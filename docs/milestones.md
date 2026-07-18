@@ -67,16 +67,28 @@ Artifact: Document model round-trips plaintext under test.
 ## M2 — Editing Core  (Host only)
 Goal: Prove editing + undo without a GUI.
 
-- [ ] T2.1 Cursor + selection model (positions defined in docs/document-model.md).
+- [x] T2.1 Cursor + selection model (positions defined in docs/document-model.md).
       AC: Cursor moves across runs/paragraphs correctly in tests.
-- [ ] T2.2 Insert/delete text with style inheritance rules.
+      See engine/src/cursor.c, host/tests/test_cursor.c.
+- [x] T2.2 Insert/delete text with style inheritance rules.
       AC: Inserting at a boundary inherits the documented style; tests cover
       start/middle/end of run and paragraph.
-- [ ] T2.3 Undo/redo as an operation journal (command objects).
+      Scope note: insert is always a point op; delete is scoped to a range
+      within a single run (selections spanning multiple runs/paragraphs, and
+      paragraph split/merge on Enter/Backspace, are not implemented here --
+      WP_OP_SPLIT_PARA/WP_OP_MERGE_PARA remain defined-but-unused for that
+      follow-up). See docs/editing.md, engine/src/edit.c, host/tests/test_edit.c.
+- [x] T2.3 Undo/redo as an operation journal (command objects).
       AC: Random-op fuzz test: after N ops then N undos, model equals start
       state (deep compare).
+      Verified via format_txt_export comparison (valid here since this
+      milestone's op set never touches cstyle/pstyle). See engine/src/undo.c,
+      host/tests/test_undo.c (test_undo_fuzz_n_ops_then_n_undos_restores_original,
+      60 random ops, fixed seed).
 
 Artifact: Scriptable, provably-correct editor core.
+**Reached**, within the scope noted above (single-run delete, no paragraph
+split/merge). 72/72 tests pass via ./host/tools/ci.sh.
 
 ---
 

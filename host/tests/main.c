@@ -25,6 +25,32 @@ void test_file_roundtrip(void);
 void test_pipe_transport_loopback_and_timeout(void);
 void test_fake_monospace_metrics(void);
 
+/* cursor.c */
+void test_cursor_forward_crosses_paragraph_boundary(void);
+void test_cursor_forward_backward_step_counts_match(void);
+void test_cursor_next_prev_are_true_inverses(void);
+
+/* edit.c */
+void test_edit_insert_at_start_of_paragraph(void);
+void test_edit_insert_at_end_of_paragraph(void);
+void test_edit_insert_mid_run_splits_correctly(void);
+void test_edit_insert_into_empty_paragraph(void);
+void test_edit_insert_style_inheritance_at_boundary(void);
+void test_edit_delete_whole_run(void);
+void test_edit_delete_left_partial(void);
+void test_edit_delete_right_partial(void);
+void test_edit_delete_mid_run_splits(void);
+void test_edit_delete_rejects_invalid_range(void);
+void test_edit_insert_then_delete_restores_content(void);
+
+/* undo.c */
+void test_undo_insert_then_undo_then_redo(void);
+void test_undo_delete_all_cases_then_undo_redo(void);
+void test_undo_new_edit_clears_redo(void);
+void test_undo_empty_journal_returns_error(void);
+void test_undo_no_leaks(void);
+void test_undo_fuzz_n_ops_then_n_undos_restores_original(void);
+
 /* strpool.c */
 void test_strpool_reserves_offset_zero(void);
 void test_strpool_multiple_appends_survive_growth(void);
@@ -90,6 +116,29 @@ static const test_case g_cases[] = {
     { "file_roundtrip", test_file_roundtrip },
     { "pipe_transport_loopback_and_timeout", test_pipe_transport_loopback_and_timeout },
     { "fake_monospace_metrics", test_fake_monospace_metrics },
+
+    { "cursor_forward_crosses_paragraph_boundary", test_cursor_forward_crosses_paragraph_boundary },
+    { "cursor_forward_backward_step_counts_match", test_cursor_forward_backward_step_counts_match },
+    { "cursor_next_prev_are_true_inverses", test_cursor_next_prev_are_true_inverses },
+
+    { "edit_insert_at_start_of_paragraph", test_edit_insert_at_start_of_paragraph },
+    { "edit_insert_at_end_of_paragraph", test_edit_insert_at_end_of_paragraph },
+    { "edit_insert_mid_run_splits_correctly", test_edit_insert_mid_run_splits_correctly },
+    { "edit_insert_into_empty_paragraph", test_edit_insert_into_empty_paragraph },
+    { "edit_insert_style_inheritance_at_boundary", test_edit_insert_style_inheritance_at_boundary },
+    { "edit_delete_whole_run", test_edit_delete_whole_run },
+    { "edit_delete_left_partial", test_edit_delete_left_partial },
+    { "edit_delete_right_partial", test_edit_delete_right_partial },
+    { "edit_delete_mid_run_splits", test_edit_delete_mid_run_splits },
+    { "edit_delete_rejects_invalid_range", test_edit_delete_rejects_invalid_range },
+    { "edit_insert_then_delete_restores_content", test_edit_insert_then_delete_restores_content },
+
+    { "undo_insert_then_undo_then_redo", test_undo_insert_then_undo_then_redo },
+    { "undo_delete_all_cases_then_undo_redo", test_undo_delete_all_cases_then_undo_redo },
+    { "undo_new_edit_clears_redo", test_undo_new_edit_clears_redo },
+    { "undo_empty_journal_returns_error", test_undo_empty_journal_returns_error },
+    { "undo_no_leaks", test_undo_no_leaks },
+    { "undo_fuzz_n_ops_then_n_undos_restores_original", test_undo_fuzz_n_ops_then_n_undos_restores_original },
 
     { "strpool_reserves_offset_zero", test_strpool_reserves_offset_zero },
     { "strpool_multiple_appends_survive_growth", test_strpool_multiple_appends_survive_growth },
