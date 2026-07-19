@@ -6,16 +6,18 @@
 
 /* Manual (NOT part of `make test`/ci.sh) end-to-end proof that the real
    offload_client.c API -- the exact same code path platform/atari's
-   future Thesaurus menu action or a Pi deployment would use, not a
-   hand-rolled protocol client -- gets genuine LLM-generated synonyms
-   back from a live offload/gateway/ollama_gateway.c talking to a real
-   Ollama server. Deliberately excluded from the automated suite: LLM
+   future Thesaurus/Grammar Check menu actions or a Pi deployment would
+   use, not a hand-rolled protocol client -- gets genuine LLM-generated
+   answers back from a live offload/gateway/ollama_gateway.c talking to a
+   real Ollama server. Runs BOTH real ops this gateway implements
+   (OFFLOAD_THESAURUS, OFFLOAD_GRAMMAR_CHECK, added M8 T8.1) over the
+   same connection. Deliberately excluded from the automated suite: LLM
    output is not deterministic (see docs/formats/offload-protocol.md),
    and a contributor without Ollama installed must still be able to run
    `make test`/`ci.sh` successfully -- this tool exists so a human can
    verify the real thing works, not so CI can assert exact output.
 
-   Usage: ollama_gateway_smoke <endpoint> [word]
+   Usage: ollama_gateway_smoke <endpoint> [word] [paragraph]
    Run via host/tools/run_ollama_smoke.sh, which spawns bin/ollama_gateway
    itself and passes its endpoint here -- see that script for the
    port-capture mechanics (same trick as host/tests/gateway_harness.c). */
@@ -56,20 +58,69 @@ static void print_word_list(const u8 *buf, u32 len)
     printf("\n");
 }
 
+/* Decodes and prints the OFFLOAD_GRAMMAR_CHECK response shape (u16
+   issue_count, then issue_count x (u16 start_offset, u16 span_len, u16
+   message_len + bytes, u16 suggestion_len + bytes) --
+   docs/formats/offload-protocol.md). Also re-slices `paragraph` at each
+   reported offset/length and prints THAT alongside the model's own
+   message/suggestion -- a human-visible confirmation that the offset
+   the gateway computed via its own substring search genuinely lands on
+   the flagged text, not just a self-consistent number. */
+static void print_grammar_issues(const u8 *buf, u32 len, const char *paragraph, u32 paragraph_len)
+{
+    u16 count;
+    u32 pos, i;
+
+    if (len < 2) {
+        printf("  (payload too short to contain a count)\n");
+        return;
+    }
+    count = be_read16(buf);
+    pos = 2;
+    printf("  %u issue(s):\n", (unsigned)count);
+    for (i = 0; i < count; i++) {
+        u16 start_offset, span_len, mlen, slen;
+
+        if (pos + 6 > len) { printf("  (truncated issue record)\n"); return; }
+        start_offset = be_read16(buf + pos); pos += 2;
+        span_len     = be_read16(buf + pos); pos += 2;
+        mlen         = be_read16(buf + pos); pos += 2;
+        if (pos + mlen + 2 > len) { printf("  (truncated message)\n"); return; }
+
+        printf("    [%u..%u) \"", (unsigned)start_offset, (unsigned)(start_offset + span_len));
+        if ((u32)start_offset + span_len <= paragraph_len) {
+            printf("%.*s", (int)span_len, paragraph + start_offset);
+        } else {
+            printf("(offset out of range!)");
+        }
+        printf("\" -- %.*s", (int)mlen, buf + pos);
+        pos += mlen;
+
+        slen = be_read16(buf + pos); pos += 2;
+        if (pos + slen > len) { printf(" (truncated suggestion)\n"); return; }
+        if (slen > 0) printf(" -> \"%.*s\"", (int)slen, buf + pos);
+        pos += slen;
+        printf("\n");
+    }
+}
+
 int main(int argc, char **argv)
 {
     const char *endpoint;
     const char *word = "happy";
+    const char *paragraph = "The team are excited to announce there new product, "
+                             "which dont require any special setup.";
     offload_capabilities caps;
     offload_request req;
     offload_response resp;
 
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <endpoint> [word]\n", argv[0]);
+        fprintf(stderr, "usage: %s <endpoint> [word] [paragraph]\n", argv[0]);
         return 1;
     }
     endpoint = argv[1];
     if (argc >= 3) word = argv[2];
+    if (argc >= 4) paragraph = argv[3];
 
     printf("OLLAMA GATEWAY SMOKE: starting (endpoint=%s word=%s)\n", endpoint, word);
 
@@ -92,6 +143,8 @@ int main(int argc, char **argv)
         check(strcmp(name, "ollama-gateway") == 0, "negotiated gateway_name is \"ollama-gateway\"");
         check((caps.ops_supported & (1uL << OFFLOAD_THESAURUS)) != 0,
               "negotiated capabilities advertise OFFLOAD_THESAURUS");
+        check((caps.ops_supported & (1uL << OFFLOAD_GRAMMAR_CHECK)) != 0,
+              "negotiated capabilities advertise OFFLOAD_GRAMMAR_CHECK");
     } else {
         check(WP_FALSE, "offload_query succeeded");
     }
@@ -109,6 +162,21 @@ int main(int argc, char **argv)
         offload_response_free(&resp);
     } else {
         check(WP_FALSE, "offload_submit(OFFLOAD_THESAURUS) returned WP_OK");
+    }
+
+    req.op = OFFLOAD_GRAMMAR_CHECK;
+    req.payload = (const u8 *)paragraph;
+    req.payload_len = (u32)strlen(paragraph);
+    req.timeout_ms = 90000; /* cold model load (a second, different model) + generation */
+
+    if (offload_submit(&req, &resp) == WP_OK) {
+        check(WP_TRUE, "offload_submit(OFFLOAD_GRAMMAR_CHECK) returned WP_OK");
+        check(resp.status == OFFLOAD_OK, "response status is OFFLOAD_OK");
+        printf("  grammar issues for \"%s\":\n", paragraph);
+        print_grammar_issues(resp.result, resp.result_len, paragraph, (u32)strlen(paragraph));
+        offload_response_free(&resp);
+    } else {
+        check(WP_FALSE, "offload_submit(OFFLOAD_GRAMMAR_CHECK) returned WP_OK");
     }
 
     offload_shutdown();

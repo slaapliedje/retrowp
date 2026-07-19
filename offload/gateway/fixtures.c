@@ -33,6 +33,27 @@ static const spelling_entry k_spellings[] = {
     { "seperate", k_sugg_seperate, 1 }
 };
 
+/* Offsets below were computed with `python3 -c "print(s.index(...))"`
+   against the literal paragraph string, not counted by hand -- this
+   project has twice already shipped an off-by-one from hand-counted
+   string lengths (see docs/atari-platform.md's T7.4 section), so every
+   fixture offset here follows that same verify-with-code discipline. */
+static const fixtures_grammar_issue k_issues_team_ready[] = {
+    { 4, 8, "Subject-verb agreement", "team is" },
+    { 20, 11, "Wrong word: possessive for contraction", "They're going" }
+};
+
+typedef struct {
+    const char *paragraph;
+    const fixtures_grammar_issue *issues;
+    u32 issue_count;
+} grammar_entry;
+
+static const grammar_entry k_grammar[] = {
+    { "The team are ready. Their going to present it today.",
+      k_issues_team_ready, 2 }
+};
+
 static wp_bool word_eq(const u8 *word, u32 len, const char *candidate)
 {
     u32 clen = (u32)strlen(candidate);
@@ -67,4 +88,17 @@ wp_bool fixtures_spellcheck_lookup(const u8 *word, u32 len,
         }
     }
     return WP_FALSE;
+}
+
+u32 fixtures_grammar_lookup(const u8 *paragraph, u32 len, const fixtures_grammar_issue **out)
+{
+    u32 i;
+
+    for (i = 0; i < sizeof(k_grammar) / sizeof(k_grammar[0]); i++) {
+        if (word_eq(paragraph, len, k_grammar[i].paragraph)) {
+            *out = k_grammar[i].issues;
+            return k_grammar[i].issue_count;
+        }
+    }
+    return 0;
 }

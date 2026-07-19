@@ -14,11 +14,11 @@
 #include "fixtures.h"
 #include "gw_common.h"
 
-/* Host-side mock gateway (T6.4): a standalone POSIX executable, never
-   linked into the engine or app. It answers OFFLOAD_THESAURUS and
-   OFFLOAD_SPELL_CHECK from the fixture tables with real wire framing,
-   so tests can prove the protocol round-trips deterministically without
-   a Pi or an LLM.
+/* Host-side mock gateway (T6.4, GRAMMAR_CHECK added T8.1): a standalone
+   POSIX executable, never linked into the engine or app. It answers
+   OFFLOAD_THESAURUS, OFFLOAD_SPELL_CHECK, and OFFLOAD_GRAMMAR_CHECK from
+   the fixture tables with real wire framing, so tests can prove the
+   protocol round-trips deterministically without a Pi or an LLM.
 
    Two transports, same protocol logic:
    - Default (TCP): binds port 0 (OS-assigned) and prints the assigned
@@ -163,7 +163,8 @@ int main(int argc, char **argv)
 
         memset(&caps, 0, sizeof(caps));
         caps.protocol_version = WIRE_VERSION;
-        caps.ops_supported = (1uL << OFFLOAD_SPELL_CHECK) | (1uL << OFFLOAD_THESAURUS);
+        caps.ops_supported = (1uL << OFFLOAD_SPELL_CHECK) | (1uL << OFFLOAD_THESAURUS) |
+                             (1uL << OFFLOAD_GRAMMAR_CHECK);
         caps.max_payload_bytes = 4096;
         strncpy((char *)caps.gateway_name, "mock-gateway", sizeof(caps.gateway_name) - 1);
 
@@ -174,7 +175,10 @@ int main(int argc, char **argv)
     /* --- request/response loop --- */
     for (;;) {
         wire_header req_hdr;
-        u8 word_buf[256];
+        /* Sized for a whole paragraph (GRAMMAR_CHECK), not just a word --
+           THESAURUS/SPELL_CHECK requests still fit comfortably inside
+           this same buffer, just using far less of it. */
+        u8 word_buf[2048];
         u32 word_len;
         wp_status st;
 
@@ -230,6 +234,27 @@ int main(int argc, char **argv)
 
                 resp_len = gw_encode_spellcheck_response(is_correct, suggestions, count,
                                                        resp_payload, sizeof(resp_payload));
+                status = (u8)OFFLOAD_OK;
+            } else if (req_hdr.op == OFFLOAD_GRAMMAR_CHECK) {
+                enum { GRAMMAR_MAX_ISSUES = 16 };
+                const fixtures_grammar_issue *issues = NULL;
+                u32 count = fixtures_grammar_lookup(word_buf, word_len, &issues);
+                u16 starts[GRAMMAR_MAX_ISSUES];
+                u16 lens[GRAMMAR_MAX_ISSUES];
+                const char *messages[GRAMMAR_MAX_ISSUES];
+                const char *suggestions[GRAMMAR_MAX_ISSUES];
+                u32 j;
+
+                if (count > GRAMMAR_MAX_ISSUES) count = GRAMMAR_MAX_ISSUES;
+                for (j = 0; j < count; j++) {
+                    starts[j]      = issues[j].start_offset;
+                    lens[j]        = issues[j].span_len;
+                    messages[j]    = issues[j].message;
+                    suggestions[j] = issues[j].suggestion;
+                }
+
+                resp_len = gw_encode_grammar_issues(starts, lens, messages, suggestions, count,
+                                                     resp_payload, sizeof(resp_payload));
                 status = (u8)OFFLOAD_OK;
             }
 

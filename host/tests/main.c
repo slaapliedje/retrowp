@@ -136,6 +136,8 @@ void test_offload_thesaurus_happy_path(void);
 void test_offload_thesaurus_unknown_word_returns_empty_list(void);
 void test_offload_spellcheck_flags_known_misspelling(void);
 void test_offload_spellcheck_correct_word(void);
+void test_offload_grammar_check_known_fixture(void);
+void test_offload_grammar_check_clean_paragraph_returns_no_issues(void);
 void test_offload_unsupported_op_reports_unsupported(void);
 void test_offload_corrupt_response_is_rejected(void);
 void test_offload_timeout_on_delayed_gateway(void);
@@ -271,6 +273,8 @@ static const test_case g_cases[] = {
     { "offload_thesaurus_unknown_word_returns_empty_list", test_offload_thesaurus_unknown_word_returns_empty_list },
     { "offload_spellcheck_flags_known_misspelling", test_offload_spellcheck_flags_known_misspelling },
     { "offload_spellcheck_correct_word", test_offload_spellcheck_correct_word },
+    { "offload_grammar_check_known_fixture", test_offload_grammar_check_known_fixture },
+    { "offload_grammar_check_clean_paragraph_returns_no_issues", test_offload_grammar_check_clean_paragraph_returns_no_issues },
     { "offload_unsupported_op_reports_unsupported", test_offload_unsupported_op_reports_unsupported },
     { "offload_corrupt_response_is_rejected", test_offload_corrupt_response_is_rejected },
     { "offload_timeout_on_delayed_gateway", test_offload_timeout_on_delayed_gateway },

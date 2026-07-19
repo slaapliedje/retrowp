@@ -155,26 +155,82 @@ other format in this project has, not a new one invented for M7.
   touches this project's own RTF code. `offload/gateway/odt_gateway.py`
   (below) takes advantage of this deliberately.
 
+### `OFFLOAD_GRAMMAR_CHECK` (M8 T8.1)
+
+**Design decision: the gateway proposes, the gateway itself verifies --
+never trust a model's claimed position.** An LLM asked for "the issue"
+in a paragraph is good at picking out a real, verbatim phrase and good
+at explaining what's wrong with it, but is NOT reliably able to count
+bytes/characters to produce a correct numeric offset (this is a well
+known weak spot for token-based models, not specific to any one model
+tried here). So the wire response's `start_offset` is never a number
+the model produced -- the gateway asks the model to quote the exact
+offending text instead, then finds that quote in the ORIGINAL request
+paragraph itself via a real, deterministic byte-for-byte substring
+search, computing the offset/length from that match. A quote the
+gateway can't find verbatim in the original text (a paraphrase, or an
+outright hallucination) is silently dropped, never forwarded -- the
+same "don't propagate garbage" convention `parse_word_list` already
+uses for THESAURUS. This means every issue the client ever receives is
+guaranteed to point at real text that is genuinely present in the
+paragraph it was asked about, independent of how faithfully any given
+model followed instructions.
+
+- **Request payload:** the UTF-8 paragraph text, no framing beyond the
+  wire frame's own `length` field -- same convention as THESAURUS/
+  SPELL_CHECK.
+- **Response payload:** a length-prefixed issue list --
+  ```
+  offset  size  field
+  0       2     issue_count
+  2       ...   issue_count x issue record:
+                  2     start_offset    byte offset into the request
+                                        paragraph (from the real
+                                        substring search above, never
+                                        the model's own count)
+                  2     span_len        byte length of the flagged span
+                  2     message_len
+                  ...   message_len bytes of UTF-8 (short explanation)
+                  2     suggestion_len
+                  ...   suggestion_len bytes of UTF-8 (replacement
+                                        text; suggestion_len == 0 means
+                                        "flagged, no fix offered")
+  ```
+  A clean paragraph gets `issue_count == 0`, not an error -- "no issues
+  found" is a valid answer, same convention as an empty THESAURUS/
+  SPELL_CHECK list.
+- Byte offsets, not codepoint offsets (`skills/encoding.md`'s policy --
+  bytes are the wire/storage unit; codepoint-aware stepping is a
+  presentation-layer concern). Safe by construction here: `span_len`
+  bytes starting at `start_offset` are always an exact copy of
+  contiguous bytes from the original (valid UTF-8) paragraph, so the
+  span can never land mid-codepoint.
+
 ### Any other op
 
 The mock gateway responds `RESPONSE` with `status = OFFLOAD_UNSUPPORTED`
-and an empty payload for any op it doesn't implement (`GRAMMAR_CHECK`,
-`CHAT`, `IMAGE`, and -- for `mock_gateway.c`/`ollama_gateway.c`
-specifically -- `CONVERT_IMPORT`/`CONVERT_EXPORT` too, since ODT/PDF
-conversion lives in the separate `odt_gateway.py`, not either of those)
--- exercising the "absent gracefully" capability-negotiation path M8's
-optional ops still need, before any of those actually exist.
+and an empty payload for any op it doesn't implement (`CHAT`, `IMAGE`,
+and -- for `mock_gateway.c`/`ollama_gateway.c` specifically --
+`CONVERT_IMPORT`/`CONVERT_EXPORT` too, since ODT/PDF conversion lives in
+the separate `odt_gateway.py`, not either of those; `ollama_gateway.c`
+also reports `OFFLOAD_UNSUPPORTED` for `SPELL_CHECK`, see below) --
+exercising the "absent gracefully" capability-negotiation path M8's
+still-optional ops (`CHAT`/`IMAGE`) need, before either actually exists.
 
 ## Mock Gateway (`offload/gateway/mock_gateway.c`)
 
 A standalone POSIX executable, built to `bin/mock_gateway`, never linked
-into the engine or app. It answers THESAURUS/SPELL_CHECK from a small
-fixture table (`offload/gateway/fixtures.h`/`.c`) over a real TCP socket,
-so `host/tests/test_offload.c` can prove the protocol round-trips
-deterministically without a Pi or an LLM. It binds TCP port 0 (OS-
-assigned) and prints the assigned port as one line on stdout before
-accepting, so `host/tests/gateway_harness.c` never has to guess a port
-or poll for readiness.
+into the engine or app. It answers THESAURUS/SPELL_CHECK/GRAMMAR_CHECK
+from a small fixture table (`offload/gateway/fixtures.h`/`.c`) over a
+real TCP socket, so `host/tests/test_offload.c` can prove the protocol
+round-trips deterministically without a Pi or an LLM -- GRAMMAR_CHECK's
+fixture table maps a small set of known fixture paragraphs to canned
+issue lists (already-computed offsets, no substring search needed since
+the fixture data is trusted by construction), covering the wire
+encode/decode shape without needing a real model in the loop. It binds
+TCP port 0 (OS-assigned) and prints the assigned port as one line on
+stdout before accepting, so `host/tests/gateway_harness.c` never has to
+guess a port or poll for readiness.
 
 Fault-injection CLI flags, each mapped to a specific client-observable
 failure mode exercised by `test_offload.c`:
@@ -187,10 +243,12 @@ failure mode exercised by `test_offload.c`:
 | `--short-frame` | Sends a response header promising a large payload, writes a few bytes, then goes back to waiting for the next request | Client times out on a stalled/incomplete frame, distinct from CRC corruption |
 
 Real LLM/dictionary integration (Ollama/llama.cpp on a Pi) replacing
-`fixtures.c` is explicit future scope (M8) -- **for a real
-GRAMMAR_CHECK/full SPELL_CHECK gateway.** `ollama_gateway.c` below is a
-narrower, already-implemented slice of that scope: one real op
-(THESAURUS), not the full M8 feature set.
+`fixtures.c` is explicit future scope (M8) -- **for a real full
+SPELL_CHECK gateway** (GRAMMAR_CHECK is now covered, see below).
+`ollama_gateway.c` below is a narrower, already-implemented slice of
+that scope: two real ops (THESAURUS, GRAMMAR_CHECK), not the full M8
+feature set (SPELL_CHECK/CHAT/IMAGE remain unimplemented by any gateway
+in this repo).
 
 ## Ollama Gateway (`offload/gateway/ollama_gateway.c`, post-M6)
 
@@ -202,19 +260,33 @@ difference is entirely in what backs one op:
 
 - **`OFFLOAD_THESAURUS`** is answered by a real call to a local Ollama
   server (`http://127.0.0.1:11434` by default) instead of a fixture
-  table -- genuine LLM-generated synonyms, not canned data.
+  table -- genuine LLM-generated synonyms, not canned data. Default
+  model `deepseek-coder-v2:16b` (`--model` to override), unchanged since
+  M6 -- see below for why GRAMMAR_CHECK deliberately does NOT reuse this
+  default.
+- **`OFFLOAD_GRAMMAR_CHECK`** (T8.1) is answered by a real call to the
+  same Ollama server, but with its OWN default model, `gemma2:9b`
+  (`--grammar-model` to override, independent of `--model`). This was an
+  empirical choice, not a guess: prompted with a paragraph containing
+  several real errors (subject-verb agreement, "alot", "their" for
+  "they're"), `gemma2:9b` reliably followed the rigid
+  `QUOTE :: MESSAGE :: SUGGESTION` output line format this gateway's
+  parser depends on, and every quote it produced was a genuine, exact
+  substring of the source paragraph. `mistral:7b`, tried the same way
+  (including a retry with a few-shot example line added to the prompt),
+  never produced a clean 3-field line either time, and on the retry
+  hallucinated words that do not appear anywhere in the source paragraph
+  at all. Two different models loaded means paying Ollama's cold-load
+  cost separately the first time each op is used after a gap -- an
+  accepted cost of keeping Thesaurus's already-verified model choice
+  untouched rather than picking one model to serve both tasks.
 - **Every other op, including `OFFLOAD_SPELL_CHECK`,** responds
   `OFFLOAD_UNSUPPORTED` -- a deliberate choice, not a missing feature.
-  Tested against this gateway's default model (`deepseek-coder-v2:16b`,
-  the only non-"thinking" model available in this project's own dev
-  environment), a spelling probe for `teh` came back "Correct" -- a
-  worse answer than `services/spell`'s deterministic on-device checker
-  already gives for free. THESAURUS has a much lower correctness bar (a
-  real-vocabulary word list has value even when incomplete) and is
-  exactly the kind of large-vocabulary knowledge CLAUDE.md's own project
-  brief names as offload-worthy, so that's where this gateway spends its
-  one real capability. A gateway that does GRAMMAR_CHECK/SPELL_CHECK for
-  real, likely against a better-suited model, is M8 scope.
+  Tested against `deepseek-coder-v2:16b` during M6, a spelling probe for
+  `teh` came back "Correct" -- a worse answer than `services/spell`'s
+  deterministic on-device checker already gives for free, and the
+  reason SPELL_CHECK stays on-device rather than getting the same
+  offload treatment THESAURUS and GRAMMAR_CHECK just did.
 
 **No libcurl.** `offload/gateway/http_client.c` hand-rolls the single
 HTTP/1.1 POST this needs directly over a raw socket (`http_post_json()`):

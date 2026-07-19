@@ -104,3 +104,39 @@ u32 gw_encode_spellcheck_response(wp_bool is_correct, const char *const *suggest
 
     return 1 + list_len;
 }
+
+u32 gw_encode_grammar_issues(const u16 *start_offsets, const u16 *span_lens,
+                              const char *const *messages, const char *const *suggestions,
+                              u32 count, u8 *out, u32 out_cap)
+{
+    u32 pos, i;
+
+    if (out_cap < 2) return 0;
+    be_write16(out, (u16)count);
+    pos = 2;
+
+    for (i = 0; i < count; i++) {
+        u32 mlen = (u32)strlen(messages[i]);
+        u32 slen = (suggestions[i] != NULL) ? (u32)strlen(suggestions[i]) : 0;
+
+        if (pos + 2 + 2 + 2 + mlen + 2 + slen > out_cap) return 0;
+
+        be_write16(out + pos, start_offsets[i]);
+        pos += 2;
+        be_write16(out + pos, span_lens[i]);
+        pos += 2;
+
+        be_write16(out + pos, (u16)mlen);
+        pos += 2;
+        memcpy(out + pos, messages[i], mlen);
+        pos += mlen;
+
+        be_write16(out + pos, (u16)slen);
+        pos += 2;
+        if (slen > 0) {
+            memcpy(out + pos, suggestions[i], slen);
+            pos += slen;
+        }
+    }
+    return pos;
+}

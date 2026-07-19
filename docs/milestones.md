@@ -565,6 +565,53 @@ Goal: Full smart features, all optional/degradable.
 
 - [ ] T8.1 Gateway grammar check (LLM or rule engine) → issue list payload.
       AC: Paragraph in, structured issues out; ST renders them.
+      **Partially done: protocol + both gateways are real and verified;
+      "ST renders them" is NOT done yet** -- kept unchecked rather than
+      overclaiming, the same "don't check the box until the whole AC is
+      met" discipline M7's T7.1-T7.4 split already established.
+      - Wire payload (docs/formats/offload-protocol.md's new
+        `OFFLOAD_GRAMMAR_CHECK` section): request is the UTF-8 paragraph,
+        response is a length-prefixed issue list (start_offset, span_len,
+        message, suggestion per issue).
+      - `mock_gateway.c` answers it from a small fixture table
+        (`offload/gateway/fixtures.c`), covered by two new deterministic
+        `host/tests/test_offload.c` cases (part of `make test`) -- a
+        known 2-issue fixture paragraph, and an unrecognized paragraph
+        correctly yielding 0 issues.
+      - `offload/gateway/ollama_gateway.c` answers it for real, via a
+        second Ollama call alongside its existing THESAURUS one, using
+        its OWN independently-chosen default model (`gemma2:9b`, picked
+        empirically over `mistral:7b` -- see the file's header comment
+        and docs/formats/offload-protocol.md for the comparison).
+        **Design decision: the gateway never trusts a model's claimed
+        numeric offset.** It asks the model to quote the offending text
+        verbatim instead, then finds that exact quote in the original
+        request paragraph via a real substring search
+        (`find_substring`); an unverifiable quote (paraphrased or
+        hallucinated) is silently dropped rather than forwarded with a
+        wrong or unusable offset.
+      - Verified against a REAL, running Ollama server (not mocked):
+        `host/tools/ollama_gateway_smoke.c` (run via
+        `host/tools/run_ollama_smoke.sh`) now exercises both ops over one
+        connection. A live run against a paragraph with three genuine
+        errors ("The team are excited to announce there new product,
+        which dont require any special setup.") correctly identified all
+        three, and the gateway-computed offsets were confirmed (by
+        re-slicing the original paragraph at each reported offset/length
+        and printing it alongside the model's own message/suggestion) to
+        land exactly on the flagged text -- not just self-consistent with
+        the encoder, genuinely correct against live, non-deterministic
+        model output. Manual-only, same as the existing THESAURUS smoke
+        coverage: LLM output isn't deterministic, so this is deliberately
+        not part of `make test`/`ci.sh`.
+      - **Remaining for T8.1:** engine/UI wiring -- a real GEM UI surface
+        in `platform/atari/app_shell.c` that sends a paragraph, receives
+        the issue list, and lets the user see/act on it. Unlike
+        Thesaurus's single blocking `form_alert()`, this is a LIST of
+        positioned issues, not one message, so it's a materially bigger
+        UI task than what T7.4/the existing Thesaurus/Spell Check menu
+        actions needed -- deliberately scoped as its own follow-up pass
+        rather than folded in here.
 - [ ] T8.2 On-box grammar-lite fallback (rule-based) when no Pi.
       AC: Basic checks work with no device attached.
 - [ ] T8.3 Optional CHAT / IMAGE ops behind capability flags.

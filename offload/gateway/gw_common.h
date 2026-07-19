@@ -43,4 +43,18 @@ u32 gw_encode_word_list(const char *const *words, u32 count, u8 *out, u32 out_ca
 u32 gw_encode_spellcheck_response(wp_bool is_correct, const char *const *suggestions,
                                    u32 count, u8 *out, u32 out_cap);
 
+/* Encodes count grammar issues: u16 count, then count x (u16
+   start_offset, u16 span_len, u16 message_len + message bytes, u16
+   suggestion_len + suggestion bytes) -- the OFFLOAD_GRAMMAR_CHECK
+   response shape (docs/formats/offload-protocol.md). suggestions[i] may
+   be NULL or "" for "flagged, no fix offered" (encoded as
+   suggestion_len == 0). Plain parallel arrays, not a struct pointer --
+   this file has no fixture-table type of its own, and shouldn't (both
+   mock_gateway.c's canned fixtures and ollama_gateway.c's dynamically
+   computed issues need to reach the same encoder). Returns bytes
+   written, or 0 if it wouldn't fit. */
+u32 gw_encode_grammar_issues(const u16 *start_offsets, const u16 *span_lens,
+                              const char *const *messages, const char *const *suggestions,
+                              u32 count, u8 *out, u32 out_cap);
+
 #endif /* WP_GATEWAY_GW_COMMON_H */

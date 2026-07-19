@@ -6,12 +6,13 @@
 # produces non-deterministic output, neither of which belongs in the
 # automated suite. Run this by hand to prove the real thing works.
 #
-# Usage: host/tools/run_ollama_smoke.sh [word] [-- <extra ollama_gateway args>]
+# Usage: host/tools/run_ollama_smoke.sh [word] [paragraph] [-- <extra ollama_gateway args>]
 set -e
 
 cd "$(dirname "$0")/../.."
 
 WORD="${1:-happy}"
+PARAGRAPH="${2:-}"
 
 make bin/ollama_gateway ollama-smoke >&2
 
@@ -50,4 +51,8 @@ if [ -z "$PORT" ]; then
     exit 1
 fi
 
-./bin/ollama_gateway_smoke "tcp:127.0.0.1:$PORT" "$WORD"
+if [ -n "$PARAGRAPH" ]; then
+    ./bin/ollama_gateway_smoke "tcp:127.0.0.1:$PORT" "$WORD" "$PARAGRAPH"
+else
+    ./bin/ollama_gateway_smoke "tcp:127.0.0.1:$PORT" "$WORD"
+fi
