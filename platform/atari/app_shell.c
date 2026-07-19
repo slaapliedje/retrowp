@@ -52,9 +52,10 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_EDIT_PASTE, -1,                     -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 1, 8,  1 },
     { WP_MENU_OBJ_EDIT_BOX,   -1,                     -1,                    G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 2, 8,  1 },
     { WP_MENU_OBJ_ROOT,       WP_MENU_OBJ_TOOLS_BOX,  WP_MENU_OBJ_TOOLS_BOX, G_TITLE,  OF_NONE,   OS_NORMAL, {0}, 12, 0, 7,  1 },
-    { WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_THESAURUS, G_BOX, OF_NONE, OS_NORMAL, {0}, 12, 1, 14, 2 },
-    { WP_MENU_OBJ_TOOLS_THESAURUS, -1,                -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 0, 14, 1 },
-    { WP_MENU_OBJ_TOOLS_BOX,  -1,                     -1,                    G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 1, 14, 1 }
+    { WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_GRAMMARCHECK, G_BOX, OF_NONE, OS_NORMAL, {0}, 12, 1, 16, 3 },
+    { WP_MENU_OBJ_TOOLS_THESAURUS, -1,                -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 0, 16, 1 },
+    { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, -1,              -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 1, 16, 1 },
+    { WP_MENU_OBJ_TOOLS_BOX,  -1,                     -1,                    G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 2, 16, 1 }
 };
 
 static char g_text_file[]  = " File ";
@@ -68,6 +69,7 @@ static char g_text_copy[]  = "  Copy";
 static char g_text_paste[] = "  Paste";
 static char g_text_spellcheck[] = "  Spell Check";
 static char g_text_thesaurus[] = "  Thesaurus";
+static char g_text_grammarcheck[] = "  Grammar Check";
 
 void wp_menu_tree_init(void)
 {
@@ -82,6 +84,7 @@ void wp_menu_tree_init(void)
     wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_spec.free_string = g_text_paste;
     wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_spec.free_string = g_text_spellcheck;
     wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_spec.free_string = g_text_thesaurus;
+    wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_spec.free_string = g_text_grammarcheck;
 }
 
 wp_bool wp_menu_tree_selfcheck(void)
@@ -108,14 +111,17 @@ wp_bool wp_menu_tree_selfcheck(void)
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_next != WP_MENU_OBJ_TOOLS_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_head != WP_MENU_OBJ_TOOLS_SPELLCHECK) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_THESAURUS) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_GRAMMARCHECK) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_type != G_BOX) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_next != WP_MENU_OBJ_TOOLS_THESAURUS) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
 
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_next != WP_MENU_OBJ_TOOLS_GRAMMARCHECK) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_next != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_head != WP_MENU_OBJ_FILE_OPEN) return WP_FALSE;
@@ -144,6 +150,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_spec.free_string != g_text_paste) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_spec.free_string != g_text_spellcheck) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_spec.free_string != g_text_thesaurus) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_spec.free_string != g_text_grammarcheck) return WP_FALSE;
 
     return WP_TRUE;
 }
@@ -954,6 +961,347 @@ static void do_thesaurus(void)
     form_alert(1, msg);
 }
 
+/* Grammar Check (M8 T8.1): sends the CURRENT paragraph's plain text
+   over the offload link and, for each issue the gateway reports back,
+   shows the flagged text/explanation/suggestion one at a time via
+   form_alert() and lets the user Apply, Skip, or Stop. There is no GEM
+   control that shows an arbitrary-length list in one dialog and no
+   resource-editor toolchain in this project to build one with (see the
+   OBJECT[] comment above), so this cycles through issues sequentially
+   instead of inventing a custom list widget.
+
+   Every issue's quoted span was already verified by the GATEWAY via a
+   byte-exact substring search against the paragraph text this app sent
+   it (docs/formats/offload-protocol.md) -- but this app additionally
+   never trusts a wire offset against the LIVE document once earlier
+   fixes in the same session may have shifted it; see
+   map_paragraph_offset_to_run below. */
+#define WP_ATARI_GRAMMAR_MAX_PARAGRAPH_LEN 2000uL /* matches ollama_gateway.c's GRAMMAR_PARAGRAPH_MAX_LEN */
+#define WP_ATARI_GRAMMAR_TIMEOUT_MS        90000uL /* same cold-model-load rationale as Thesaurus */
+#define WP_ATARI_GRAMMAR_MAX_ISSUES        16u /* matches gw_common.h's GRAMMAR_MAX_ISSUES */
+#define WP_ATARI_GRAMMAR_DISPLAY_LEN       40 /* dialog-text truncation only -- never touches what gets applied */
+
+/* Concatenates the plain UTF-8 text of the CURRENT paragraph (g_cursor's
+   section/paragraph, every run in order) into out. Returns WP_FALSE if
+   there's no document loaded, the paragraph is empty, or the text
+   wouldn't fit in out_cap -- all three are "nothing to check" for the
+   caller, not distinguished further. Mirrors format_txt_export's inner
+   loop (engine/src/format_txt.c) narrowed to one paragraph; no engine
+   primitive already does this (only whole-document export exists). */
+static wp_bool extract_current_paragraph_text(u8 *out, u32 out_cap, u32 *out_len)
+{
+    wp_section *sec;
+    wp_paragraph *para;
+    u32 written = 0;
+    u16 i;
+
+    if (!g_doc_loaded) return WP_FALSE;
+    sec = wp_document_section_get(&g_doc, g_cursor.section);
+    para = wp_section_paragraph_get(sec, g_cursor.paragraph);
+
+    for (i = 0; i < para->run_count; i++) {
+        wp_run *run = wp_paragraph_run_get(para, i);
+
+        if (run->text.length > 0) {
+            const u8 *bytes;
+
+            if (written + run->text.length > out_cap) return WP_FALSE;
+            bytes = wp_strpool_get(&g_doc.strings, run->text);
+            memcpy(out + written, bytes, run->text.length);
+            written += run->text.length;
+        }
+    }
+    if (written == 0) return WP_FALSE;
+    *out_len = written;
+    return WP_TRUE;
+}
+
+/* Maps a paragraph-relative byte range [start, end) in the CURRENT
+   paragraph to a single run's index and run-local offsets, re-walking
+   g_doc fresh every call rather than holding a pointer across an
+   earlier edit (wp_paragraph_run_add can reallocate para->runs --
+   docmodel.h says so explicitly). Returns WP_FALSE if the range isn't
+   entirely within ONE run: it may cross a style boundary, or (after an
+   earlier fix in this same Grammar Check pass shifted the text) may no
+   longer line up with real run boundaries at all -- either way,
+   declining to auto-apply is the safe answer, since
+   wp_edit_delete_range's contract is single-run-only (docs/editing.md)
+   and forcing a bad range through would risk corrupting text this
+   action never meant to touch. */
+static wp_bool map_paragraph_offset_to_run(u32 start, u32 end, u16 *out_run_index,
+                                            u32 *out_run_start, u32 *out_run_end)
+{
+    wp_section *sec;
+    wp_paragraph *para;
+    u32 base = 0;
+    u16 i;
+
+    sec = wp_document_section_get(&g_doc, g_cursor.section);
+    para = wp_section_paragraph_get(sec, g_cursor.paragraph);
+
+    for (i = 0; i < para->run_count; i++) {
+        wp_run *run = wp_paragraph_run_get(para, i);
+        u32 run_len = run->text.length;
+
+        if (start >= base && end <= base + run_len) {
+            *out_run_index = i;
+            *out_run_start = start - base;
+            *out_run_end = end - base;
+            return WP_TRUE;
+        }
+        base += run_len;
+    }
+    return WP_FALSE;
+}
+
+typedef struct {
+    u16       start_offset;
+    u16       span_len;
+    const u8 *message;
+    u32       message_len;
+    const u8 *suggestion;
+    u32       suggestion_len;
+} wp_atari_grammar_issue;
+
+/* Decodes issue `index` from the OFFLOAD_GRAMMAR_CHECK response shape
+   (u16 issue_count, then issue_count x (u16 start_offset, u16 span_len,
+   u16 message_len + bytes, u16 suggestion_len + bytes) --
+   docs/formats/offload-protocol.md), mirroring host/tests/
+   test_offload.c's grammar_issue_at(). Returns WP_FALSE on a short/
+   malformed buffer or an out-of-range index. */
+static wp_bool decode_grammar_issue_at(const u8 *buf, u32 len, u32 index, wp_atari_grammar_issue *out)
+{
+    u16 count;
+    u32 pos, i;
+
+    if (len < 2) return WP_FALSE;
+    count = be_read16(buf);
+    pos = 2;
+    if (index >= count) return WP_FALSE;
+
+    for (i = 0; i <= index; i++) {
+        u16 mlen, slen;
+
+        if (pos + 6 > len) return WP_FALSE;
+        out->start_offset = be_read16(buf + pos); pos += 2;
+        out->span_len     = be_read16(buf + pos); pos += 2;
+        mlen = be_read16(buf + pos); pos += 2;
+
+        if (pos + mlen + 2 > len) return WP_FALSE;
+        if (i == index) { out->message = buf + pos; out->message_len = mlen; }
+        pos += mlen;
+
+        slen = be_read16(buf + pos); pos += 2;
+        if (pos + slen > len) return WP_FALSE;
+        if (i == index) { out->suggestion = buf + pos; out->suggestion_len = slen; }
+        pos += slen;
+    }
+    return WP_TRUE;
+}
+
+/* Appends up to WP_ATARI_GRAMMAR_DISPLAY_LEN bytes of s into buf via
+   append_str -- keeps one long quote/message/suggestion from crowding
+   the rest of a form_alert dialog off the tiny ST screen. Truncates the
+   DIALOG TEXT only; the wire values actually applied to the document
+   are never touched by this. */
+static void append_str_n(char *buf, u32 cap, u32 *pos, const u8 *s, u32 s_len)
+{
+    char tmp[WP_ATARI_GRAMMAR_DISPLAY_LEN + 1];
+    u32 tlen = (s_len < (u32)sizeof(tmp) - 1) ? s_len : (u32)sizeof(tmp) - 1;
+
+    memcpy(tmp, s, tlen);
+    tmp[tlen] = '\0';
+    append_str(buf, cap, pos, tmp);
+}
+
+static void do_grammar_check(void)
+{
+    u8 *paragraph;
+    u32 paragraph_len;
+    offload_request req;
+    offload_response resp;
+    u32 issue_count;
+    wp_atari_grammar_issue issues[WP_ATARI_GRAMMAR_MAX_ISSUES];
+    u32 order[WP_ATARI_GRAMMAR_MAX_ISSUES];
+    u32 applied_start[WP_ATARI_GRAMMAR_MAX_ISSUES];
+    u32 applied_end[WP_ATARI_GRAMMAR_MAX_ISSUES];
+    u32 applied_count = 0;
+    i32 delta = 0;
+    wp_bool any_applied = WP_FALSE;
+    u32 n, i, j;
+
+    if (!g_doc_loaded) return;
+
+    paragraph = (u8 *)mem_alloc(WP_ATARI_GRAMMAR_MAX_PARAGRAPH_LEN);
+    if (paragraph == NULL) return;
+
+    if (!extract_current_paragraph_text(paragraph, (u32)WP_ATARI_GRAMMAR_MAX_PARAGRAPH_LEN, &paragraph_len)) {
+        mem_free(paragraph);
+        form_alert(1, FA_INFO "[Place the cursor in a paragraph|with some text, then choose|Grammar Check again.][ OK ]");
+        return;
+    }
+
+    if (!ensure_offload()) {
+        mem_free(paragraph);
+        form_alert(1, FA_ERROR "[No offload device available.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");
+        return;
+    }
+
+    req.op = OFFLOAD_GRAMMAR_CHECK;
+    req.payload = paragraph;
+    req.payload_len = paragraph_len;
+    req.timeout_ms = (u32)WP_ATARI_GRAMMAR_TIMEOUT_MS;
+
+    if (offload_submit(&req, &resp) != WP_OK) {
+        mem_free(paragraph);
+        form_alert(1, FA_ERROR "[Grammar Check request failed or timed out.][ OK ]");
+        return;
+    }
+
+    if (resp.status != OFFLOAD_OK) {
+        offload_response_free(&resp);
+        mem_free(paragraph);
+        form_alert(1, FA_INFO "[The connected gateway doesn't support|Grammar Check.][ OK ]");
+        return;
+    }
+
+    n = (resp.result_len >= 2) ? be_read16(resp.result) : 0;
+    if (n > (u32)WP_ATARI_GRAMMAR_MAX_ISSUES) n = (u32)WP_ATARI_GRAMMAR_MAX_ISSUES;
+
+    issue_count = 0;
+    for (i = 0; i < n; i++) {
+        if (!decode_grammar_issue_at(resp.result, resp.result_len, i, &issues[issue_count])) break;
+        issue_count++;
+    }
+
+    if (issue_count == 0) {
+        offload_response_free(&resp);
+        mem_free(paragraph);
+        form_alert(1, FA_INFO "[No grammar issues found.][ OK ]");
+        return;
+    }
+
+    /* Process in ascending start_offset order regardless of how the
+       gateway emitted them -- applying an earlier fix shifts byte
+       positions for everything after it in this same paragraph, and
+       the `delta` bookkeeping below only works walking left to right.
+       Plain insertion sort: issue_count is capped at 16. */
+    for (i = 0; i < issue_count; i++) order[i] = i;
+    for (i = 1; i < issue_count; i++) {
+        u32 key = order[i];
+
+        j = i;
+        while (j > 0 && issues[order[j - 1]].start_offset > issues[key].start_offset) {
+            order[j] = order[j - 1];
+            j--;
+        }
+        order[j] = key;
+    }
+
+    for (i = 0; i < issue_count; i++) {
+        wp_atari_grammar_issue *issue = &issues[order[i]];
+        char msg[220];
+        u32 pos = 0;
+        wp_bool has_suggestion = (issue->suggestion_len > 0);
+        wp_bool overlaps_applied = WP_FALSE;
+        short btn;
+        u32 k;
+
+        /* An LLM occasionally flags overlapping spans (two issues both
+           touching the same word); comparing against ALREADY-APPLIED
+           ranges in ORIGINAL-paragraph coordinates (stable, never
+           shifted) is simple and catches this directly -- applying a
+           second fix into text a first fix already replaced would
+           corrupt the document. */
+        for (k = 0; k < applied_count; k++) {
+            u32 a_start = applied_start[k], a_end = applied_end[k];
+            u32 b_start = (u32)issue->start_offset, b_end = (u32)issue->start_offset + (u32)issue->span_len;
+
+            if (!(a_end <= b_start || b_end <= a_start)) { overlaps_applied = WP_TRUE; break; }
+        }
+
+        append_str(msg, (u32)sizeof(msg), &pos, FA_INFO "[");
+        append_str_n(msg, (u32)sizeof(msg), &pos, issue->message, issue->message_len);
+        append_str(msg, (u32)sizeof(msg), &pos, "|Text: \"");
+        if ((u32)issue->start_offset + (u32)issue->span_len <= paragraph_len) {
+            append_str_n(msg, (u32)sizeof(msg), &pos, paragraph + issue->start_offset, issue->span_len);
+        }
+        append_str(msg, (u32)sizeof(msg), &pos, "\"|Suggestion: ");
+        if (has_suggestion) {
+            append_str(msg, (u32)sizeof(msg), &pos, "\"");
+            append_str_n(msg, (u32)sizeof(msg), &pos, issue->suggestion, issue->suggestion_len);
+            append_str(msg, (u32)sizeof(msg), &pos, "\"");
+        } else {
+            append_str(msg, (u32)sizeof(msg), &pos, "(none offered)");
+        }
+        append_str(msg, (u32)sizeof(msg), &pos, "][ Apply | Skip | Stop ]");
+
+        btn = form_alert(1, msg);
+
+        if (btn == 3) break; /* Stop: leave any remaining issues unshown */
+        if (btn != 1 || !has_suggestion) continue; /* Skip, or Apply with nothing to apply */
+
+        if (overlaps_applied) {
+            form_alert(1, FA_ERROR "[Couldn't apply -- this fix overlaps|a fix already applied.][ OK ]");
+            continue;
+        }
+
+        {
+            u32 adj_start = (u32)((i32)issue->start_offset + delta);
+            u32 adj_end = adj_start + (u32)issue->span_len;
+            u16 run_index;
+            u32 run_start, run_end;
+
+            if (!map_paragraph_offset_to_run(adj_start, adj_end, &run_index, &run_start, &run_end)) {
+                form_alert(1, FA_ERROR "[Couldn't apply -- this fix spans|multiple text styles.][ OK ]");
+                continue;
+            }
+
+            if (wp_edit_delete_range(&g_doc, &g_journal, g_cursor.section, g_cursor.paragraph,
+                                      run_index, run_start, run_end) == WP_OK) {
+                wp_pos insert_pos;
+                wp_pos out_pos;
+
+                insert_pos.section = g_cursor.section;
+                insert_pos.paragraph = g_cursor.paragraph;
+                insert_pos.run = (u32)run_index;
+                insert_pos.offset = run_start;
+
+                if (wp_edit_insert_text(&g_doc, &g_journal, insert_pos,
+                                         issue->suggestion, issue->suggestion_len, &out_pos) == WP_OK) {
+                    delta += (i32)issue->suggestion_len - (i32)issue->span_len;
+                    if (applied_count < (u32)WP_ATARI_GRAMMAR_MAX_ISSUES) {
+                        applied_start[applied_count] = (u32)issue->start_offset;
+                        applied_end[applied_count] = (u32)issue->start_offset + (u32)issue->span_len;
+                        applied_count++;
+                    }
+                    any_applied = WP_TRUE;
+                } else {
+                    form_alert(1, FA_ERROR "[Couldn't apply that fix.][ OK ]");
+                }
+            } else {
+                form_alert(1, FA_ERROR "[Couldn't apply that fix.][ OK ]");
+            }
+        }
+    }
+
+    offload_response_free(&resp);
+    mem_free(paragraph);
+
+    /* At least one edit landed somewhere in this paragraph -- g_cursor's
+       old run/offset may now be a stale index into a run array that was
+       resized by those edits (run_remove_at/run_insert_at can shift or
+       shrink it). Resetting to this paragraph's start is always valid:
+       every delete-then-insert pair here leaves the paragraph with at
+       least one run (insert_span_at_pos's para->run_count == 0 case
+       creates one), so run 0 / offset 0 is guaranteed to exist. */
+    if (any_applied) {
+        g_cursor.run = 0;
+        g_cursor.offset = 0;
+        relayout_document(g_content_width_twips);
+    }
+}
+
 wp_bool wp_atari_layout_selfcheck(void)
 {
     wp_document doc;
@@ -1315,6 +1663,99 @@ wp_bool wp_atari_thesaurus_selfcheck(void)
     return ok;
 }
 
+wp_bool wp_atari_grammar_check_selfcheck(void)
+{
+    wp_bool ok = WP_TRUE;
+    u32 sec_idx, para_idx;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_span span1, span2;
+    u16 run_idx;
+    u8 out_buf[64];
+    u32 out_len;
+    u8 canned[32];
+    u32 canned_len;
+    wp_atari_grammar_issue issue;
+
+    if (wp_document_init(&g_doc) != WP_OK) return WP_FALSE;
+    g_doc_loaded = WP_TRUE;
+
+    wp_document_section_add(&g_doc, &sec_idx);
+    sec = wp_document_section_get(&g_doc, sec_idx);
+    wp_section_paragraph_add(sec, &para_idx);
+    para = wp_section_paragraph_get(sec, para_idx);
+
+    /* Two runs: "plain " (6 bytes) + "bold" (4 bytes) -- paragraph text
+       "plain bold" (10 bytes), style boundary at byte offset 6. (para
+       itself stays valid across wp_paragraph_run_add below -- only
+       para->runs' internal buffer can be reallocated, per docmodel.h;
+       run_insert_at in edit.c relies on the exact same fact.) */
+    wp_strpool_append(&g_doc.strings, (const u8 *)"plain ", 6, &span1);
+    wp_paragraph_run_add(para, span1, g_doc.default_cstyle, &run_idx);
+    wp_strpool_append(&g_doc.strings, (const u8 *)"bold", 4, &span2);
+    wp_paragraph_run_add(para, span2, g_doc.default_cstyle, &run_idx);
+
+    g_cursor.section = sec_idx;
+    g_cursor.paragraph = para_idx;
+    g_cursor.run = 0;
+    g_cursor.offset = 0;
+
+    /* extract_current_paragraph_text concatenates both runs regardless
+       of the style boundary between them. */
+    if (!extract_current_paragraph_text(out_buf, (u32)sizeof(out_buf), &out_len) ||
+        out_len != 10 || memcmp(out_buf, "plain bold", 10) != 0) {
+        ok = WP_FALSE;
+    }
+
+    /* [0,5) "plain" sits entirely inside run 0. */
+    {
+        u16 ri; u32 rs, re;
+        if (!map_paragraph_offset_to_run(0, 5, &ri, &rs, &re) || ri != 0 || rs != 0 || re != 5) {
+            ok = WP_FALSE;
+        }
+    }
+    /* [6,10) "bold" sits entirely inside run 1. */
+    {
+        u16 ri; u32 rs, re;
+        if (!map_paragraph_offset_to_run(6, 10, &ri, &rs, &re) || ri != 1 || rs != 0 || re != 4) {
+            ok = WP_FALSE;
+        }
+    }
+    /* [4,8) "n bo" straddles the run boundary at 6 -- must decline
+       rather than guess which run to touch. */
+    {
+        u16 ri; u32 rs, re;
+        if (map_paragraph_offset_to_run(4, 8, &ri, &rs, &re)) ok = WP_FALSE;
+    }
+
+    /* decode_grammar_issue_at against a hand-built canned response: one
+       issue (start_offset=6, span_len=4, message="msg", suggestion="fix")
+       -- same wire shape host/tests/test_offload.c's grammar_issue_at()
+       proves on the host side, exercised here against THIS app's own
+       independent decode loop. */
+    canned_len = 0;
+    be_write16(canned + canned_len, 1); canned_len += 2;
+    be_write16(canned + canned_len, 6); canned_len += 2;
+    be_write16(canned + canned_len, 4); canned_len += 2;
+    be_write16(canned + canned_len, 3); canned_len += 2;
+    memcpy(canned + canned_len, "msg", 3); canned_len += 3;
+    be_write16(canned + canned_len, 3); canned_len += 2;
+    memcpy(canned + canned_len, "fix", 3); canned_len += 3;
+
+    if (!decode_grammar_issue_at(canned, canned_len, 0, &issue) ||
+        issue.start_offset != 6 || issue.span_len != 4 ||
+        issue.message_len != 3 || memcmp(issue.message, "msg", 3) != 0 ||
+        issue.suggestion_len != 3 || memcmp(issue.suggestion, "fix", 3) != 0) {
+        ok = WP_FALSE;
+    }
+    if (decode_grammar_issue_at(canned, canned_len, 1, &issue)) ok = WP_FALSE; /* out of range */
+
+    wp_document_free(&g_doc);
+    g_doc_loaded = WP_FALSE;
+
+    return ok;
+}
+
 static void redraw_window(short window_handle, VdiHdl vdi)
 {
     GRECT r, work;
@@ -1387,6 +1828,10 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
             break;
         case WP_MENU_OBJ_TOOLS_THESAURUS:
             do_thesaurus();
+            break;
+        case WP_MENU_OBJ_TOOLS_GRAMMARCHECK:
+            do_grammar_check();
+            redraw_window(window_handle, vdi);
             break;
         default:
             break;

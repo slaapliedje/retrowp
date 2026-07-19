@@ -563,12 +563,8 @@ pieces each one composes.
 ## M8 — Grammar + Optional AI Ops
 Goal: Full smart features, all optional/degradable.
 
-- [ ] T8.1 Gateway grammar check (LLM or rule engine) → issue list payload.
+- [x] T8.1 Gateway grammar check (LLM or rule engine) → issue list payload.
       AC: Paragraph in, structured issues out; ST renders them.
-      **Partially done: protocol + both gateways are real and verified;
-      "ST renders them" is NOT done yet** -- kept unchecked rather than
-      overclaiming, the same "don't check the box until the whole AC is
-      met" discipline M7's T7.1-T7.4 split already established.
       - Wire payload (docs/formats/offload-protocol.md's new
         `OFFLOAD_GRAMMAR_CHECK` section): request is the UTF-8 paragraph,
         response is a length-prefixed issue list (start_offset, span_len,
@@ -604,14 +600,25 @@ Goal: Full smart features, all optional/degradable.
         model output. Manual-only, same as the existing THESAURUS smoke
         coverage: LLM output isn't deterministic, so this is deliberately
         not part of `make test`/`ci.sh`.
-      - **Remaining for T8.1:** engine/UI wiring -- a real GEM UI surface
-        in `platform/atari/app_shell.c` that sends a paragraph, receives
-        the issue list, and lets the user see/act on it. Unlike
-        Thesaurus's single blocking `form_alert()`, this is a LIST of
-        positioned issues, not one message, so it's a materially bigger
-        UI task than what T7.4/the existing Thesaurus/Spell Check menu
-        actions needed -- deliberately scoped as its own follow-up pass
-        rather than folded in here.
+      - **"ST renders them": done.** Tools > Grammar Check
+        (`platform/atari/app_shell.c`) sends the current paragraph,
+        decodes the issue list, and cycles through issues one at a time
+        via `[ Apply | Skip | Stop ]` `form_alert()` dialogs -- a
+        materially bigger UI task than Thesaurus's single blocking
+        alert, since applying more than one fix in the same paragraph
+        needs real bookkeeping (ascending-offset processing, a running
+        byte-delta so later offsets track earlier edits, and an overlap
+        guard against corrupting text an earlier fix already replaced).
+        A stale-cursor risk after a mid-paragraph edit (the run array
+        `wp_edit_delete_range`/`wp_edit_insert_text` mutate can resize or
+        reorder) is handled by resetting the cursor to the paragraph's
+        start, always valid post-edit by construction. Full design and
+        verification writeup: docs/atari-platform.md's "Grammar Check
+        wired into the UI" section, including the new
+        `wp_atari_grammar_check_selfcheck()` (run via `ci_atari.sh`,
+        passing on real m68k hardware emulation) and the same honestly-
+        stated "the form_alert()-driving wrapper itself is untested by
+        CI" gap every other offload menu action in this app already has.
 - [ ] T8.2 On-box grammar-lite fallback (rule-based) when no Pi.
       AC: Basic checks work with no device attached.
 - [ ] T8.3 Optional CHAT / IMAGE ops behind capability flags.

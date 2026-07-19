@@ -726,3 +726,133 @@ feature in this app:
    are a thin, mechanical composition of already-proven pieces plus file
    I/O and string formatting, not independently re-verified end to end
    as a running menu action.
+
+## Grammar Check wired into the UI (M8 T8.1)
+
+Closes the "engine/UI wiring" half of T8.1's own AC ("Paragraph in,
+structured issues out; ST renders them") -- the protocol and both
+gateways (fixture-backed and real-Ollama-backed) were already done and
+verified (`docs/formats/offload-protocol.md`, `docs/milestones.md`);
+this is the part that makes it a real menu action on this target.
+
+**A new third Tools item, Tools > Grammar Check**, appended after
+Thesaurus (`WP_MENU_OBJ_TOOLS_GRAMMARCHECK`) in the hand-built
+`OBJECT[]` tree -- same "append, don't insert" discipline as every
+earlier menu growth in this file, so no existing index moved. The Tools
+box grew from 2 rows to 3 and widened from 14 to 16 character cells
+("  Grammar Check" is longer than "  Spell Check"/"  Thesaurus").
+`wp_menu_tree_selfcheck()` grew the matching linkage assertions, and
+`ci_atari.sh`'s existing "menu tree ob_next/head/tail linkage" check
+exercises them on every run.
+
+**A materially different UI shape from every offload action before
+it.** Thesaurus and Spell Check each report ONE thing via a single
+`form_alert()`. Grammar Check gets back a LIST of positioned issues --
+GEM has no control that shows an arbitrary-length list, and this
+project has no resource-editor toolchain to build one with (see the
+`OBJECT[]` comment at the top of this document), so `do_grammar_check()`
+instead cycles through issues one at a time, each its own
+`[ Apply | Skip | Stop ]` `form_alert()`. This is the first menu action
+in this app that can MUTATE the document from inside a loop of blocking
+dialogs, which is where most of the real design work in this task went:
+
+- **The paragraph sent is the CURRENT one** (`g_cursor.section`/
+  `g_cursor.paragraph`), concatenated across every run via a new
+  `extract_current_paragraph_text()` -- no engine primitive already does
+  this (only whole-document plaintext export exists,
+  `engine/src/format_txt.c`), so this mirrors that function's inner loop
+  narrowed to one paragraph.
+- **Wire offsets are never trusted against the LIVE document.** Every
+  issue's `start_offset`/`span_len` is paragraph-relative and refers to
+  the ORIGINAL paragraph text as sent -- stable for as long as the
+  dialog loop runs, since a fix is applied to `g_doc`, never to the
+  local snapshot buffer used for display. A new
+  `map_paragraph_offset_to_run()` maps a (possibly delta-adjusted, see
+  below) paragraph-relative range onto a single run's index and
+  run-local offsets, re-walking `g_doc` fresh on every call rather than
+  holding a pointer across an earlier edit (`wp_paragraph_run_add` can
+  reallocate `para->runs` -- `docmodel.h` says so explicitly, and
+  `edit.c`'s own `run_insert_at` relies on the same fact). It returns
+  `WP_FALSE` -- decline to auto-apply -- if the range crosses a run
+  boundary, since `wp_edit_delete_range`'s contract is single-run-only
+  (`docs/editing.md`) and forcing a bad range through risks corrupting
+  text this action never meant to touch.
+- **Applying more than one fix in the same paragraph needs bookkeeping
+  two different ways.** Issues are processed in ascending
+  `start_offset` order (a plain insertion sort over up to
+  `WP_ATARI_GRAMMAR_MAX_ISSUES` = 16 entries -- the gateway doesn't
+  promise emission order), tracking a running `i32 delta` (the net byte-
+  length change from every EARLIER applied fix in this same pass) so a
+  later issue's ORIGINAL offset can be translated to its CURRENT
+  position in the live, already-partially-edited paragraph. Separately,
+  an LLM occasionally flags overlapping spans (two issues both touching
+  the same word); this is checked against already-applied ranges in
+  ORIGINAL-paragraph coordinates (stable, never shifted, so the overlap
+  test is a simple interval comparison) BEFORE attempting the
+  delta-adjusted apply -- applying a second fix into text a first fix
+  already replaced would silently corrupt the document, and this is the
+  one failure mode `map_paragraph_offset_to_run`'s own boundary check
+  cannot be relied on to always catch (a paragraph that is entirely one
+  run will happily accept an offset/length pair that no longer
+  corresponds to real, intended text).
+- **`g_cursor` is reset to this paragraph's start (run 0, offset 0),
+  never left as-is, after any fix is applied.** Its old run/offset may
+  now index into a `para->runs` array that `wp_edit_delete_range`/
+  `wp_edit_insert_text` resized or reordered elsewhere in the SAME
+  paragraph -- a stale index there is a real out-of-bounds risk on the
+  very next keystroke, not a cosmetic issue. Run 0 / offset 0 is
+  guaranteed to exist afterward because Grammar Check only ever performs
+  a delete immediately followed by a non-empty insert (Apply is only
+  offered when the gateway sent a non-empty suggestion), and
+  `insert_span_at_pos`'s own `para->run_count == 0` case
+  (`engine/src/edit.c`) creates a fresh run rather than requiring one to
+  already exist.
+- **Every quote/message/suggestion shown in a dialog is truncated for
+  DISPLAY ONLY**, via a new `append_str_n()` (a thin wrapper over the
+  existing `append_str()`), to keep one long field from crowding the
+  rest of a `form_alert()` off the ST's tiny screen -- the wire values
+  actually written to the document, and the byte-exact substring search
+  the GATEWAY already performed against them
+  (`docs/formats/offload-protocol.md`), are never touched by this.
+- **Timeout and connection handling are identical to Thesaurus**
+  (`WP_ATARI_GRAMMAR_TIMEOUT_MS` = 90s, `ensure_offload()`'s lazy-once
+  connect) -- same cold-model-load rationale, no new design needed
+  there.
+
+**Verified two ways, deliberately not three, same split Thesaurus
+established:**
+1. `wp_atari_grammar_check_selfcheck()` (run via `ci_atari.sh`) proves
+   the three new pure-logic pieces against a hand-built fixture: a
+   2-run paragraph ("plain " + "bold", built directly via the
+   structural mutation API rather than through `format_txt_import`,
+   which never produces more than one run) proves
+   `extract_current_paragraph_text()` concatenates across the style
+   boundary correctly, and proves `map_paragraph_offset_to_run()` both
+   accepts a range fully inside one run AND declines a range straddling
+   the boundary. A hand-built canned response buffer proves
+   `decode_grammar_issue_at()`'s wire-walking is correct, mirroring
+   `host/tests/test_offload.c`'s `grammar_issue_at()` on the host side
+   but exercised here as this app's own independent decode loop, on
+   real m68k hardware emulation.
+2. The `offload_client.c` <-> real-gateway round trip is NOT re-proven
+   here -- `OFFLOAD_GRAMMAR_CHECK` is submitted through the exact same
+   generic `offload_submit()` path every other op uses (no per-op wire
+   framing), and that path is already proven correct over real emulated
+   RS-232, for arbitrary payload sizes, by T6.3's `atari_serial_smoke.c`
+   and T7.4's `atari_convert_smoke.c`. Re-proving it a third time for
+   this one specific op would add nothing new.
+
+**Known gap, honestly not closed here, same shape as every offload
+action before it:** `do_grammar_check()` itself has never been run and
+observed end to end -- it ends in a loop of blocking `form_alert()`
+calls, which this headless environment cannot safely drive to
+completion (see the SIGPIPE incident this document describes at length
+under T6.3). Verified instead, transitively: the three pieces above are
+each independently proven, and `wp_edit_delete_range`/
+`wp_edit_insert_text` are proven independently by the engine's own host
+test suite (`host/tests/test_edit.c`) and by this app's own
+`do_backspace()`/`do_insert_char()` already running correctly under
+`ci_atari.sh`. `do_grammar_check()` is a mechanical composition of all
+of these plus dialog/button-index handling that has no CI-safe way to
+be exercised -- not a smaller gap than Thesaurus's identical one, and
+not silently different in kind.

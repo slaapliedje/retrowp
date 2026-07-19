@@ -42,7 +42,9 @@
 #define WP_MENU_OBJ_TOOLS_SPELLCHECK 13
 /* post-M6: a second Tools item, Thesaurus, appended after Spell Check. */
 #define WP_MENU_OBJ_TOOLS_THESAURUS  14
-#define WP_MENU_OBJ_COUNT       15
+/* M8 T8.1: a third Tools item, Grammar Check, appended after Thesaurus. */
+#define WP_MENU_OBJ_TOOLS_GRAMMARCHECK 15
+#define WP_MENU_OBJ_COUNT       16
 
 extern OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 
@@ -144,5 +146,20 @@ wp_bool wp_atari_rtf_spell_selfcheck(void);
    ci_atari.sh run (no gateway is attached in that harness) for no new
    coverage. */
 wp_bool wp_atari_thesaurus_selfcheck(void);
+
+/* M8 T8.1: proves the three new non-blocking pieces behind the Grammar
+   Check menu action -- extracting the current paragraph's plain text,
+   mapping a paragraph-relative byte range back to a (run_index, run-
+   local offset) pair (declining when a range crosses a run boundary),
+   and decoding the OFFLOAD_GRAMMAR_CHECK wire response shape -- against
+   fixture documents/cursor positions and a hand-built canned response
+   buffer. Deliberately does NOT call do_grammar_check() itself
+   (form_alert() blocks) or offload_init() against a real gateway: the
+   offload_client.c round trip is already proven generic (works for any
+   op, arbitrary payload sizes) over real emulated RS-232 by T6.3's
+   atari_serial_smoke.c and T7.4's atari_convert_smoke.c, so re-proving
+   it here for this one specific op would add nothing new -- same
+   reasoning wp_atari_thesaurus_selfcheck's own comment already gives. */
+wp_bool wp_atari_grammar_check_selfcheck(void);
 
 #endif /* WP_ATARI_APP_SHELL_INTERNAL_H */

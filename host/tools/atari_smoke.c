@@ -145,6 +145,9 @@ int main(void)
     check(wp_atari_thesaurus_selfcheck(),
           "word-before-cursor extraction for the Thesaurus menu action");
 
+    check(wp_atari_grammar_check_selfcheck(),
+          "paragraph extraction, run-offset mapping, and issue decode for Grammar Check");
+
     {
         long free_before = 0, free_after_load = 0, free_after_free = 0;
         wp_bool budget_ok = wp_atari_memory_budget_selfcheck(&free_before, &free_after_load, &free_after_free);
