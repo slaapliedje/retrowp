@@ -295,13 +295,13 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                         if (font != NULL) plat_font_close(font);
                         plat_font_open((const u8 *)"", 0, cs->size_twips, cs->flags, &font);
                         plat_font_metrics_get(font, &fm);
-                        ascent_px = atari_twips_to_px(fm.ascent);
+                        ascent_px = atari_twips_to_px_y(fm.ascent);
                         cached_style = line_style;
                         have_font = WP_TRUE;
                     }
                 }
 
-                line_height_px = atari_twips_to_px(line->height_twips);
+                line_height_px = atari_twips_to_px_y(line->height_twips);
                 if (buf_len > 0 && font != NULL) {
                     plat_draw_text((plat_gc *)&gc, font, area.g_x, y_px + ascent_px,
                                     (const u8 *)buf, buf_len, 0, 0, 0);
@@ -2047,7 +2047,7 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
         if (g_doc_loaded) {
             GRECT work;
             wind_get_grect(window_handle, WF_WORKXYWH, &work);
-            relayout_document(atari_px_to_twips((i32)work.g_w));
+            relayout_document(atari_px_to_twips_x((i32)work.g_w));
         }
         return WP_FALSE;
 
@@ -2092,7 +2092,7 @@ void app_shell_run(void)
     {
         GRECT work;
         wind_get_grect(window_handle, WF_WORKXYWH, &work);
-        load_sample_document(atari_px_to_twips((i32)work.g_w));
+        load_sample_document(atari_px_to_twips_x((i32)work.g_w));
     }
 
     quit = WP_FALSE;

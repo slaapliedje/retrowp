@@ -159,33 +159,85 @@ this gap is the natural next hardening step, not a redesign.
 implements `plat_draw_text`, `plat_fill_rect`, `plat_gc_flush`, and the
 UTF-8/native charset conversion pair.
 
-**No true screen DPI without SpeedoGDOS.** The document model's `size_twips`
-(1/20 point, used for both font size and physical page dimensions) has no
-legitimate way to become a pixel count on a bare ST without a GDOS install
-to query real device metrics. `ATARI_ASSUMED_DPI = 96` (in
-`metrics_atari_internal.h`) is a fixed, documented simplification, not a
-calibration. This is safe specifically because T4.2's AC ("measured widths
-drive correct on-screen wrap matching the engine's layout") is an
-*internal-consistency* property: `plat_measure_text` converts VDI pixel
-widths to twips using this ratio, and `app_shell.c`'s paint code converts
-the resulting layout's twips coordinates back to pixels with the *same*
-ratio before calling `plat_draw_text` -- so wherever the engine says a line
-breaks is exactly where it's drawn, regardless of whether 96 DPI matches any
-real monitor. Proven quantitatively, not just by eyeballing a screenshot:
-`wp_atari_layout_selfcheck()` (`platform/atari/app_shell.c`, exercised by
-the CI smoke test) imports a short paragraph, relayouts it at a narrow
-column through the real VDI seam, and asserts both `line_count > 1` and
-every line's `width_twips <= content_width_twips` -- confirmed to actually
-catch a regression (deliberately zeroed `plat_measure_text`'s output during
-development and watched the check fail, then restored it).
+**Real per-axis device DPI (revisits T4.2, post-M8).** T4.2 originally shipped
+a fixed `ATARI_ASSUMED_DPI = 96` on the premise that there was "no legitimate
+way to query a real physical screen DPI without a GDOS install." That premise
+was wrong, and was corrected once a real SpeedoGDOS 5.7 install (from the
+user's own original floppies) was available to investigate against: real
+per-axis DPI comes from `v_opnvwk()`'s own `work_out[3]`/`work_out[4]`
+(pixel width/height in microns) -- a **standard VDI open-workstation output,
+not a GDOS-specific one**. Verified empirically on a real Hatari + EmuTOS
+boot with *no* GDOS driver attached at all: `work_out[3]=338`,
+`work_out[4]=372` microns at 320x200 low-res, giving `DPI_X=75`,
+`DPI_Y=68` -- physically sensible and consistent with the ST low-res
+screen's known non-square pixel aspect (pixels taller than wide). `vq_gdos()`
+returned `0` and `vq_vgdos()` returned `GDOS_NONE` (`-2`) in that same run,
+confirming the query needs no GDOS at all.
 
-**Ascent/descent approximation.** `plat_font_metrics_get` uses
-`vst_point()`'s own `charh`/`cellh` outputs (`charh` as ascent, `cellh -
-charh` as descent, leading always 0) rather than `vqt_fontinfo()`'s more
-precise `distances[]` breakdown. Simpler and sufficient for layout
-correctness (line height only needs to be self-consistent, not exactly
-typographically correct); not revisited unless real typography (kerning,
-precise baseline alignment across mixed styles) becomes a requirement.
+Because X and Y pixels are *not* square on a real ST, `metrics_atari.c` now
+queries and converts each axis separately: `atari_twips_to_px_x/_y` and
+`atari_px_to_twips_x/_y` (previously a single unsuffixed pair). Callers were
+audited and split by what they actually measure -- ascent/descent/line-height
+use the `_y` pair, measured text width and window column width use the `_x`
+pair. `ATARI_ASSUMED_DPI` still exists, but only as a per-axis defensive
+fallback if a driver ever reports a 0 or unusable pixel size (shouldn't
+happen on real hardware, but must never divide by zero) -- it is no longer
+the primary source of truth. T4.2's AC (wrap correctness as an
+internal-consistency property between `plat_measure_text` and the paint
+code's pixel positions) still holds, since both still go through the same
+per-axis ratio; the ratio itself is now real instead of assumed. Verified
+via `host/tools/ci_atari.sh` (which runs with no GDOS attached, the common
+case): `wp_atari_layout_selfcheck()` still passes with the real DPI values
+computed above.
+
+**Real ascent/descent via `vqt_fontinfo()` (revisits T4.2, post-M8).**
+`plat_font_metrics_get` previously approximated ascent/descent from
+`vst_point()`'s own `charh`/`cellh` outputs. It now uses
+`vqt_fontinfo()`'s `distances[]` breakdown instead: `distances[1]` is
+descent-to-baseline and `distances[3]` is ascent-to-baseline, both **positive
+magnitudes** (not signed coordinates) -- verified empirically (not assumed
+from the VDI reference alone, since a wrong sign or index would silently
+mis-position every line): on the same no-GDOS EmuTOS boot, `distances[3]`
+(13) matched `vst_point`'s own `charh` (13) exactly, while `distances[1]`
+(2) gave a tighter, more accurate descent than the old `cellh - charh`
+approximation (3) would have. `vst_point()` is still called first (required
+to select the point size before querying font info); its width/height
+outputs are just no longer used for ascent/descent.
+
+**GDOS detection and scalable-font loading (post-M8).** `vq_gdos()` is now
+queried once, in `ensure_metrics_vdi()`. If a GDOS is resident,
+`vst_load_fonts(handle, 0)` is called so `vst_point()` can hit exact
+requested point sizes via the scalable outline renderer instead of snapping
+to the nearest built-in bitmap size. If no GDOS is present, or the load call
+fails, this is a no-op and behavior is unchanged from before this investigation.
+This is deliberately narrow in scope: the document model has no font-family
+concept (`plat_font_open` has always ignored its `utf8_font_name` argument --
+see `docs/document-model.md`), so this does *not* add typeface selection,
+only better size accuracy when a scalable renderer happens to be present.
+
+**Known gap: GDOS-active path is not covered by automated CI.** A real
+SpeedoGDOS 5.7 install (from the user's own original floppies, following the
+real `INSTALL.PRG` installer under Hatari with real mouse-driven interaction
+-- see the mouse-injection technique this investigation also produced,
+recorded separately) reproducibly panics during its own AUTO-folder boot
+under this Hatari v2.6.1 + EmuTOS 0.9.12 combination (`Panic: Illegal
+Instruction`, `pc=00000030`, right after SpeedoGDOS's own cache-loading
+banner and immediately after a `have to clip 1 chars from '#ECACHE2#'!`
+warning from Hatari's GEMDOS HDD emulation -- `EXTEND.SYS`'s
+`CACHEFILE=#ECACHE2#` setting is 9 characters between its delimiters,
+exceeding an 8.3 short name, which is the leading suspect). This reproduced
+identically against both a fresh copy of the installed `C:` drive and the
+original, untouched one, with and without a pre-created `C:\SPDTMP`
+directory -- ruling out a simple missing-directory or copy-artifact cause.
+The crash happens entirely inside GDOS's own boot sequence, before any
+application code (including `WP.PRG`/`SMOKE.PRG`) ever gets control, so it
+is a real environment/emulation-compatibility limitation, not something this
+project's own code can work around. `host/tools/ci_atari.sh` therefore still
+boots with no GDOS attached (the common case for a real 1MB ST anyway); the
+GDOS-detection code path (`vq_gdos()` returning nonzero, `vst_load_fonts()`
+succeeding) is verified by API contract and by the config files a real
+install actually produces, not by an automated end-to-end boot. If a future
+Hatari/EmuTOS version resolves this, revisit adding a GDOS-active CI leg.
 
 **Metrics VDI handle is separate from any window's VDI handle.**
 `plat_font_open` can be called before a window exists (or independent of

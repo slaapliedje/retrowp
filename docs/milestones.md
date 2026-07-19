@@ -172,13 +172,30 @@ Goal: A real, running ST word processor at 1MB.
       a deliberately-introduced metrics regression. (2) visual -- a
       screenshot of WP.PRG rendering a hardcoded sample paragraph with
       correct word-boundary wrap filling the window without overflow.
-      Known gaps (see docs/atari-platform.md): ascent/descent use
-      vst_point's charh/cellh rather than vqt_fontinfo's precise
-      distances[]; color is a black/white luminance threshold, not a
-      real palette search; UTF-8-to-native conversion is ASCII-only
-      (non-ASCII becomes '?', correctly decoded per-codepoint via
-      utf8_decode); no scrolling, so content past the first screenful
-      isn't drawn.
+      Known gaps (see docs/atari-platform.md): color is a black/white
+      luminance threshold, not a real palette search; UTF-8-to-native
+      conversion is ASCII-only (non-ASCII becomes '?', correctly decoded
+      per-codepoint via utf8_decode); no scrolling, so content past the
+      first screenful isn't drawn.
+      **Revisited post-M8**: the "no SpeedoGDOS install available" premise
+      above was investigated for real, using the user's own original
+      SpeedoGDOS 5.7 floppies driven through a real INSTALL.PRG run under
+      Hatari. Real per-axis DPI turned out to need no GDOS at all --
+      v_opnvwk()'s own work_out[3]/[4] (pixel width/height in microns) is
+      a standard VDI output, verified empirically (75/68 DPI on a no-GDOS
+      EmuTOS boot, matching the ST's known non-square low-res pixels).
+      ATARI_ASSUMED_DPI is now only a defensive per-axis fallback, not the
+      primary source of truth. Ascent/descent now use vqt_fontinfo's
+      distances[] (verified: distances[3]/[1] are ascent/descent as
+      positive magnitudes, cross-checked against vst_point's charh on a
+      real boot). vq_gdos() is queried at runtime and, when true,
+      vst_load_fonts() is called so exact point sizes are hit via a real
+      scalable outline font when one is resident -- gracefully a no-op
+      otherwise. See docs/atari-platform.md for the full writeup,
+      including a real, reproducible SpeedoGDOS-boot crash under this
+      Hatari/EmuTOS combination that keeps the GDOS-active path from
+      being covered by automated CI (the no-GDOS path -- the common case
+      -- remains fully covered).
 - [x] T4.3 File I/O, clipboard, timer hooks for Atari.
       AC: Open/save plaintext; GEM clipboard cut/paste works.
       file_atari.c over mintlib stdio (fopen/fread/fwrite -- no raw
