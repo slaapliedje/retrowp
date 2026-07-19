@@ -143,6 +143,12 @@ void test_offload_gateway_dies_before_responding(void);
 void test_offload_short_frame_times_out(void);
 void test_offload_submit_fails_after_gateway_killed(void);
 
+/* offload/gateway/odt_gateway.py (M7 T7.2) */
+void test_convert_odt_import_via_gateway(void);
+void test_convert_odt_export_roundtrip_via_gateway(void);
+void test_convert_unsupported_format_id_reports_unsupported(void);
+void test_convert_malformed_payload_is_error(void);
+
 static const test_case g_cases[] = {
     { "endian_read_write16", test_endian_read_write16 },
     { "endian_read_write32", test_endian_read_write32 },
@@ -269,7 +275,11 @@ static const test_case g_cases[] = {
     { "offload_timeout_on_delayed_gateway", test_offload_timeout_on_delayed_gateway },
     { "offload_gateway_dies_before_responding", test_offload_gateway_dies_before_responding },
     { "offload_short_frame_times_out", test_offload_short_frame_times_out },
-    { "offload_submit_fails_after_gateway_killed", test_offload_submit_fails_after_gateway_killed }
+    { "offload_submit_fails_after_gateway_killed", test_offload_submit_fails_after_gateway_killed },
+    { "convert_odt_import_via_gateway", test_convert_odt_import_via_gateway },
+    { "convert_odt_export_roundtrip_via_gateway", test_convert_odt_export_roundtrip_via_gateway },
+    { "convert_unsupported_format_id_reports_unsupported", test_convert_unsupported_format_id_reports_unsupported },
+    { "convert_malformed_payload_is_error", test_convert_malformed_payload_is_error }
 };
 
 int main(void)

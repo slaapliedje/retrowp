@@ -22,6 +22,15 @@ typedef struct {
    couldn't be started or never reported a port within a few seconds. */
 wp_status gateway_start(const char *const *extra_args, gateway_handle *handle);
 
+/* Same as gateway_start, but execs `binary` instead of the hardcoded
+   bin/mock_gateway -- lets test_convert.c drive
+   offload/gateway/odt_gateway.py (or any other gateway matching the
+   same "print a port, then speak the wire protocol" convention) through
+   this identical spawn/port-capture/kill machinery. `binary` must be
+   directly executable (a compiled binary, or a script with a valid
+   #!/usr/bin/env shebang and the executable bit set). */
+wp_status gateway_start_bin(const char *binary, const char *const *extra_args, gateway_handle *handle);
+
 /* SIGKILLs the gateway process immediately and reaps it. Used both as a
    fault-injection tool (simulating a hard crash) and as end-of-test
    cleanup. Safe to call on an already-dead handle. */

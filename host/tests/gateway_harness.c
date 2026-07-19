@@ -14,6 +14,11 @@
 
 wp_status gateway_start(const char *const *extra_args, gateway_handle *handle)
 {
+    return gateway_start_bin(GATEWAY_BINARY, extra_args, handle);
+}
+
+wp_status gateway_start_bin(const char *binary, const char *const *extra_args, gateway_handle *handle)
+{
     int pipefd[2];
     pid_t pid;
 
@@ -38,7 +43,7 @@ wp_status gateway_start(const char *const *extra_args, gateway_handle *handle)
         dup2(pipefd[1], STDOUT_FILENO);
         close(pipefd[1]);
 
-        argv[argc++] = (char *)GATEWAY_BINARY;
+        argv[argc++] = (char *)binary;
         if (extra_args) {
             while (*extra_args && argc < 15) {
                 argv[argc++] = (char *)*extra_args;
@@ -47,7 +52,7 @@ wp_status gateway_start(const char *const *extra_args, gateway_handle *handle)
         }
         argv[argc] = NULL;
 
-        execv(GATEWAY_BINARY, argv);
+        execv(binary, argv);
         _exit(127); /* exec failed */
     }
 

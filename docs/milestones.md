@@ -442,18 +442,63 @@ deliberately (see docs/formats/offload-protocol.md).
 ## M7 — Offloaded Formats (the 1MB payoff)
 Goal: 1MB ST opens/saves ODT and rich PDF without local parsing.
 
-- [ ] T7.1 Define CONVERT_IMPORT/EXPORT payloads (format id + bytes).
+- [x] T7.1 Define CONVERT_IMPORT/EXPORT payloads (format id + bytes).
       AC: protocol.md documents the message shapes.
-- [ ] T7.2 Gateway ODT import (ZIP/XML → internal model serialization) and
+      Design decision: RTF (not a new internal-model serialization) is
+      the wire-level interchange format -- the engine always ships/
+      receives RTF across this op, reusing format_rtf_import/export
+      unchanged; only the gateway needs to know a foreign format.
+      Response payload for CONVERT_IMPORT is RTF bytes; request payload
+      for CONVERT_EXPORT is RTF bytes (format_id + format_rtf_export()
+      output). See docs/formats/offload-protocol.md.
+- [x] T7.2 Gateway ODT import (ZIP/XML → internal model serialization) and
       export (model → ODT).
       AC: Round-trip an ODT through the gateway; model matches a host-side
       reference import.
+      offload/gateway/odt_gateway.py (Python -- CLAUDE.md explicitly
+      allows "modern C/Python" for offload/gateway; ODT's ZIP+XML needs
+      real DEFLATE/XML handling, which Python's stdlib makes tractable
+      the way hand-rolling it in C would not have been, the same
+      "don't reinvent a real subsystem" call docs/services/spell.md
+      already made). Converts ODT <-> the RTF subset docs/formats/rtf.md
+      documents, reimplementing the wire protocol independently in
+      Python (no shared module a Python gateway can link against).
+      Verified two ways: an automated, fully deterministic round trip
+      (host/tests/test_convert.c, part of make test -- unlike
+      ollama_gateway.c, this gateway has no nondeterministic backend)
+      against a real LibreOffice-produced fixture ODT, AND manual cross-
+      validation with real soffice --headless conversions in both
+      directions during development. Two real bugs found and fixed this
+      way (bytes-vs-str regex comparisons that silently no-opped the
+      whole parser; character runs not flushed on brace boundaries,
+      merging sibling runs). Full writeup: docs/formats/odt.md.
 - [ ] T7.3 Gateway PDF export (model → PDF bytes returned to client).
       AC: Produced PDF opens in a modern viewer; text/layout correct.
+      Not implemented. Deliberately deferred, not attempted and
+      abandoned: unlike ODT (which only needs to carry already-tagged
+      structured text, the same shape RTF has), a real PDF needs this
+      gateway to do its OWN text layout -- word-wrap, pagination, and
+      explicit per-line positioning in a content stream -- a genuinely
+      separate, sizable body of work from T7.2's ODT conversion, not
+      "20 more minutes" of the same kind of work. format_id=FORMAT_PDF
+      is defined at the protocol level (T7.1) and currently returns
+      OFFLOAD_UNSUPPORTED from odt_gateway.py, honestly, not silently.
 - [ ] T7.4 Engine-side wiring: "Open ODT" ships bytes, receives model.
       AC: On 1MB ST with Pi attached, open and save an ODT successfully.
+      Not implemented. The natural next step is small and well-scoped
+      (mirror the RTF extension-sniffing pattern already in
+      platform/atari/app_shell.c's do_file_open/do_file_save), the same
+      staging this project already used for M5 (engine/service work
+      landed first, UI wiring followed in a later pass) -- just not done
+      in this pass.
 
 Artifact: 1MB ST with ODT + rich PDF via the Pi.
+**Partially reached.** The protocol (T7.1) and a real, tested,
+bidirectional ODT<->RTF gateway (T7.2) are done and verified two ways
+(automated deterministic round-trip test + manual real-LibreOffice
+cross-validation). PDF export (T7.3) and the Atari-side UI wiring (T7.4)
+remain open, both deliberately scoped out of this pass rather than
+rushed -- see each task's note above for why.
 
 ---
 

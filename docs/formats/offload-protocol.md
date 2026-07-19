@@ -108,13 +108,62 @@ M8).
   Same length-prefixed word-list shape as THESAURUS, after the
   `is_correct` byte.
 
+### `OFFLOAD_CONVERT_IMPORT` / `OFFLOAD_CONVERT_EXPORT` (M7)
+
+**Design decision: RTF is the wire-level interchange format, not the
+internal document model.** `format_rtf_import`/`format_rtf_export`
+already exist, are tested, and cross-compile for every real target
+(M5) -- reusing them means CONVERT_IMPORT/EXPORT need no new engine-side
+serialization of `wp_document` at all. The engine always sends/receives
+RTF bytes across this op; only the GATEWAY needs to know how to turn a
+foreign format into RTF and back. This also bounds what a gateway needs
+to preserve on a round trip to exactly the subset `docs/formats/rtf.md`
+already documents (alignment, indents, spacing, bold/italic/underline/
+strike/super/sub, size, color) -- the same honest, narrow contract every
+other format in this project has, not a new one invented for M7.
+
+- **`CONVERT_IMPORT` request payload:**
+  ```
+  offset  size  field
+  0       1     format_id (1 = ODT)
+  1       ...   the foreign file's raw bytes (e.g. a whole .odt file)
+  ```
+  **Response payload (status `OFFLOAD_OK`):** RTF bytes, exactly the
+  shape `format_rtf_import` accepts. The engine's own Open-ODT flow (a
+  future task) is therefore just: ship the file's bytes with
+  `format_id=1`, then feed the response straight into
+  `format_rtf_import()` -- no new engine-side parsing at all.
+- **`CONVERT_EXPORT` request payload:**
+  ```
+  offset  size  field
+  0       1     format_id (1 = ODT, 2 = PDF)
+  1       ...   RTF bytes, produced by the engine's OWN format_rtf_export()
+  ```
+  **Response payload (status `OFFLOAD_OK`):** the foreign format's raw
+  bytes (a whole `.odt` file, or a whole `.pdf` file) -- write directly
+  to disk, no further engine-side work.
+  PDF is **export-only**: there is no `format_id` for "import a PDF" --
+  PDF has no general, reliable text-reconstruction guarantee (real-world
+  PDFs range from clean text to scanned images with no text layer at
+  all), and nothing in this project needs to read one back in.
+- A gateway that implements CONVERT_IMPORT/EXPORT only needs to
+  understand RTF in the ONE shape `format_rtf_export` actually produces
+  (documented exactly in `docs/formats/rtf.md`'s "Export" section) and
+  only needs to PRODUCE RTF in the shape `format_rtf_import` actually
+  accepts -- not general third-party RTF in either direction, since the
+  wire contract above guarantees which side of the conversion always
+  touches this project's own RTF code. `offload/gateway/odt_gateway.py`
+  (below) takes advantage of this deliberately.
+
 ### Any other op
 
 The mock gateway responds `RESPONSE` with `status = OFFLOAD_UNSUPPORTED`
 and an empty payload for any op it doesn't implement (`GRAMMAR_CHECK`,
-`CONVERT_IMPORT`, `CONVERT_EXPORT`, `CHAT`, `IMAGE`) -- exercising the
-"absent gracefully" capability-negotiation path that M8's optional ops
-need later, before any of them actually exist.
+`CHAT`, `IMAGE`, and -- for `mock_gateway.c`/`ollama_gateway.c`
+specifically -- `CONVERT_IMPORT`/`CONVERT_EXPORT` too, since ODT/PDF
+conversion lives in the separate `odt_gateway.py`, not either of those)
+-- exercising the "absent gracefully" capability-negotiation path M8's
+optional ops still need, before any of those actually exist.
 
 ## Mock Gateway (`offload/gateway/mock_gateway.c`)
 
@@ -245,3 +294,18 @@ must still be able to run the automated suite. Instead:
   synonyms), an unsupported op (`SPELL_CHECK` &rarr; `OFFLOAD_UNSUPPORTED`,
   empty payload), and multiple sequential requests over one connection
   (proving the request/response loop, not just a single round trip).
+
+## ODT Gateway (`offload/gateway/odt_gateway.py`, M7 T7.2)
+
+A third gateway, answering `CONVERT_IMPORT`/`CONVERT_EXPORT` for
+`format_id = FORMAT_ODT` by converting to/from the RTF interchange shape
+described above. Unlike `ollama_gateway.c`, this one IS fully
+deterministic and IS part of `make test` (`host/tests/test_convert.c`).
+Full design, the two real parsing bugs found and fixed during
+development, and the verification approach (both automated and manual
+LibreOffice cross-validation) are in `docs/formats/odt.md` -- read that
+before changing this gateway. `format_id = FORMAT_PDF` is accepted at
+the protocol level but returns `OFFLOAD_UNSUPPORTED` from this specific
+gateway: PDF export needs its own text-layout work (word-wrap,
+pagination, content-stream positioning) this gateway doesn't do, a
+deliberately separate scope, not implemented here (M7 T7.3).
