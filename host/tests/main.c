@@ -146,6 +146,7 @@ void test_offload_submit_fails_after_gateway_killed(void);
 /* offload/gateway/odt_gateway.py (M7 T7.2) */
 void test_convert_odt_import_via_gateway(void);
 void test_convert_odt_export_roundtrip_via_gateway(void);
+void test_convert_pdf_export_via_gateway(void);
 void test_convert_unsupported_format_id_reports_unsupported(void);
 void test_convert_malformed_payload_is_error(void);
 
@@ -278,6 +279,7 @@ static const test_case g_cases[] = {
     { "offload_submit_fails_after_gateway_killed", test_offload_submit_fails_after_gateway_killed },
     { "convert_odt_import_via_gateway", test_convert_odt_import_via_gateway },
     { "convert_odt_export_roundtrip_via_gateway", test_convert_odt_export_roundtrip_via_gateway },
+    { "convert_pdf_export_via_gateway", test_convert_pdf_export_via_gateway },
     { "convert_unsupported_format_id_reports_unsupported", test_convert_unsupported_format_id_reports_unsupported },
     { "convert_malformed_payload_is_error", test_convert_malformed_payload_is_error }
 };

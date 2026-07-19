@@ -234,7 +234,7 @@ void test_convert_unsupported_format_id_reports_unsupported(void)
     ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
     ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
 
-    payload[0] = 99; /* not FORMAT_ODT */
+    payload[0] = 99; /* neither FORMAT_ODT nor FORMAT_PDF */
     payload[1] = 'x';
     req.op = OFFLOAD_CONVERT_IMPORT;
     req.payload = payload;
@@ -244,14 +244,100 @@ void test_convert_unsupported_format_id_reports_unsupported(void)
     ASSERT_TRUE(resp.status == OFFLOAD_UNSUPPORTED);
     offload_response_free(&resp);
 
-    payload[0] = FORMAT_PDF; /* CONVERT_EXPORT to PDF: not implemented by this gateway */
-    req.op = OFFLOAD_CONVERT_EXPORT;
-    req.payload = payload;
-    req.payload_len = 2;
+    req.op = OFFLOAD_CONVERT_EXPORT; /* same bogus format_id, CONVERT_EXPORT this time */
     ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
     ASSERT_TRUE(resp.status == OFFLOAD_UNSUPPORTED);
     offload_response_free(&resp);
 
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+/* PDF is export-only (no format_id for "import a PDF" -- see
+   docs/formats/offload-protocol.md), and unlike ODT this gateway does
+   its own real text layout for it (word-wrap, pagination, per-line
+   positioning -- docs/formats/pdf.md). Builds a small document, exports
+   to RTF, ships it through CONVERT_EXPORT with format_id=FORMAT_PDF, and
+   checks the result is a genuine PDF (magic bytes, a real "/Type /Page"
+   object present -- this project has no PDF-parsing library on the
+   engine side, nor should it, so this is a structural check, not a full
+   parse). Deliberately kept small: engine/src/offload_client.c caps a
+   single response at OFFLOAD_MAX_RESPONSE_PAYLOAD (4096 bytes) --
+   a real constraint of the current transport, not specific to PDF, that
+   a bigger fixture here actually hit during development (offload_submit
+   returned WP_RANGE, not a gateway bug). Multi-page pagination (the
+   PDF-specific behavior a tiny fixture like this can't exercise without
+   pushing past that cap) was verified manually during development --
+   see docs/formats/pdf.md for that trace (40 paragraphs, 3 real pages,
+   checked with real pdftotext/pdftoppm). */
+void test_convert_pdf_export_via_gateway(void)
+{
+    gateway_handle gw;
+    wp_document doc;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_pstyle pstyle;
+    wp_cstyle cstyle;
+    wp_para_style ps;
+    wp_char_style cs;
+    wp_span span;
+    u16 run_idx;
+    u32 sec_idx, para_idx;
+    u8 rtf_buf[1024];
+    u32 rtf_len;
+    u8 req_payload[1024 + 1];
+    offload_request req;
+    offload_response resp;
+    static const char *paragraph_text =
+        "This paragraph forces real word-wrapping across a couple of lines "
+        "within the page column width.";
+    wp_bool found_page_object = WP_FALSE;
+    u32 i;
+
+    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
+    ASSERT_TRUE(wp_document_section_add(&doc, &sec_idx) == WP_OK);
+    sec = wp_document_section_get(&doc, sec_idx);
+
+    ASSERT_TRUE(wp_section_paragraph_add(sec, &para_idx) == WP_OK);
+    para = wp_section_paragraph_get(sec, para_idx);
+    memset(&ps, 0, sizeof(ps));
+    ps.align = WP_ALIGN_JUSTIFY;
+    ASSERT_TRUE(wp_document_pstyle_add(&doc, &ps, &pstyle) == WP_OK);
+    wp_paragraph_pstyle_set(para, pstyle);
+    memset(&cs, 0, sizeof(cs));
+    cs.flags = WP_STYLE_BOLD;
+    cs.size_twips = 240;
+    ASSERT_TRUE(wp_document_cstyle_add(&doc, &cs, &cstyle) == WP_OK);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)paragraph_text,
+                                   (u32)strlen(paragraph_text), &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, cstyle, &run_idx) == WP_OK);
+
+    ASSERT_TRUE(format_rtf_export(&doc, rtf_buf, sizeof(rtf_buf), &rtf_len) == WP_OK);
+    wp_document_free(&doc);
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    req_payload[0] = FORMAT_PDF;
+    memcpy(req_payload + 1, rtf_buf, rtf_len);
+    req.op = OFFLOAD_CONVERT_EXPORT;
+    req.payload = req_payload;
+    req.payload_len = rtf_len + 1;
+    req.timeout_ms = 10000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+    ASSERT_TRUE(resp.result_len > 4);
+    ASSERT_MEM_EQ(resp.result, "%PDF", 4);
+
+    for (i = 0; i + 12 <= resp.result_len; i++) {
+        if (memcmp(resp.result + i, "/Type /Page", 11) == 0 && resp.result[i + 11] != 's') {
+            found_page_object = WP_TRUE;
+            break;
+        }
+    }
+    ASSERT_TRUE(found_page_object);
+
+    offload_response_free(&resp);
     offload_shutdown();
     gateway_stop(&gw);
 }

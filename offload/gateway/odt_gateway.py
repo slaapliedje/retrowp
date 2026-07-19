@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Standalone ODT<->RTF conversion gateway (M7 T7.2).
+"""Standalone document-conversion gateway: ODT<->RTF and RTF->PDF (M7
+T7.2, T7.3).
 
 A third offload/gateway executable, alongside mock_gateway.c (fixture-
 backed THESAURUS/SPELL_CHECK) and ollama_gateway.c (real-LLM-backed
-THESAURUS). This one answers OFFLOAD_CONVERT_IMPORT and
-OFFLOAD_CONVERT_EXPORT for format_id=ODT -- everything else, including
-CONVERT_EXPORT for PDF if that ever lands, responds OFFLOAD_UNSUPPORTED.
+THESAURUS). This one answers OFFLOAD_CONVERT_IMPORT for format_id=ODT,
+and OFFLOAD_CONVERT_EXPORT for format_id=ODT or format_id=PDF --
+everything else responds OFFLOAD_UNSUPPORTED. There is deliberately no
+PDF *import*: PDF has no general, reliable text-reconstruction guarantee
+(docs/formats/offload-protocol.md has the reasoning), so it is export-only.
 
 Written in Python, not C, per CLAUDE.md's explicit allowance
 ("offload/gateway: the Pi-side gateway (modern C/Python)"): ODT is a ZIP
@@ -611,6 +614,349 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
 
 
 # ---------------------------------------------------------------------
+# paragraph model -> PDF bytes (CONVERT_EXPORT, format=PDF, M7 T7.3)
+#
+# Unlike ODT (which only carries already-tagged structured text), PDF
+# needs THIS module to do its own text layout: word-wrap, pagination,
+# and explicit per-line/per-run positioning in a content stream. US
+# Letter, 1in margins, the 4 standard Helvetica variants (no embedding
+# needed -- every PDF viewer has them built in), real Adobe AFM glyph
+# widths (not approximated) for accurate wrapping and positioning.
+# ---------------------------------------------------------------------
+
+# Real Adobe Core 14 AFM widths (ASCII 32-126, 1000-unit em), extracted
+# from matplotlib's bundled pdfcorefonts/Helvetica*.afm during
+# development -- not guessed or approximated. Helvetica-Oblique and
+# Helvetica-BoldOblique share exactly these same widths as their
+# upright counterparts (italic is a shear of the same glyphs, not a
+# separate width table) -- verified against the real AFM files.
+_HELV_WIDTHS = {32: 278, 33: 278, 34: 355, 35: 556, 36: 556, 37: 889, 38: 667, 39: 222, 40: 333, 41: 333, 42: 389, 43: 584, 44: 278, 45: 333, 46: 278, 47: 278, 48: 556, 49: 556, 50: 556, 51: 556, 52: 556, 53: 556, 54: 556, 55: 556, 56: 556, 57: 556, 58: 278, 59: 278, 60: 584, 61: 584, 62: 584, 63: 556, 64: 1015, 65: 667, 66: 667, 67: 722, 68: 722, 69: 667, 70: 611, 71: 778, 72: 722, 73: 278, 74: 500, 75: 667, 76: 556, 77: 833, 78: 722, 79: 778, 80: 667, 81: 778, 82: 722, 83: 667, 84: 611, 85: 722, 86: 667, 87: 944, 88: 667, 89: 667, 90: 611, 91: 278, 92: 278, 93: 278, 94: 469, 95: 556, 96: 222, 97: 556, 98: 556, 99: 500, 100: 556, 101: 556, 102: 278, 103: 556, 104: 556, 105: 222, 106: 222, 107: 500, 108: 222, 109: 833, 110: 556, 111: 556, 112: 556, 113: 556, 114: 333, 115: 500, 116: 278, 117: 556, 118: 500, 119: 722, 120: 500, 121: 500, 122: 500, 123: 334, 124: 260, 125: 334, 126: 584}
+_HELV_BOLD_WIDTHS = {32: 278, 33: 333, 34: 474, 35: 556, 36: 556, 37: 889, 38: 722, 39: 278, 40: 333, 41: 333, 42: 389, 43: 584, 44: 278, 45: 333, 46: 278, 47: 278, 48: 556, 49: 556, 50: 556, 51: 556, 52: 556, 53: 556, 54: 556, 55: 556, 56: 556, 57: 556, 58: 333, 59: 333, 60: 584, 61: 584, 62: 584, 63: 611, 64: 975, 65: 722, 66: 722, 67: 722, 68: 722, 69: 667, 70: 611, 71: 778, 72: 722, 73: 278, 74: 556, 75: 722, 76: 611, 77: 833, 78: 722, 79: 778, 80: 667, 81: 778, 82: 722, 83: 667, 84: 611, 85: 722, 86: 667, 87: 944, 88: 667, 89: 667, 90: 611, 91: 333, 92: 278, 93: 333, 94: 584, 95: 556, 96: 278, 97: 556, 98: 611, 99: 556, 100: 611, 101: 556, 102: 333, 103: 611, 104: 611, 105: 278, 106: 278, 107: 556, 108: 278, 109: 889, 110: 611, 111: 611, 112: 611, 113: 611, 114: 389, 115: 556, 116: 333, 117: 611, 118: 556, 119: 778, 120: 556, 121: 556, 122: 500, 123: 389, 124: 280, 125: 389, 126: 584}
+_PDF_FALLBACK_WIDTH = 556  # any char outside ASCII 32-126 -- an average-width approximation, not real AFM data for that range
+
+_PDF_PAGE_WIDTH = 612.0   # US Letter, points
+_PDF_PAGE_HEIGHT = 792.0
+_PDF_MARGIN = 72.0        # 1 inch
+_PDF_COLUMN_WIDTH = _PDF_PAGE_WIDTH - 2 * _PDF_MARGIN
+_PDF_CONTENT_TOP = _PDF_PAGE_HEIGHT - _PDF_MARGIN
+_PDF_CONTENT_BOTTOM = _PDF_MARGIN
+
+_PDF_FONT_REGULAR = '/F1'
+_PDF_FONT_BOLD = '/F2'
+_PDF_FONT_OBLIQUE = '/F3'
+_PDF_FONT_BOLDOBLIQUE = '/F4'
+
+_PDF_SUPERSUB_SCALE = 0.65  # typographic convention: super/subscript glyphs render smaller
+
+
+def _pdf_font_for_run(run):
+    b, i = run.get('b'), run.get('i')
+    if b and i:
+        return _PDF_FONT_BOLDOBLIQUE, _HELV_BOLD_WIDTHS
+    if b:
+        return _PDF_FONT_BOLD, _HELV_BOLD_WIDTHS
+    if i:
+        return _PDF_FONT_OBLIQUE, _HELV_WIDTHS
+    return _PDF_FONT_REGULAR, _HELV_WIDTHS
+
+
+def _pdf_text_width_pt(text, widths, size_pt):
+    return sum(widths.get(ord(ch), _PDF_FALLBACK_WIDTH) for ch in text) * size_pt / 1000.0
+
+
+def _pdf_effective_size_pt(run):
+    """The size used for BOTH width measurement and Tf, so wrapping
+    decisions and rendering never disagree about how wide super/
+    subscript text is."""
+    size_pt = run.get('size_twips', 240) / 20.0
+    if run.get('super') or run.get('sub'):
+        return size_pt * _PDF_SUPERSUB_SCALE
+    return size_pt
+
+
+def _pdf_text_rise_pt(run, size_pt):
+    """PDF Ts (text rise), 0 for normal text. Proportional to the
+    (already-reduced) super/sub size -- a reasonable typographic
+    default, not a claim of matching any font's real, published super/
+    subscript metrics (Helvetica has none)."""
+    if run.get('super'):
+        return size_pt * 0.4
+    if run.get('sub'):
+        return -size_pt * 0.2
+    return 0.0
+
+
+def _pdf_build_items(para):
+    """Splits a paragraph into (is_space, [(text, run), ...]) items,
+    merging consecutive same-kind fragments across run boundaries so a
+    word split by a style change never breaks mid-word (the same
+    property engine/src/linebreak.c's own token merging guarantees on
+    the engine side, reimplemented here since this gateway does its own
+    independent layout pass)."""
+    items = []
+    cur_is_space = None
+    cur_fragments = []
+    for run in para['runs']:
+        text = run.get('text', '')
+        i, n = 0, len(text)
+        while i < n:
+            is_space = (text[i] == ' ')
+            j = i
+            while j < n and (text[j] == ' ') == is_space:
+                j += 1
+            frag = (text[i:j], run)
+            if cur_is_space is None:
+                cur_is_space, cur_fragments = is_space, [frag]
+            elif is_space == cur_is_space:
+                cur_fragments.append(frag)
+            else:
+                items.append((cur_is_space, cur_fragments))
+                cur_is_space, cur_fragments = is_space, [frag]
+            i = j
+    if cur_fragments:
+        items.append((cur_is_space, cur_fragments))
+    return items
+
+
+def _pdf_item_width_pt(frags):
+    return sum(_pdf_text_width_pt(text, _pdf_font_for_run(run)[1], _pdf_effective_size_pt(run))
+               for text, run in frags)
+
+
+def _pdf_wrap_paragraph(para, column_width_pt):
+    """Greedy word wrap, breaking BEFORE a word that doesn't fit and
+    dropping a would-be trailing space at the break (standard word-wrap
+    behavior). An overlong single word wider than the column overflows
+    its line rather than breaking mid-word -- the same allowance
+    docs/layout.md documents for the engine's own line breaker. Returns
+    (lines, li, ri, fi) where each line is (line_items, is_first_line)."""
+    items = _pdf_build_items(para)
+    li = para.get('li', 0) / 20.0
+    ri = para.get('ri', 0) / 20.0
+    fi = para.get('fi', 0) / 20.0
+
+    def avail(first_line):
+        return max(0.0, column_width_pt - li - ri - (fi if first_line else 0.0))
+
+    lines = []
+    cur, cur_width, first_line = [], 0.0, True
+
+    def flush():
+        nonlocal cur, cur_width, first_line
+        if cur and cur[-1][0]:
+            cur_width -= _pdf_item_width_pt(cur[-1][1])
+            cur = cur[:-1]
+        lines.append((cur, first_line))
+        first_line = False
+        cur, cur_width = [], 0.0
+
+    i = 0
+    while i < len(items):
+        is_space, frags = items[i]
+        w = _pdf_item_width_pt(frags)
+        a = avail(first_line)
+        if is_space:
+            if cur and cur_width + w > a:
+                flush()
+                i += 1
+                continue
+            cur.append((is_space, frags))
+            cur_width += w
+            i += 1
+        else:
+            if cur and cur_width + w > a:
+                flush()
+                continue  # retry this word on the new line
+            cur.append((is_space, frags))
+            cur_width += w
+            i += 1
+
+    if cur or not lines:
+        flush()
+    return lines, li, ri, fi
+
+
+def _pdf_escape_str(text):
+    out = []
+    for ch in text:
+        cp = ord(ch)
+        if ch in '()\\':
+            out.append('\\' + ch)
+        elif cp < 0x80 or 0xA0 <= cp <= 0xFF:
+            out.append(ch)  # WinAnsiEncoding matches Latin-1 in this range
+        else:
+            out.append('?')
+    return ''.join(out)
+
+
+def paragraphs_to_pdf_bytes(paragraphs):
+    pages = []
+    cur_ops = []
+    cur_y = _PDF_CONTENT_TOP
+    cur_tw = None
+    cur_font = cur_size = None
+    cur_color = (0, 0, 0)
+
+    def new_page():
+        nonlocal cur_ops, cur_y, cur_tw, cur_font, cur_size, cur_color
+        pages.append(cur_ops)
+        cur_ops = []
+        cur_y = _PDF_CONTENT_TOP
+        cur_tw = None
+        cur_font = cur_size = None
+        cur_color = (0, 0, 0)
+
+    def ensure_room(leading):
+        if cur_y - leading < _PDF_CONTENT_BOTTOM:
+            new_page()
+
+    for pi, para in enumerate(paragraphs):
+        lines, li, ri, fi = _pdf_wrap_paragraph(para, _PDF_COLUMN_WIDTH)
+        sb = para.get('sb', 0) / 20.0
+        sa = para.get('sa', 0) / 20.0
+        align = para.get('align', 'left')
+
+        if pi > 0:
+            ensure_room(sb)
+            cur_y -= sb
+
+        for line_idx, (line_items, is_first) in enumerate(lines):
+            is_last_line_of_para = (line_idx == len(lines) - 1)
+            max_size_pt = 12.0
+            for _, frags in line_items:
+                for _, run in frags:
+                    max_size_pt = max(max_size_pt, run.get('size_twips', 240) / 20.0)
+            leading = max_size_pt * 1.2
+            ensure_room(leading)
+
+            line_width = sum(_pdf_item_width_pt(frags) for _, frags in line_items)
+            indent = li + (fi if is_first else 0.0)
+            col = _PDF_COLUMN_WIDTH - li - ri - (fi if is_first else 0.0)
+
+            extra_per_space = 0.0
+            x0 = _PDF_MARGIN + indent
+            if align == 'right':
+                x0 += max(0.0, col - line_width)
+            elif align == 'center':
+                x0 += max(0.0, (col - line_width) / 2.0)
+            elif align == 'justify' and not is_last_line_of_para:
+                space_count = sum(1 for is_space, _ in line_items if is_space)
+                if space_count > 0 and col > line_width:
+                    extra_per_space = (col - line_width) / space_count
+
+            cur_y -= max_size_pt  # baseline sits max_size_pt below the line's top (ascent-ish approximation)
+
+            cur_ops.append('BT')
+            cur_ops.append('%.2f %.2f Td' % (x0, cur_y))
+            if extra_per_space != cur_tw:
+                cur_ops.append('%.3f Tw' % extra_per_space)
+                cur_tw = extra_per_space
+            cur_font = cur_size = None
+            cur_rise = 0.0
+            # Tracked independently (not relying on Tj's own auto-advance)
+            # so underline/strikethrough segments land exactly where the
+            # SAME AFM widths say the text does -- as long as this uses
+            # those same widths, it can't drift from where Tj itself draws.
+            running_x = x0
+            deco = []  # (x_start, x_end, y) segments to stroke AFTER this ET
+            for is_space, frags in line_items:
+                for text, run in frags:
+                    font_name, widths = _pdf_font_for_run(run)
+                    size_pt = _pdf_effective_size_pt(run)
+                    if font_name != cur_font or size_pt != cur_size:
+                        cur_ops.append('%s %.2f Tf' % (font_name, size_pt))
+                        cur_font, cur_size = font_name, size_pt
+                    rise = _pdf_text_rise_pt(run, size_pt)
+                    if rise != cur_rise:
+                        cur_ops.append('%.2f Ts' % rise)
+                        cur_rise = rise
+                    color = run.get('color') or (0, 0, 0)
+                    if color != cur_color:
+                        cur_ops.append('%.3f %.3f %.3f rg' % (color[0] / 255.0, color[1] / 255.0, color[2] / 255.0))
+                        cur_color = color
+                    cur_ops.append('(%s) Tj' % _pdf_escape_str(text))
+
+                    w = _pdf_text_width_pt(text, widths, size_pt)
+                    if is_space and extra_per_space:
+                        w += extra_per_space * text.count(' ')
+                    if run.get('ul'):
+                        deco.append((running_x, running_x + w, cur_y - size_pt * 0.08, color))
+                    if run.get('strike'):
+                        deco.append((running_x, running_x + w, cur_y + size_pt * 0.3, color))
+                    running_x += w
+            cur_ops.append('ET')
+
+            for x_start, x_end, y, color in deco:
+                if x_end <= x_start:
+                    continue
+                cur_ops.append('%.3f %.3f %.3f RG' % (color[0] / 255.0, color[1] / 255.0, color[2] / 255.0))
+                cur_ops.append('1 w')
+                cur_ops.append('%.2f %.2f m %.2f %.2f l S' % (x_start, y, x_end, y))
+
+            cur_y -= (leading - max_size_pt)
+
+        cur_y -= sa
+
+    pages.append(cur_ops)
+    return _pdf_assemble(pages)
+
+
+def _pdf_assemble(pages):
+    """Builds the final PDF byte stream: Catalog, Pages tree, one Page +
+    one content-stream object per page, and 4 standard Type1 font
+    objects (Helvetica/-Bold/-Oblique/-BoldOblique -- no embedding
+    needed, every PDF viewer has these built in). No /Widths array is
+    declared on the font objects: every viewer already knows the
+    standard 14 fonts' real metrics, which is exactly why this module
+    used the SAME real AFM widths for its own layout above -- the two
+    are meant to agree without this file needing to assert it via an
+    explicit array."""
+    objects = []
+    font_defs = [(10, 'Helvetica'), (11, 'Helvetica-Bold'),
+                 (12, 'Helvetica-Oblique'), (13, 'Helvetica-BoldOblique')]
+    font_res = ' '.join('/F%d %d 0 R' % (i + 1, num) for i, (num, _) in enumerate(font_defs))
+
+    page_obj_nums, content_obj_nums = [], []
+    next_obj = 14
+    for _ in pages:
+        page_obj_nums.append(next_obj)
+        next_obj += 1
+        content_obj_nums.append(next_obj)
+        next_obj += 1
+
+    kids = ' '.join('%d 0 R' % n for n in page_obj_nums)
+    objects.append((1, b'<< /Type /Catalog /Pages 2 0 R >>'))
+    objects.append((2, ('<< /Type /Pages /Kids [%s] /Count %d >>' % (kids, len(pages))).encode('ascii')))
+    for num, base_name in font_defs:
+        objects.append((num, ('<< /Type /Font /Subtype /Type1 /BaseFont /%s '
+                               '/Encoding /WinAnsiEncoding >>' % base_name).encode('ascii')))
+    for page_num, content_num, ops in zip(page_obj_nums, content_obj_nums, pages):
+        objects.append((page_num, ('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %g %g] '
+                                    '/Resources << /Font << %s >> >> /Contents %d 0 R >>' %
+                                    (_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT, font_res, content_num)).encode('ascii')))
+        stream = ('\n'.join(ops) + '\n').encode('latin-1', errors='replace')
+        objects.append((content_num, b'<< /Length %d >>\nstream\n' % len(stream) + stream + b'endstream'))
+
+    objects.sort(key=lambda o: o[0])
+    out = bytearray(b'%PDF-1.4\n%\xe2\xe3\xcf\xd3\n')
+    offsets = {}
+    for num, body in objects:
+        offsets[num] = len(out)
+        out += ('%d 0 obj\n' % num).encode('ascii') + body + b'\nendobj\n'
+
+    xref_start = len(out)
+    max_num = max(offsets)
+    out += ('xref\n0 %d\n' % (max_num + 1)).encode('ascii')
+    out += b'0000000000 65535 f \n'
+    for n in range(1, max_num + 1):
+        off = offsets.get(n)
+        out += (b'0000000000 00000 f \n' if off is None else ('%010d 00000 n \n' % off).encode('ascii'))
+    out += ('trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF' %
+            (max_num + 1, xref_start)).encode('ascii')
+    return bytes(out)
+
+
+# ---------------------------------------------------------------------
 # Request dispatch + server loop
 # ---------------------------------------------------------------------
 
@@ -639,7 +985,7 @@ def handle_convert_export(payload):
     try:
         if format_id == FORMAT_ODT:
             return STATUS_OK, paragraphs_to_odt_bytes(paragraphs)
-        return STATUS_UNSUPPORTED, b''  # PDF: not implemented by this gateway
+        return STATUS_OK, paragraphs_to_pdf_bytes(paragraphs)
     except Exception:
         return STATUS_ERR, b''
 

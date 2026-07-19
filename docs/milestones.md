@@ -472,17 +472,35 @@ Goal: 1MB ST opens/saves ODT and rich PDF without local parsing.
       way (bytes-vs-str regex comparisons that silently no-opped the
       whole parser; character runs not flushed on brace boundaries,
       merging sibling runs). Full writeup: docs/formats/odt.md.
-- [ ] T7.3 Gateway PDF export (model → PDF bytes returned to client).
+- [x] T7.3 Gateway PDF export (model → PDF bytes returned to client).
       AC: Produced PDF opens in a modern viewer; text/layout correct.
-      Not implemented. Deliberately deferred, not attempted and
-      abandoned: unlike ODT (which only needs to carry already-tagged
-      structured text, the same shape RTF has), a real PDF needs this
-      gateway to do its OWN text layout -- word-wrap, pagination, and
-      explicit per-line positioning in a content stream -- a genuinely
-      separate, sizable body of work from T7.2's ODT conversion, not
-      "20 more minutes" of the same kind of work. format_id=FORMAT_PDF
-      is defined at the protocol level (T7.1) and currently returns
-      OFFLOAD_UNSUPPORTED from odt_gateway.py, honestly, not silently.
+      Same odt_gateway.py process, format_id=FORMAT_PDF. A real, from-
+      scratch PDF writer: word-wrap and pagination against REAL Adobe
+      AFM glyph widths (extracted from matplotlib's bundled
+      pdfcorefonts during development, not approximated), the 4
+      standard Helvetica variants (no font embedding needed),
+      left/right/center/justify (justify via the PDF Tw operator, exact
+      because the same real widths drove both the wrap decision and the
+      stretch amount), underline/strikethrough (drawn manually -- PDF
+      has no native attribute for either), superscript/subscript (the
+      PDF Ts operator plus a scaled-down effective size used
+      consistently for both wrapping and rendering), and real multi-
+      page pagination. PDF import was never attempted -- export-only,
+      by design (docs/formats/offload-protocol.md). Verified two ways:
+      an automated round trip (host/tests/test_convert.c, part of make
+      test, kept small since engine/src/offload_client.c caps a single
+      response at 4096 bytes -- a real transport constraint an earlier
+      larger fixture actually hit during development) checking real PDF
+      structure, AND manual verification with real poppler-utils
+      (pdfinfo/pdftotext/pdftoppm) -- multi-page pagination (40
+      paragraphs, 3 real pages, all content present and in order) and
+      visual correctness (rendered to an image and inspected: justified
+      text visibly stretches except on a paragraph's last line, bold/
+      italic/color/underline/strikethrough/superscript/subscript all
+      render correctly) against fixtures built through the real C
+      engine's format_rtf_export(), not hand-written RTF. Full writeup,
+      including the design rationale for why this was genuinely
+      separate work from T7.2's ODT conversion: docs/formats/pdf.md.
 - [ ] T7.4 Engine-side wiring: "Open ODT" ships bytes, receives model.
       AC: On 1MB ST with Pi attached, open and save an ODT successfully.
       Not implemented. The natural next step is small and well-scoped
@@ -493,12 +511,18 @@ Goal: 1MB ST opens/saves ODT and rich PDF without local parsing.
       in this pass.
 
 Artifact: 1MB ST with ODT + rich PDF via the Pi.
-**Partially reached.** The protocol (T7.1) and a real, tested,
-bidirectional ODT<->RTF gateway (T7.2) are done and verified two ways
-(automated deterministic round-trip test + manual real-LibreOffice
-cross-validation). PDF export (T7.3) and the Atari-side UI wiring (T7.4)
-remain open, both deliberately scoped out of this pass rather than
-rushed -- see each task's note above for why.
+**Reached at the gateway level.** The protocol (T7.1), a real, tested,
+bidirectional ODT<->RTF gateway (T7.2), and a real from-scratch PDF
+writer with genuine text layout -- word-wrap, pagination, justification,
+underline/strikethrough, superscript/subscript, all against real Adobe
+AFM glyph metrics (T7.3) -- are done, in the same odt_gateway.py process,
+each verified both by an automated deterministic test and by manual
+cross-validation against real independent tools (LibreOffice for ODT,
+poppler-utils for PDF). Only T7.4 remains open: the Atari-side UI wiring
+("Open ODT"/"Save ODT"/"Save PDF" menu actions) is small, well-scoped
+follow-up work -- the same staging this project already used for M5
+(engine/service work landed first, UI wiring followed in a later pass)
+-- deliberately not done in this pass, not forgotten.
 
 ---
 

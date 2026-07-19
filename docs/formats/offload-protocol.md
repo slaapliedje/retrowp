@@ -304,8 +304,11 @@ deterministic and IS part of `make test` (`host/tests/test_convert.c`).
 Full design, the two real parsing bugs found and fixed during
 development, and the verification approach (both automated and manual
 LibreOffice cross-validation) are in `docs/formats/odt.md` -- read that
-before changing this gateway. `format_id = FORMAT_PDF` is accepted at
-the protocol level but returns `OFFLOAD_UNSUPPORTED` from this specific
-gateway: PDF export needs its own text-layout work (word-wrap,
-pagination, content-stream positioning) this gateway doesn't do, a
-deliberately separate scope, not implemented here (M7 T7.3).
+before changing this gateway.
+
+The same process also answers `CONVERT_EXPORT` for `format_id =
+FORMAT_PDF` (M7 T7.3, `docs/formats/pdf.md`) -- a real, from-scratch PDF
+writer with its own text layout (word-wrap, pagination, per-line
+positioning against real Adobe AFM glyph metrics), since unlike ODT, a
+PDF has no importer downstream to defer layout to. `FORMAT_PDF` is
+export-only; there is no PDF import.
