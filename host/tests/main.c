@@ -152,6 +152,24 @@ void test_convert_pdf_export_via_gateway(void);
 void test_convert_unsupported_format_id_reports_unsupported(void);
 void test_convert_malformed_payload_is_error(void);
 
+/* services/grammar/grammar.c (M8 T8.2) */
+void test_grammar_doubled_word_flags_whole_phrase_and_suggests_one_copy(void);
+void test_grammar_doubled_word_is_case_insensitive(void);
+void test_grammar_no_doubled_word_for_different_words(void);
+void test_grammar_triple_word_reports_one_issue_and_moves_past_it(void);
+void test_grammar_multiple_spaces_suggests_single_space(void);
+void test_grammar_single_space_is_not_flagged(void);
+void test_grammar_space_before_punctuation_includes_the_mark(void);
+void test_grammar_no_space_before_punctuation_is_not_flagged(void);
+void test_grammar_repeated_exclamation_flagged(void);
+void test_grammar_ellipsis_is_not_flagged_as_repeated_punctuation(void);
+void test_grammar_missing_initial_capital_flagged(void);
+void test_grammar_capitalized_start_is_not_flagged(void);
+void test_grammar_clean_text_reports_no_issues(void);
+void test_grammar_empty_text_reports_no_issues(void);
+void test_grammar_max_issues_cap_is_respected(void);
+void test_grammar_realistic_paragraph_finds_every_planted_issue(void);
+
 static const test_case g_cases[] = {
     { "endian_read_write16", test_endian_read_write16 },
     { "endian_read_write32", test_endian_read_write32 },
@@ -285,7 +303,24 @@ static const test_case g_cases[] = {
     { "convert_odt_export_roundtrip_via_gateway", test_convert_odt_export_roundtrip_via_gateway },
     { "convert_pdf_export_via_gateway", test_convert_pdf_export_via_gateway },
     { "convert_unsupported_format_id_reports_unsupported", test_convert_unsupported_format_id_reports_unsupported },
-    { "convert_malformed_payload_is_error", test_convert_malformed_payload_is_error }
+    { "convert_malformed_payload_is_error", test_convert_malformed_payload_is_error },
+
+    { "grammar_doubled_word_flags_whole_phrase_and_suggests_one_copy", test_grammar_doubled_word_flags_whole_phrase_and_suggests_one_copy },
+    { "grammar_doubled_word_is_case_insensitive", test_grammar_doubled_word_is_case_insensitive },
+    { "grammar_no_doubled_word_for_different_words", test_grammar_no_doubled_word_for_different_words },
+    { "grammar_triple_word_reports_one_issue_and_moves_past_it", test_grammar_triple_word_reports_one_issue_and_moves_past_it },
+    { "grammar_multiple_spaces_suggests_single_space", test_grammar_multiple_spaces_suggests_single_space },
+    { "grammar_single_space_is_not_flagged", test_grammar_single_space_is_not_flagged },
+    { "grammar_space_before_punctuation_includes_the_mark", test_grammar_space_before_punctuation_includes_the_mark },
+    { "grammar_no_space_before_punctuation_is_not_flagged", test_grammar_no_space_before_punctuation_is_not_flagged },
+    { "grammar_repeated_exclamation_flagged", test_grammar_repeated_exclamation_flagged },
+    { "grammar_ellipsis_is_not_flagged_as_repeated_punctuation", test_grammar_ellipsis_is_not_flagged_as_repeated_punctuation },
+    { "grammar_missing_initial_capital_flagged", test_grammar_missing_initial_capital_flagged },
+    { "grammar_capitalized_start_is_not_flagged", test_grammar_capitalized_start_is_not_flagged },
+    { "grammar_clean_text_reports_no_issues", test_grammar_clean_text_reports_no_issues },
+    { "grammar_empty_text_reports_no_issues", test_grammar_empty_text_reports_no_issues },
+    { "grammar_max_issues_cap_is_respected", test_grammar_max_issues_cap_is_respected },
+    { "grammar_realistic_paragraph_finds_every_planted_issue", test_grammar_realistic_paragraph_finds_every_planted_issue }
 };
 
 int main(void)

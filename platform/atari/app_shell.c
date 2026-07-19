@@ -13,6 +13,7 @@
 #include "metrics_atari_internal.h"
 #include "mem_atari.h"
 #include "spell.h"
+#include "grammar.h"
 #include "offload.h"
 #include "endian.h"
 
@@ -1054,14 +1055,31 @@ static wp_bool map_paragraph_offset_to_run(u32 start, u32 end, u16 *out_run_inde
     return WP_FALSE;
 }
 
+/* message/suggestion are fixed, owned buffers (not pointers into a
+   response that might outlive its owner) specifically so this struct
+   is source-agnostic: populated either from decode_grammar_issue_at()
+   (the wire response) or, M8 T8.2, directly from grammar_lite_check()
+   (services/grammar) when no offload device is attached -- the rest of
+   do_grammar_check() (sort, dialog loop, apply) doesn't need to know or
+   care which source an issue came from. Sized larger than
+   WP_ATARI_GRAMMAR_DISPLAY_LEN deliberately: the SUGGESTION here is
+   what actually gets inserted into the document if the user picks
+   Apply, so it must not be truncated to dialog-display width -- only
+   append_str_n (below) truncates, and only for what's shown on screen. */
 typedef struct {
-    u16       start_offset;
-    u16       span_len;
-    const u8 *message;
-    u32       message_len;
-    const u8 *suggestion;
-    u32       suggestion_len;
+    u16  start_offset;
+    u16  span_len;
+    char message[80];
+    char suggestion[80];
 } wp_atari_grammar_issue;
+
+static void copy_bounded(char *out, u32 out_cap, const u8 *s, u32 s_len)
+{
+    u32 len = (s_len < out_cap - 1) ? s_len : out_cap - 1;
+
+    memcpy(out, s, len);
+    out[len] = '\0';
+}
 
 /* Decodes issue `index` from the OFFLOAD_GRAMMAR_CHECK response shape
    (u16 issue_count, then issue_count x (u16 start_offset, u16 span_len,
@@ -1088,12 +1106,12 @@ static wp_bool decode_grammar_issue_at(const u8 *buf, u32 len, u32 index, wp_ata
         mlen = be_read16(buf + pos); pos += 2;
 
         if (pos + mlen + 2 > len) return WP_FALSE;
-        if (i == index) { out->message = buf + pos; out->message_len = mlen; }
+        if (i == index) copy_bounded(out->message, (u32)sizeof(out->message), buf + pos, mlen);
         pos += mlen;
 
         slen = be_read16(buf + pos); pos += 2;
         if (pos + slen > len) return WP_FALSE;
-        if (i == index) { out->suggestion = buf + pos; out->suggestion_len = slen; }
+        if (i == index) copy_bounded(out->suggestion, (u32)sizeof(out->suggestion), buf + pos, slen);
         pos += slen;
     }
     return WP_TRUE;
@@ -1102,8 +1120,9 @@ static wp_bool decode_grammar_issue_at(const u8 *buf, u32 len, u32 index, wp_ata
 /* Appends up to WP_ATARI_GRAMMAR_DISPLAY_LEN bytes of s into buf via
    append_str -- keeps one long quote/message/suggestion from crowding
    the rest of a form_alert dialog off the tiny ST screen. Truncates the
-   DIALOG TEXT only; the wire values actually applied to the document
-   are never touched by this. */
+   DIALOG TEXT only; the wire/local values actually applied to the
+   document (wp_atari_grammar_issue's own fields, above) are never
+   touched by this. */
 static void append_str_n(char *buf, u32 cap, u32 *pos, const u8 *s, u32 s_len)
 {
     char tmp[WP_ATARI_GRAMMAR_DISPLAY_LEN + 1];
@@ -1128,6 +1147,7 @@ static void do_grammar_check(void)
     u32 applied_count = 0;
     i32 delta = 0;
     wp_bool any_applied = WP_FALSE;
+    wp_bool used_offload;
     u32 n, i, j;
 
     if (!g_doc_loaded) return;
@@ -1141,41 +1161,66 @@ static void do_grammar_check(void)
         return;
     }
 
-    if (!ensure_offload()) {
-        mem_free(paragraph);
-        form_alert(1, FA_ERROR "[No offload device available.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");
-        return;
-    }
-
-    req.op = OFFLOAD_GRAMMAR_CHECK;
-    req.payload = paragraph;
-    req.payload_len = paragraph_len;
-    req.timeout_ms = (u32)WP_ATARI_GRAMMAR_TIMEOUT_MS;
-
-    if (offload_submit(&req, &resp) != WP_OK) {
-        mem_free(paragraph);
-        form_alert(1, FA_ERROR "[Grammar Check request failed or timed out.][ OK ]");
-        return;
-    }
-
-    if (resp.status != OFFLOAD_OK) {
-        offload_response_free(&resp);
-        mem_free(paragraph);
-        form_alert(1, FA_INFO "[The connected gateway doesn't support|Grammar Check.][ OK ]");
-        return;
-    }
-
-    n = (resp.result_len >= 2) ? be_read16(resp.result) : 0;
-    if (n > (u32)WP_ATARI_GRAMMAR_MAX_ISSUES) n = (u32)WP_ATARI_GRAMMAR_MAX_ISSUES;
-
     issue_count = 0;
-    for (i = 0; i < n; i++) {
-        if (!decode_grammar_issue_at(resp.result, resp.result_len, i, &issues[issue_count])) break;
-        issue_count++;
+    used_offload = ensure_offload();
+
+    if (used_offload) {
+        req.op = OFFLOAD_GRAMMAR_CHECK;
+        req.payload = paragraph;
+        req.payload_len = paragraph_len;
+        req.timeout_ms = (u32)WP_ATARI_GRAMMAR_TIMEOUT_MS;
+
+        if (offload_submit(&req, &resp) != WP_OK) {
+            mem_free(paragraph);
+            form_alert(1, FA_ERROR "[Grammar Check request failed or timed out.][ OK ]");
+            return;
+        }
+
+        if (resp.status != OFFLOAD_OK) {
+            offload_response_free(&resp);
+            mem_free(paragraph);
+            form_alert(1, FA_INFO "[The connected gateway doesn't support|Grammar Check.][ OK ]");
+            return;
+        }
+
+        n = (resp.result_len >= 2) ? be_read16(resp.result) : 0;
+        if (n > (u32)WP_ATARI_GRAMMAR_MAX_ISSUES) n = (u32)WP_ATARI_GRAMMAR_MAX_ISSUES;
+
+        for (i = 0; i < n; i++) {
+            if (!decode_grammar_issue_at(resp.result, resp.result_len, i, &issues[issue_count])) break;
+            issue_count++;
+        }
+    } else {
+        /* No Pi/gateway attached -- fall back to the on-device rule-
+           based checker (M8 T8.2) rather than failing outright, per
+           CLAUDE.md's Offload Rules ("the engine must be fully
+           functional WITHOUT an offload device attached"). Told to the
+           user up front, not silently swapped in: this catches a much
+           narrower, purely mechanical set of issues than the real AI-
+           backed path above (docs/services/grammar.md) -- a connected
+           gateway that then fails or times out mid-request is a
+           different, rarer failure NOT covered by this fallback (still
+           a hard failure above), since T8.2's own scope is specifically
+           "no device attached at all," not "every possible offload
+           failure." */
+        grammar_issue local_issues[WP_ATARI_GRAMMAR_MAX_ISSUES];
+
+        form_alert(1, FA_INFO "[No offload device attached.|Using basic on-device grammar|checks instead.][ OK ]");
+
+        n = grammar_lite_check(paragraph, paragraph_len, local_issues, (u32)WP_ATARI_GRAMMAR_MAX_ISSUES);
+        for (j = 0; j < n; j++) {
+            issues[issue_count].start_offset = (u16)local_issues[j].start_offset;
+            issues[issue_count].span_len = (u16)local_issues[j].span_len;
+            copy_bounded(issues[issue_count].message, (u32)sizeof(issues[issue_count].message),
+                         (const u8 *)local_issues[j].message, (u32)strlen(local_issues[j].message));
+            copy_bounded(issues[issue_count].suggestion, (u32)sizeof(issues[issue_count].suggestion),
+                         (const u8 *)local_issues[j].suggestion, (u32)strlen(local_issues[j].suggestion));
+            issue_count++;
+        }
     }
 
     if (issue_count == 0) {
-        offload_response_free(&resp);
+        if (used_offload) offload_response_free(&resp);
         mem_free(paragraph);
         form_alert(1, FA_INFO "[No grammar issues found.][ OK ]");
         return;
@@ -1202,7 +1247,7 @@ static void do_grammar_check(void)
         wp_atari_grammar_issue *issue = &issues[order[i]];
         char msg[220];
         u32 pos = 0;
-        wp_bool has_suggestion = (issue->suggestion_len > 0);
+        wp_bool has_suggestion = (issue->suggestion[0] != '\0');
         wp_bool overlaps_applied = WP_FALSE;
         short btn;
         u32 k;
@@ -1221,7 +1266,7 @@ static void do_grammar_check(void)
         }
 
         append_str(msg, (u32)sizeof(msg), &pos, FA_INFO "[");
-        append_str_n(msg, (u32)sizeof(msg), &pos, issue->message, issue->message_len);
+        append_str_n(msg, (u32)sizeof(msg), &pos, (const u8 *)issue->message, (u32)strlen(issue->message));
         append_str(msg, (u32)sizeof(msg), &pos, "|Text: \"");
         if ((u32)issue->start_offset + (u32)issue->span_len <= paragraph_len) {
             append_str_n(msg, (u32)sizeof(msg), &pos, paragraph + issue->start_offset, issue->span_len);
@@ -1229,7 +1274,7 @@ static void do_grammar_check(void)
         append_str(msg, (u32)sizeof(msg), &pos, "\"|Suggestion: ");
         if (has_suggestion) {
             append_str(msg, (u32)sizeof(msg), &pos, "\"");
-            append_str_n(msg, (u32)sizeof(msg), &pos, issue->suggestion, issue->suggestion_len);
+            append_str_n(msg, (u32)sizeof(msg), &pos, (const u8 *)issue->suggestion, (u32)strlen(issue->suggestion));
             append_str(msg, (u32)sizeof(msg), &pos, "\"");
         } else {
             append_str(msg, (u32)sizeof(msg), &pos, "(none offered)");
@@ -1267,9 +1312,9 @@ static void do_grammar_check(void)
                 insert_pos.run = (u32)run_index;
                 insert_pos.offset = run_start;
 
-                if (wp_edit_insert_text(&g_doc, &g_journal, insert_pos,
-                                         issue->suggestion, issue->suggestion_len, &out_pos) == WP_OK) {
-                    delta += (i32)issue->suggestion_len - (i32)issue->span_len;
+                if (wp_edit_insert_text(&g_doc, &g_journal, insert_pos, (const u8 *)issue->suggestion,
+                                         (u32)strlen(issue->suggestion), &out_pos) == WP_OK) {
+                    delta += (i32)strlen(issue->suggestion) - (i32)issue->span_len;
                     if (applied_count < (u32)WP_ATARI_GRAMMAR_MAX_ISSUES) {
                         applied_start[applied_count] = (u32)issue->start_offset;
                         applied_end[applied_count] = (u32)issue->start_offset + (u32)issue->span_len;
@@ -1285,7 +1330,7 @@ static void do_grammar_check(void)
         }
     }
 
-    offload_response_free(&resp);
+    if (used_offload) offload_response_free(&resp);
     mem_free(paragraph);
 
     /* At least one edit landed somewhere in this paragraph -- g_cursor's
@@ -1744,11 +1789,34 @@ wp_bool wp_atari_grammar_check_selfcheck(void)
 
     if (!decode_grammar_issue_at(canned, canned_len, 0, &issue) ||
         issue.start_offset != 6 || issue.span_len != 4 ||
-        issue.message_len != 3 || memcmp(issue.message, "msg", 3) != 0 ||
-        issue.suggestion_len != 3 || memcmp(issue.suggestion, "fix", 3) != 0) {
+        strcmp(issue.message, "msg") != 0 || strcmp(issue.suggestion, "fix") != 0) {
         ok = WP_FALSE;
     }
     if (decode_grammar_issue_at(canned, canned_len, 1, &issue)) ok = WP_FALSE; /* out of range */
+
+    /* M8 T8.2: grammar_lite_check() itself (services/grammar) is already
+       covered thoroughly by host/tests/test_grammar.c, but ONLY as
+       compiled by the host cc -- proving the exact same source actually
+       behaves correctly once cross-compiled for m68k and run under real
+       CPU emulation is exactly the kind of "don't assume host behavior
+       transfers" check this project applies elsewhere (the same reason
+       wp_atari_rtf_spell_selfcheck() re-exercises spell_check_word/
+       spell_suggest here rather than trusting host/tests/test_spell.c
+       alone). One representative issue is enough: the rule logic itself
+       is already exhaustively proven on host. */
+    {
+        static const char gtext[] = "this the the works";
+        grammar_issue gout[4];
+        u32 gcount = grammar_lite_check((const u8 *)gtext, (u32)strlen(gtext), gout, 4);
+        wp_bool saw_capital = WP_FALSE, saw_doubled = WP_FALSE;
+        u32 gi;
+
+        for (gi = 0; gi < gcount; gi++) {
+            if (strcmp(gout[gi].message, "Missing capital letter") == 0) saw_capital = WP_TRUE;
+            if (strcmp(gout[gi].message, "Repeated word") == 0) saw_doubled = WP_TRUE;
+        }
+        if (!saw_capital || !saw_doubled) ok = WP_FALSE;
+    }
 
     wp_document_free(&g_doc);
     g_doc_loaded = WP_FALSE;

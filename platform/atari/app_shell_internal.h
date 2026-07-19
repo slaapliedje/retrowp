@@ -147,19 +147,27 @@ wp_bool wp_atari_rtf_spell_selfcheck(void);
    coverage. */
 wp_bool wp_atari_thesaurus_selfcheck(void);
 
-/* M8 T8.1: proves the three new non-blocking pieces behind the Grammar
-   Check menu action -- extracting the current paragraph's plain text,
-   mapping a paragraph-relative byte range back to a (run_index, run-
-   local offset) pair (declining when a range crosses a run boundary),
-   and decoding the OFFLOAD_GRAMMAR_CHECK wire response shape -- against
-   fixture documents/cursor positions and a hand-built canned response
-   buffer. Deliberately does NOT call do_grammar_check() itself
-   (form_alert() blocks) or offload_init() against a real gateway: the
-   offload_client.c round trip is already proven generic (works for any
-   op, arbitrary payload sizes) over real emulated RS-232 by T6.3's
-   atari_serial_smoke.c and T7.4's atari_convert_smoke.c, so re-proving
-   it here for this one specific op would add nothing new -- same
-   reasoning wp_atari_thesaurus_selfcheck's own comment already gives. */
+/* M8 T8.1/T8.2: proves the non-blocking pieces behind the Grammar Check
+   menu action -- extracting the current paragraph's plain text, mapping
+   a paragraph-relative byte range back to a (run_index, run-local
+   offset) pair (declining when a range crosses a run boundary),
+   decoding the OFFLOAD_GRAMMAR_CHECK wire response shape, and (T8.2) a
+   representative real call into services/grammar's grammar_lite_check()
+   -- against fixture documents/cursor positions and a hand-built canned
+   response buffer. The grammar_lite_check() call is real cross-target
+   verification, not redundant with host/tests/test_grammar.c: that
+   suite proves the RULE LOGIC exhaustively but only as compiled by the
+   host cc, while this proves the exact same source still behaves
+   correctly once cross-compiled for m68k and actually run under real
+   CPU emulation -- the same reasoning wp_atari_rtf_spell_selfcheck()
+   already applies to spell_check_word/spell_suggest. Deliberately does
+   NOT call do_grammar_check() itself (form_alert() blocks) or
+   offload_init() against a real gateway: the offload_client.c round
+   trip is already proven generic (works for any op, arbitrary payload
+   sizes) over real emulated RS-232 by T6.3's atari_serial_smoke.c and
+   T7.4's atari_convert_smoke.c, so re-proving it here for this one
+   specific op would add nothing new -- same reasoning
+   wp_atari_thesaurus_selfcheck's own comment already gives. */
 wp_bool wp_atari_grammar_check_selfcheck(void);
 
 #endif /* WP_ATARI_APP_SHELL_INTERNAL_H */

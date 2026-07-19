@@ -8,7 +8,7 @@ CC ?= cc
 STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror
 RELAXED_CFLAGS = -Wall -Wextra
 
-INCLUDES = -Iengine/include -Iplatform/host -Ioffload/transport -Iservices/spell -Ihost/tests
+INCLUDES = -Iengine/include -Iplatform/host -Ioffload/transport -Iservices/spell -Iservices/grammar -Ihost/tests
 
 BUILD = build
 BIN   = bin
@@ -16,14 +16,14 @@ BIN   = bin
 ENGINE_SRC    = $(wildcard engine/src/*.c)
 PLATFORM_SRC  = $(wildcard platform/host/*.c)
 TRANSPORT_SRC = $(wildcard offload/transport/*.c)
-SERVICES_SRC  = $(wildcard services/spell/*.c)
+SERVICES_SRC  = $(wildcard services/spell/*.c) $(wildcard services/grammar/*.c)
 TEST_SRC      = $(wildcard host/tests/*.c)
 GATEWAY_SRC   = $(wildcard offload/gateway/*.c)
 
 ENGINE_OBJ    = $(patsubst engine/src/%.c,$(BUILD)/engine/%.o,$(ENGINE_SRC))
 PLATFORM_OBJ  = $(patsubst platform/host/%.c,$(BUILD)/platform/%.o,$(PLATFORM_SRC))
 TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(BUILD)/transport/%.o,$(TRANSPORT_SRC))
-SERVICES_OBJ  = $(patsubst services/spell/%.c,$(BUILD)/services/%.o,$(SERVICES_SRC))
+SERVICES_OBJ  = $(patsubst services/spell/%.c,$(BUILD)/services/%.o,$(patsubst services/grammar/%.c,$(BUILD)/services/%.o,$(SERVICES_SRC)))
 TEST_OBJ      = $(patsubst host/tests/%.c,$(BUILD)/tests/%.o,$(TEST_SRC))
 
 # offload/gateway has TWO standalone executables (each with its own
@@ -70,6 +70,9 @@ $(BUILD)/transport/%.o: offload/transport/%.c | $(BUILD)/transport
 	$(CC) $(STRICT_CFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BUILD)/services/%.o: services/spell/%.c | $(BUILD)/services
+	$(CC) $(STRICT_CFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BUILD)/services/%.o: services/grammar/%.c | $(BUILD)/services
 	$(CC) $(STRICT_CFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BUILD)/tests/%.o: host/tests/%.c | $(BUILD)/tests
@@ -122,7 +125,7 @@ ATARI_BIN   = bin/atari
 
 ATARI_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(ATARI_BUILD)/engine/%.o,$(ENGINE_SRC))
 ATARI_TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(ATARI_BUILD)/transport/%.o,$(TRANSPORT_SRC))
-ATARI_SERVICES_OBJ  = $(patsubst services/spell/%.c,$(ATARI_BUILD)/services/%.o,$(SERVICES_SRC))
+ATARI_SERVICES_OBJ  = $(patsubst services/spell/%.c,$(ATARI_BUILD)/services/%.o,$(patsubst services/grammar/%.c,$(ATARI_BUILD)/services/%.o,$(SERVICES_SRC)))
 
 # atari-engine-check is a separate, free portability check: it proves
 # the SAME portable engine/ + offload/transport + services/ sources this
@@ -143,6 +146,9 @@ $(ATARI_BUILD)/transport/%.o: offload/transport/%.c | $(ATARI_BUILD)/transport
 $(ATARI_BUILD)/services/%.o: services/spell/%.c | $(ATARI_BUILD)/services
 	$(ATARICC) $(ATARI_STRICT_CFLAGS) $(ATARI_INCLUDES) -c $< -o $@
 
+$(ATARI_BUILD)/services/%.o: services/grammar/%.c | $(ATARI_BUILD)/services
+	$(ATARICC) $(ATARI_STRICT_CFLAGS) $(ATARI_INCLUDES) -c $< -o $@
+
 # platform/atari's own sources, excluding the two files with their own
 # main() (main.c for WP.PRG, and host/tools/atari_smoke.c for
 # SMOKE.PRG) -- everything else (app shell, mem/metrics/draw/transport)
@@ -151,7 +157,7 @@ ATARI_PLATFORM_SRC = $(filter-out platform/atari/main.c,$(wildcard platform/atar
 ATARI_PLATFORM_OBJ = $(patsubst platform/atari/%.c,$(ATARI_BUILD)/app/%.o,$(ATARI_PLATFORM_SRC))
 
 $(ATARI_BUILD)/app/%.o: platform/atari/%.c | $(ATARI_BUILD)/app
-	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Iservices/spell -c $< -o $@
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Iservices/spell -Iservices/grammar -c $< -o $@
 
 $(ATARI_BIN)/WP.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/app/main.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem

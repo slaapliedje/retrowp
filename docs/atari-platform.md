@@ -727,7 +727,7 @@ feature in this app:
    I/O and string formatting, not independently re-verified end to end
    as a running menu action.
 
-## Grammar Check wired into the UI (M8 T8.1)
+## Grammar Check wired into the UI (M8 T8.1, offline fallback M8 T8.2)
 
 Closes the "engine/UI wiring" half of T8.1's own AC ("Paragraph in,
 structured issues out; ST renders them") -- the protocol and both
@@ -856,3 +856,69 @@ test suite (`host/tests/test_edit.c`) and by this app's own
 of these plus dialog/button-index handling that has no CI-safe way to
 be exercised -- not a smaller gap than Thesaurus's identical one, and
 not silently different in kind.
+
+### Offline fallback: `services/grammar` (M8 T8.2)
+
+CLAUDE.md's Offload Rules are explicit that the engine must stay fully
+functional with no offload device attached. Before T8.2, "no device
+attached" for Grammar Check meant `do_grammar_check()` failed outright
+with a "No offload device available" alert right after the paragraph-
+extraction step -- functional in the sense that it didn't crash, but
+not a working feature. `services/grammar/grammar_lite_check()` (its own
+design doc: `docs/services/grammar.md`) is what it falls back to now: a
+small, purely mechanical, rule-based checker (doubled words, multiple
+spaces, space before punctuation, repeated `!`/`?`, a missing paragraph-
+initial capital) that needs no network, no LLM, and no semantic
+understanding of the text at all.
+
+**The fallback is announced, not silently swapped in.** When
+`ensure_offload()` fails, `do_grammar_check()` shows one
+`form_alert()` ("No offload device attached. Using basic on-device
+grammar checks instead.") before running `grammar_lite_check()`, so the
+user knows they are getting a narrower check than the real AI-backed
+path, not a silent quality downgrade.
+
+**One struct refactor made this a clean fallback instead of a parallel
+code path.** `wp_atari_grammar_issue` originally stored `message`/
+`suggestion` as raw pointers into the offload response buffer
+(`resp.result`) plus explicit lengths -- tied to that buffer's lifetime
+and shape. It now stores both in small fixed, owned buffers (`char[80]`,
+sized deliberately larger than `WP_ATARI_GRAMMAR_DISPLAY_LEN` since the
+SUGGESTION field is what actually gets inserted into the document on
+Apply, not just displayed), filled either by `decode_grammar_issue_at()`
+(the wire path) or directly from `grammar_lite_check()`'s own output
+(the local path). Every downstream piece -- the ascending-offset sort,
+the overlap guard, the run-boundary mapping, the Apply/Skip/Stop dialog
+loop -- operates on this one common shape and has no idea which source
+an issue came from. A `used_offload` flag gates only the two things that
+genuinely differ: whether `offload_response_free()` needs to run at the
+end, and whether the request/response round trip or the local scan
+populated `issues[]` in the first place.
+
+**Scope boundary: this only covers "no device attached," not "the
+device failed mid-request."** A gateway that connects successfully but
+then times out or returns `OFFLOAD_UNSUPPORTED` still gets the original
+hard-failure alert, not a fallback -- T8.2's own AC is specifically "no
+device attached," and conflating a live gateway's failure with an
+absent one would hide a real problem (a misconfigured or crashed
+gateway) behind what looks like normal degraded-mode operation.
+
+**Verified two ways:**
+1. `services/grammar`'s own rule logic is exhaustively covered by
+   `host/tests/test_grammar.c` (part of `make test`) -- one positive/
+   negative pair per rule plus a combined-paragraph test, all offsets
+   verified with `python3 -c "print(s.index(...))"` rather than hand-
+   counted (`docs/services/grammar.md`).
+2. `wp_atari_grammar_check_selfcheck()` (run via `ci_atari.sh`) now
+   ALSO makes one real call into `grammar_lite_check()` and checks its
+   output -- not redundant with (1): that suite proves the rule logic
+   exhaustively but only as compiled by the host `cc`, while this proves
+   the exact same source still behaves correctly once cross-compiled
+   for m68k and actually run under real CPU emulation, the same
+   "don't assume host behavior transfers" check
+   `wp_atari_rtf_spell_selfcheck()` already applies to
+   `spell_check_word`/`spell_suggest`.
+
+The `do_grammar_check()` wrapper's own untested-by-CI status (above) is
+unchanged by any of this -- the fallback branch inside it is exercised
+by the same transitive reasoning as the offload branch always was.

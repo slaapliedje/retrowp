@@ -619,8 +619,43 @@ Goal: Full smart features, all optional/degradable.
         passing on real m68k hardware emulation) and the same honestly-
         stated "the form_alert()-driving wrapper itself is untested by
         CI" gap every other offload menu action in this app already has.
-- [ ] T8.2 On-box grammar-lite fallback (rule-based) when no Pi.
+- [x] T8.2 On-box grammar-lite fallback (rule-based) when no Pi.
       AC: Basic checks work with no device attached.
+      New `services/grammar` module (`docs/services/grammar.md`): pure
+      C, no platform calls at all (not even `plat_file_*`/`mem_alloc` --
+      no data file, no allocation, just an in-memory scan), five
+      purely mechanical rules (doubled word, multiple spaces, space
+      before punctuation, repeated `!`/`?`, missing paragraph-initial
+      capital), each rule chosen specifically because it needs no
+      semantic understanding of the text and so is essentially never a
+      false positive -- deliberately NOT an attempt to approximate what
+      the LLM-backed T8.1 path does with hand-written rules. Every issue
+      it produces has a real, non-empty, auto-appliable suggestion by
+      construction (`grammar.h`'s hard contract), which is what let
+      `platform/atari/app_shell.c`'s `do_grammar_check()` treat a
+      locally-sourced issue exactly like a gateway-sourced one after a
+      small struct refactor (`wp_atari_grammar_issue` now owns fixed
+      message/suggestion buffers instead of holding pointers into the
+      offload response). When `ensure_offload()` fails, the app shows an
+      informational alert ("Using basic on-device grammar checks
+      instead") and falls back to `grammar_lite_check()` on the current
+      paragraph rather than failing outright -- announced, not silently
+      swapped in. Scoped narrowly to "no device attached," not "the
+      device failed mid-request" (a connected-then-failing gateway still
+      hard-fails, so a real gateway problem is never mistaken for normal
+      degraded-mode operation). Verified on host (134/134 `make test`
+      cases, including a combined-rule realistic-paragraph test in the
+      same spirit as `docs/services/spell.md`'s own "don't trust a tiny
+      fixture alone" lesson) AND on real m68k hardware emulation (a new
+      case in `wp_atari_grammar_check_selfcheck()`, run via
+      `ci_atari.sh`, makes a real cross-compiled call into
+      `grammar_lite_check()` -- proving the same source behaves
+      correctly once actually built for the target, not just assumed
+      from the host build). Full writeup: docs/atari-platform.md's
+      "Offline fallback: services/grammar" section. A real bug (an
+      accidental `*/` inside a `/* ... */` comment closing it early) was
+      caught immediately by `make test`'s strict `-Werror` build, not by
+      inspection -- see that section for the full story.
 - [ ] T8.3 Optional CHAT / IMAGE ops behind capability flags.
       AC: Present only when gateway advertises them; absent gracefully otherwise.
 
