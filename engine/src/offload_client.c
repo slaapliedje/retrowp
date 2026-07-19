@@ -6,7 +6,23 @@
 
 #define OFFLOAD_CONNECT_TIMEOUT_MS    2000u
 #define OFFLOAD_HANDSHAKE_TIMEOUT_MS  2000u
-#define OFFLOAD_MAX_RESPONSE_PAYLOAD  4096u
+
+/* Bounds the scratch buffer offload_submit() allocates to receive a
+   response -- NOT a wire-protocol limit (that's WIRE_MAX_PAYLOAD, 64KB,
+   in offload/transport/wire.h). Originally 4096: comfortably more than
+   THESAURUS/SPELL_CHECK's small word-list responses ever needed (M6).
+   M7's CONVERT_IMPORT/CONVERT_EXPORT (docs/formats/offload-protocol.md)
+   changed that: a real gateway-produced ODT or PDF for even a modest
+   document routinely exceeds 4096 bytes (an early, larger fixture in
+   host/tests/test_convert.c hit this exact ceiling during development --
+   offload_submit returned WP_RANGE, not a gateway bug -- before the
+   fixture was resized down and this constant was raised instead).
+   32768 is a deliberate, still-bounded choice, not "as large as
+   possible": comfortably covers a real 1MB-tier document's ODT/PDF
+   export, is freed immediately after copying into resp->result (sized
+   to the ACTUAL response length, not this constant), and stays a small
+   fraction of the 1MB Atari ST budget even as a temporary allocation. */
+#define OFFLOAD_MAX_RESPONSE_PAYLOAD  32768u
 
 static plat_transport       *g_transport = NULL;
 static wp_bool                g_available = WP_FALSE;

@@ -399,6 +399,165 @@ static wp_bool str_ends_with_ci(const char *s, const char *suffix)
     return WP_TRUE;
 }
 
+#define WP_ATARI_OFFLOAD_ENDPOINT "serial:aux:9600"
+
+static wp_bool g_offload_init_attempted = WP_FALSE;
+
+/* Tries offload_init() exactly ONCE, lazily, on first use (same pattern
+   as get_spell_dict() above) -- an unattached/absent device fails within
+   OFFLOAD_CONNECT_TIMEOUT_MS + OFFLOAD_HANDSHAKE_TIMEOUT_MS
+   (engine/src/offload_client.c: 2s + 2s), a bounded, one-time cost, not
+   a multi-second stall on every single offload-backed action thereafter
+   (Thesaurus, and now ODT/PDF Open/Save). Defined here, before its first
+   real caller (ODT/PDF below), rather than down near Thesaurus where it
+   was originally written -- Thesaurus still uses it unchanged. */
+static wp_bool ensure_offload(void)
+{
+    if (!g_offload_init_attempted) {
+        g_offload_init_attempted = WP_TRUE;
+        offload_init(WP_ATARI_OFFLOAD_ENDPOINT); /* result read back via offload_available() */
+    }
+    return offload_available();
+}
+
+/* ODT/PDF (post-M7): CONVERT_IMPORT/CONVERT_EXPORT ship the WHOLE
+   foreign-format file as one offload request/response payload (unlike
+   Thesaurus's single-word lookups), so this needs its own generous
+   bounds. Real RS-232 at 9600 baud (this target's only real transport,
+   T6.3) moves roughly 960 bytes/sec (8N1 framing = 10 bits/byte), so a
+   modest multi-KB document can genuinely take tens of real seconds each
+   way -- the timeout below is sized for that, not for a fast local link,
+   and offload_client.c's own OFFLOAD_MAX_RESPONSE_PAYLOAD (32768, see
+   its own comment) is what actually bounds how large a response this
+   app can ever receive regardless of what's requested here. */
+#define WP_ATARI_ODT_MAX_FILE_SIZE  60000uL /* comfortably under WIRE_MAX_PAYLOAD (64K) with room for the format_id byte + frame overhead */
+#define WP_ATARI_CONVERT_TIMEOUT_MS 120000uL /* ~2 minutes -- see the bandwidth math above */
+#define WP_ATARI_FORMAT_ODT 1u /* matches docs/formats/offload-protocol.md's FORMAT_ODT */
+#define WP_ATARI_FORMAT_PDF 2u /* matches docs/formats/offload-protocol.md's FORMAT_PDF -- export only, no import */
+
+/* Shared by ODT open and both ODT/PDF save paths: ensures the offload
+   link is up (reusing ensure_offload()'s lazy-once pattern from
+   Thesaurus) and reports its absence the same way every other offload
+   feature in this app does -- gracefully, via form_alert(), never a
+   crash or a silently corrupted document. */
+static wp_bool require_offload_for_convert(void)
+{
+    if (!ensure_offload()) {
+        form_alert(1, FA_ERROR "[No offload device available.|ODT/PDF needs a connected gateway.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");
+        return WP_FALSE;
+    }
+    return WP_TRUE;
+}
+
+/* Reads a whole .odt file, ships it through OFFLOAD_CONVERT_IMPORT, and
+   replaces the current document with the RTF the gateway sends back --
+   format_rtf_import() does the actual parsing, exactly like the local
+   .RTF Open path above; only where the RTF bytes come FROM differs. */
+static void do_odt_open(const char *fullpath)
+{
+    plat_file *f;
+    u32 size, read_len;
+    u8 *req_buf;
+    offload_request req;
+    offload_response resp;
+
+    if (!require_offload_for_convert()) return;
+
+    if (plat_file_open(fullpath, PLAT_FILE_READ, &f) != WP_OK) return;
+    if (plat_file_size(f, &size) != WP_OK || size > WP_ATARI_ODT_MAX_FILE_SIZE) {
+        plat_file_close(f);
+        form_alert(1, FA_ERROR "[That ODT file is too large|for this app to open.][ OK ]");
+        return;
+    }
+
+    req_buf = (u8 *)mem_alloc(size + 1);
+    if (req_buf == NULL) { plat_file_close(f); return; }
+
+    req_buf[0] = (u8)WP_ATARI_FORMAT_ODT;
+    if (plat_file_read(f, req_buf + 1, size, &read_len) != WP_OK) {
+        mem_free(req_buf);
+        plat_file_close(f);
+        return;
+    }
+    plat_file_close(f);
+
+    req.op = OFFLOAD_CONVERT_IMPORT;
+    req.payload = req_buf;
+    req.payload_len = read_len + 1;
+    req.timeout_ms = (u32)WP_ATARI_CONVERT_TIMEOUT_MS;
+
+    if (offload_submit(&req, &resp) != WP_OK) {
+        mem_free(req_buf);
+        form_alert(1, FA_ERROR "[Opening that ODT file failed|or timed out.][ OK ]");
+        return;
+    }
+    mem_free(req_buf);
+
+    if (resp.status == OFFLOAD_OK) {
+        wp_document new_doc;
+        if (format_rtf_import(resp.result, resp.result_len, &new_doc) == WP_OK) {
+            replace_document(&new_doc, g_content_width_twips);
+        } else {
+            form_alert(1, FA_ERROR "[The gateway's reply couldn't be read|as a document.][ OK ]");
+        }
+    } else {
+        form_alert(1, FA_ERROR "[The connected gateway couldn't|convert that ODT file.][ OK ]");
+    }
+    offload_response_free(&resp);
+}
+
+/* Exports the current document to RTF (the same bytes the local .RTF
+   Save path would write), ships it through OFFLOAD_CONVERT_EXPORT with
+   the requested format_id, and writes whatever comes back straight to
+   disk -- an opaque .odt or .pdf file this app never parses itself. */
+static void do_odt_pdf_save(const char *fullpath, u8 format_id)
+{
+    u32 rtf_needed;
+    u8 *req_buf;
+    offload_request req;
+    offload_response resp;
+    plat_file *f;
+
+    if (!g_doc_loaded) return;
+    if (!require_offload_for_convert()) return;
+
+    format_rtf_export(&g_doc, NULL, 0, &rtf_needed);
+    req_buf = (u8 *)mem_alloc(rtf_needed + 1);
+    if (req_buf == NULL) return;
+
+    req_buf[0] = format_id;
+    if (format_rtf_export(&g_doc, req_buf + 1, rtf_needed, &rtf_needed) != WP_OK) {
+        mem_free(req_buf);
+        return;
+    }
+
+    req.op = OFFLOAD_CONVERT_EXPORT;
+    req.payload = req_buf;
+    req.payload_len = rtf_needed + 1;
+    req.timeout_ms = (u32)WP_ATARI_CONVERT_TIMEOUT_MS;
+
+    if (offload_submit(&req, &resp) != WP_OK) {
+        mem_free(req_buf);
+        form_alert(1, FA_ERROR "[Saving that file failed or timed out.][ OK ]");
+        return;
+    }
+    mem_free(req_buf);
+
+    if (resp.status != OFFLOAD_OK) {
+        form_alert(1, FA_ERROR "[The connected gateway couldn't produce|that file format.][ OK ]");
+        offload_response_free(&resp);
+        return;
+    }
+
+    if (plat_file_open(fullpath, PLAT_FILE_WRITE, &f) == WP_OK) {
+        plat_file_write(f, resp.result, resp.result_len);
+        plat_file_close(f);
+    } else {
+        form_alert(1, FA_ERROR "[Couldn't write that file to disk.][ OK ]");
+    }
+    offload_response_free(&resp);
+}
+
 static void do_file_open(void)
 {
     char path[128];
@@ -408,11 +567,16 @@ static void do_file_open(void)
     u32 size, read_len;
     u8 *buf;
 
-    /* "*.*" (not "*.TXT") so RTF files are visible too -- see
+    /* "*.*" (not "*.TXT") so RTF/ODT files are visible too -- see
        str_ends_with_ci above for how the format is actually picked. */
     strcpy(path, "C:\\*.*");
     fname[0] = '\0';
     if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
+
+    if (str_ends_with_ci(fullpath, ".ODT")) {
+        do_odt_open(fullpath);
+        return;
+    }
 
     if (plat_file_open(fullpath, PLAT_FILE_READ, &f) != WP_OK) return;
     if (plat_file_size(f, &size) != WP_OK) { plat_file_close(f); return; }
@@ -449,6 +613,15 @@ static void do_file_save(void)
     strcpy(path, "C:\\*.*");
     strcpy(fname, "UNTITLED.TXT");
     if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
+
+    if (str_ends_with_ci(fullpath, ".ODT")) {
+        do_odt_pdf_save(fullpath, (u8)WP_ATARI_FORMAT_ODT);
+        return;
+    }
+    if (str_ends_with_ci(fullpath, ".PDF")) {
+        do_odt_pdf_save(fullpath, (u8)WP_ATARI_FORMAT_PDF);
+        return;
+    }
 
     as_rtf = str_ends_with_ci(fullpath, ".RTF");
     if (as_rtf) {
@@ -659,8 +832,10 @@ static void do_spell_check(void)
    word selection (no selection model at all, per docs/editing.md), and
    after typing a word the cursor naturally sits right after it, so this
    matches how the app is actually used today rather than inventing a
-   word-under-cursor hit-test this editor has no input path to drive. */
-#define WP_ATARI_OFFLOAD_ENDPOINT       "serial:aux:9600"
+   word-under-cursor hit-test this editor has no input path to drive.
+   (WP_ATARI_OFFLOAD_ENDPOINT and ensure_offload() itself now live above,
+   near str_ends_with_ci -- ODT/PDF Open/Save (post-M7) need them earlier
+   in the file than Thesaurus does.) */
 #define WP_ATARI_THESAURUS_MAX_WORD_LEN 64
 #define WP_ATARI_THESAURUS_TIMEOUT_MS   90000uL /* generous: a real Pi/LLM
                                                     gateway's cold model
@@ -672,22 +847,6 @@ static void do_spell_check(void)
                                                     default -- see
                                                     docs/formats/offload-
                                                     protocol.md. */
-
-static wp_bool g_offload_init_attempted = WP_FALSE;
-
-/* Tries offload_init() exactly ONCE, lazily, on first use (same pattern
-   as get_spell_dict() above) -- an unattached/absent device fails within
-   OFFLOAD_CONNECT_TIMEOUT_MS + OFFLOAD_HANDSHAKE_TIMEOUT_MS
-   (engine/src/offload_client.c: 2s + 2s), a bounded, one-time cost, not
-   a multi-second stall on every single Thesaurus click thereafter. */
-static wp_bool ensure_offload(void)
-{
-    if (!g_offload_init_attempted) {
-        g_offload_init_attempted = WP_TRUE;
-        offload_init(WP_ATARI_OFFLOAD_ENDPOINT); /* result read back via offload_available() */
-    }
-    return offload_available();
-}
 
 static wp_bool extract_word_before_cursor(u8 *out_word, u32 *out_word_len)
 {

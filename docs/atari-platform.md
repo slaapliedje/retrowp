@@ -635,3 +635,94 @@ could close this with real `xdotool` mouse-click injection into a form
 alert if that proves reliable enough (T4.1's existing gap note is
 skeptical it will be, in this headless environment) -- not attempted
 here.
+
+## ODT + PDF wired into the UI (M7 T7.4)
+
+Closes M7's own T7.4 note ("Engine-side wiring: 'Open ODT' ships bytes,
+receives model") the same way Thesaurus closed T6.3's: File Open/Save
+now recognize `.ODT` (open and save, via `offload/gateway/odt_gateway.py`
+-- `docs/formats/odt.md`) and `.PDF` (save only -- PDF has no importer,
+by design, `docs/formats/pdf.md`), extending the SAME extension-sniffing
+dispatch `do_file_open`/`do_file_save` already used for `.RTF` vs
+plaintext. No new menu items, no format-choice dialog -- typing a
+different extension into the file selector's filename field is still
+how this app picks a format, the same classic-GEM convention the RTF
+wiring already established.
+
+**`do_odt_open()`** reads the whole `.odt` file (capped at
+`WP_ATARI_ODT_MAX_FILE_SIZE`, 60000 bytes -- comfortably under
+`WIRE_MAX_PAYLOAD`'s 64K with room for the format-id byte and frame
+overhead; real-world ODT files from other tools commonly run 10-50KB
+even for short documents, thanks to `styles.xml`/`meta.xml`/thumbnail
+bloat this project's OWN minimal ODT writer doesn't produce), ships it
+through `OFFLOAD_CONVERT_IMPORT`, and feeds the RTF that comes back
+straight into the ALREADY-TESTED `format_rtf_import()` -- no new
+parsing logic on the engine side at all, exactly as
+`docs/formats/offload-protocol.md`'s "RTF is the interchange format"
+design decision promised it would be.
+
+**`do_odt_pdf_save()`** is the mirror: `format_rtf_export()` the current
+document (the same bytes the local `.RTF` Save path already writes),
+ship those through `OFFLOAD_CONVERT_EXPORT` with `format_id` = ODT or
+PDF, write whatever comes back straight to disk. This app never parses
+the `.odt`/`.pdf` bytes it writes -- they're opaque, gateway-produced
+output, same as they are for `do_odt_open`'s input in reverse.
+
+**A real engine-side change was needed to make this actually work, not
+just compile.** `engine/src/offload_client.c`'s `OFFLOAD_MAX_RESPONSE_PAYLOAD`
+was 4096 bytes -- plenty for THESAURUS/SPELL_CHECK's word-list replies,
+but a real gateway-produced ODT or PDF for even a modest document
+routinely exceeds that (an early, larger `host/tests/test_convert.c`
+fixture hit this exact ceiling during T7.3 development -- `offload_submit`
+returned `WP_RANGE`, not a gateway bug). Raised to 32768: still bounded,
+still freed immediately after copying into `resp->result` (which is
+sized to the ACTUAL response length, not this constant), still a small
+fraction of the 1MB Atari ST budget as a temporary allocation.
+
+**Real RS-232 is slow for whole-file transfer, and this app's timeouts
+say so honestly.** THESAURUS/SPELL_CHECK payloads are a few bytes;
+ODT/PDF payloads are whole files. At 9600 baud with 8N1 framing (10 bits
+per byte, `transport_atari.c`'s `RS_8BITS | RS_1STOP`), real throughput
+is about 960 bytes/sec -- a modest multi-KB document can genuinely take
+tens of real seconds to transfer each direction. `WP_ATARI_CONVERT_TIMEOUT_MS`
+is set to two minutes accordingly, deliberately far more generous than
+Thesaurus's already-generous 90 seconds (which is sized for a slow
+COLD-MODEL-LOAD, not a slow TRANSFER -- a different bottleneck, both
+real, both worth naming precisely rather than picking one big number for
+every offload feature).
+
+**Verified two ways**, the same split as every other offload-backed
+feature in this app:
+1. `host/tools/atari_convert_smoke.c` / `host/tools/ci_atari_convert_serial.sh`
+   -- genuinely NEW coverage, not a repeat of T6.3's
+   `atari_serial_smoke.c` (which only ever proved THESAURUS, a tiny
+   single-word payload, over serial). Bridges Hatari's real emulated
+   RS-232 to a real `offload/gateway/odt_gateway.py` instance (which
+   already supports `--serial-rx`/`--serial-tx`, unchanged from T7.2) via
+   the same two-FIFO mechanism `ci_atari_serial.sh` uses, and drives the
+   real `offload_init`/`offload_submit`/`offload_shutdown` API end to
+   end: builds a fixture document, `format_rtf_export()`s it,
+   `CONVERT_EXPORT`s to ODT over real serial (checked for a real ZIP
+   magic), `CONVERT_IMPORT`s those SAME ODT bytes back over the same
+   connection (proving the request/response loop handles more than one
+   request, and closing the round trip with no external tool needed),
+   `format_rtf_import()`s the result and asserts every attribute
+   (alignment, bold, exact text) survived, then separately
+   `CONVERT_EXPORT`s to PDF over real serial (checked for the real
+   `%PDF` magic). A real test-authoring bug was caught here too: a
+   hardcoded expected string length off by one (30 vs the fixture's
+   actual 29 characters) -- the same class of mistake this project's
+   history keeps finding in hand-counted test literals, caught the same
+   way, by actually running the test rather than trusting the arithmetic.
+2. `do_odt_open()`/`do_odt_pdf_save()` themselves are never exercised by
+   any CI path, for the identical reason `do_thesaurus()`/
+   `do_spell_check()` aren't: they end in `form_alert()`, a real blocking
+   AES call this headless environment cannot safely drive to completion.
+   Verified instead, transitively, exactly like Thesaurus: the
+   `offload_client.c` round trip is proven end to end (above, AND by the
+   whole-file real-transfer case specifically, which Thesaurus's
+   single-word case never exercised), and `format_rtf_import`/
+   `format_rtf_export` are proven independently (M5). These two functions
+   are a thin, mechanical composition of already-proven pieces plus file
+   I/O and string formatting, not independently re-verified end to end
+   as a running menu action.

@@ -174,15 +174,25 @@ $(ATARI_BUILD)/serialsmoke/%.o: host/tools/%.c | $(ATARI_BUILD)/serialsmoke
 $(ATARI_BIN)/SERIALTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialsmoke/atari_serial_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
-$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BIN):
+# M7 T7.4c: same shape as SERIALTST.PRG, proving CONVERT_IMPORT/EXPORT
+# (not just THESAURUS) survive real RS-232 -- see atari_convert_smoke.c.
+$(ATARI_BUILD)/convertsmoke/%.o: host/tools/%.c | $(ATARI_BUILD)/convertsmoke
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Ioffload/transport -c $< -o $@
+
+$(ATARI_BIN)/CONVERTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/convertsmoke/atari_convert_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
+	$(ATARICC) $^ -o $@ -lgem
+
+$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BUILD)/convertsmoke $(ATARI_BIN):
 	mkdir -p $@
 
-.PHONY: atari atari-smoke atari-serial-smoke
+.PHONY: atari atari-smoke atari-serial-smoke atari-convert-smoke
 atari: $(ATARI_BIN)/WP.PRG
 
 atari-smoke: $(ATARI_BIN)/SMOKE.PRG
 
 atari-serial-smoke: $(ATARI_BIN)/SERIALTST.PRG
+
+atari-convert-smoke: $(ATARI_BIN)/CONVERTST.PRG
 
 clean:
 	rm -rf $(BUILD) $(BIN)

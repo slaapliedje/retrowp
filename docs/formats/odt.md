@@ -152,9 +152,12 @@ Two layers, deliberately different in what they can prove:
   side tooling on a reliable local transport (TCP loopback, or the FIFO
   bridge `ci_atari_serial.sh`-style tooling uses); a real Pi deployment
   over noisy RS-232 might want the fuller behavior, not implemented here.
-- **Not wired into `platform/atari`'s UI.** Same class of gap T6.3 left
-  for Thesaurus and this project later closed (`docs/atari-platform.md`)
-  -- there is no "Open ODT"/"Save ODT" menu action yet. The natural next
-  step (mirroring the RTF extension-sniffing pattern already in
-  `do_file_open`/`do_file_save`) is real, contained work, just not done
-  in this pass.
+- **UI wiring: done (M7 T7.4).** File Open/Save in `platform/atari/
+  app_shell.c` now recognize `.ODT` the same way they already recognized
+  `.RTF` -- see `docs/atari-platform.md`'s "ODT + PDF wired into the UI"
+  section for the full writeup, including a real engine-side fix
+  (`OFFLOAD_MAX_RESPONSE_PAYLOAD`) that turned out to be necessary along
+  the way, and new real-serial verification
+  (`ci_atari_convert_serial.sh`) that goes beyond what this document's
+  own verification section above covers (a real whole-file transfer over
+  real RS-232, not just TCP loopback or manual LibreOffice cross-checks).

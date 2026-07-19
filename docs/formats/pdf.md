@@ -135,7 +135,10 @@ properties the automated test's size constraint can't exercise):
 - **Fixed US Letter, 1 inch margins, no page-size/orientation option.**
 - **Extended-charset (non-ASCII) glyph widths are approximated**, not
   real AFM data -- see the width-table note above.
-- **Not wired into `platform/atari`'s UI** -- same class of gap
-  `docs/formats/odt.md` and `docs/atari-platform.md`'s Thesaurus section
-  already note for their own features; a "Save as PDF" menu action is
-  natural follow-up work, not attempted in this pass.
+- **UI wiring: done (M7 T7.4).** File Save in `platform/atari/
+  app_shell.c` now recognizes `.PDF` via the same extension-sniffing
+  dispatch as `.RTF`/`.ODT` -- see `docs/atari-platform.md`'s "ODT + PDF
+  wired into the UI" section, including
+  `ci_atari_convert_serial.sh`'s real-RS-232 verification that a
+  CONVERT_EXPORT(PDF) request/response actually survives the real
+  serial link this target would use, not just TCP loopback.

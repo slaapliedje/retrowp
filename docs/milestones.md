@@ -501,28 +501,62 @@ Goal: 1MB ST opens/saves ODT and rich PDF without local parsing.
       engine's format_rtf_export(), not hand-written RTF. Full writeup,
       including the design rationale for why this was genuinely
       separate work from T7.2's ODT conversion: docs/formats/pdf.md.
-- [ ] T7.4 Engine-side wiring: "Open ODT" ships bytes, receives model.
+- [x] T7.4 Engine-side wiring: "Open ODT" ships bytes, receives model.
       AC: On 1MB ST with Pi attached, open and save an ODT successfully.
-      Not implemented. The natural next step is small and well-scoped
-      (mirror the RTF extension-sniffing pattern already in
-      platform/atari/app_shell.c's do_file_open/do_file_save), the same
-      staging this project already used for M5 (engine/service work
-      landed first, UI wiring followed in a later pass) -- just not done
-      in this pass.
+      File Open/Save recognize .ODT (open+save) and .PDF (save only --
+      no importer, by design) via the same extension-sniffing dispatch
+      already used for .RTF; no new menu items. do_odt_open() ships the
+      whole file through CONVERT_IMPORT and feeds the returned RTF into
+      the already-tested format_rtf_import() -- no new engine-side
+      parsing. do_odt_pdf_save() is the mirror via CONVERT_EXPORT.
+      A real engine change was needed, not just UI plumbing:
+      engine/src/offload_client.c's OFFLOAD_MAX_RESPONSE_PAYLOAD (4096,
+      sized for THESAURUS word lists) was too small for a real
+      gateway-produced ODT/PDF -- an early, larger test_convert.c
+      fixture hit this exact ceiling during T7.3 development. Raised to
+      32768, still bounded, still a small fraction of the 1MB budget.
+      Timeouts (WP_ATARI_CONVERT_TIMEOUT_MS, 2 minutes) are sized for
+      real RS-232's actual throughput at 9600 baud (~960 bytes/sec, 8N1
+      framing) transferring a WHOLE FILE, not for THESAURUS's
+      single-word payloads or a slow cold LLM load -- three genuinely
+      different bottlenecks, named separately rather than papered over
+      with one generic "big timeout." Verified two ways: (1)
+      host/tools/atari_convert_smoke.c + new
+      host/tools/ci_atari_convert_serial.sh prove real
+      CONVERT_IMPORT/CONVERT_EXPORT (ODT and PDF) over real emulated
+      RS-232 against a real offload/gateway/odt_gateway.py instance --
+      genuinely new coverage beyond T6.3's atari_serial_smoke.c, which
+      only ever exercised THESAURUS's tiny single-word payload over
+      serial, never a whole-file transfer. A real test-authoring bug
+      (hardcoded string length off by one) was caught and fixed by
+      actually running this test, not by inspection. (2) The
+      form_alert()-driving menu actions themselves (do_odt_open/
+      do_odt_pdf_save) are never exercised by CI, for the same reason
+      Thesaurus's and Spell Check's aren't -- see
+      docs/atari-platform.md's "ODT + PDF wired into the UI" section for
+      the full writeup and that gap's honest scope.
 
 Artifact: 1MB ST with ODT + rich PDF via the Pi.
-**Reached at the gateway level.** The protocol (T7.1), a real, tested,
-bidirectional ODT<->RTF gateway (T7.2), and a real from-scratch PDF
-writer with genuine text layout -- word-wrap, pagination, justification,
-underline/strikethrough, superscript/subscript, all against real Adobe
-AFM glyph metrics (T7.3) -- are done, in the same odt_gateway.py process,
-each verified both by an automated deterministic test and by manual
-cross-validation against real independent tools (LibreOffice for ODT,
-poppler-utils for PDF). Only T7.4 remains open: the Atari-side UI wiring
-("Open ODT"/"Save ODT"/"Save PDF" menu actions) is small, well-scoped
-follow-up work -- the same staging this project already used for M5
-(engine/service work landed first, UI wiring followed in a later pass)
--- deliberately not done in this pass, not forgotten.
+**Reached.** The protocol (T7.1), a real, tested, bidirectional
+ODT<->RTF gateway (T7.2), a real from-scratch PDF writer with genuine
+text layout -- word-wrap, pagination, justification, underline/
+strikethrough, superscript/subscript, all against real Adobe AFM glyph
+metrics (T7.3) -- and the Atari-side UI wiring for both (T7.4) are all
+done. File Open/Save recognize .ODT/.PDF by extension, exactly like
+.RTF; a real engine-side fix (OFFLOAD_MAX_RESPONSE_PAYLOAD 4096 -> 32768)
+was needed along the way for real documents to actually round-trip, not
+just tiny fixtures. Every layer verified against something outside this
+project's own code: LibreOffice for ODT, poppler-utils for PDF, and --
+new for T7.4 specifically -- real emulated RS-232 carrying a real
+whole-file transfer to a real gateway process, not just the tiny
+single-word payloads every other offload feature (THESAURUS) had
+exercised over serial before this. The one remaining gap, honestly
+scoped rather than silently accepted: the menu actions themselves
+(do_odt_open/do_odt_pdf_save, and Thesaurus/Spell Check before them)
+are never exercised by CI, because they end in a real blocking
+form_alert() this headless environment cannot safely drive to
+completion -- verified transitively instead, through the already-proven
+pieces each one composes.
 
 ---
 
