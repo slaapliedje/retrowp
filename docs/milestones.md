@@ -344,14 +344,43 @@ Goal: ST asks the Pi over serial and gets an answer, safely.
       stub gateway, a request round-trips.
       Transport used: `platform/host`'s `tcp:` endpoint (network first, per
       the host-only bootstrap scope -- see below).
-- [ ] T6.3 Atari RS232 transport hook (and MiNTnet TCP variant if present).
+- [x] T6.3 Atari RS232 transport hook (and MiNTnet TCP variant if present).
       AC: On hardware/emulator, handshake negotiates capabilities.
-      Not started: no `platform/atari` backend exists yet (M4). The transport
-      seam (`plat_transport_open/read/write/close` in platform.h) is already
-      structured so this is a drop-in fifth implementation of those four
-      functions, alongside `platform/host`'s `pipe:`/`tcp:` -- no change to
-      `offload/transport`, `offload_client.c`, or `offload.h` will be needed
-      when it lands.
+      platform/atari/transport_atari.c implements the transport seam over
+      real Bconin/Bconout/Bconstat/Bcostat/Rsconf (DEV_AUX), exactly the
+      drop-in fifth implementation predicted above -- zero changes to
+      offload/transport, offload_client.c, or offload.h. No MiNTnet
+      variant: FreeMiNT's BSD-socket GEMDOS extensions don't exist under
+      plain TOS/EmuTOS (confirmed by disassembling libc.a), so pursuing
+      it would need booting real FreeMiNT under Hatari for a target that
+      can't use it anyway -- WP_UNSUPPORTED for any endpoint prefix
+      other than "serial:", honestly, not silently.
+      Verified beyond the literal AC: host/tools/ci_atari_serial.sh
+      bridges Hatari's --rs232-in/--rs232-out to
+      offload/gateway/mock_gateway.c's new --serial-rx/--serial-tx mode
+      via two FIFOs, and host/tools/atari_serial_smoke.c proves the real
+      offload_init()/offload_query()/offload_submit()/offload_shutdown()
+      client API works end to end over real emulated RS-232: the
+      HELLO/CAPS handshake negotiates the gateway's real
+      protocol_version and gateway_name (the AC), AND a full
+      OFFLOAD_THESAURUS request/response round trip completes
+      correctly (going further than required, reusing the exact
+      fixture-backed logic the TCP tests already cover).
+      Real bug found and fixed: the gateway's hardcoded 5-second
+      HELLO-wait timeout (fine for the TCP tests, where the client
+      connects near-instantly) was shorter than a real Atari boot +
+      program load takes under Hatari's cycle-exact CPU emulation, so
+      the gateway gave up and closed its FIFOs before the ST program
+      ever wrote a byte -- and Hatari's own subsequent write to the
+      now-reader-less FIFO raised SIGPIPE, crashing the emulator itself
+      (not just failing the test). Root-caused by independently ruling
+      out three other components first (raw Bconin/Bconout mechanics,
+      plat_ticks_ms()/clock() actually advancing, and the gateway's
+      serial mode in isolation via a hand-written Python client) before
+      isolating it with temporary tracing. Fixed with a new
+      --hello-timeout-ms flag (default unchanged at 5000 for TCP;
+      ci_atari_serial.sh passes 25000 for serial). Full trace in
+      docs/atari-platform.md.
 - [x] T6.4 Pi `gateway` answering ONE op end-to-end (THESAURUS or SPELL).
       AC: ST sends a word, receives synonyms/suggestions; timeout path verified
       by killing the gateway mid-request.
@@ -363,13 +392,16 @@ Goal: ST asks the Pi over serial and gets an answer, safely.
       "kill mid-request"/corrupt-frame/timeout coverage.
 
 Artifact: Working serial offload for one high-value feature.
-**Partially reached, host-only:** offload transport + client + a mock gateway
-round-trip THESAURUS and SPELL_CHECK over TCP loopback, with full fault-
-injection coverage (corrupt CRC, dead gateway, delayed gateway, short/stalled
-frame). T6.3 (real Atari serial transport) and a real Pi/LLM-backed gateway
-are still open -- this was a deliberate scope choice (see CLAUDE.md and the
-project's bootstrap plan) to prove the engine core + offload plumbing on host
-before any platform-specific GUI work begins.
+**Reached.** Offload transport + client + a mock gateway round-trip
+THESAURUS and SPELL_CHECK, with full fault-injection coverage (corrupt CRC,
+dead gateway, delayed gateway, short/stalled frame) over TCP loopback
+(T6.1/T6.2/T6.4), AND the same client/transport/gateway logic proven over
+real emulated RS-232 on the actual Atari target (T6.3), including a real
+bug found only at that layer (the gateway's TCP-calibrated handshake
+timeout was too short for real Atari boot time, and crashed Hatari itself
+via SIGPIPE, not just the test -- see docs/atari-platform.md). Still a
+deliberate scope boundary, not a gap: the gateway remains a host-side mock
+against a fixture table, not a real Pi/LLM -- that's M8.
 
 ---
 

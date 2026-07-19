@@ -135,13 +135,27 @@ $(ATARI_BUILD)/smoke/%.o: host/tools/%.c | $(ATARI_BUILD)/smoke
 $(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
-$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BIN):
+# T6.3's serial offload smoke test doesn't touch any AES/window API
+# itself, but ATARI_ENGINE_OBJ pulls in the whole engine (docmodel.c's
+# cleanup path reaches linebreak.c regardless of whether this test ever
+# lays out text), which needs metrics_atari.c/draw_atari.c's VDI calls
+# -- so this still needs the full platform/atari object set and -lgem,
+# same as WP.PRG/SMOKE.PRG. Only the source file differs.
+$(ATARI_BUILD)/serialsmoke/%.o: host/tools/%.c | $(ATARI_BUILD)/serialsmoke
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Ioffload/transport -c $< -o $@
+
+$(ATARI_BIN)/SERIALTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialsmoke/atari_serial_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) | $(ATARI_BIN)
+	$(ATARICC) $^ -o $@ -lgem
+
+$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BIN):
 	mkdir -p $@
 
-.PHONY: atari atari-smoke
+.PHONY: atari atari-smoke atari-serial-smoke
 atari: $(ATARI_BIN)/WP.PRG
 
 atari-smoke: $(ATARI_BIN)/SMOKE.PRG
+
+atari-serial-smoke: $(ATARI_BIN)/SERIALTST.PRG
 
 clean:
 	rm -rf $(BUILD) $(BIN)

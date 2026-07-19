@@ -4,6 +4,9 @@
 #include <unistd.h>
 #include <poll.h>
 #include <time.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -16,15 +19,31 @@
 
 /* Host-side mock gateway (T6.4): a standalone POSIX executable, never
    linked into the engine or app. It answers OFFLOAD_THESAURUS and
-   OFFLOAD_SPELL_CHECK from the fixture tables with real wire framing
-   over a real TCP socket, so tests can prove the protocol round-trips
-   deterministically without a Pi or an LLM. Binds port 0 (OS-assigned)
-   and prints the assigned port as a single line on stdout before
-   accepting, so host/tests/gateway_harness.c never has to guess or poll
-   for readiness.
+   OFFLOAD_SPELL_CHECK from the fixture tables with real wire framing,
+   so tests can prove the protocol round-trips deterministically without
+   a Pi or an LLM.
+
+   Two transports, same protocol logic:
+   - Default (TCP): binds port 0 (OS-assigned) and prints the assigned
+     port as a single line on stdout before accepting, so
+     host/tests/gateway_harness.c never has to guess or poll for
+     readiness.
+   - --serial-rx <path> --serial-tx <path> (T6.3): reads frames from
+     <rx> and writes them to <tx> instead -- the same two named FIFOs
+     Hatari's --rs232-out/--rs232-in point at, letting this exact,
+     already-tested handshake/fixture logic answer a REAL Atari-side
+     offload_client() over emulated RS-232, not just a TCP client. Both
+     FIFOs are opened O_RDWR (not O_RDONLY/O_WRONLY) specifically to
+     avoid the classic named-FIFO open-blocks-until-peer-connects
+     deadlock -- verified against this project's own
+     platform/host/transport_host.c pipe: implementation, which relies
+     on the same trick. Prints "serial\n" instead of a port number, so
+     a harness can wait for the FIFOs to be open before starting Hatari
+     the same way it already waits for the TCP port line.
 
    Fault injection (see docs/formats/offload-protocol.md for how each
-   maps to a client-observable failure):
+   maps to a client-observable failure), same flags regardless of
+   transport:
      --corrupt-after=N   flips a byte in the CRC of every response after
                           the Nth (0 = corrupt starting with the first).
      --die-after=N       exits abruptly (no response) after the Nth
@@ -33,7 +52,26 @@
      --short-frame        sends a response header promising a large
                           payload, writes a few bytes, then goes back to
                           waiting for the next request -- the promised
-                          payload never arrives. */
+                          payload never arrives.
+     --hello-timeout-ms=N how long to wait for the client's first HELLO
+                          before giving up and exiting (default 5000,
+                          fine for the TCP tests where the client
+                          connects near-instantly). host/tools/
+                          ci_atari_serial.sh overrides this to something
+                          much larger: a real Atari boot + program load
+                          under Hatari's cycle-exact CPU emulation can
+                          take well over 5 real seconds before the ST
+                          program ever reaches its first Bconout call,
+                          and the ORIGINAL bug this flag fixes was ugly
+                          in a specific way worth documenting -- on
+                          timeout this process closes both FIFOs and
+                          exits (correct behavior), but Hatari's *own*
+                          later write() to the now-reader-less
+                          --rs232-out FIFO then raises SIGPIPE, killing
+                          the whole emulator (not just failing the
+                          test): a real, once-reproduced failure mode
+                          this comment exists to prevent re-discovering
+                          the hard way. */
 
 static int parse_int_flag(const char *arg, const char *name, int *out)
 {
@@ -46,7 +84,7 @@ static int parse_int_flag(const char *arg, const char *name, int *out)
     return 0;
 }
 
-typedef struct { int fd; } gw_ctx;
+typedef struct { int read_fd; int write_fd; } gw_ctx;
 
 static wp_status gw_read(void *ctx, u8 *out, u32 out_cap, u32 timeout_ms, u32 *out_len)
 {
@@ -55,7 +93,7 @@ static wp_status gw_read(void *ctx, u8 *out, u32 out_cap, u32 timeout_ms, u32 *o
     int pr;
     ssize_t n;
 
-    pfd.fd = c->fd;
+    pfd.fd = c->read_fd;
     pfd.events = POLLIN;
 
     pr = poll(&pfd, 1, (int)timeout_ms);
@@ -63,7 +101,7 @@ static wp_status gw_read(void *ctx, u8 *out, u32 out_cap, u32 timeout_ms, u32 *o
     if (pr < 0) return WP_ERR;
     if (pfd.revents & (POLLHUP | POLLERR)) return WP_ERR;
 
-    n = read(c->fd, out, (size_t)out_cap);
+    n = read(c->read_fd, out, (size_t)out_cap);
     if (n <= 0) return WP_ERR;
 
     if (out_len) *out_len = (u32)n;
@@ -140,15 +178,29 @@ static u32 encode_spellcheck_response(wp_bool is_correct, const char *const *sug
     return 1 + list_len;
 }
 
+/* Opens `path` as a named FIFO (creating it if it doesn't exist yet)
+   with O_RDWR -- not O_RDONLY/O_WRONLY -- specifically so this open
+   never blocks waiting for a peer, regardless of whether Hatari has
+   opened its end yet. See the file-level comment for why this matters. */
+static int open_fifo_rdwr(const char *path)
+{
+    if (mkfifo(path, 0600) != 0 && errno != EEXIST) return -1;
+    return open(path, O_RDWR);
+}
+
 int main(int argc, char **argv)
 {
     int corrupt_after = -1;
     int die_after = -1;
     int delay_ms = 0;
+    int hello_timeout_ms = 5000;
     wp_bool short_frame = WP_FALSE;
+    const char *serial_rx = NULL;
+    const char *serial_tx = NULL;
     int i;
 
-    int listen_fd, conn_fd;
+    int listen_fd = -1;
+    int conn_fd = -1;
     struct sockaddr_in addr;
     socklen_t addrlen;
     gw_ctx ctx;
@@ -158,31 +210,48 @@ int main(int argc, char **argv)
         if (parse_int_flag(argv[i], "--corrupt-after", &corrupt_after)) continue;
         if (parse_int_flag(argv[i], "--die-after", &die_after)) continue;
         if (parse_int_flag(argv[i], "--delay-ms", &delay_ms)) continue;
+        if (parse_int_flag(argv[i], "--hello-timeout-ms", &hello_timeout_ms)) continue;
         if (strcmp(argv[i], "--short-frame") == 0) { short_frame = WP_TRUE; continue; }
+        if (strncmp(argv[i], "--serial-rx=", 12) == 0) { serial_rx = argv[i] + 12; continue; }
+        if (strncmp(argv[i], "--serial-tx=", 12) == 0) { serial_tx = argv[i] + 12; continue; }
     }
 
-    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (listen_fd < 0) return 1;
+    if (serial_rx != NULL && serial_tx != NULL) {
+        int rx_fd = open_fifo_rdwr(serial_rx);
+        int tx_fd = open_fifo_rdwr(serial_tx);
 
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = 0;
+        if (rx_fd < 0 || tx_fd < 0) return 1;
 
-    if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) return 1;
-    if (listen(listen_fd, 1) != 0) return 1;
+        ctx.read_fd = rx_fd;
+        ctx.write_fd = tx_fd;
 
-    addrlen = sizeof(addr);
-    if (getsockname(listen_fd, (struct sockaddr *)&addr, &addrlen) != 0) return 1;
+        printf("serial\n");
+        fflush(stdout);
+    } else {
+        listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (listen_fd < 0) return 1;
 
-    printf("%d\n", (int)ntohs(addr.sin_port));
-    fflush(stdout);
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        addr.sin_port = 0;
 
-    conn_fd = accept(listen_fd, NULL, NULL);
-    close(listen_fd);
-    if (conn_fd < 0) return 1;
+        if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) return 1;
+        if (listen(listen_fd, 1) != 0) return 1;
 
-    ctx.fd = conn_fd;
+        addrlen = sizeof(addr);
+        if (getsockname(listen_fd, (struct sockaddr *)&addr, &addrlen) != 0) return 1;
+
+        printf("%d\n", (int)ntohs(addr.sin_port));
+        fflush(stdout);
+
+        conn_fd = accept(listen_fd, NULL, NULL);
+        close(listen_fd);
+        if (conn_fd < 0) return 1;
+
+        ctx.read_fd = conn_fd;
+        ctx.write_fd = conn_fd;
+    }
 
     /* --- handshake: expect HELLO, respond CAPS --- */
     {
@@ -192,9 +261,10 @@ int main(int argc, char **argv)
         offload_capabilities caps;
         u8 caps_payload[CAPS_PAYLOAD_SIZE];
 
-        if (wire_read_frame(gw_read, &ctx, 5000, &hdr, dummy, 0, &dummy_len) != WP_OK
+        if (wire_read_frame(gw_read, &ctx, (u32)hello_timeout_ms, &hdr, dummy, 0, &dummy_len) != WP_OK
             || hdr.type != WIRE_MSG_HELLO) {
-            close(conn_fd);
+            close(ctx.read_fd);
+            if (ctx.write_fd != ctx.read_fd) close(ctx.write_fd);
             return 1;
         }
 
@@ -205,7 +275,7 @@ int main(int argc, char **argv)
         strncpy((char *)caps.gateway_name, "mock-gateway", sizeof(caps.gateway_name) - 1);
 
         caps_encode(&caps, caps_payload);
-        send_frame(conn_fd, WIRE_MSG_CAPS, 0, 0, 0, caps_payload, CAPS_PAYLOAD_SIZE, WP_FALSE);
+        send_frame(ctx.write_fd, WIRE_MSG_CAPS, 0, 0, 0, caps_payload, CAPS_PAYLOAD_SIZE, WP_FALSE);
     }
 
     /* --- request/response loop --- */
@@ -242,8 +312,8 @@ int main(int argc, char **argv)
             be_write16(hdr_buf + 6, req_hdr.seq);
             be_write32(hdr_buf + 8, 60000uL); /* promise far more than we send */
 
-            gw_write_all(conn_fd, hdr_buf, WIRE_HEADER_SIZE);
-            gw_write_all(conn_fd, (const u8 *)"only a few bytes", 17);
+            gw_write_all(ctx.write_fd, hdr_buf, WIRE_HEADER_SIZE);
+            gw_write_all(ctx.write_fd, (const u8 *)"only a few bytes", 17);
             continue; /* the rest never arrives; back to waiting for the next request */
         }
 
@@ -270,11 +340,12 @@ int main(int argc, char **argv)
                 status = (u8)OFFLOAD_OK;
             }
 
-            send_frame(conn_fd, WIRE_MSG_RESPONSE, req_hdr.op, status, req_hdr.seq,
+            send_frame(ctx.write_fd, WIRE_MSG_RESPONSE, req_hdr.op, status, req_hdr.seq,
                        resp_payload, resp_len, corrupt);
         }
     }
 
-    close(conn_fd);
+    close(ctx.read_fd);
+    if (ctx.write_fd != ctx.read_fd) close(ctx.write_fd);
     return 0;
 }

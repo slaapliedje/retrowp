@@ -363,3 +363,104 @@ the real cross-compiler, linked into genuine plain-TOS `.prg` binaries, and
 verified under Hatari with a mix of automated (Native-Features-driven,
 regression-tested) and visual/exploratory checks. See `docs/milestones.md`
 for the full per-task scope notes and honest gaps list.
+
+## Real RS-232 offload transport (M6 T6.3)
+
+`platform/atari/transport_atari.c` implements `plat_transport_open/read/
+write/close` over the ST's AUX BIOS device (`DEV_AUX` = 1 -- confirmed
+against `mint/ostruct.h`, not guessed) using the classic `Bconin`/
+`Bconout`/`Bconstat`/`Bcostat`/`Rsconf` calls. Endpoint format is
+`"serial:<device>:<baud>"` (platform.h's own doc comment already
+established this convention); `<device>` is currently unvalidated beyond
+non-empty, since the ST has exactly one serial port. `Rsconf` configures
+8N1 at the requested baud, async /16 clock, receiver enabled, no flow
+control; the transmit-side `tsr`/`scr` fields are left unchanged
+(`RS_INQUIRE`, the same "-1 means leave unchanged" idiom `mint/ostruct.h`
+uses consistently elsewhere) since no transmit-side bit list is
+documented anywhere on this system.
+
+**No MiNTnet variant.** FreeMiNT's BSD-socket GEMDOS extensions
+(`Fsocket` et al, function numbers `0x160+`) are a FreeMiNT-kernel-only
+extension -- confirmed by disassembling the actual shipped `libc.a`
+(`___socket` traps GEMDOS function `0x160`) and checking that plain
+TOS/EmuTOS's function range doesn't include it. Pursuing this would mean
+booting real FreeMiNT under Hatari, a materially heavier setup than the
+EmuTOS boot this project's CI already uses everywhere else, for a
+target (plain TOS) that can't use it anyway -- `plat_transport_open`
+returns `WP_UNSUPPORTED` for any endpoint prefix other than `"serial:"`,
+honestly, not silently.
+
+### Verified two ways
+
+1. **Automated, end to end, over real emulated RS-232**:
+   `host/tools/ci_atari_serial.sh` bridges Hatari's `--rs232-in`/
+   `--rs232-out` to `offload/gateway/mock_gateway.c`'s new `--serial-rx`/
+   `--serial-tx` mode via two named FIFOs (both opened `O_RDWR`, not
+   `O_RDONLY`/`O_WRONLY`, specifically so neither side's open blocks
+   waiting for a peer -- the same trick `platform/host/transport_host.c`'s
+   `pipe:` endpoint already relies on). `host/tools/atari_serial_smoke.c`
+   calls the real `offload_init()`/`offload_query()`/`offload_submit()`/
+   `offload_shutdown()` client API -- the same code path
+   `engine/src/offload_client.c` and `offload/transport/wire.c` already
+   have full TCP-backed test coverage for -- through
+   `transport_atari.c`'s real `Bconin`/`Bconout`. It proves: the HELLO/
+   CAPS handshake completes and negotiates the gateway's real
+   `protocol_version` and `gateway_name` (T6.3's literal AC), AND a full
+   `OFFLOAD_THESAURUS` request/response round trip completes correctly --
+   going further than the AC strictly requires, reusing the exact
+   fixture-backed logic the TCP tests already exercise.
+2. **A real bug, found and fixed via the same bisection discipline used
+   elsewhere in this project** (the RTF binary-search bug, the `-O2` NF
+   trap gotcha): the first attempt at the serial CI script hung, then
+   crashed Hatari itself with SIGPIPE. Isolating the cause required
+   ruling out three components independently before finding it:
+   - Raw `Bconin`/`Bconout`/`Rsconf` mechanics, tested with a minimal
+     PING/PONG program bridged through a hand-written Python FIFO
+     script -- worked.
+   - `plat_ticks_ms()`/`clock()` actually advancing over real time under
+     Hatari (a plausible culprit, since `transport_atari.c`'s read/write
+     timeout loops depend on it) -- tested directly, confirmed working
+     (`CLOCKS_PER_SEC` is genuinely 200, matching the ST's real system
+     tick, and `clock()` advances correctly against real wall-clock
+     time).
+   - `mock_gateway.c`'s new serial mode, tested independently against a
+     hand-written Python client speaking the wire protocol directly over
+     the FIFOs (no Hatari involved) -- worked, and cross-checked the
+     protocol bytes by hand (magic `"WP"`, version 1, CRC) after an
+     initial copy-paste bug in the *test script itself* (wrong magic
+     bytes) was caught and fixed.
+
+   With all three cleared, adding temporary `fprintf` tracing to
+   `mock_gateway.c`'s read loop pinned it down: `poll()` on the gateway's
+   read FIFO returned 0 (a clean timeout) after its **hardcoded 5-second**
+   wait for the client's first HELLO frame. A full Atari boot + program
+   load under Hatari's cycle-exact CPU emulation genuinely takes longer
+   than 5 real seconds before the ST program ever reaches its first
+   `Bconout` call -- so the gateway gave up, correctly closed both FIFOs,
+   and exited (5000ms was calibrated for the existing TCP tests, where
+   the client connects near-instantly, and was never revisited for a
+   real-hardware-timed scenario). The genuinely nasty part: Hatari's
+   *own* subsequent write of the ST program's HELLO bytes to the now-
+   reader-less `--rs232-out` FIFO then raised SIGPIPE, killing the whole
+   emulator -- not a failed test, a crashed test *harness*, which is why
+   it took real bisection rather than reading a stack trace to find.
+   Fixed with a new `--hello-timeout-ms` flag on `mock_gateway.c`
+   (default 5000, unchanged for the TCP tests; `ci_atari_serial.sh` passes
+   25000 for the serial case), documented in the gateway's own file
+   comment so this specific failure mode doesn't need rediscovering.
+
+### Known gaps
+
+- **Not wired into `platform/atari`'s UI.** `app_shell.c` doesn't call
+  `offload_init`/`offload_submit` anywhere yet -- there's no "Check
+  Spelling" or "Thesaurus" menu action wired to the offload link. T6.3's
+  own AC is about the transport working, not about a UI feature using
+  it; wiring an actual menu action is natural follow-up work (would also
+  need T4.3-style keyboard/menu plumbing extended, not just the
+  transport).
+- **Baud rate is fixed per `plat_transport_open` call, not
+  auto-negotiated.** The endpoint string must specify a baud rate the
+  gateway side is also configured for (in practice, `9600` throughout
+  this project's own testing) -- there's no protocol-level baud
+  negotiation, matching how real serial links have always worked (both
+  ends configure to a known-shared rate out of band).
