@@ -14,11 +14,12 @@
 #include "fixtures.h"
 #include "gw_common.h"
 
-/* Host-side mock gateway (T6.4, GRAMMAR_CHECK added T8.1): a standalone
-   POSIX executable, never linked into the engine or app. It answers
-   OFFLOAD_THESAURUS, OFFLOAD_SPELL_CHECK, and OFFLOAD_GRAMMAR_CHECK from
-   the fixture tables with real wire framing, so tests can prove the
-   protocol round-trips deterministically without a Pi or an LLM.
+/* Host-side mock gateway (T6.4, GRAMMAR_CHECK added T8.1, CHAT added
+   T8.3): a standalone POSIX executable, never linked into the engine or
+   app. It answers OFFLOAD_THESAURUS, OFFLOAD_SPELL_CHECK,
+   OFFLOAD_GRAMMAR_CHECK, and OFFLOAD_CHAT from the fixture tables with
+   real wire framing, so tests can prove the protocol round-trips
+   deterministically without a Pi or an LLM.
 
    Two transports, same protocol logic:
    - Default (TCP): binds port 0 (OS-assigned) and prints the assigned
@@ -164,7 +165,7 @@ int main(int argc, char **argv)
         memset(&caps, 0, sizeof(caps));
         caps.protocol_version = WIRE_VERSION;
         caps.ops_supported = (1uL << OFFLOAD_SPELL_CHECK) | (1uL << OFFLOAD_THESAURUS) |
-                             (1uL << OFFLOAD_GRAMMAR_CHECK);
+                             (1uL << OFFLOAD_GRAMMAR_CHECK) | (1uL << OFFLOAD_CHAT);
         caps.max_payload_bytes = 4096;
         strncpy((char *)caps.gateway_name, "mock-gateway", sizeof(caps.gateway_name) - 1);
 
@@ -256,6 +257,15 @@ int main(int argc, char **argv)
                 resp_len = gw_encode_grammar_issues(starts, lens, messages, suggestions, count,
                                                      resp_payload, sizeof(resp_payload));
                 status = (u8)OFFLOAD_OK;
+            } else if (req_hdr.op == OFFLOAD_CHAT) {
+                u32 reply_len;
+                const char *reply = fixtures_chat_reply(word_buf, word_len, &reply_len);
+
+                if (reply_len <= sizeof(resp_payload)) {
+                    memcpy(resp_payload, reply, reply_len);
+                    resp_len = reply_len;
+                    status = (u8)OFFLOAD_OK;
+                }
             }
 
             gw_send_frame(ctx.write_fd, WIRE_MSG_RESPONSE, req_hdr.op, status, req_hdr.seq,

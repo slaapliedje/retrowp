@@ -9,9 +9,10 @@
    future Thesaurus/Grammar Check menu actions or a Pi deployment would
    use, not a hand-rolled protocol client -- gets genuine LLM-generated
    answers back from a live offload/gateway/ollama_gateway.c talking to a
-   real Ollama server. Runs BOTH real ops this gateway implements
-   (OFFLOAD_THESAURUS, OFFLOAD_GRAMMAR_CHECK, added M8 T8.1) over the
-   same connection. Deliberately excluded from the automated suite: LLM
+   real Ollama server. Runs all three real ops this gateway implements
+   (OFFLOAD_THESAURUS, OFFLOAD_GRAMMAR_CHECK added M8 T8.1, OFFLOAD_CHAT
+   added M8 T8.3) over the same connection. Deliberately excluded from
+   the automated suite: LLM
    output is not deterministic (see docs/formats/offload-protocol.md),
    and a contributor without Ollama installed must still be able to run
    `make test`/`ci.sh` successfully -- this tool exists so a human can
@@ -110,17 +111,19 @@ int main(int argc, char **argv)
     const char *word = "happy";
     const char *paragraph = "The team are excited to announce there new product, "
                              "which dont require any special setup.";
+    const char *chat_prompt = "In one short sentence, what is a good synonym for happy?";
     offload_capabilities caps;
     offload_request req;
     offload_response resp;
 
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <endpoint> [word] [paragraph]\n", argv[0]);
+        fprintf(stderr, "usage: %s <endpoint> [word] [paragraph] [chat_prompt]\n", argv[0]);
         return 1;
     }
     endpoint = argv[1];
     if (argc >= 3) word = argv[2];
     if (argc >= 4) paragraph = argv[3];
+    if (argc >= 5) chat_prompt = argv[4];
 
     printf("OLLAMA GATEWAY SMOKE: starting (endpoint=%s word=%s)\n", endpoint, word);
 
@@ -145,6 +148,10 @@ int main(int argc, char **argv)
               "negotiated capabilities advertise OFFLOAD_THESAURUS");
         check((caps.ops_supported & (1uL << OFFLOAD_GRAMMAR_CHECK)) != 0,
               "negotiated capabilities advertise OFFLOAD_GRAMMAR_CHECK");
+        check((caps.ops_supported & (1uL << OFFLOAD_CHAT)) != 0,
+              "negotiated capabilities advertise OFFLOAD_CHAT");
+        check((caps.ops_supported & (1uL << OFFLOAD_IMAGE)) == 0,
+              "negotiated capabilities do NOT advertise OFFLOAD_IMAGE (never implemented anywhere)");
     } else {
         check(WP_FALSE, "offload_query succeeded");
     }
@@ -177,6 +184,20 @@ int main(int argc, char **argv)
         offload_response_free(&resp);
     } else {
         check(WP_FALSE, "offload_submit(OFFLOAD_GRAMMAR_CHECK) returned WP_OK");
+    }
+
+    req.op = OFFLOAD_CHAT;
+    req.payload = (const u8 *)chat_prompt;
+    req.payload_len = (u32)strlen(chat_prompt);
+    req.timeout_ms = 90000; /* cold model load (shares GRAMMAR_CHECK's model, may already be warm) + generation */
+
+    if (offload_submit(&req, &resp) == WP_OK) {
+        check(WP_TRUE, "offload_submit(OFFLOAD_CHAT) returned WP_OK");
+        check(resp.status == OFFLOAD_OK, "response status is OFFLOAD_OK");
+        printf("  chat reply to \"%s\":\n  %.*s\n", chat_prompt, (int)resp.result_len, resp.result);
+        offload_response_free(&resp);
+    } else {
+        check(WP_FALSE, "offload_submit(OFFLOAD_CHAT) returned WP_OK");
     }
 
     offload_shutdown();

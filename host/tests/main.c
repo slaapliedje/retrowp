@@ -138,6 +138,9 @@ void test_offload_spellcheck_flags_known_misspelling(void);
 void test_offload_spellcheck_correct_word(void);
 void test_offload_grammar_check_known_fixture(void);
 void test_offload_grammar_check_clean_paragraph_returns_no_issues(void);
+void test_offload_chat_happy_path(void);
+void test_offload_chat_unrecognized_prompt_gets_generic_reply(void);
+void test_offload_capabilities_advertise_chat_but_not_image(void);
 void test_offload_unsupported_op_reports_unsupported(void);
 void test_offload_corrupt_response_is_rejected(void);
 void test_offload_timeout_on_delayed_gateway(void);
@@ -293,6 +296,9 @@ static const test_case g_cases[] = {
     { "offload_spellcheck_correct_word", test_offload_spellcheck_correct_word },
     { "offload_grammar_check_known_fixture", test_offload_grammar_check_known_fixture },
     { "offload_grammar_check_clean_paragraph_returns_no_issues", test_offload_grammar_check_clean_paragraph_returns_no_issues },
+    { "offload_chat_happy_path", test_offload_chat_happy_path },
+    { "offload_chat_unrecognized_prompt_gets_generic_reply", test_offload_chat_unrecognized_prompt_gets_generic_reply },
+    { "offload_capabilities_advertise_chat_but_not_image", test_offload_capabilities_advertise_chat_but_not_image },
     { "offload_unsupported_op_reports_unsupported", test_offload_unsupported_op_reports_unsupported },
     { "offload_corrupt_response_is_rejected", test_offload_corrupt_response_is_rejected },
     { "offload_timeout_on_delayed_gateway", test_offload_timeout_on_delayed_gateway },

@@ -206,31 +206,112 @@ model followed instructions.
   contiguous bytes from the original (valid UTF-8) paragraph, so the
   span can never land mid-codepoint.
 
+### `OFFLOAD_CHAT` (M8 T8.3)
+
+The simplest payload shape in this protocol -- there is no structure to
+encode beyond the text itself, unlike GRAMMAR_CHECK's issue list or
+THESAURUS's word list.
+
+- **Request payload:** the UTF-8 prompt text, no framing beyond the
+  wire frame's own `length` field -- same convention as every other
+  text-in op. `platform/atari/app_shell.c`'s Tools > Chat sends the
+  CURRENT PARAGRAPH as the prompt (reusing `extract_current_paragraph_text()`,
+  the same paragraph-extraction piece GRAMMAR_CHECK already built), not
+  a purpose-built free-text input field -- this project's own toolchain
+  note (`docs/atari-platform.md`) already calls a hand-built multi-field
+  GEM dialog "not needed yet" for anything this app has built so far,
+  and CHAT doesn't change that: reusing an already-proven extraction
+  path costs nothing new, where inventing a real text-entry dialog would
+  be genuinely new, nontrivial GEM UI machinery for a "T8.3" whose own
+  AC is about capability GATING, not input ergonomics.
+- **Response payload:** the UTF-8 reply text, no framing, shown
+  read-only via `form_alert()` -- CHAT never mutates the document
+  (unlike Grammar Check's Apply/Skip/Stop), matching Thesaurus's
+  existing "look something up, show it, done" pattern rather than
+  inventing a new insert-into-document flow for this milestone.
+
+**This is the first op whose client actually uses the CAPS handshake's
+`ops_supported` bitmask before submitting**, not just after a failed
+request. Every earlier feature (Thesaurus, Grammar Check, ODT/PDF)
+submits the request unconditionally and only handles
+`OFFLOAD_UNSUPPORTED` reactively, after a full round trip -- functionally
+fine, but it wastes a request against a gateway that could have said no
+immediately. T8.3's own AC ("present only when the gateway advertises
+it") is specifically about USING the capability bit this project has
+had since M6's HELLO/CAPS handshake (`offload_query()`) but never
+actually consulted before now. `do_chat()` calls `offload_query()` and
+checks `caps.ops_supported & (1uL << OFFLOAD_CHAT)` BEFORE building a
+request -- a gateway that doesn't advertise CHAT gets an immediate,
+honest "this gateway doesn't offer Chat" alert with no network round
+trip at all.
+
+### `OFFLOAD_IMAGE`: deliberately not implemented anywhere in this repo
+
+M8's own milestone text pairs CHAT and IMAGE ("Optional CHAT / IMAGE
+ops behind capability flags"), but this project has NO image type
+anywhere -- not in the document model (`docs/document-model.md`), not
+in any format importer/exporter (RTF/ODT/PDF are all explicitly
+text-only, `docs/formats/*.md`), and not in `platform/atari`'s draw
+layer (`plat_draw_text` is the only drawing primitive that exists;
+there is no `plat_draw_image` or equivalent in `platform.h`).
+Implementing IMAGE's capability advertisement and wire plumbing with
+nowhere in this app to actually put the resulting bytes would be a
+hollow feature -- present only to satisfy a checkbox, not something a
+user could ever see or use. `OFFLOAD_IMAGE` stays defined in
+`engine/include/offload.h` (a real, reserved op ID, so a future gateway
+or a future image-capable platform backend has a stable value to target)
+but is never advertised or implemented by any gateway in this repo, and
+`(1uL << OFFLOAD_IMAGE)` is never set in any CAPS response here -- the
+same honest "reserved but unimplemented" treatment CLAUDE.md's own
+project brief gives to other explicitly-future scope (font embedding,
+image support in PDF, M10).
+
+**A design note for whenever this DOES get built:** a real IMAGE
+feature on this project's vintage targets isn't just "add a bitmap
+type to the document model" -- what a Pi/LLM-side image generator would
+naturally produce (modern compressed formats, truecolor or high color
+counts) isn't what any of this project's actual targets can display.
+Atari ST low-res is 16 colors from a 512-color palette; the other
+planned platforms (Amiga, Mac Classic, DOS text-mode) have their own,
+different, and in some cases far more constrained, color/format
+ceilings. A useful IMAGE op would need the GATEWAY to downconvert to
+something genuinely displayable on whichever target asked (a simple,
+low-color, palette-indexed bitmap, not a generically "smaller" modern
+format that still assumes a color depth these targets never had) --
+real scope for a future milestone, not a detail to guess at now while
+the op has no implementation at all.
+
 ### Any other op
 
 The mock gateway responds `RESPONSE` with `status = OFFLOAD_UNSUPPORTED`
-and an empty payload for any op it doesn't implement (`CHAT`, `IMAGE`,
-and -- for `mock_gateway.c`/`ollama_gateway.c` specifically --
-`CONVERT_IMPORT`/`CONVERT_EXPORT` too, since ODT/PDF conversion lives in
-the separate `odt_gateway.py`, not either of those; `ollama_gateway.c`
-also reports `OFFLOAD_UNSUPPORTED` for `SPELL_CHECK`, see below) --
-exercising the "absent gracefully" capability-negotiation path M8's
-still-optional ops (`CHAT`/`IMAGE`) need, before either actually exists.
+and an empty payload for any op it doesn't implement (`IMAGE` always;
+`CONVERT_IMPORT`/`CONVERT_EXPORT` too, for `mock_gateway.c`/
+`ollama_gateway.c` specifically, since ODT/PDF conversion lives in the
+separate `odt_gateway.py`, not either of those; `ollama_gateway.c` also
+reports `OFFLOAD_UNSUPPORTED` for `SPELL_CHECK`, see below) --
+exercising the "absent gracefully" capability-negotiation path
+`OFFLOAD_IMAGE` needs for as long as it stays unimplemented, and that
+every other op needed before it existed.
 
 ## Mock Gateway (`offload/gateway/mock_gateway.c`)
 
 A standalone POSIX executable, built to `bin/mock_gateway`, never linked
-into the engine or app. It answers THESAURUS/SPELL_CHECK/GRAMMAR_CHECK
-from a small fixture table (`offload/gateway/fixtures.h`/`.c`) over a
-real TCP socket, so `host/tests/test_offload.c` can prove the protocol
+into the engine or app. It answers THESAURUS/SPELL_CHECK/GRAMMAR_CHECK/
+CHAT from a small fixture table (`offload/gateway/fixtures.h`/`.c`) over
+a real TCP socket, so `host/tests/test_offload.c` can prove the protocol
 round-trips deterministically without a Pi or an LLM -- GRAMMAR_CHECK's
 fixture table maps a small set of known fixture paragraphs to canned
 issue lists (already-computed offsets, no substring search needed since
-the fixture data is trusted by construction), covering the wire
-encode/decode shape without needing a real model in the loop. It binds
-TCP port 0 (OS-assigned) and prints the assigned port as one line on
-stdout before accepting, so `host/tests/gateway_harness.c` never has to
-guess a port or poll for readiness.
+the fixture data is trusted by construction), CHAT's maps a small set of
+known fixture prompts to canned reply strings (an unrecognized prompt
+gets a fixed generic reply, never `OFFLOAD_ERR` -- "I don't have
+anything to add" is a valid canned answer, the same "always answer,
+never fail on unrecognized input" convention THESAURUS's unknown-word
+case already established), covering the wire encode/decode shape
+without needing a real model in the loop. It binds TCP port 0
+(OS-assigned) and prints the assigned port as one line on stdout before
+accepting, so `host/tests/gateway_harness.c` never has to guess a port
+or poll for readiness.
 
 Fault-injection CLI flags, each mapped to a specific client-observable
 failure mode exercised by `test_offload.c`:
@@ -244,11 +325,12 @@ failure mode exercised by `test_offload.c`:
 
 Real LLM/dictionary integration (Ollama/llama.cpp on a Pi) replacing
 `fixtures.c` is explicit future scope (M8) -- **for a real full
-SPELL_CHECK gateway** (GRAMMAR_CHECK is now covered, see below).
-`ollama_gateway.c` below is a narrower, already-implemented slice of
-that scope: two real ops (THESAURUS, GRAMMAR_CHECK), not the full M8
-feature set (SPELL_CHECK/CHAT/IMAGE remain unimplemented by any gateway
-in this repo).
+SPELL_CHECK gateway** (GRAMMAR_CHECK and CHAT are now covered, see
+below). `ollama_gateway.c` below is a narrower, already-implemented
+slice of that scope: three real ops (THESAURUS, GRAMMAR_CHECK, CHAT),
+not the full M8 feature set (SPELL_CHECK remains unimplemented by any
+gateway in this repo, and IMAGE is permanently out of scope -- see its
+own section above).
 
 ## Ollama Gateway (`offload/gateway/ollama_gateway.c`, post-M6)
 
@@ -280,13 +362,23 @@ difference is entirely in what backs one op:
   cost separately the first time each op is used after a gap -- an
   accepted cost of keeping Thesaurus's already-verified model choice
   untouched rather than picking one model to serve both tasks.
+- **`OFFLOAD_CHAT`** (T8.3) is answered by a real call to the same
+  Ollama server, sharing GRAMMAR_CHECK's `gemma2:9b` default
+  (`--chat-model` to override, independent of both `--model` and
+  `--grammar-model`) -- a general-purpose instruct model is the right
+  fit for "freeform assist" the same way it was for grammar issues, and
+  unlike GRAMMAR_CHECK's rigid line format, CHAT has no output shape to
+  parse at all: the model's raw `"response"` field IS the reply,
+  extracted the same way (`extract_json_string_field()`) and shipped
+  back byte-for-byte, no further parsing or verification needed since
+  there's no structure to get wrong.
 - **Every other op, including `OFFLOAD_SPELL_CHECK`,** responds
   `OFFLOAD_UNSUPPORTED` -- a deliberate choice, not a missing feature.
   Tested against `deepseek-coder-v2:16b` during M6, a spelling probe for
   `teh` came back "Correct" -- a worse answer than `services/spell`'s
   deterministic on-device checker already gives for free, and the
   reason SPELL_CHECK stays on-device rather than getting the same
-  offload treatment THESAURUS and GRAMMAR_CHECK just did.
+  offload treatment THESAURUS, GRAMMAR_CHECK, and CHAT just did.
 
 **No libcurl.** `offload/gateway/http_client.c` hand-rolls the single
 HTTP/1.1 POST this needs directly over a raw socket (`http_post_json()`):

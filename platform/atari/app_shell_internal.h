@@ -44,7 +44,9 @@
 #define WP_MENU_OBJ_TOOLS_THESAURUS  14
 /* M8 T8.1: a third Tools item, Grammar Check, appended after Thesaurus. */
 #define WP_MENU_OBJ_TOOLS_GRAMMARCHECK 15
-#define WP_MENU_OBJ_COUNT       16
+/* M8 T8.3: a fourth Tools item, Chat, appended after Grammar Check. */
+#define WP_MENU_OBJ_TOOLS_CHAT   16
+#define WP_MENU_OBJ_COUNT        17
 
 extern OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 
@@ -169,5 +171,18 @@ wp_bool wp_atari_thesaurus_selfcheck(void);
    specific op would add nothing new -- same reasoning
    wp_atari_thesaurus_selfcheck's own comment already gives. */
 wp_bool wp_atari_grammar_check_selfcheck(void);
+
+/* M8 T8.3: proves offload_caps_supports() -- the new pure bit-check
+   behind Chat's "consult CAPS before submitting" behavior -- against a
+   hand-built offload_capabilities value with a known bitmask (CHAT bit
+   set, IMAGE bit clear). There is little else new and non-blocking to
+   test here: Chat's prompt extraction reuses extract_current_paragraph_text()
+   (already proven by wp_atari_grammar_check_selfcheck()), and its
+   response has no structure to decode (docs/formats/offload-protocol.md
+   -- the reply is shipped back verbatim, unlike GRAMMAR_CHECK's issue
+   list). Deliberately does NOT call do_chat() itself (form_alert()
+   blocks) or offload_init()/offload_query() against a real gateway --
+   same reasoning every other selfcheck in this file already gives. */
+wp_bool wp_atari_chat_selfcheck(void);
 
 #endif /* WP_ATARI_APP_SHELL_INTERNAL_H */

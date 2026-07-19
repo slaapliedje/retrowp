@@ -922,3 +922,86 @@ gateway) behind what looks like normal degraded-mode operation.
 The `do_grammar_check()` wrapper's own untested-by-CI status (above) is
 unchanged by any of this -- the fallback branch inside it is exercised
 by the same transitive reasoning as the offload branch always was.
+
+## Chat wired into the UI (M8 T8.3)
+
+**IMAGE is deliberately not part of this.** M8's own milestone text
+pairs "CHAT / IMAGE ops behind capability flags," but this app has no
+image type anywhere -- not in the document model, not in any format
+importer/exporter, and not in `platform.h`'s draw seam (`plat_draw_text`
+is the only drawing primitive that exists). Building IMAGE's wire
+plumbing with nowhere to put the resulting bytes would be a checkbox
+feature, not a real one -- see `docs/formats/offload-protocol.md`'s own
+`OFFLOAD_IMAGE` section, including a design note for whenever this
+project's targets can genuinely support it (a real IMAGE feature would
+need the GATEWAY to downconvert to something each vintage target can
+actually display -- ST low-res is 16 colors from a 512-color palette,
+and the other planned platforms have their own, often tighter,
+ceilings -- not just ship whatever a modern generator produces).
+
+**A new fourth Tools item, Tools > Chat**, appended after Grammar Check
+(`WP_MENU_OBJ_TOOLS_CHAT`) in the hand-built `OBJECT[]` tree -- same
+"append, don't insert" discipline as every earlier menu growth in this
+file. `wp_menu_tree_selfcheck()` grew the matching linkage assertions.
+
+**`do_chat()` reuses two already-proven pieces instead of inventing
+new ones.** The prompt is the current paragraph, via
+`extract_current_paragraph_text()` (Grammar Check's own extraction
+helper, T8.1) -- not a purpose-built free-text input field. This
+project's toolchain note (above, "no resource editor... a hand-built
+`OBJECT[]` array is the practical choice... `rsrc_load()` would be the
+better tool for anything with real dialog layout, which this project
+doesn't need yet") already named a real multi-field GEM text-entry
+dialog as out of scope for anything built so far, and Chat doesn't
+change that: reusing an already-tested extraction path costs nothing
+new, where a genuine text-input dialog would be real, unproven GEM UI
+machinery for a milestone whose own AC is about capability GATING, not
+input ergonomics. The reply is shown read-only via `form_alert()` --
+Chat never mutates the document, matching Thesaurus's "look something
+up, show it, done" pattern rather than inventing an insert-into-
+document flow.
+
+**The actual point of T8.3, and the one genuinely new piece of client
+behavior:** `do_chat()` is the first offload action in this app that
+calls `offload_query()` and checks the CAPS handshake's
+`ops_supported` bitmask BEFORE submitting a request. Every earlier
+feature -- Thesaurus, Grammar Check, ODT/PDF -- submits unconditionally
+and only handles `OFFLOAD_UNSUPPORTED` reactively, after a full request/
+response round trip; functionally fine, but it wastes a round trip
+against a gateway that could have said no immediately. A new
+`offload_caps_supports(caps, op)` helper (`(caps->ops_supported &
+(1uL << op)) != 0`) makes this check a one-line, easily-selfcheck-
+tested call: a gateway that doesn't advertise CHAT gets an immediate,
+honest "This gateway doesn't offer Chat" alert with zero network
+traffic, genuinely satisfying "present only when the gateway
+advertises it, absent gracefully otherwise" rather than approximating
+it after the fact.
+
+**Verified two ways, same split as every offload action before it:**
+1. `wp_atari_chat_selfcheck()` (run via `ci_atari.sh`) proves
+   `offload_caps_supports()` against a hand-built `offload_capabilities`
+   value with a known bitmask (CHAT set, THESAURUS set, GRAMMAR_CHECK
+   and IMAGE clear) -- there is little else new and non-blocking to
+   test here, since prompt extraction reuses Grammar Check's already-
+   selfchecked `extract_current_paragraph_text()` and the response has
+   no structure to decode at all (the reply is shipped back verbatim).
+2. `host/tools/ollama_gateway_smoke.c`, extended to exercise all three
+   real ops over one connection, confirms against a LIVE Ollama server
+   that `ollama_gateway.c` genuinely advertises `OFFLOAD_CHAT` (and
+   genuinely does NOT advertise `OFFLOAD_IMAGE`) and that a real prompt
+   ("In one short sentence, what is a good synonym for happy?") gets a
+   real, sensible reply back through the exact same `offload_client.c`
+   API this menu action uses. All 15 checks passed on a live run,
+   including the two new capability-advertisement assertions.
+
+**Known gap, honestly not closed here, same shape as every offload
+action before it:** `do_chat()` itself has never been run and observed
+end to end -- it ends in `form_alert()`, a real blocking AES call this
+headless environment cannot safely drive to completion. Verified
+instead, transitively: `offload_caps_supports()` (selfcheck above),
+`extract_current_paragraph_text()` (Grammar Check's own selfcheck), and
+the `offload_init`/`offload_query`/`offload_submit`/`offload_shutdown`
+sequence (proven generic over real emulated RS-232 by T6.3/T7.4) are
+each independently proven; `do_chat()` is a thin, mechanical composition
+of all three plus string formatting, not independently re-verified end
+to end.

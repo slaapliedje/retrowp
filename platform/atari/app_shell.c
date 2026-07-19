@@ -53,10 +53,11 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_EDIT_PASTE, -1,                     -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 1, 8,  1 },
     { WP_MENU_OBJ_EDIT_BOX,   -1,                     -1,                    G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 2, 8,  1 },
     { WP_MENU_OBJ_ROOT,       WP_MENU_OBJ_TOOLS_BOX,  WP_MENU_OBJ_TOOLS_BOX, G_TITLE,  OF_NONE,   OS_NORMAL, {0}, 12, 0, 7,  1 },
-    { WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_GRAMMARCHECK, G_BOX, OF_NONE, OS_NORMAL, {0}, 12, 1, 16, 3 },
+    { WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_CHAT, G_BOX, OF_NONE, OS_NORMAL, {0}, 12, 1, 16, 4 },
     { WP_MENU_OBJ_TOOLS_THESAURUS, -1,                -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 0, 16, 1 },
     { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, -1,              -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 1, 16, 1 },
-    { WP_MENU_OBJ_TOOLS_BOX,  -1,                     -1,                    G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 2, 16, 1 }
+    { WP_MENU_OBJ_TOOLS_CHAT, -1,                      -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 2, 16, 1 },
+    { WP_MENU_OBJ_TOOLS_BOX,  -1,                     -1,                    G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 3, 16, 1 }
 };
 
 static char g_text_file[]  = " File ";
@@ -71,6 +72,7 @@ static char g_text_paste[] = "  Paste";
 static char g_text_spellcheck[] = "  Spell Check";
 static char g_text_thesaurus[] = "  Thesaurus";
 static char g_text_grammarcheck[] = "  Grammar Check";
+static char g_text_chat[] = "  Chat";
 
 void wp_menu_tree_init(void)
 {
@@ -86,6 +88,7 @@ void wp_menu_tree_init(void)
     wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_spec.free_string = g_text_spellcheck;
     wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_spec.free_string = g_text_thesaurus;
     wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_spec.free_string = g_text_grammarcheck;
+    wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_spec.free_string = g_text_chat;
 }
 
 wp_bool wp_menu_tree_selfcheck(void)
@@ -112,7 +115,7 @@ wp_bool wp_menu_tree_selfcheck(void)
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_next != WP_MENU_OBJ_TOOLS_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_head != WP_MENU_OBJ_TOOLS_SPELLCHECK) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_GRAMMARCHECK) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_CHAT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_type != G_BOX) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_next != WP_MENU_OBJ_TOOLS_THESAURUS) return WP_FALSE;
@@ -121,8 +124,11 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_next != WP_MENU_OBJ_TOOLS_GRAMMARCHECK) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
 
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_next != WP_MENU_OBJ_TOOLS_CHAT) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_next != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_head != WP_MENU_OBJ_FILE_OPEN) return WP_FALSE;
@@ -152,6 +158,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_spec.free_string != g_text_spellcheck) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_spec.free_string != g_text_thesaurus) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_spec.free_string != g_text_grammarcheck) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_spec.free_string != g_text_chat) return WP_FALSE;
 
     return WP_TRUE;
 }
@@ -1117,17 +1124,24 @@ static wp_bool decode_grammar_issue_at(const u8 *buf, u32 len, u32 index, wp_ata
     return WP_TRUE;
 }
 
-/* Appends up to WP_ATARI_GRAMMAR_DISPLAY_LEN bytes of s into buf via
-   append_str -- keeps one long quote/message/suggestion from crowding
-   the rest of a form_alert dialog off the tiny ST screen. Truncates the
-   DIALOG TEXT only; the wire/local values actually applied to the
-   document (wp_atari_grammar_issue's own fields, above) are never
-   touched by this. */
-static void append_str_n(char *buf, u32 cap, u32 *pos, const u8 *s, u32 s_len)
+/* Appends up to max_len bytes of s into buf via append_str -- keeps one
+   long field from crowding the rest of a form_alert dialog off the
+   tiny ST screen. Truncates the DIALOG TEXT only; the wire/local values
+   actually applied to the document (wp_atari_grammar_issue's own
+   fields, above) are never touched by this. Grammar Check's three
+   fields (message/quote/suggestion) share one dialog and so each get
+   the tighter WP_ATARI_GRAMMAR_DISPLAY_LEN; Chat's reply is the ONLY
+   field in its own dialog and is prose, not a short suggestion, so it
+   gets its own, more generous WP_ATARI_CHAT_DISPLAY_LEN -- max_len is a
+   parameter, not a shared hardcoded macro, specifically so callers
+   aren't forced to agree on one truncation width. */
+static void append_str_n(char *buf, u32 cap, u32 *pos, const u8 *s, u32 s_len, u32 max_len)
 {
-    char tmp[WP_ATARI_GRAMMAR_DISPLAY_LEN + 1];
-    u32 tlen = (s_len < (u32)sizeof(tmp) - 1) ? s_len : (u32)sizeof(tmp) - 1;
+    char tmp[192]; /* generous fixed cap: the largest max_len any caller passes today
+                       (WP_ATARI_CHAT_DISPLAY_LEN) plus headroom for a future caller */
+    u32 tlen = (s_len < max_len) ? s_len : max_len;
 
+    if (tlen >= (u32)sizeof(tmp)) tlen = (u32)sizeof(tmp) - 1;
     memcpy(tmp, s, tlen);
     tmp[tlen] = '\0';
     append_str(buf, cap, pos, tmp);
@@ -1266,15 +1280,18 @@ static void do_grammar_check(void)
         }
 
         append_str(msg, (u32)sizeof(msg), &pos, FA_INFO "[");
-        append_str_n(msg, (u32)sizeof(msg), &pos, (const u8 *)issue->message, (u32)strlen(issue->message));
+        append_str_n(msg, (u32)sizeof(msg), &pos, (const u8 *)issue->message, (u32)strlen(issue->message),
+                     (u32)WP_ATARI_GRAMMAR_DISPLAY_LEN);
         append_str(msg, (u32)sizeof(msg), &pos, "|Text: \"");
         if ((u32)issue->start_offset + (u32)issue->span_len <= paragraph_len) {
-            append_str_n(msg, (u32)sizeof(msg), &pos, paragraph + issue->start_offset, issue->span_len);
+            append_str_n(msg, (u32)sizeof(msg), &pos, paragraph + issue->start_offset, issue->span_len,
+                         (u32)WP_ATARI_GRAMMAR_DISPLAY_LEN);
         }
         append_str(msg, (u32)sizeof(msg), &pos, "\"|Suggestion: ");
         if (has_suggestion) {
             append_str(msg, (u32)sizeof(msg), &pos, "\"");
-            append_str_n(msg, (u32)sizeof(msg), &pos, (const u8 *)issue->suggestion, (u32)strlen(issue->suggestion));
+            append_str_n(msg, (u32)sizeof(msg), &pos, (const u8 *)issue->suggestion, (u32)strlen(issue->suggestion),
+                         (u32)WP_ATARI_GRAMMAR_DISPLAY_LEN);
             append_str(msg, (u32)sizeof(msg), &pos, "\"");
         } else {
             append_str(msg, (u32)sizeof(msg), &pos, "(none offered)");
@@ -1345,6 +1362,91 @@ static void do_grammar_check(void)
         g_cursor.offset = 0;
         relayout_document(g_content_width_twips);
     }
+}
+
+/* Chat (M8 T8.3): "freeform assist" -- sends the current paragraph
+   (reusing extract_current_paragraph_text(), the same piece Grammar
+   Check already built) as a prompt and shows the reply read-only via
+   form_alert(), the same "look something up, show it, done" pattern
+   Thesaurus already established. Never mutates the document -- unlike
+   Grammar Check's Apply/Skip/Stop loop, inventing an insert-the-reply
+   flow is out of scope for what T8.3's own AC actually asks for
+   (capability gating, not a new editing flow).
+
+   This is the first op whose client actually CONSULTS the CAPS
+   handshake's ops_supported bitmask before submitting, rather than
+   just handling OFFLOAD_UNSUPPORTED reactively after a full round trip
+   the way Thesaurus/Grammar Check/ODT-PDF all do -- see
+   docs/formats/offload-protocol.md's OFFLOAD_CHAT section for why this
+   is the actual point of "present only when the gateway advertises it,
+   absent gracefully otherwise": a gateway that doesn't advertise CHAT
+   gets an immediate, honest answer with no wasted network round trip. */
+#define WP_ATARI_CHAT_MAX_PARAGRAPH_LEN 2000uL /* matches ollama_gateway.c's CHAT_PROMPT_MAX_LEN */
+#define WP_ATARI_CHAT_TIMEOUT_MS        90000uL /* same cold-model-load rationale as Thesaurus/Grammar Check */
+#define WP_ATARI_CHAT_DISPLAY_LEN       180 /* the reply is the ONLY field in its dialog, unlike Grammar Check's three */
+
+static wp_bool offload_caps_supports(const offload_capabilities *caps, offload_op op)
+{
+    return (wp_bool)((caps->ops_supported & (1uL << (u32)op)) != 0);
+}
+
+static void do_chat(void)
+{
+    u8 *paragraph;
+    u32 paragraph_len;
+    offload_capabilities caps;
+    offload_request req;
+    offload_response resp;
+    char msg[220];
+    u32 pos = 0;
+
+    if (!g_doc_loaded) return;
+
+    paragraph = (u8 *)mem_alloc(WP_ATARI_CHAT_MAX_PARAGRAPH_LEN);
+    if (paragraph == NULL) return;
+
+    if (!extract_current_paragraph_text(paragraph, (u32)WP_ATARI_CHAT_MAX_PARAGRAPH_LEN, &paragraph_len)) {
+        mem_free(paragraph);
+        form_alert(1, FA_INFO "[Place the cursor in a paragraph|with some text, then choose|Chat again.][ OK ]");
+        return;
+    }
+
+    if (!ensure_offload()) {
+        mem_free(paragraph);
+        form_alert(1, FA_ERROR "[No offload device available.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");
+        return;
+    }
+
+    if (offload_query(&caps) != WP_OK || !offload_caps_supports(&caps, OFFLOAD_CHAT)) {
+        mem_free(paragraph);
+        form_alert(1, FA_INFO "[This gateway doesn't offer Chat.][ OK ]");
+        return;
+    }
+
+    req.op = OFFLOAD_CHAT;
+    req.payload = paragraph;
+    req.payload_len = paragraph_len;
+    req.timeout_ms = (u32)WP_ATARI_CHAT_TIMEOUT_MS;
+
+    if (offload_submit(&req, &resp) != WP_OK) {
+        mem_free(paragraph);
+        form_alert(1, FA_ERROR "[Chat request failed or timed out.][ OK ]");
+        return;
+    }
+    mem_free(paragraph);
+
+    if (resp.status != OFFLOAD_OK) {
+        offload_response_free(&resp);
+        form_alert(1, FA_INFO "[The connected gateway couldn't|answer that.][ OK ]");
+        return;
+    }
+
+    append_str(msg, (u32)sizeof(msg), &pos, FA_INFO "[");
+    append_str_n(msg, (u32)sizeof(msg), &pos, resp.result, resp.result_len, (u32)WP_ATARI_CHAT_DISPLAY_LEN);
+    append_str(msg, (u32)sizeof(msg), &pos, "][ OK ]");
+
+    offload_response_free(&resp);
+    form_alert(1, msg);
 }
 
 wp_bool wp_atari_layout_selfcheck(void)
@@ -1824,6 +1926,22 @@ wp_bool wp_atari_grammar_check_selfcheck(void)
     return ok;
 }
 
+wp_bool wp_atari_chat_selfcheck(void)
+{
+    offload_capabilities caps;
+    wp_bool ok = WP_TRUE;
+
+    memset(&caps, 0, sizeof(caps));
+    caps.ops_supported = (1uL << OFFLOAD_THESAURUS) | (1uL << OFFLOAD_CHAT);
+
+    if (!offload_caps_supports(&caps, OFFLOAD_CHAT)) ok = WP_FALSE;
+    if (offload_caps_supports(&caps, OFFLOAD_IMAGE)) ok = WP_FALSE;
+    if (!offload_caps_supports(&caps, OFFLOAD_THESAURUS)) ok = WP_FALSE;
+    if (offload_caps_supports(&caps, OFFLOAD_GRAMMAR_CHECK)) ok = WP_FALSE;
+
+    return ok;
+}
+
 static void redraw_window(short window_handle, VdiHdl vdi)
 {
     GRECT r, work;
@@ -1900,6 +2018,9 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
         case WP_MENU_OBJ_TOOLS_GRAMMARCHECK:
             do_grammar_check();
             redraw_window(window_handle, vdi);
+            break;
+        case WP_MENU_OBJ_TOOLS_CHAT:
+            do_chat();
             break;
         default:
             break;

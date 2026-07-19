@@ -102,3 +102,29 @@ u32 fixtures_grammar_lookup(const u8 *paragraph, u32 len, const fixtures_grammar
     }
     return 0;
 }
+
+typedef struct {
+    const char *prompt;
+    const char *reply;
+} chat_entry;
+
+static const chat_entry k_chat[] = {
+    { "Hello", "Hi there! How can I help with your document?" },
+    { "What is the capital of France?", "Paris." }
+};
+
+static const char k_chat_default_reply[] = "I don't have anything to add.";
+
+const char *fixtures_chat_reply(const u8 *prompt, u32 len, u32 *out_len)
+{
+    u32 i;
+
+    for (i = 0; i < sizeof(k_chat) / sizeof(k_chat[0]); i++) {
+        if (word_eq(prompt, len, k_chat[i].prompt)) {
+            *out_len = (u32)strlen(k_chat[i].reply);
+            return k_chat[i].reply;
+        }
+    }
+    *out_len = (u32)strlen(k_chat_default_reply);
+    return k_chat_default_reply;
+}

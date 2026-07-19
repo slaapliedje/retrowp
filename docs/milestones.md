@@ -656,10 +656,69 @@ Goal: Full smart features, all optional/degradable.
       accidental `*/` inside a `/* ... */` comment closing it early) was
       caught immediately by `make test`'s strict `-Werror` build, not by
       inspection -- see that section for the full story.
-- [ ] T8.3 Optional CHAT / IMAGE ops behind capability flags.
+- [x] T8.3 Optional CHAT / IMAGE ops behind capability flags.
       AC: Present only when gateway advertises them; absent gracefully otherwise.
+      **CHAT implemented; IMAGE deliberately not** -- this app has no
+      image type anywhere (document model, format importers/exporters,
+      or the Atari draw layer), so building IMAGE's capability
+      advertisement with nowhere to put the resulting bytes would be a
+      checkbox feature, not a real one. Full rationale, plus a design
+      note for whenever a future milestone makes this genuinely
+      buildable (image data would need the GATEWAY to downconvert to
+      something each vintage target can actually display, not just ship
+      whatever a modern generator produces), in
+      docs/formats/offload-protocol.md's `OFFLOAD_IMAGE` section.
+      - Wire payload (docs/formats/offload-protocol.md's new
+        `OFFLOAD_CHAT` section): the simplest shape in the protocol --
+        UTF-8 prompt in, UTF-8 reply out, no framing beyond the wire
+        frame's own length, since a chat reply has no structure to
+        encode the way GRAMMAR_CHECK's issue list or THESAURUS's word
+        list do.
+      - Both gateways implement it: `mock_gateway.c` from a small
+        fixture table (deterministic, part of `make test`), and
+        `offload/gateway/ollama_gateway.c` for real, sharing
+        GRAMMAR_CHECK's `gemma2:9b` default (own `--chat-model`
+        override) since CHAT is "freeform assist" with no rigid format
+        to parse -- the same category of task GRAMMAR_CHECK already
+        proved that model handles well.
+      - **The actual point of this AC, not previously done for any
+        offload feature:** `platform/atari/app_shell.c`'s `do_chat()`
+        is the first client code in this project that calls
+        `offload_query()` and checks the CAPS handshake's
+        `ops_supported` bitmask BEFORE submitting a request, via a new
+        `offload_caps_supports()` helper. Thesaurus/Grammar Check/
+        ODT-PDF all submit unconditionally and only handle
+        `OFFLOAD_UNSUPPORTED` reactively after a full round trip --
+        Chat gets an immediate, honest "this gateway doesn't offer
+        Chat" answer with zero network traffic when the bit isn't set.
+        Prompt extraction reuses Grammar Check's
+        `extract_current_paragraph_text()`; the reply is shown
+        read-only via `form_alert()` (no insert-into-document flow --
+        out of scope for an AC about capability gating, not editing).
+      - Verified on host (137/137 `make test`, including a real CAPS
+        check that `OFFLOAD_CHAT` is advertised and `OFFLOAD_IMAGE` is
+        NOT by the real gateways), on real m68k hardware emulation (a
+        new `wp_atari_chat_selfcheck()` case, run via `ci_atari.sh`),
+        and against a REAL, running Ollama server (`host/tools/
+        ollama_gateway_smoke.c`, extended to exercise all three real
+        ops over one connection -- a live prompt got a real, sensible
+        reply, and capability advertisement was confirmed both ways:
+        CHAT present, IMAGE genuinely absent). Full writeup:
+        docs/atari-platform.md's "Chat wired into the UI" section.
+      - Same honest gap as every other offload menu action:
+        `do_chat()` itself (the `form_alert()`-driving wrapper) is
+        untested by CI, verified only transitively through its
+        already-proven building blocks.
 
 Artifact: Complete smart writing experience, fully optional.
+**Reached**, within this project's own documented scope choices.
+T8.1 (LLM-backed grammar check, protocol + both gateways + real ST UI
+wiring) and T8.2 (on-device rule-based fallback for no-Pi-attached) are
+both done. T8.3 (capability-gated optional ops) is done for CHAT, the
+one half of "CHAT / IMAGE" this project can actually make use of --
+IMAGE stays a reserved, unimplemented op ID, honestly documented rather
+than faked, until a future milestone gives this project somewhere to
+put image bytes at all.
 
 ---
 

@@ -12,28 +12,29 @@
 #include "gw_common.h"
 #include "http_client.h"
 
-/* Real-backend gateway (post-M6; GRAMMAR_CHECK added M8 T8.1): answers
-   OFFLOAD_THESAURUS and OFFLOAD_GRAMMAR_CHECK with actual Ollama
-   (http://localhost:11434 by default) calls instead of mock_gateway.c's
-   fixture table -- "not just a faked endpoint" per the request that
-   prompted this file. Same wire protocol, same TCP/serial transport
-   choice, same HELLO/CAPS handshake shape as mock_gateway.c (sharing
-   gw_common.c so neither drifts); only these two request handlers'
-   backend differs.
+/* Real-backend gateway (post-M6; GRAMMAR_CHECK added M8 T8.1; CHAT
+   added M8 T8.3): answers OFFLOAD_THESAURUS, OFFLOAD_GRAMMAR_CHECK, and
+   OFFLOAD_CHAT with actual Ollama (http://localhost:11434 by default)
+   calls instead of mock_gateway.c's fixture table -- "not just a faked
+   endpoint" per the request that prompted this file. Same wire
+   protocol, same TCP/serial transport choice, same HELLO/CAPS handshake
+   shape as mock_gateway.c (sharing gw_common.c so neither drifts); only
+   these three request handlers' backend differs.
 
-   Scope: THESAURUS and GRAMMAR_CHECK only. Every other op, including
-   SPELL_CHECK (which mock_gateway.c does serve, from fixtures),
-   responds OFFLOAD_UNSUPPORTED here -- the same honest "absent
-   gracefully" path the protocol already defines for ops no gateway
-   implements (docs/formats/offload-protocol.md). Leaving SPELL_CHECK
-   unimplemented here was a deliberate choice made after testing, not an
-   oversight: spelling correction needs to be RIGHT, and this project's
-   on-device services/spell already covers that deterministically; a
-   quick trial against deepseek-coder-v2:16b reported "teh" as a
-   correctly spelled word, which is a bad user experience swap for the
-   deterministic local checker.
+   Scope: THESAURUS, GRAMMAR_CHECK, and CHAT only. Every other op,
+   including SPELL_CHECK (which mock_gateway.c does serve, from
+   fixtures) and IMAGE (which NO gateway anywhere in this repo
+   implements -- see docs/formats/offload-protocol.md for why), responds
+   OFFLOAD_UNSUPPORTED here -- the same honest "absent gracefully" path
+   the protocol already defines for ops no gateway implements. Leaving
+   SPELL_CHECK unimplemented here was a deliberate choice made after
+   testing, not an oversight: spelling correction needs to be RIGHT, and
+   this project's on-device services/spell already covers that
+   deterministically; a quick trial against deepseek-coder-v2:16b
+   reported "teh" as a correctly spelled word, which is a bad user
+   experience swap for the deterministic local checker.
 
-   TWO independently-defaulted models, not one shared default:
+   THREE independently-defaulted models, not one shared default:
    - THESAURUS keeps its M6 default, `deepseek-coder-v2:16b`
      (--model to override) -- untouched, still the only non-"thinking"
      model this gateway originally verified against, and there's no
@@ -57,6 +58,18 @@
      Paying Ollama's cold-load cost separately the first time each op is
      used after a gap is the accepted cost of keeping THESAURUS's
      already-verified choice untouched.
+   - CHAT shares GRAMMAR_CHECK's `gemma2:9b` default (--chat-model to
+     override, independent of both --model and --grammar-model) rather
+     than getting a third distinct default: CHAT is "freeform assist"
+     with no rigid output format to parse (unlike GRAMMAR_CHECK) and no
+     narrow-vocabulary lookup task (unlike THESAURUS) -- a general-
+     purpose instruct model is simply the right category of model for
+     it, and gemma2:9b already proved itself a reliable instruct
+     follower during GRAMMAR_CHECK's own model comparison. Giving it an
+     independent override flag anyway (rather than hard-reusing
+     --grammar-model) keeps every op's model choice tunable on its own,
+     the same "one op, one flag" convention THESAURUS and GRAMMAR_CHECK
+     already established.
 
    **Never trust the model's own claimed position.** GRAMMAR_CHECK's
    wire response carries a byte offset/length for each issue, but an
@@ -73,9 +86,10 @@
    points at text that is genuinely present in the paragraph it asked
    about, independent of how faithfully the model followed instructions.
 
-   --model/--grammar-model are plain CLI overrides, so a differently-
-   equipped machine (or a smaller/faster instruct model pulled later)
-   isn't locked to either default. Whatever model is loaded costs real
+   --model/--grammar-model/--chat-model are plain CLI overrides, so a
+   differently-equipped machine (or a smaller/faster instruct model
+   pulled later) isn't locked to any default. Whatever model is loaded
+   costs real
    wall-clock time on a cold start -- ~20s to load an 8.9GB model into
    memory was the measured cost in this project's own dev environment
    even on an otherwise-idle GPU, BEFORE the model can answer the first
@@ -93,6 +107,7 @@
 #define OLLAMA_DEFAULT_PORT 11434
 #define OLLAMA_DEFAULT_MODEL "deepseek-coder-v2:16b"
 #define OLLAMA_DEFAULT_GRAMMAR_MODEL "gemma2:9b"
+#define OLLAMA_DEFAULT_CHAT_MODEL "gemma2:9b"
 #define OLLAMA_DEFAULT_TIMEOUT_MS 60000u
 
 #define THESAURUS_MAX_WORDS    8
@@ -104,6 +119,8 @@
 #define GRAMMAR_MSG_MAX_LEN       160
 #define GRAMMAR_SUGG_MAX_LEN      160
 #define GRAMMAR_PARAGRAPH_MAX_LEN 2000 /* truncation bound for the incoming GRAMMAR_CHECK paragraph */
+
+#define CHAT_PROMPT_MAX_LEN 2000 /* truncation bound for the incoming CHAT prompt */
 
 static int parse_int_flag(const char *arg, const char *name, int *out)
 {
@@ -516,12 +533,73 @@ static u8 do_grammar_check(const char *ollama_host, u16 ollama_port, const char 
     return (u8)OFFLOAD_OK;
 }
 
+/* Builds the /api/generate request body for CHAT -- no rigid output
+   format requested (unlike build_grammar_request), since there's
+   nothing to parse out of the reply: the whole "response" field IS the
+   answer, shipped back byte-for-byte. */
+static u32 build_chat_request(const char *model, const u8 *prompt, u32 prompt_len,
+                               char *out, u32 out_cap)
+{
+    char escaped[CHAT_PROMPT_MAX_LEN * 6 + 1];
+    int written;
+
+    json_escape(prompt, prompt_len, escaped, (u32)sizeof(escaped));
+
+    written = snprintf(out, out_cap, "{\"model\":\"%s\",\"prompt\":\"%s\",\"stream\":false}",
+                        model, escaped);
+
+    if (written <= 0 || (size_t)written >= out_cap) return 0;
+    return (u32)written;
+}
+
+/* Real capability #3: prompt -> Ollama -> reply, shipped back verbatim.
+   No candidate parsing, no verification pass -- unlike THESAURUS (a
+   comma list to split) and GRAMMAR_CHECK (a quote to re-verify against
+   the source), a chat reply has no internal structure this gateway
+   needs to trust or distrust; it either fits in resp_cap or gets
+   truncated, the same bounded-but-not-failing posture every other
+   bulk-text response in this project takes. */
+static u8 do_chat(const char *ollama_host, u16 ollama_port, const char *model,
+                   u32 ollama_timeout_ms, const u8 *prompt, u32 prompt_len,
+                   u8 *resp_payload, u32 resp_cap, u32 *resp_len)
+{
+    char req_body[CHAT_PROMPT_MAX_LEN * 6 + 256];
+    u32 req_len;
+    u8 http_body[16384];
+    u32 http_body_len = 0;
+    char field[16384];
+    u32 field_len = 0;
+    u32 clamped_len = (prompt_len > CHAT_PROMPT_MAX_LEN) ? CHAT_PROMPT_MAX_LEN : prompt_len;
+
+    *resp_len = 0;
+
+    req_len = build_chat_request(model, prompt, clamped_len, req_body, (u32)sizeof(req_body));
+    if (req_len == 0) return (u8)OFFLOAD_ERR;
+
+    if (http_post_json(ollama_host, ollama_port, "/api/generate",
+                        (const u8 *)req_body, req_len, ollama_timeout_ms,
+                        http_body, (u32)sizeof(http_body), &http_body_len) != WP_OK) {
+        return (u8)OFFLOAD_ERR;
+    }
+
+    if (!extract_json_string_field(http_body, http_body_len, "response",
+                                    field, (u32)sizeof(field), &field_len)) {
+        return (u8)OFFLOAD_ERR;
+    }
+
+    if (field_len > resp_cap) field_len = resp_cap;
+    memcpy(resp_payload, field, field_len);
+    *resp_len = field_len;
+    return (u8)OFFLOAD_OK;
+}
+
 int main(int argc, char **argv)
 {
     const char *ollama_host = OLLAMA_DEFAULT_HOST;
     int ollama_port = OLLAMA_DEFAULT_PORT;
     const char *model = OLLAMA_DEFAULT_MODEL;
     const char *grammar_model = OLLAMA_DEFAULT_GRAMMAR_MODEL;
+    const char *chat_model = OLLAMA_DEFAULT_CHAT_MODEL;
     int ollama_timeout_ms = (int)OLLAMA_DEFAULT_TIMEOUT_MS;
     int hello_timeout_ms = 5000;
     const char *serial_rx = NULL;
@@ -539,6 +617,7 @@ int main(int argc, char **argv)
         if (parse_int_flag(argv[i], "--ollama-port", &ollama_port)) continue;
         if (parse_str_flag(argv[i], "--model", &model)) continue;
         if (parse_str_flag(argv[i], "--grammar-model", &grammar_model)) continue;
+        if (parse_str_flag(argv[i], "--chat-model", &chat_model)) continue;
         if (parse_int_flag(argv[i], "--ollama-timeout-ms", &ollama_timeout_ms)) continue;
         if (parse_int_flag(argv[i], "--hello-timeout-ms", &hello_timeout_ms)) continue;
         if (strncmp(argv[i], "--serial-rx=", 12) == 0) { serial_rx = argv[i] + 12; continue; }
@@ -599,7 +678,8 @@ int main(int argc, char **argv)
 
         memset(&caps, 0, sizeof(caps));
         caps.protocol_version = WIRE_VERSION;
-        caps.ops_supported = (1uL << OFFLOAD_THESAURUS) | (1uL << OFFLOAD_GRAMMAR_CHECK);
+        caps.ops_supported = (1uL << OFFLOAD_THESAURUS) | (1uL << OFFLOAD_GRAMMAR_CHECK) |
+                             (1uL << OFFLOAD_CHAT);
         caps.max_payload_bytes = 4096;
         strncpy((char *)caps.gateway_name, "ollama-gateway", sizeof(caps.gateway_name) - 1);
 
@@ -630,6 +710,10 @@ int main(int argc, char **argv)
             status = do_grammar_check(ollama_host, (u16)ollama_port, grammar_model,
                                        (u32)ollama_timeout_ms, word_buf, word_len,
                                        resp_payload, sizeof(resp_payload), &resp_len);
+        } else if (req_hdr.op == OFFLOAD_CHAT) {
+            status = do_chat(ollama_host, (u16)ollama_port, chat_model,
+                              (u32)ollama_timeout_ms, word_buf, word_len,
+                              resp_payload, sizeof(resp_payload), &resp_len);
         } else {
             status = (u8)OFFLOAD_UNSUPPORTED;
             resp_len = 0;

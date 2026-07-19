@@ -44,4 +44,13 @@ typedef struct {
    the process lifetime). *out is untouched when the return value is 0. */
 u32 fixtures_grammar_lookup(const u8 *paragraph, u32 len, const fixtures_grammar_issue **out);
 
+/* Looks up prompt (UTF-8, `len` bytes) in the canned chat-reply table.
+   ALWAYS succeeds -- an unrecognized prompt gets a fixed generic reply,
+   never an error, the same "always answer, don't fail on unrecognized
+   input" convention an unknown THESAURUS word already gets (an empty
+   synonym list, not OFFLOAD_ERR). Returns a NUL-terminated C string
+   (static storage, valid for the process lifetime) and its length via
+   *out_len. */
+const char *fixtures_chat_reply(const u8 *prompt, u32 len, u32 *out_len);
+
 #endif /* WP_GATEWAY_FIXTURES_H */

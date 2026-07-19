@@ -221,6 +221,66 @@ void test_offload_grammar_check_clean_paragraph_returns_no_issues(void)
     gateway_stop(&gw);
 }
 
+void test_offload_chat_happy_path(void)
+{
+    gateway_handle gw;
+    offload_response resp;
+
+    ASSERT_TRUE(gateway_start(NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    ASSERT_TRUE(submit_word(OFFLOAD_CHAT, "Hello", 2000, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+    ASSERT_EQ_U32(resp.result_len, (u32)strlen("Hi there! How can I help with your document?"));
+    ASSERT_MEM_EQ(resp.result, "Hi there! How can I help with your document?", resp.result_len);
+
+    offload_response_free(&resp);
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+void test_offload_chat_unrecognized_prompt_gets_generic_reply(void)
+{
+    gateway_handle gw;
+    offload_response resp;
+
+    ASSERT_TRUE(gateway_start(NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    /* Not a recognized fixture prompt -- same "always answer, don't
+       fail on unrecognized input" convention THESAURUS's unknown-word
+       case already established (an empty list, not an error). */
+    ASSERT_TRUE(submit_word(OFFLOAD_CHAT, "What time is it?", 2000, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+    ASSERT_EQ_U32(resp.result_len, (u32)strlen("I don't have anything to add."));
+    ASSERT_MEM_EQ(resp.result, "I don't have anything to add.", resp.result_len);
+
+    offload_response_free(&resp);
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+void test_offload_capabilities_advertise_chat_but_not_image(void)
+{
+    gateway_handle gw;
+    offload_capabilities caps;
+
+    ASSERT_TRUE(gateway_start(NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    ASSERT_TRUE(offload_query(&caps) == WP_OK);
+    ASSERT_TRUE((caps.ops_supported & (1uL << OFFLOAD_CHAT)) != 0);
+    /* OFFLOAD_IMAGE is permanently unimplemented by every gateway in
+       this repo (docs/formats/offload-protocol.md) -- no gateway ever
+       sets this bit, which is exactly what lets the Atari-side
+       capability-gating logic (T8.3) be tested against a real,
+       honestly-unsupported op instead of invented test scaffolding. */
+    ASSERT_TRUE((caps.ops_supported & (1uL << OFFLOAD_IMAGE)) == 0);
+
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
 void test_offload_unsupported_op_reports_unsupported(void)
 {
     gateway_handle gw;
@@ -229,7 +289,12 @@ void test_offload_unsupported_op_reports_unsupported(void)
     ASSERT_TRUE(gateway_start(NULL, &gw) == WP_OK);
     ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
 
-    ASSERT_TRUE(submit_word(OFFLOAD_CHAT, "hello", 2000, &resp) == WP_OK);
+    /* OFFLOAD_IMAGE, not OFFLOAD_CHAT: CHAT is now a real, supported op
+       (T8.3), so it can no longer stand in as "something this gateway
+       doesn't implement" -- IMAGE permanently can (docs/formats/
+       offload-protocol.md: no gateway in this repo ever advertises or
+       implements it). */
+    ASSERT_TRUE(submit_word(OFFLOAD_IMAGE, "hello", 2000, &resp) == WP_OK);
     ASSERT_TRUE(resp.status == OFFLOAD_UNSUPPORTED);
     offload_response_free(&resp);
 
