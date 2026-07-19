@@ -8,7 +8,7 @@ CC ?= cc
 STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror
 RELAXED_CFLAGS = -Wall -Wextra
 
-INCLUDES = -Iengine/include -Iplatform/host -Ioffload/transport -Ihost/tests
+INCLUDES = -Iengine/include -Iplatform/host -Ioffload/transport -Iservices/spell -Ihost/tests
 
 BUILD = build
 BIN   = bin
@@ -16,12 +16,14 @@ BIN   = bin
 ENGINE_SRC    = $(wildcard engine/src/*.c)
 PLATFORM_SRC  = $(wildcard platform/host/*.c)
 TRANSPORT_SRC = $(wildcard offload/transport/*.c)
+SERVICES_SRC  = $(wildcard services/spell/*.c)
 TEST_SRC      = $(wildcard host/tests/*.c)
 GATEWAY_SRC   = $(wildcard offload/gateway/*.c)
 
 ENGINE_OBJ    = $(patsubst engine/src/%.c,$(BUILD)/engine/%.o,$(ENGINE_SRC))
 PLATFORM_OBJ  = $(patsubst platform/host/%.c,$(BUILD)/platform/%.o,$(PLATFORM_SRC))
 TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(BUILD)/transport/%.o,$(TRANSPORT_SRC))
+SERVICES_OBJ  = $(patsubst services/spell/%.c,$(BUILD)/services/%.o,$(SERVICES_SRC))
 TEST_OBJ      = $(patsubst host/tests/%.c,$(BUILD)/tests/%.o,$(TEST_SRC))
 GATEWAY_OBJ   = $(patsubst offload/gateway/%.c,$(BUILD)/gateway/%.o,$(GATEWAY_SRC))
 
@@ -36,7 +38,7 @@ ENDIAN_OBJ    = $(BUILD)/engine/endian.o
 
 all: $(BIN)/host_tests $(BIN)/mock_gateway
 
-$(BIN)/host_tests: $(ENGINE_OBJ) $(PLATFORM_OBJ) $(TRANSPORT_OBJ) $(TEST_OBJ) | $(BIN)
+$(BIN)/host_tests: $(ENGINE_OBJ) $(PLATFORM_OBJ) $(TRANSPORT_OBJ) $(SERVICES_OBJ) $(TEST_OBJ) | $(BIN)
 	$(CC) $^ -o $@
 
 $(BIN)/mock_gateway: $(GATEWAY_OBJ) $(TRANSPORT_OBJ) $(ENDIAN_OBJ) | $(BIN)
@@ -51,13 +53,16 @@ $(BUILD)/platform/%.o: platform/host/%.c | $(BUILD)/platform
 $(BUILD)/transport/%.o: offload/transport/%.c | $(BUILD)/transport
 	$(CC) $(STRICT_CFLAGS) $(INCLUDES) -c $< -o $@
 
+$(BUILD)/services/%.o: services/spell/%.c | $(BUILD)/services
+	$(CC) $(STRICT_CFLAGS) $(INCLUDES) -c $< -o $@
+
 $(BUILD)/tests/%.o: host/tests/%.c | $(BUILD)/tests
 	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BUILD)/gateway/%.o: offload/gateway/%.c | $(BUILD)/gateway
 	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) -c $< -o $@
 
-$(BUILD)/engine $(BUILD)/platform $(BUILD)/transport $(BUILD)/tests $(BUILD)/gateway $(BIN):
+$(BUILD)/engine $(BUILD)/platform $(BUILD)/transport $(BUILD)/services $(BUILD)/tests $(BUILD)/gateway $(BIN):
 	mkdir -p $@
 
 test: $(BIN)/host_tests $(BIN)/mock_gateway
@@ -90,21 +95,25 @@ ATARI_BIN   = bin/atari
 
 ATARI_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(ATARI_BUILD)/engine/%.o,$(ENGINE_SRC))
 ATARI_TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(ATARI_BUILD)/transport/%.o,$(TRANSPORT_SRC))
+ATARI_SERVICES_OBJ  = $(patsubst services/spell/%.c,$(ATARI_BUILD)/services/%.o,$(SERVICES_SRC))
 
 # atari-engine-check is a separate, free portability check: it proves
-# the SAME portable engine/ + offload/transport sources this project
-# already tests on host also compile clean under strict C89 for a real
-# 16/32-bit target -- catches host-only assumptions (pointer size,
-# struct packing, etc.) independent of whether anything actually links
-# against them yet.
+# the SAME portable engine/ + offload/transport + services/ sources this
+# project already tests on host also compile clean under strict C89 for
+# a real 16/32-bit target -- catches host-only assumptions (pointer
+# size, struct packing, etc.) independent of whether anything actually
+# links against them yet.
 .PHONY: atari-engine-check
-atari-engine-check: $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ)
-	@echo "engine + offload/transport cross-compile clean for m68k-atari-mint"
+atari-engine-check: $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ)
+	@echo "engine + offload/transport + services cross-compile clean for m68k-atari-mint"
 
 $(ATARI_BUILD)/engine/%.o: engine/src/%.c | $(ATARI_BUILD)/engine
 	$(ATARICC) $(ATARI_STRICT_CFLAGS) $(ATARI_INCLUDES) -c $< -o $@
 
 $(ATARI_BUILD)/transport/%.o: offload/transport/%.c | $(ATARI_BUILD)/transport
+	$(ATARICC) $(ATARI_STRICT_CFLAGS) $(ATARI_INCLUDES) -c $< -o $@
+
+$(ATARI_BUILD)/services/%.o: services/spell/%.c | $(ATARI_BUILD)/services
 	$(ATARICC) $(ATARI_STRICT_CFLAGS) $(ATARI_INCLUDES) -c $< -o $@
 
 # platform/atari's own sources, excluding the two files with their own
@@ -126,7 +135,7 @@ $(ATARI_BUILD)/smoke/%.o: host/tools/%.c | $(ATARI_BUILD)/smoke
 $(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
-$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BIN):
+$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BIN):
 	mkdir -p $@
 
 .PHONY: atari atari-smoke

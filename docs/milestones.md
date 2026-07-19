@@ -251,16 +251,85 @@ portable engine under strict C89 for the first non-host target.
 ## M5 — Classic RTF + Compact Spell  (On-box)
 Goal: Practical writer that stays at 1MB.
 
-- [ ] T5.1 `format_rtf` import (classic RTF 1.x subset; documented supported
+- [x] T5.1 `format_rtf` import (classic RTF 1.x subset; documented supported
       control words).
       AC: Fixture RTFs import to expected model trees.
-- [ ] T5.2 `format_rtf` export (round-trip of supported subset).
+      Hand-written brace-scoped-state-stack parser (RTF_MAX_DEPTH=64,
+      WP_RANGE on overflow rather than unbounded recursion), one pass,
+      no external RTF library. Supported control words, cp1252 hex-
+      escape decoding, and every deliberate simplification (no font-name
+      or title/author wiring -- both fields are bare wp_str offsets
+      with no paired length, same locked-struct gap T3.1 already
+      documented; \line approximated as a paragraph break; no \uN
+      Unicode escapes) are in docs/formats/rtf.md. See
+      engine/src/format_rtf_import.c. 17 fixture tests in
+      host/tests/test_format_rtf.c cover structure, all supported
+      paragraph/character attributes, the color table, hex escapes,
+      special-char control words, ignorable/skipped destinations,
+      unrecognized-control-word forward compatibility, and malformed-
+      input handling (truncated hex escape and excess nesting depth are
+      rejected; truncated/unbalanced input recovers leniently as a
+      documented, tested design choice, not an accident). Cross-compiles
+      clean for the real Atari target (`make atari-engine-check`) and
+      the whole Atari CI harness stays green with it linked in.
+- [x] T5.2 `format_rtf` export (round-trip of supported subset).
       AC: model→RTF→model preserves supported attributes.
-- [ ] T5.3 `services/spell`: compact dictionary queried from disk + affix rules.
+      One shared emission function serves both the measuring pass and
+      the real write pass (rtf_writer in format_rtf_export.c) rather
+      than two independently-maintained implementations, since RTF
+      emission has enough real logic (escaping, color-table lookups,
+      conditional control words) that hand-synced duplicates would be a
+      real drift risk; nothing is written to the caller's buffer unless
+      the whole document fits. Minimal one-entry \fonttbl (\f0, always
+      referenced) is honest placeholder output -- nothing sets a real
+      font name anywhere in the codebase yet (T3.1's documented gap).
+      See docs/formats/rtf.md, engine/src/format_rtf_export.c. Verified
+      two ways: (1) host/tests/test_format_rtf_export.c's own model->
+      RTF->model round-trip across every supported attribute
+      (alignment/indents/spacing/bold/italic/underline/strike/super/
+      sub/size/color) plus a "nothing written on overflow" sentinel-
+      buffer test; (2) independently -- exported RTF fed to `soffice
+      --headless --convert-to txt` (LibreOffice) produced exactly the
+      expected text, confirming the output is genuinely well-formed
+      RTF readable by real-world software, not just self-consistent
+      with this project's own importer. Cross-compiles clean for the
+      real Atari target.
+- [x] T5.3 `services/spell`: compact dictionary queried from disk + affix rules.
       AC: Known misspellings flagged; suggestions returned; peak RAM within 1MB
       budget (dictionary not fully loaded).
+      Dictionary is a plain sorted lowercase-word text file queried by
+      binary search directly against the file (plat_file_seek/read) --
+      never loaded as a whole; peak RAM per lookup is a handful of
+      fixed 32-byte stack buffers, a design-level guarantee not a
+      runtime-measured ceiling. Affix rules are a small fixed table of
+      common English suffix transformations (not Hunspell-compatible --
+      a real multi-week project of its own, deliberately out of scope
+      for "compact"). Suggestions are bounded edit-distance-1 candidate
+      generation. See docs/services/spell.md, services/spell/spell.c.
+      Real bug found and fixed during development: the first binary-
+      search implementation scanned forward to the next line when a
+      probe landed mid-line rather than backward to the line containing
+      the probe, which could silently break search-range convergence
+      and hang indefinitely on some inputs -- passed against an 11-word
+      hand fixture but hung against the realistic 6000-word one
+      (docs/services/spell.md has the full trace). Verified with both:
+      host/tests/test_spell.c's hand-authored fixture (precise
+      assertions per affix rule, case-insensitivity, non-ASCII fail-
+      open behavior, leak-free via mem_host counters) and a 6000-word
+      fixture sampled from a real en_US dictionary (BSD-licensed,
+      attribution in docs/services/spell.md), including the file's
+      first/last lines (the binary search's boundary conditions).
+      Cross-compiles clean for the real Atari target.
 
 Artifact: Open/save RTF + local spell-check, still 1MB.
+**Reached at the engine/services level**: format_rtf import/export and
+services/spell are implemented, tested (host + real Atari cross-compile),
+and scoped/documented honestly (docs/formats/rtf.md,
+docs/services/spell.md). Not yet wired into platform/atari's UI (File
+menu is still plaintext-only, T4.3; no spell-check menu action exists
+yet) -- that UI wiring is natural follow-up work, not part of this
+milestone's own AC, which is about the format/service modules
+themselves being correct and 1MB-budget-safe.
 
 ---
 

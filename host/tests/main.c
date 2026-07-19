@@ -86,6 +86,43 @@ void test_format_txt_import_crlf(void);
 void test_format_txt_import_empty_creates_zero_paragraphs(void);
 void test_format_txt_export_reports_size_on_overflow(void);
 
+/* format_rtf_import.c */
+void test_format_rtf_import_rejects_bad_header(void);
+void test_format_rtf_import_rejects_unsupported_charset(void);
+void test_format_rtf_import_simple_paragraph(void);
+void test_format_rtf_import_no_trailing_empty_paragraph(void);
+void test_format_rtf_import_blank_line_is_empty_paragraph(void);
+void test_format_rtf_import_bold_italic_underline(void);
+void test_format_rtf_import_font_size(void);
+void test_format_rtf_import_alignment_and_indents(void);
+void test_format_rtf_import_color_table(void);
+void test_format_rtf_import_hex_escape_decodes_cp1252(void);
+void test_format_rtf_import_special_chars(void);
+void test_format_rtf_import_skips_fonttbl_and_ignorable_destination(void);
+void test_format_rtf_import_unrecognized_control_word_is_ignored(void);
+void test_format_rtf_import_truncated_hex_escape_is_badfmt(void);
+void test_format_rtf_import_exceeds_max_nesting_depth_is_range(void);
+void test_format_rtf_import_truncated_input_recovers_leniently(void);
+void test_format_rtf_import_no_leaks(void);
+
+/* format_rtf_export.c */
+void test_format_rtf_export_reports_size_on_overflow(void);
+void test_format_rtf_roundtrip_plain_text(void);
+void test_format_rtf_roundtrip_full_attribute_set(void);
+
+/* spell.c */
+void test_spell_dict_open_missing_file_fails(void);
+void test_spell_check_exact_known_word(void);
+void test_spell_check_unknown_word(void);
+void test_spell_check_case_insensitive(void);
+void test_spell_check_affix_rules(void);
+void test_spell_check_non_ascii_fails_open(void);
+void test_spell_check_no_leaks(void);
+void test_spell_suggest_finds_transposition(void);
+void test_spell_suggest_respects_max(void);
+void test_spell_suggest_non_ascii_returns_nothing(void);
+void test_spell_realistic_dictionary_sample(void);
+
 /* offload/transport/wire.c */
 void test_wire_crc16_known_vector(void);
 void test_wire_encode_decode_roundtrip(void);
@@ -181,6 +218,40 @@ static const test_case g_cases[] = {
     { "format_txt_import_crlf", test_format_txt_import_crlf },
     { "format_txt_import_empty_creates_zero_paragraphs", test_format_txt_import_empty_creates_zero_paragraphs },
     { "format_txt_export_reports_size_on_overflow", test_format_txt_export_reports_size_on_overflow },
+
+    { "format_rtf_import_rejects_bad_header", test_format_rtf_import_rejects_bad_header },
+    { "format_rtf_import_rejects_unsupported_charset", test_format_rtf_import_rejects_unsupported_charset },
+    { "format_rtf_import_simple_paragraph", test_format_rtf_import_simple_paragraph },
+    { "format_rtf_import_no_trailing_empty_paragraph", test_format_rtf_import_no_trailing_empty_paragraph },
+    { "format_rtf_import_blank_line_is_empty_paragraph", test_format_rtf_import_blank_line_is_empty_paragraph },
+    { "format_rtf_import_bold_italic_underline", test_format_rtf_import_bold_italic_underline },
+    { "format_rtf_import_font_size", test_format_rtf_import_font_size },
+    { "format_rtf_import_alignment_and_indents", test_format_rtf_import_alignment_and_indents },
+    { "format_rtf_import_color_table", test_format_rtf_import_color_table },
+    { "format_rtf_import_hex_escape_decodes_cp1252", test_format_rtf_import_hex_escape_decodes_cp1252 },
+    { "format_rtf_import_special_chars", test_format_rtf_import_special_chars },
+    { "format_rtf_import_skips_fonttbl_and_ignorable_destination", test_format_rtf_import_skips_fonttbl_and_ignorable_destination },
+    { "format_rtf_import_unrecognized_control_word_is_ignored", test_format_rtf_import_unrecognized_control_word_is_ignored },
+    { "format_rtf_import_truncated_hex_escape_is_badfmt", test_format_rtf_import_truncated_hex_escape_is_badfmt },
+    { "format_rtf_import_exceeds_max_nesting_depth_is_range", test_format_rtf_import_exceeds_max_nesting_depth_is_range },
+    { "format_rtf_import_truncated_input_recovers_leniently", test_format_rtf_import_truncated_input_recovers_leniently },
+    { "format_rtf_import_no_leaks", test_format_rtf_import_no_leaks },
+
+    { "format_rtf_export_reports_size_on_overflow", test_format_rtf_export_reports_size_on_overflow },
+    { "format_rtf_roundtrip_plain_text", test_format_rtf_roundtrip_plain_text },
+    { "format_rtf_roundtrip_full_attribute_set", test_format_rtf_roundtrip_full_attribute_set },
+
+    { "spell_dict_open_missing_file_fails", test_spell_dict_open_missing_file_fails },
+    { "spell_check_exact_known_word", test_spell_check_exact_known_word },
+    { "spell_check_unknown_word", test_spell_check_unknown_word },
+    { "spell_check_case_insensitive", test_spell_check_case_insensitive },
+    { "spell_check_affix_rules", test_spell_check_affix_rules },
+    { "spell_check_non_ascii_fails_open", test_spell_check_non_ascii_fails_open },
+    { "spell_check_no_leaks", test_spell_check_no_leaks },
+    { "spell_suggest_finds_transposition", test_spell_suggest_finds_transposition },
+    { "spell_suggest_respects_max", test_spell_suggest_respects_max },
+    { "spell_suggest_non_ascii_returns_nothing", test_spell_suggest_non_ascii_returns_nothing },
+    { "spell_realistic_dictionary_sample", test_spell_realistic_dictionary_sample },
 
     { "wire_crc16_known_vector", test_wire_crc16_known_vector },
     { "wire_encode_decode_roundtrip", test_wire_encode_decode_roundtrip },
