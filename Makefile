@@ -25,7 +25,14 @@ PLATFORM_OBJ  = $(patsubst platform/host/%.c,$(BUILD)/platform/%.o,$(PLATFORM_SR
 TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(BUILD)/transport/%.o,$(TRANSPORT_SRC))
 SERVICES_OBJ  = $(patsubst services/spell/%.c,$(BUILD)/services/%.o,$(SERVICES_SRC))
 TEST_OBJ      = $(patsubst host/tests/%.c,$(BUILD)/tests/%.o,$(TEST_SRC))
-GATEWAY_OBJ   = $(patsubst offload/gateway/%.c,$(BUILD)/gateway/%.o,$(GATEWAY_SRC))
+
+# offload/gateway has TWO standalone executables (each with its own
+# main()), sharing gw_common.c's wire-protocol plumbing -- so unlike
+# every other *_OBJ above, this can't just be "every .c in the
+# directory" linked as one unit; each binary below lists its own files
+# explicitly.
+MOCK_GATEWAY_OBJ   = $(BUILD)/gateway/mock_gateway.o $(BUILD)/gateway/fixtures.o $(BUILD)/gateway/gw_common.o
+OLLAMA_GATEWAY_OBJ = $(BUILD)/gateway/ollama_gateway.o $(BUILD)/gateway/gw_common.o $(BUILD)/gateway/http_client.o
 
 # offload/transport (wire.c, caps_codec.c) uses engine/src/endian.c's
 # be_read*/be_write* helpers. endian.c has no other engine dependency (no
@@ -36,12 +43,21 @@ ENDIAN_OBJ    = $(BUILD)/engine/endian.o
 
 .PHONY: all test clean
 
-all: $(BIN)/host_tests $(BIN)/mock_gateway
+all: $(BIN)/host_tests $(BIN)/mock_gateway $(BIN)/ollama_gateway
 
 $(BIN)/host_tests: $(ENGINE_OBJ) $(PLATFORM_OBJ) $(TRANSPORT_OBJ) $(SERVICES_OBJ) $(TEST_OBJ) | $(BIN)
 	$(CC) $^ -o $@
 
-$(BIN)/mock_gateway: $(GATEWAY_OBJ) $(TRANSPORT_OBJ) $(ENDIAN_OBJ) | $(BIN)
+$(BIN)/mock_gateway: $(MOCK_GATEWAY_OBJ) $(TRANSPORT_OBJ) $(ENDIAN_OBJ) | $(BIN)
+	$(CC) $^ -o $@
+
+# ollama_gateway (post-M6): answers OFFLOAD_THESAURUS with a real Ollama
+# HTTP call (offload/gateway/http_client.c is a hand-rolled raw-socket
+# HTTP/1.1 client -- no libcurl dependency) instead of mock_gateway's
+# fixture table. See docs/formats/offload-protocol.md. Never part of
+# `test`/`ci.sh`: LLM output isn't deterministic, and a contributor
+# without Ollama installed must still be able to run the automated suite.
+$(BIN)/ollama_gateway: $(OLLAMA_GATEWAY_OBJ) $(TRANSPORT_OBJ) $(ENDIAN_OBJ) | $(BIN)
 	$(CC) $^ -o $@
 
 $(BUILD)/engine/%.o: engine/src/%.c | $(BUILD)/engine
@@ -62,11 +78,22 @@ $(BUILD)/tests/%.o: host/tests/%.c | $(BUILD)/tests
 $(BUILD)/gateway/%.o: offload/gateway/%.c | $(BUILD)/gateway
 	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) -c $< -o $@
 
-$(BUILD)/engine $(BUILD)/platform $(BUILD)/transport $(BUILD)/services $(BUILD)/tests $(BUILD)/gateway $(BIN):
+$(BUILD)/tools/%.o: host/tools/%.c | $(BUILD)/tools
+	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BUILD)/engine $(BUILD)/platform $(BUILD)/transport $(BUILD)/services $(BUILD)/tests $(BUILD)/gateway $(BUILD)/tools $(BIN):
 	mkdir -p $@
 
 test: $(BIN)/host_tests $(BIN)/mock_gateway
 	./$(BIN)/host_tests
+
+# Manual verification only (see ollama_gateway_smoke.c's own comment) --
+# never a dependency of `all`/`test`.
+$(BIN)/ollama_gateway_smoke: $(ENGINE_OBJ) $(PLATFORM_OBJ) $(TRANSPORT_OBJ) $(BUILD)/tools/ollama_gateway_smoke.o | $(BIN)
+	$(CC) $^ -o $@
+
+.PHONY: ollama-smoke
+ollama-smoke: $(BIN)/ollama_gateway_smoke
 
 # ---------------------------------------------------------------------
 # Atari ST cross build (M4). Real target toolchain, not a host stub:
@@ -124,15 +151,15 @@ ATARI_PLATFORM_SRC = $(filter-out platform/atari/main.c,$(wildcard platform/atar
 ATARI_PLATFORM_OBJ = $(patsubst platform/atari/%.c,$(ATARI_BUILD)/app/%.o,$(ATARI_PLATFORM_SRC))
 
 $(ATARI_BUILD)/app/%.o: platform/atari/%.c | $(ATARI_BUILD)/app
-	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -c $< -o $@
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Iservices/spell -c $< -o $@
 
-$(ATARI_BIN)/WP.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/app/main.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) | $(ATARI_BIN)
+$(ATARI_BIN)/WP.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/app/main.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
 $(ATARI_BUILD)/smoke/%.o: host/tools/%.c | $(ATARI_BUILD)/smoke
 	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -c $< -o $@
 
-$(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) | $(ATARI_BIN)
+$(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
 # T6.3's serial offload smoke test doesn't touch any AES/window API
@@ -144,7 +171,7 @@ $(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o
 $(ATARI_BUILD)/serialsmoke/%.o: host/tools/%.c | $(ATARI_BUILD)/serialsmoke
 	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Ioffload/transport -c $< -o $@
 
-$(ATARI_BIN)/SERIALTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialsmoke/atari_serial_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) | $(ATARI_BIN)
+$(ATARI_BIN)/SERIALTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialsmoke/atari_serial_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
 $(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BIN):

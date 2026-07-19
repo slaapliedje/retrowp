@@ -34,7 +34,15 @@
 #define WP_MENU_OBJ_EDIT_CUT    8
 #define WP_MENU_OBJ_EDIT_COPY   9
 #define WP_MENU_OBJ_EDIT_PASTE  10
-#define WP_MENU_OBJ_COUNT       11
+/* M5 UI wiring: a third title, Tools (Spell Check), appended after Edit
+   rather than inserted between File/Edit -- keeps every existing index
+   stable so nothing above this line needed to change. */
+#define WP_MENU_OBJ_TOOLS_TITLE      11
+#define WP_MENU_OBJ_TOOLS_BOX        12
+#define WP_MENU_OBJ_TOOLS_SPELLCHECK 13
+/* post-M6: a second Tools item, Thesaurus, appended after Spell Check. */
+#define WP_MENU_OBJ_TOOLS_THESAURUS  14
+#define WP_MENU_OBJ_COUNT       15
 
 extern OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 
@@ -109,5 +117,32 @@ wp_bool wp_atari_file_clipboard_selfcheck(void);
 wp_bool wp_atari_memory_budget_selfcheck(long *free_before_out,
                                           long *free_after_load_out,
                                           long *free_after_free_out);
+
+/* M5 UI wiring: proves the RTF/spell code paths platform/atari's menu
+   actions now use actually work through REAL plat_file_* calls on this
+   target, the same way wp_atari_file_clipboard_selfcheck already does
+   for plaintext -- self-contained scratch fixtures (a temp .RTF file, a
+   temp 4-word dictionary file), no shipped dictionary asset required.
+   Deliberately does NOT call do_spell_check() itself: that function's
+   form_alert() blocks waiting for a button click, which would hang this
+   headless CI run forever (see docs/atari-platform.md) -- only the
+   non-blocking building blocks (extension sniffing, format_rtf_import/
+   export, spell_dict_open/spell_check_word/spell_suggest) are exercised
+   here. */
+wp_bool wp_atari_rtf_spell_selfcheck(void);
+
+/* post-M6: proves extract_word_before_cursor() -- the new pure-logic
+   piece behind the Thesaurus menu action -- against a handful of fixture
+   documents/cursor positions (a word right at the cursor, no word at
+   all, cursor at document start). Deliberately does NOT call
+   do_thesaurus() itself (form_alert() again) or offload_init() against a
+   real gateway: the offload_client.c <-> real-gateway round trip over
+   real emulated RS-232 is already proven end to end by T6.3's
+   atari_serial_smoke.c/ci_atari_serial.sh, reusing the exact same
+   client API this menu action calls -- re-proving that here would just
+   add ~2s of guaranteed-to-fail connect/handshake timeout to every
+   ci_atari.sh run (no gateway is attached in that harness) for no new
+   coverage. */
+wp_bool wp_atari_thesaurus_selfcheck(void);
 
 #endif /* WP_ATARI_APP_SHELL_INTERNAL_H */

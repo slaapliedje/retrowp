@@ -325,11 +325,21 @@ Artifact: Open/save RTF + local spell-check, still 1MB.
 **Reached at the engine/services level**: format_rtf import/export and
 services/spell are implemented, tested (host + real Atari cross-compile),
 and scoped/documented honestly (docs/formats/rtf.md,
-docs/services/spell.md). Not yet wired into platform/atari's UI (File
-menu is still plaintext-only, T4.3; no spell-check menu action exists
-yet) -- that UI wiring is natural follow-up work, not part of this
-milestone's own AC, which is about the format/service modules
-themselves being correct and 1MB-budget-safe.
+docs/services/spell.md).
+**Update (post-M6): now wired into platform/atari's UI.** File Open/Save
+pick RTF vs plaintext by filename extension; a new Tools > Spell Check
+menu action scans the whole document and reports the first unknown word
+via form_alert, with a lazily-opened dictionary at a fixed path
+(C:\WPSPELL.DIC, no shipped asset). Verified two ways: a new
+wp_atari_rtf_spell_selfcheck() (host/tools/ci_atari.sh) proves a real RTF
+round-trip and real dictionary lookups over actual Atari plat_file_*
+calls (the non-blocking building blocks do_spell_check() uses); the menu
+action itself is never invoked from CI since form_alert() blocks waiting
+for a click, which would hang a headless Hatari run. See
+docs/atari-platform.md's "RTF + Spell Check wired into the UI" section
+for the full design, including the documented scope narrowing (no
+selection model, no cross-run word tokenization, no interactive
+correction UI).
 
 ---
 
@@ -402,6 +412,30 @@ timeout was too short for real Atari boot time, and crashed Hatari itself
 via SIGPIPE, not just the test -- see docs/atari-platform.md). Still a
 deliberate scope boundary, not a gap: the gateway remains a host-side mock
 against a fixture table, not a real Pi/LLM -- that's M8.
+**Update (post-M6):** a second gateway, `offload/gateway/ollama_gateway.c`,
+now answers `OFFLOAD_THESAURUS` with a real local Ollama call instead of
+a fixture table -- genuine LLM-generated synonyms, verified end-to-end
+through the real `offload_client.c` API (`host/tools/ollama_gateway_smoke.c`,
+run via `host/tools/run_ollama_smoke.sh`). Deliberately narrower than
+M8: THESAURUS only (every other op, including SPELL_CHECK, still reports
+`OFFLOAD_UNSUPPORTED` from this gateway -- see
+docs/formats/offload-protocol.md for why), never wired into
+`make test`/`ci.sh` (LLM output isn't deterministic, and Ollama isn't a
+build dependency), and not a Pi deployment -- a real GRAMMAR_CHECK
+gateway and an on-Pi rollout both remain M8 scope, not reshaped by this.
+**Further update:** `platform/atari`'s own T6.3 "Known gaps" note --
+"no 'Thesaurus' menu action wired to the offload link" -- is now closed:
+a Tools > Thesaurus menu item looks up the word before the cursor over
+the offload link and reports synonyms via a GEM alert. See
+docs/atari-platform.md's "Thesaurus wired into the UI" section for the
+design and an honestly-stated residual gap: the alert-producing action
+itself has never been run and observed end to end (real click or
+otherwise), because doing so safely isn't possible with this project's
+current headless-Hatari tooling -- only its non-blocking building blocks
+(word extraction, the offload_client.c round trip) are independently
+verified. Spell Check stays on-device (services/spell) -- offload-backed
+spell checking remains unimplemented by any gateway in this repo,
+deliberately (see docs/formats/offload-protocol.md).
 
 ---
 

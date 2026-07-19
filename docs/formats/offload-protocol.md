@@ -138,5 +138,110 @@ failure mode exercised by `test_offload.c`:
 | `--short-frame` | Sends a response header promising a large payload, writes a few bytes, then goes back to waiting for the next request | Client times out on a stalled/incomplete frame, distinct from CRC corruption |
 
 Real LLM/dictionary integration (Ollama/llama.cpp on a Pi) replacing
-`fixtures.c` is explicit future scope (M8), not implemented here -- this
-milestone proves the protocol, not the intelligence behind it.
+`fixtures.c` is explicit future scope (M8) -- **for a real
+GRAMMAR_CHECK/full SPELL_CHECK gateway.** `ollama_gateway.c` below is a
+narrower, already-implemented slice of that scope: one real op
+(THESAURUS), not the full M8 feature set.
+
+## Ollama Gateway (`offload/gateway/ollama_gateway.c`, post-M6)
+
+A second standalone executable, built to `bin/ollama_gateway`, speaking
+the exact same wire protocol/handshake as `mock_gateway.c` (both share
+`gw_common.c` for the transport-agnostic plumbing -- frame send/receive,
+FIFO opening, word-list encoding -- so the two never drift). The
+difference is entirely in what backs one op:
+
+- **`OFFLOAD_THESAURUS`** is answered by a real call to a local Ollama
+  server (`http://127.0.0.1:11434` by default) instead of a fixture
+  table -- genuine LLM-generated synonyms, not canned data.
+- **Every other op, including `OFFLOAD_SPELL_CHECK`,** responds
+  `OFFLOAD_UNSUPPORTED` -- a deliberate choice, not a missing feature.
+  Tested against this gateway's default model (`deepseek-coder-v2:16b`,
+  the only non-"thinking" model available in this project's own dev
+  environment), a spelling probe for `teh` came back "Correct" -- a
+  worse answer than `services/spell`'s deterministic on-device checker
+  already gives for free. THESAURUS has a much lower correctness bar (a
+  real-vocabulary word list has value even when incomplete) and is
+  exactly the kind of large-vocabulary knowledge CLAUDE.md's own project
+  brief names as offload-worthy, so that's where this gateway spends its
+  one real capability. A gateway that does GRAMMAR_CHECK/SPELL_CHECK for
+  real, likely against a better-suited model, is M8 scope.
+
+**No libcurl.** `offload/gateway/http_client.c` hand-rolls the single
+HTTP/1.1 POST this needs directly over a raw socket (`http_post_json()`):
+build the request line/headers/JSON body, send, read until the peer
+closes (`Connection: close`, so no chunked-encoding handling is needed),
+split headers from body on the first blank line. Not a general HTTP
+client -- no redirects, no keep-alive, no DNS (`--ollama-host` must be a
+dotted-decimal IPv4 address). This keeps the same "no dependencies
+beyond what's truly needed" posture the rest of `offload/gateway` and
+the engine already hold, and mirrors `wire.c`'s own framing-only,
+zero-I/O design philosophy.
+
+**Prompting and parsing.** The request asks the model for "ONLY a
+comma-separated list... no numbering, no explanation"; the response is
+extracted from Ollama's `"response":"..."` JSON field (a small hand-
+rolled extractor, not a JSON library -- `extract_json_string_field()`
+handles the handful of escapes (`\"`, `\\`, `\n`, `\r`, `\t`) that can
+appear in a plain-text answer and drops `\uXXXX` escapes rather than
+decoding them, matching the ASCII-first scope `services/spell` already
+established). The extracted text is then split on commas/newlines,
+trimmed, and filtered to tokens that look like a single word (letters,
+hyphen, apostrophe only) -- silently dropping anything else (a trailing
+empty token, a stray sentence the model added despite instructions).
+Verified against a live model (see below): `"happy"` reliably returns a
+clean list like `cheerful, joyful, content, pleased, merry, ...`.
+
+**Honesty note on "unknown word" behavior.** `fixtures.c`'s mock gateway
+guarantees `count == 0` for a word it doesn't recognize (a static table
+lookup). This gateway makes NO such guarantee: tested against a genuine
+nonsense word (`zzqxwibble`), the model returned nothing usable on one
+run (empty-token list, correctly decoded to `count == 0`) but
+*hallucinated* eight plausible-looking "synonyms" on another run against
+the same gateway build. Both are valid wire responses (the protocol
+never required correctness, only a well-formed answer), but this is a
+real, inherent difference from the deterministic fixture table, not a
+bug in the parser -- worth knowing before wiring a UI action that
+displays results uncritically.
+
+**Resource cost, measured, not assumed.** In this project's own dev
+environment, a cold model load (Ollama had unloaded it after its
+`keep_alive` window) took ~20 real seconds for the default 8.9GB model
+before the first token came back, even on an otherwise-idle GPU -- hence
+`--ollama-timeout-ms` defaults to 60000, not something tuned for an
+already-warm model. A 32B "thinking" model also present in that same
+environment was tried first and abandoned for this default: under
+concurrent load from an unrelated GPU-heavy process, a single request
+did not return within several minutes and was killed rather than waited
+out. `--model` is a plain CLI override precisely so a differently-
+equipped machine, or a smaller/faster instruct model pulled later, isn't
+locked to what happened to work in one environment.
+
+**CLI flags:** `--ollama-host=` (default `127.0.0.1`), `--ollama-port=`
+(default `11434`), `--model=` (default `deepseek-coder-v2:16b`),
+`--ollama-timeout-ms=` (default `60000`), `--hello-timeout-ms=` (default
+`5000`, same meaning as `mock_gateway.c`'s flag of the same name), and
+the same `--serial-rx=`/`--serial-tx=` pair `mock_gateway.c` supports,
+for driving this over a real Hatari RS-232 bridge exactly like T6.3.
+
+**Verification.** Deliberately kept OUT of `make test`/`ci.sh`: LLM
+output is not deterministic, and a contributor without Ollama installed
+must still be able to run the automated suite. Instead:
+- `host/tools/ollama_gateway_smoke.c` drives the REAL `offload_client.c`
+  API (`offload_init`/`offload_query`/`offload_submit`/
+  `offload_shutdown`) -- the same code any real menu action would call
+  -- against a spawned `ollama_gateway`, asserting the structural
+  properties that ARE deterministic (handshake succeeds, negotiated
+  `gateway_name` is `"ollama-gateway"`, `OFFLOAD_THESAURUS` is
+  advertised, the request returns `OFFLOAD_OK`) while printing the actual
+  synonym list for a human to eyeball.
+- `host/tools/run_ollama_smoke.sh` spawns `bin/ollama_gateway`, captures
+  its OS-assigned port the same way `gateway_harness.c` already does for
+  the mock gateway's tests, and runs the smoke tool against it. Run by
+  hand: `host/tools/run_ollama_smoke.sh happy`.
+- Also proven directly over the raw wire protocol (a throwaway Python
+  client, the same style of tool used to isolate T6.3's SIGPIPE bug) for
+  three cases in one session: a real word (`"happy"` &rarr; 8 real
+  synonyms), an unsupported op (`SPELL_CHECK` &rarr; `OFFLOAD_UNSUPPORTED`,
+  empty payload), and multiple sequential requests over one connection
+  (proving the request/response loop, not just a single round trip).

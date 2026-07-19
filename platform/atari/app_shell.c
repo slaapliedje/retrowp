@@ -5,12 +5,16 @@
 #include "platform.h"
 #include "docmodel.h"
 #include "format_txt.h"
+#include "format_rtf.h"
 #include "layout.h"
 #include "editing.h"
 #include "app_shell.h"
 #include "app_shell_internal.h"
 #include "metrics_atari_internal.h"
 #include "mem_atari.h"
+#include "spell.h"
+#include "offload.h"
+#include "endian.h"
 
 /* Hand-built menu bar OBJECT tree: File (Open/Save/Quit) and Edit
    (Cut/Copy/Paste). There is no resource editor or .rsc file anywhere
@@ -36,9 +40,9 @@
    relative to the parent (screen-relative only for the root). */
 OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     /* next,                 head,                  tail,                  type,     flags,     state,     spec, x, y, w, h */
-    { -1,                     WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_EDIT_TITLE, G_IBOX,   OF_NONE,   OS_NORMAL, {0}, 0, 0, 40, 1 },
+    { -1,                     WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_TOOLS_TITLE, G_IBOX,   OF_NONE,   OS_NORMAL, {0}, 0, 0, 40, 1 },
     { WP_MENU_OBJ_EDIT_TITLE, WP_MENU_OBJ_FILE_BOX,   WP_MENU_OBJ_FILE_BOX,   G_TITLE,  OF_NONE,   OS_NORMAL, {0}, 0, 0, 6,  1 },
-    { WP_MENU_OBJ_ROOT,       WP_MENU_OBJ_EDIT_BOX,   WP_MENU_OBJ_EDIT_BOX,   G_TITLE,  OF_NONE,   OS_NORMAL, {0}, 6, 0, 6,  1 },
+    { WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_EDIT_BOX,  WP_MENU_OBJ_EDIT_BOX,   G_TITLE,  OF_NONE,   OS_NORMAL, {0}, 6, 0, 6,  1 },
     { WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_FILE_OPEN,  WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE,   OS_NORMAL, {0}, 0, 1, 8,  3 },
     { WP_MENU_OBJ_FILE_SAVE,  -1,                     -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 0, 8,  1 },
     { WP_MENU_OBJ_FILE_QUIT,  -1,                     -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 1, 8,  1 },
@@ -46,35 +50,45 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_EDIT_TITLE, WP_MENU_OBJ_EDIT_CUT,   WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE,   OS_NORMAL, {0}, 6, 1, 8,  3 },
     { WP_MENU_OBJ_EDIT_COPY,  -1,                     -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 0, 8,  1 },
     { WP_MENU_OBJ_EDIT_PASTE, -1,                     -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 1, 8,  1 },
-    { WP_MENU_OBJ_EDIT_BOX,   -1,                     -1,                    G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 2, 8,  1 }
+    { WP_MENU_OBJ_EDIT_BOX,   -1,                     -1,                    G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 2, 8,  1 },
+    { WP_MENU_OBJ_ROOT,       WP_MENU_OBJ_TOOLS_BOX,  WP_MENU_OBJ_TOOLS_BOX, G_TITLE,  OF_NONE,   OS_NORMAL, {0}, 12, 0, 7,  1 },
+    { WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_THESAURUS, G_BOX, OF_NONE, OS_NORMAL, {0}, 12, 1, 14, 2 },
+    { WP_MENU_OBJ_TOOLS_THESAURUS, -1,                -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 0, 14, 1 },
+    { WP_MENU_OBJ_TOOLS_BOX,  -1,                     -1,                    G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 1, 14, 1 }
 };
 
 static char g_text_file[]  = " File ";
 static char g_text_edit[]  = " Edit ";
+static char g_text_tools[] = " Tools ";
 static char g_text_open[]  = "  Open";
 static char g_text_save[]  = "  Save";
 static char g_text_quit[]  = "  Quit";
 static char g_text_cut[]   = "  Cut";
 static char g_text_copy[]  = "  Copy";
 static char g_text_paste[] = "  Paste";
+static char g_text_spellcheck[] = "  Spell Check";
+static char g_text_thesaurus[] = "  Thesaurus";
 
 void wp_menu_tree_init(void)
 {
     wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_spec.free_string = g_text_file;
     wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_spec.free_string = g_text_edit;
+    wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_spec.free_string = g_text_tools;
     wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_spec.free_string = g_text_open;
     wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_spec.free_string = g_text_save;
     wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_spec.free_string = g_text_quit;
     wp_menu_tree[WP_MENU_OBJ_EDIT_CUT].ob_spec.free_string = g_text_cut;
     wp_menu_tree[WP_MENU_OBJ_EDIT_COPY].ob_spec.free_string = g_text_copy;
     wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_spec.free_string = g_text_paste;
+    wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_spec.free_string = g_text_spellcheck;
+    wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_spec.free_string = g_text_thesaurus;
 }
 
 wp_bool wp_menu_tree_selfcheck(void)
 {
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_next != -1) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_head != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_tail != WP_MENU_OBJ_EDIT_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_tail != WP_MENU_OBJ_TOOLS_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_type != G_IBOX) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_next != WP_MENU_OBJ_EDIT_TITLE) return WP_FALSE;
@@ -82,10 +96,26 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_tail != WP_MENU_OBJ_FILE_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_type != G_TITLE) return WP_FALSE;
 
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_next != WP_MENU_OBJ_ROOT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_next != WP_MENU_OBJ_TOOLS_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_head != WP_MENU_OBJ_EDIT_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_tail != WP_MENU_OBJ_EDIT_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_type != G_TITLE) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_next != WP_MENU_OBJ_ROOT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_head != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_tail != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_type != G_TITLE) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_next != WP_MENU_OBJ_TOOLS_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_head != WP_MENU_OBJ_TOOLS_SPELLCHECK) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_THESAURUS) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_type != G_BOX) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_next != WP_MENU_OBJ_TOOLS_THESAURUS) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_next != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_head != WP_MENU_OBJ_FILE_OPEN) return WP_FALSE;
@@ -109,8 +139,11 @@ wp_bool wp_menu_tree_selfcheck(void)
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_spec.free_string != g_text_file) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_spec.free_string != g_text_edit) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_spec.free_string != g_text_tools) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_spec.free_string != g_text_quit) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_spec.free_string != g_text_paste) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_spec.free_string != g_text_spellcheck) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_spec.free_string != g_text_thesaurus) return WP_FALSE;
 
     return WP_TRUE;
 }
@@ -148,26 +181,33 @@ static void relayout_document(i32 content_width_twips)
     }
 }
 
-/* Replaces the currently-open document (if any) with a freshly imported
-   one, resetting the cursor to its end and the undo journal to empty --
-   used at startup, and by Open/Paste (T4.3), which both have the same
-   "load this text as the whole document" shape. */
-static void set_document_from_text(const u8 *utf8, u32 len, i32 content_width_twips)
+/* Replaces the currently-open document (if any) with new_doc (already
+   built and owned by the caller -- this function takes it over),
+   resetting the cursor to its end and the undo journal to empty. Shared
+   by every "load this as the whole document" path: startup, Paste,
+   and both Open formats (plaintext via set_document_from_text below,
+   RTF via do_file_open directly, since RTF import has its own error
+   path that doesn't fit set_document_from_text's void-return shape). */
+static void replace_document(wp_document *new_doc, i32 content_width_twips)
 {
-    wp_document new_doc;
-
-    if (format_txt_import(utf8, len, &new_doc) != WP_OK) return;
-
     if (g_doc_loaded) {
         wp_undo_journal_free(&g_journal);
         wp_document_free(&g_doc);
     }
 
-    g_doc = new_doc;
+    g_doc = *new_doc;
     g_doc_loaded = WP_TRUE;
     wp_undo_journal_init(&g_journal);
     relayout_document(content_width_twips);
     g_cursor = wp_pos_doc_end(&g_doc);
+}
+
+static void set_document_from_text(const u8 *utf8, u32 len, i32 content_width_twips)
+{
+    wp_document new_doc;
+
+    if (format_txt_import(utf8, len, &new_doc) != WP_OK) return;
+    replace_document(&new_doc, content_width_twips);
 }
 
 static void load_sample_document(i32 content_width_twips)
@@ -335,6 +375,30 @@ static wp_bool run_file_selector(char *path_inout, char *fname_inout, char *full
     return WP_TRUE;
 }
 
+/* Case-insensitive "does path end with suffix" (suffix normally a
+   dotted extension like ".RTF"). Used to pick RTF vs plaintext
+   import/export by filename rather than adding a format-choice control
+   to the file selector -- fsel_input() has no such control, and typing
+   a different extension into its filename field is the standard classic-
+   GEM way an app distinguishes formats at Open/Save (the file selector
+   itself is format-blind). */
+static wp_bool str_ends_with_ci(const char *s, const char *suffix)
+{
+    u32 slen = (u32)strlen(s);
+    u32 suflen = (u32)strlen(suffix);
+    u32 i;
+
+    if (slen < suflen) return WP_FALSE;
+    for (i = 0; i < suflen; i++) {
+        char a = s[slen - suflen + i];
+        char b = suffix[i];
+        if (a >= 'a' && a <= 'z') a = (char)(a - 32);
+        if (b >= 'a' && b <= 'z') b = (char)(b - 32);
+        if (a != b) return WP_FALSE;
+    }
+    return WP_TRUE;
+}
+
 static void do_file_open(void)
 {
     char path[128];
@@ -344,7 +408,9 @@ static void do_file_open(void)
     u32 size, read_len;
     u8 *buf;
 
-    strcpy(path, "C:\\*.TXT");
+    /* "*.*" (not "*.TXT") so RTF files are visible too -- see
+       str_ends_with_ci above for how the format is actually picked. */
+    strcpy(path, "C:\\*.*");
     fname[0] = '\0';
     if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
 
@@ -354,7 +420,14 @@ static void do_file_open(void)
     buf = (u8 *)mem_alloc(size + 1);
     if (buf != NULL) {
         if (plat_file_read(f, buf, size, &read_len) == WP_OK) {
-            set_document_from_text(buf, read_len, g_content_width_twips);
+            if (str_ends_with_ci(fullpath, ".RTF")) {
+                wp_document new_doc;
+                if (format_rtf_import(buf, read_len, &new_doc) == WP_OK) {
+                    replace_document(&new_doc, g_content_width_twips);
+                }
+            } else {
+                set_document_from_text(buf, read_len, g_content_width_twips);
+            }
         }
         mem_free(buf);
     }
@@ -369,18 +442,25 @@ static void do_file_save(void)
     plat_file *f;
     u32 needed;
     u8 *buf;
+    wp_bool as_rtf;
 
     if (!g_doc_loaded) return;
 
-    strcpy(path, "C:\\*.TXT");
+    strcpy(path, "C:\\*.*");
     strcpy(fname, "UNTITLED.TXT");
     if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
 
-    format_txt_export(&g_doc, NULL, 0, &needed);
+    as_rtf = str_ends_with_ci(fullpath, ".RTF");
+    if (as_rtf) {
+        format_rtf_export(&g_doc, NULL, 0, &needed);
+    } else {
+        format_txt_export(&g_doc, NULL, 0, &needed);
+    }
     buf = (u8 *)mem_alloc(needed);
     if (buf == NULL) return;
 
-    if (format_txt_export(&g_doc, buf, needed, &needed) == WP_OK) {
+    if ((as_rtf ? format_rtf_export(&g_doc, buf, needed, &needed)
+                : format_txt_export(&g_doc, buf, needed, &needed)) == WP_OK) {
         if (plat_file_open(fullpath, PLAT_FILE_WRITE, &f) == WP_OK) {
             plat_file_write(f, buf, needed);
             plat_file_close(f);
@@ -430,6 +510,289 @@ static void do_edit_paste(void)
     if (!g_doc_loaded) return;
     if (plat_clipboard_get_text(buf, (u32)sizeof(buf), &out_len) != WP_OK) return;
     set_document_from_text(buf, out_len, g_content_width_twips);
+}
+
+/* Spell Check: like everything else that touches the whole document
+   (Cut/Copy/Paste), scoped to "no selection model yet". The dictionary
+   is queried from disk, never loaded whole (services/spell/spell.c,
+   docs/services/spell.md) -- a user who wants real spell-check on
+   WP.PRG drops a sorted word-list file at this fixed path (see
+   docs/atari-platform.md's deployment note; there is no shipped
+   dictionary asset, and none is needed for this feature to build/link/
+   run -- a missing file is reported through the same form_alert path as
+   a real miss, not a crash). */
+#define WP_ATARI_SPELL_DICT_PATH "C:\\WPSPELL.DIC"
+#define WP_ATARI_SPELL_MAX_SUGGESTIONS 3
+
+static spell_dict *g_spell_dict = NULL;
+static wp_bool g_spell_dict_open_attempted = WP_FALSE;
+
+static spell_dict *get_spell_dict(void)
+{
+    if (!g_spell_dict_open_attempted) {
+        g_spell_dict_open_attempted = WP_TRUE;
+        if (spell_dict_open(WP_ATARI_SPELL_DICT_PATH, &g_spell_dict) != WP_OK) {
+            g_spell_dict = NULL;
+        }
+    }
+    return g_spell_dict;
+}
+
+static wp_bool ascii_is_alpha(u8 c)
+{
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+/* Scans the whole document for the first word the dictionary doesn't
+   recognize. Tokenizes WITHIN each run only -- a word split across a
+   style boundary (e.g. "wo" bold + "rld" plain) is checked as two
+   separate fragments, not reassembled into "world" first. A real gap,
+   same class as the existing "whole document, no selection model"
+   narrowing, documented rather than silently accepted. Returns WP_TRUE
+   and fills out_word/out_word_len (both out-params) if one was found. */
+static wp_bool find_first_misspelling(spell_dict *dict, u8 *out_word, u32 *out_word_len)
+{
+    u32 si, pi;
+
+    for (si = 0; si < g_doc.section_count; si++) {
+        wp_section *sec = wp_document_section_get(&g_doc, si);
+
+        for (pi = 0; pi < sec->para_count; pi++) {
+            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            u32 r;
+
+            for (r = 0; r < para->run_count; r++) {
+                wp_run *run = wp_paragraph_run_get(para, (u16)r);
+                const u8 *bytes = wp_strpool_get(&g_doc.strings, run->text);
+                u32 k = 0;
+
+                while (k < run->text.length) {
+                    u32 start;
+                    u32 wlen;
+                    wp_bool known;
+
+                    while (k < run->text.length && !ascii_is_alpha(bytes[k])) k++;
+                    start = k;
+                    while (k < run->text.length && ascii_is_alpha(bytes[k])) k++;
+                    wlen = k - start;
+                    if (wlen == 0 || wlen >= SPELL_MAX_WORD_LEN) continue;
+
+                    if (spell_check_word(dict, bytes + start, wlen, &known) == WP_OK && !known) {
+                        memcpy(out_word, bytes + start, wlen);
+                        *out_word_len = wlen;
+                        return WP_TRUE;
+                    }
+                }
+            }
+        }
+    }
+    return WP_FALSE;
+}
+
+/* Appends s to buf (NUL-terminated, capacity cap), truncating rather
+   than overflowing if it doesn't fit -- form_alert's own internal
+   line-length limits are a real vintage-AES constraint this doesn't
+   attempt to reproduce exactly (never exercised by CI -- see
+   wp_atari_rtf_spell_selfcheck), but this buffer itself never
+   overruns regardless. */
+static void append_str(char *buf, u32 cap, u32 *pos, const char *s)
+{
+    while (*s != '\0' && *pos + 1 < cap) buf[(*pos)++] = *s++;
+    buf[*pos] = '\0';
+}
+
+static void do_spell_check(void)
+{
+    spell_dict *dict;
+    u8 word[SPELL_MAX_WORD_LEN];
+    u32 word_len;
+
+    if (!g_doc_loaded) return;
+
+    dict = get_spell_dict();
+    if (dict == NULL) {
+        form_alert(1, FA_ERROR "[Spell-check dictionary not found.|Expected at " WP_ATARI_SPELL_DICT_PATH "][ OK ]");
+        return;
+    }
+
+    if (!find_first_misspelling(dict, word, &word_len)) {
+        form_alert(1, FA_INFO "[No misspellings found.][ OK ]");
+        return;
+    }
+
+    {
+        char word_buf[SPELL_MAX_WORD_LEN];
+        char suggestions[WP_ATARI_SPELL_MAX_SUGGESTIONS][SPELL_MAX_WORD_LEN];
+        u32 sugg_count = 0;
+        char msg[200];
+        u32 pos = 0;
+
+        memcpy(word_buf, word, word_len);
+        word_buf[word_len] = '\0';
+
+        spell_suggest(dict, word, word_len, suggestions, WP_ATARI_SPELL_MAX_SUGGESTIONS, &sugg_count);
+
+        append_str(msg, (u32)sizeof(msg), &pos, FA_INFO "[Unknown word: ");
+        append_str(msg, (u32)sizeof(msg), &pos, word_buf);
+        if (sugg_count > 0) {
+            u32 i;
+            append_str(msg, (u32)sizeof(msg), &pos, "|Suggestions: ");
+            for (i = 0; i < sugg_count; i++) {
+                if (i > 0) append_str(msg, (u32)sizeof(msg), &pos, ", ");
+                append_str(msg, (u32)sizeof(msg), &pos, suggestions[i]);
+            }
+        } else {
+            append_str(msg, (u32)sizeof(msg), &pos, "|(no suggestions)");
+        }
+        append_str(msg, (u32)sizeof(msg), &pos, "][ OK ]");
+
+        form_alert(1, msg);
+    }
+}
+
+/* Thesaurus (post-M6): the first real menu action to use the offload
+   link (T6.3's "Known gaps" note in docs/atari-platform.md called this
+   out explicitly -- "no 'Thesaurus' menu action wired to the offload
+   link"). Looks up the word immediately BEFORE the cursor, same
+   directionality as Backspace, and scoped to the CURRENT RUN only, same
+   boundary do_backspace already has -- there is still no mouse-driven
+   word selection (no selection model at all, per docs/editing.md), and
+   after typing a word the cursor naturally sits right after it, so this
+   matches how the app is actually used today rather than inventing a
+   word-under-cursor hit-test this editor has no input path to drive. */
+#define WP_ATARI_OFFLOAD_ENDPOINT       "serial:aux:9600"
+#define WP_ATARI_THESAURUS_MAX_WORD_LEN 64
+#define WP_ATARI_THESAURUS_TIMEOUT_MS   90000uL /* generous: a real Pi/LLM
+                                                    gateway's cold model
+                                                    load can take tens of
+                                                    seconds, same
+                                                    rationale as
+                                                    ollama_gateway.c's
+                                                    --ollama-timeout-ms
+                                                    default -- see
+                                                    docs/formats/offload-
+                                                    protocol.md. */
+
+static wp_bool g_offload_init_attempted = WP_FALSE;
+
+/* Tries offload_init() exactly ONCE, lazily, on first use (same pattern
+   as get_spell_dict() above) -- an unattached/absent device fails within
+   OFFLOAD_CONNECT_TIMEOUT_MS + OFFLOAD_HANDSHAKE_TIMEOUT_MS
+   (engine/src/offload_client.c: 2s + 2s), a bounded, one-time cost, not
+   a multi-second stall on every single Thesaurus click thereafter. */
+static wp_bool ensure_offload(void)
+{
+    if (!g_offload_init_attempted) {
+        g_offload_init_attempted = WP_TRUE;
+        offload_init(WP_ATARI_OFFLOAD_ENDPOINT); /* result read back via offload_available() */
+    }
+    return offload_available();
+}
+
+static wp_bool extract_word_before_cursor(u8 *out_word, u32 *out_word_len)
+{
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_run *run;
+    const u8 *bytes;
+    u32 offset, end, start;
+
+    if (!g_doc_loaded) return WP_FALSE;
+    sec = wp_document_section_get(&g_doc, g_cursor.section);
+    para = wp_section_paragraph_get(sec, g_cursor.paragraph);
+    if (g_cursor.run >= para->run_count) return WP_FALSE;
+
+    run = wp_paragraph_run_get(para, (u16)g_cursor.run);
+    bytes = wp_strpool_get(&g_doc.strings, run->text);
+
+    offset = g_cursor.offset;
+    if (offset > run->text.length) offset = run->text.length;
+
+    end = offset;
+    while (end > 0 && !ascii_is_alpha(bytes[end - 1])) end--;
+    start = end;
+    while (start > 0 && ascii_is_alpha(bytes[start - 1])) start--;
+
+    if (start == end) return WP_FALSE;
+    if (end - start >= WP_ATARI_THESAURUS_MAX_WORD_LEN) return WP_FALSE;
+
+    memcpy(out_word, bytes + start, end - start);
+    *out_word_len = end - start;
+    return WP_TRUE;
+}
+
+static void do_thesaurus(void)
+{
+    u8 word[WP_ATARI_THESAURUS_MAX_WORD_LEN];
+    u32 word_len;
+    char word_buf[WP_ATARI_THESAURUS_MAX_WORD_LEN];
+    offload_request req;
+    offload_response resp;
+    char msg[220];
+    u32 pos = 0;
+
+    if (!extract_word_before_cursor(word, &word_len)) {
+        form_alert(1, FA_INFO "[Place the cursor right after a word,|then choose Thesaurus again.][ OK ]");
+        return;
+    }
+    memcpy(word_buf, word, word_len);
+    word_buf[word_len] = '\0';
+
+    if (!ensure_offload()) {
+        form_alert(1, FA_ERROR "[No offload device available.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");
+        return;
+    }
+
+    req.op = OFFLOAD_THESAURUS;
+    req.payload = word;
+    req.payload_len = word_len;
+    req.timeout_ms = (u32)WP_ATARI_THESAURUS_TIMEOUT_MS;
+
+    if (offload_submit(&req, &resp) != WP_OK) {
+        form_alert(1, FA_ERROR "[Thesaurus request failed or timed out.][ OK ]");
+        return;
+    }
+
+    if (resp.status != OFFLOAD_OK) {
+        offload_response_free(&resp);
+        form_alert(1, FA_INFO "[The connected gateway doesn't support|Thesaurus.][ OK ]");
+        return;
+    }
+
+    append_str(msg, (u32)sizeof(msg), &pos, FA_INFO "[Synonyms for ");
+    append_str(msg, (u32)sizeof(msg), &pos, word_buf);
+    append_str(msg, (u32)sizeof(msg), &pos, ": ");
+
+    {
+        u16 count = (resp.result_len >= 2) ? be_read16(resp.result) : 0;
+        u32 rpos = 2;
+        u32 i;
+
+        if (count == 0) {
+            append_str(msg, (u32)sizeof(msg), &pos, "|(none found)");
+        } else {
+            for (i = 0; i < count && rpos + 2 <= resp.result_len; i++) {
+                u16 wlen = be_read16(resp.result + rpos);
+                char tmp[WP_ATARI_THESAURUS_MAX_WORD_LEN];
+                u32 tlen;
+
+                rpos += 2;
+                if (rpos + wlen > resp.result_len) break;
+
+                tlen = (wlen < (u32)sizeof(tmp) - 1) ? wlen : (u32)sizeof(tmp) - 1;
+                memcpy(tmp, resp.result + rpos, tlen);
+                tmp[tlen] = '\0';
+
+                if (i > 0) append_str(msg, (u32)sizeof(msg), &pos, ", ");
+                append_str(msg, (u32)sizeof(msg), &pos, tmp);
+                rpos += wlen;
+            }
+        }
+    }
+    append_str(msg, (u32)sizeof(msg), &pos, "][ OK ]");
+
+    offload_response_free(&resp);
+    form_alert(1, msg);
 }
 
 wp_bool wp_atari_layout_selfcheck(void)
@@ -625,6 +988,174 @@ wp_bool wp_atari_memory_budget_selfcheck(long *free_before_out,
     return ok;
 }
 
+wp_bool wp_atari_rtf_spell_selfcheck(void)
+{
+    static const char scratch_rtf_path[] = "C:\\WPTEST.RTF";
+    static const char scratch_dict_path[] = "C:\\WPTEST.DIC";
+    static const char sample_text[] = "hello world\n";
+    static const char dict_contents[] = "cat\ndog\nhello\nworld\n";
+    wp_document doc;
+    u32 rtf_needed;
+    u8 *rtf_buf;
+    plat_file *f;
+    wp_bool ok = WP_TRUE;
+    spell_dict *dict;
+    wp_bool known;
+    char suggestions[3][SPELL_MAX_WORD_LEN];
+    u32 sugg_count;
+
+    if (!str_ends_with_ci("REPORT.RTF", ".RTF")) return WP_FALSE;
+    if (str_ends_with_ci("REPORT.TXT", ".RTF")) return WP_FALSE;
+    if (!str_ends_with_ci(".RTF", ".RTF")) return WP_FALSE;
+
+    /* RTF export -> real plat_file_write -> real plat_file_read ->
+       RTF import -> txt export, proving format_rtf_* actually runs
+       (not just cross-compiles) through this target's real file I/O. */
+    if (format_txt_import((const u8 *)sample_text, (u32)strlen(sample_text), &doc) != WP_OK) return WP_FALSE;
+
+    format_rtf_export(&doc, NULL, 0, &rtf_needed);
+    rtf_buf = (u8 *)mem_alloc(rtf_needed);
+    if (rtf_buf == NULL) { wp_document_free(&doc); return WP_FALSE; }
+
+    if (format_rtf_export(&doc, rtf_buf, rtf_needed, &rtf_needed) != WP_OK) ok = WP_FALSE;
+    wp_document_free(&doc);
+
+    if (ok) {
+        if (plat_file_open(scratch_rtf_path, PLAT_FILE_WRITE, &f) != WP_OK) {
+            ok = WP_FALSE;
+        } else {
+            if (plat_file_write(f, rtf_buf, rtf_needed) != WP_OK) ok = WP_FALSE;
+            plat_file_close(f);
+        }
+    }
+    mem_free(rtf_buf);
+
+    if (ok) {
+        u8 readback[512];
+        u32 read_len;
+
+        if (plat_file_open(scratch_rtf_path, PLAT_FILE_READ, &f) != WP_OK) {
+            ok = WP_FALSE;
+        } else {
+            if (plat_file_read(f, readback, (u32)sizeof(readback), &read_len) != WP_OK) ok = WP_FALSE;
+            plat_file_close(f);
+
+            if (ok) {
+                wp_document roundtrip_doc;
+                if (format_rtf_import(readback, read_len, &roundtrip_doc) != WP_OK) {
+                    ok = WP_FALSE;
+                } else {
+                    u32 export_needed;
+                    u8 txt_buf[64];
+
+                    format_txt_export(&roundtrip_doc, NULL, 0, &export_needed);
+                    if (export_needed > sizeof(txt_buf)) {
+                        ok = WP_FALSE;
+                    } else if (format_txt_export(&roundtrip_doc, txt_buf, export_needed, &export_needed) != WP_OK) {
+                        ok = WP_FALSE;
+                    } else if (export_needed != (u32)strlen(sample_text) ||
+                               memcmp(txt_buf, sample_text, export_needed) != 0) {
+                        ok = WP_FALSE;
+                    }
+                    wp_document_free(&roundtrip_doc);
+                }
+            }
+        }
+    }
+    plat_file_delete(scratch_rtf_path);
+
+    if (!ok) return WP_FALSE;
+
+    /* Spell dictionary lookups through real plat_file_seek/read
+       (services/spell/spell.c's binary search) against a scratch
+       dictionary this test writes itself -- no shipped dictionary
+       asset needed for CI; see docs/atari-platform.md for the real-
+       deployment convention (C:\WPSPELL.DIC, get_spell_dict above). */
+    if (plat_file_open(scratch_dict_path, PLAT_FILE_WRITE, &f) != WP_OK) return WP_FALSE;
+    if (plat_file_write(f, (const u8 *)dict_contents, (u32)strlen(dict_contents)) != WP_OK) {
+        plat_file_close(f);
+        plat_file_delete(scratch_dict_path);
+        return WP_FALSE;
+    }
+    plat_file_close(f);
+
+    if (spell_dict_open(scratch_dict_path, &dict) != WP_OK) {
+        plat_file_delete(scratch_dict_path);
+        return WP_FALSE;
+    }
+
+    if (spell_check_word(dict, (const u8 *)"hello", 5, &known) != WP_OK || known != WP_TRUE) ok = WP_FALSE;
+    if (spell_check_word(dict, (const u8 *)"zzqx", 4, &known) != WP_OK || known != WP_FALSE) ok = WP_FALSE;
+    if (spell_suggest(dict, (const u8 *)"helo", 4, suggestions, 3, &sugg_count) != WP_OK) ok = WP_FALSE;
+    if (sugg_count == 0) ok = WP_FALSE; /* "helo" -> "hello" is one insertion away */
+
+    spell_dict_close(dict);
+    plat_file_delete(scratch_dict_path);
+
+    return ok;
+}
+
+/* extract_word_before_cursor() walks backward from the cursor over any
+   non-alpha bytes FIRST, then over the alpha run behind them -- so it
+   finds the nearest preceding word even when the cursor sits in
+   trailing whitespace/punctuation, not just when it's immediately
+   adjacent to a word. Deliberate (a forgiving "look up what I just
+   typed" behavior, the same spirit as many editors' Ctrl+Backspace),
+   not an accident -- this selfcheck's offset=6 case exists specifically
+   to pin that behavior down, not just the immediately-adjacent case. */
+wp_bool wp_atari_thesaurus_selfcheck(void)
+{
+    static const char text[] = "hello world\n";
+    static const char blank_text[] = "   \n";
+    u8 word[WP_ATARI_THESAURUS_MAX_WORD_LEN];
+    u32 word_len;
+    wp_bool ok = WP_TRUE;
+
+    if (format_txt_import((const u8 *)text, (u32)strlen(text), &g_doc) != WP_OK) return WP_FALSE;
+    g_doc_loaded = WP_TRUE;
+
+    /* cursor at document end ("hello world|") -> "world" */
+    g_cursor = wp_pos_doc_end(&g_doc);
+    if (!extract_word_before_cursor(word, &word_len) || word_len != 5 ||
+        memcmp(word, "world", 5) != 0) {
+        ok = WP_FALSE;
+    }
+
+    /* cursor at the very start of the run -> nothing before it at all */
+    g_cursor.offset = 0;
+    if (extract_word_before_cursor(word, &word_len)) ok = WP_FALSE;
+
+    /* cursor right after "hello" ("hello| world") -> "hello" */
+    g_cursor.offset = 5;
+    if (!extract_word_before_cursor(word, &word_len) || word_len != 5 ||
+        memcmp(word, "hello", 5) != 0) {
+        ok = WP_FALSE;
+    }
+
+    /* cursor after the space, before "world" ("hello |world") -- skips
+       back over the space to find "hello", the nearest preceding word */
+    g_cursor.offset = 6;
+    if (!extract_word_before_cursor(word, &word_len) || word_len != 5 ||
+        memcmp(word, "hello", 5) != 0) {
+        ok = WP_FALSE;
+    }
+
+    wp_document_free(&g_doc);
+    g_doc_loaded = WP_FALSE;
+
+    /* a run with no alpha bytes anywhere before the cursor -> no word,
+       not just "no word immediately adjacent" */
+    if (format_txt_import((const u8 *)blank_text, (u32)strlen(blank_text), &g_doc) != WP_OK) return WP_FALSE;
+    g_doc_loaded = WP_TRUE;
+    g_cursor = wp_pos_doc_end(&g_doc);
+    if (extract_word_before_cursor(word, &word_len)) ok = WP_FALSE;
+
+    wp_document_free(&g_doc);
+    g_doc_loaded = WP_FALSE;
+
+    return ok;
+}
+
 static void redraw_window(short window_handle, VdiHdl vdi)
 {
     GRECT r, work;
@@ -691,6 +1222,12 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
         case WP_MENU_OBJ_EDIT_PASTE:
             do_edit_paste();
             redraw_window(window_handle, vdi);
+            break;
+        case WP_MENU_OBJ_TOOLS_SPELLCHECK:
+            do_spell_check();
+            break;
+        case WP_MENU_OBJ_TOOLS_THESAURUS:
+            do_thesaurus();
             break;
         default:
             break;
@@ -785,6 +1322,13 @@ void app_shell_run(void)
         wp_document_free(&g_doc);
         g_doc_loaded = WP_FALSE;
     }
+
+    if (g_spell_dict != NULL) {
+        spell_dict_close(g_spell_dict);
+        g_spell_dict = NULL;
+    }
+
+    offload_shutdown(); /* safe even if ensure_offload() was never called -- see offload_client.c */
 
     menu_bar(wp_menu_tree, MENU_REMOVE);
     wind_close(window_handle);

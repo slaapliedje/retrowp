@@ -464,3 +464,174 @@ honestly, not silently.
   this project's own testing) -- there's no protocol-level baud
   negotiation, matching how real serial links have always worked (both
   ends configure to a known-shared rate out of band).
+
+## RTF + Spell Check wired into the UI (post-M6)
+
+M5 landed `format_rtf` and `services/spell` as tested, cross-compiling
+modules with no UI entry point (`docs/milestones.md`'s M5 artifact note
+called this out explicitly). This closes that gap: `platform/atari/
+app_shell.c`'s File Open/Save and a new Tools menu now drive both.
+
+**RTF is picked by filename extension, not a format-choice control.**
+`fsel_input()` (the classic GEM file selector) has no such control, so
+`str_ends_with_ci(fullpath, ".RTF")` in `do_file_open`/`do_file_save`
+decides which pair of import/export calls to use -- the same way a user
+picks the format in most classic word processors of this era (type or
+select a different extension). `replace_document()` was factored out of
+the old `set_document_from_text()` so both the plaintext and RTF Open
+paths share the same "swap in a freshly built document, reset cursor and
+undo journal" logic. Open's file-selector wildcard changed from `*.TXT`
+to `*.*` so `.RTF` files are visible at all.
+
+**Spell Check is a new third menu title** (File, Edit, Tools), appended
+after Edit in the hand-built `OBJECT[]` tree rather than inserted between
+existing titles, so none of T4.1/T4.3's existing menu object indices had
+to change -- only `wp_menu_tree_selfcheck()` grew three more linkage
+assertions. `do_spell_check()`:
+- Lazily opens a dictionary at a fixed path, `C:\WPSPELL.DIC`, via
+  `spell_dict_open()` -- there is no shipped dictionary asset (that would
+  be a real multi-week undertaking of its own, same reasoning
+  `docs/services/spell.md` gives for not being Hunspell-compatible); a
+  user who wants real spell-check on `WP.PRG` supplies their own sorted
+  word-list file at that path. A missing file is reported through the
+  same `form_alert()` path as everything else here, not a crash --
+  consistent with this project's "absent gracefully" pattern for optional
+  capabilities (CLAUDE.md's Offload Rules say this for the Pi link;
+  the same spirit applies to an optional on-disk dictionary).
+- Scans the WHOLE document for the first unknown word (same "no
+  selection model" scope as Cut/Copy/Paste), tokenizing ASCII-alpha runs
+  **within each run only** -- a word split across a style boundary (e.g.
+  "wo" bold immediately followed by "rld" plain) is checked as two
+  fragments, not reassembled into "world" first. A real, documented gap,
+  not an oversight.
+- Reports through `form_alert()`: dictionary missing, no misspellings
+  found, or the first unknown word plus up to three `spell_suggest()`
+  candidates. There is no interactive correction UI (no click-to-fix,
+  no next/previous, no in-place highlighting) -- this is a "check and
+  report" action, not a red-squiggle spell checker; building the former
+  is a substantially bigger feature deliberately left for later, the
+  same way T4.3 scoped Cut/Copy/Paste to whole-document operations rather
+  than inventing a selection model to unblock them.
+
+**`do_spell_check()` is deliberately never called from any CI path.**
+`form_alert()` blocks synchronously waiting for a button click; nothing
+in this project's headless Hatari CI can click it, and calling it from an
+automated selfcheck would simply hang until `ci_atari.sh`'s outer
+`timeout` killed Hatari -- a self-inflicted repeat of the exact SIGPIPE-
+adjacent "something hangs and only the timeout notices" failure mode
+T6.3 spent real effort tracking down (see above). So the new selfcheck,
+`wp_atari_rtf_spell_selfcheck()`, exercises only the non-blocking
+building blocks `do_spell_check()` calls, not the menu action itself:
+- `str_ends_with_ci()`'s extension matching (including the boundary case
+  where the whole string equals the suffix).
+- A full RTF round trip through *real* `plat_file_write`/`plat_file_read`
+  on this target: `format_rtf_export()` a fixture document, write the
+  bytes to a scratch file, read them back, `format_rtf_import()`, export
+  as plaintext, and diff against the original. T5.1/T5.2 proved
+  `format_rtf_*` cross-compiles clean for m68k-atari-mint; this is the
+  first time it has actually *run* on this target rather than just built
+  for it.
+- Real dictionary lookups (`spell_dict_open`/`spell_check_word`/
+  `spell_suggest`) against a scratch dictionary file this test writes
+  itself (no shipped asset needed) -- proving `services/spell.c`'s
+  binary search over `plat_file_seek`/`read` works on real Atari file
+  I/O, not just the host stub.
+
+Run via `host/tools/ci_atari.sh` (added to `atari_smoke.c`'s check list)
+and confirmed passing on real Hatari alongside the rest of the smoke
+suite; `host/tools/ci_atari_serial.sh` also still passes unchanged,
+confirming linking `services/spell` into every Atari binary (`WP.PRG`,
+`SMOKE.PRG`, `SERIALTST.PRG` all now pull in `ATARI_SERVICES_OBJ`, per
+the `Makefile`) didn't disturb the serial offload path.
+
+## Thesaurus wired into the UI (post-M6, post-Ollama-gateway)
+
+T6.3's own "Known gaps" note (above) called this out explicitly:
+"`app_shell.c` doesn't call `offload_init`/`offload_submit` anywhere
+yet -- there's no 'Check Spelling' or 'Thesaurus' menu action wired to
+the offload link." This closes that gap for Thesaurus (Spell Check
+stays on-device, via `services/spell` -- see the section above; there is
+still no offload-backed spell action, and that remains a deliberate
+choice, not an oversight: `offload/gateway/ollama_gateway.c` itself
+doesn't implement `OFFLOAD_SPELL_CHECK`, see
+docs/formats/offload-protocol.md).
+
+**A new third title item, Tools > Thesaurus,** alongside Spell Check
+(`WP_MENU_OBJ_TOOLS_THESAURUS`, appended after `WP_MENU_OBJ_TOOLS_SPELLCHECK`
+in the hand-built `OBJECT[]` tree so no existing index moved -- same
+"append, don't insert" discipline as every other menu growth in this
+file). `wp_menu_tree_selfcheck()` grew the matching linkage assertions.
+
+**Looks up the word immediately BEFORE the cursor**, not a word under a
+mouse-driven selection -- there is still no selection model at all
+(`docs/editing.md`), and after typing a word the cursor naturally sits
+right after it (this app has no other way to move the cursor -- no
+arrow-key navigation either), so "the word I just typed" is what this
+app can actually express. `extract_word_before_cursor()` walks backward
+over any trailing non-alpha bytes first, then over the alpha run behind
+them, so it finds the nearest preceding word even from a couple of
+spaces past it (deliberate -- the same forgiving spirit as many editors'
+Ctrl+Backspace -- pinned down by `wp_atari_thesaurus_selfcheck()`'s
+offset=6 case, not just the immediately-adjacent case). Scoped to the
+CURRENT RUN only, the same boundary `do_backspace()` already has.
+
+**Connects lazily, once, to a fixed endpoint** (`serial:aux:9600`) on
+first use -- `ensure_offload()` mirrors `get_spell_dict()`'s "try once,
+remember the result" pattern. An absent/unattached device fails within
+`offload_client.c`'s own bounded 2s+2s connect+handshake timeout, a
+one-time cost, not a stall on every click; a real device once found stays
+connected for the rest of the session. `offload_shutdown()` is called
+unconditionally at app exit (safe even if `ensure_offload()` was never
+reached -- it's a no-op against a NULL transport).
+
+**Timeout is deliberately generous** (`WP_ATARI_THESAURUS_TIMEOUT_MS` =
+90s): a real gateway's cold model load can take tens of real seconds
+(measured directly while building `ollama_gateway.c` -- see
+docs/formats/offload-protocol.md), and this is a user-initiated action
+with visible feedback (the AES stays responsive to nothing else while
+blocked, admittedly, but a slow real answer beats a fast wrong timeout).
+
+**Reports through `form_alert()`**, same as Spell Check: no offload
+device, the connected gateway doesn't support Thesaurus (a real,
+expected case -- e.g. `mock_gateway.c`'s SPELL_CHECK-only builds, or any
+future gateway that only implements other ops), or the synonym list
+itself (decoded from the same length-prefixed word-list wire shape
+`docs/formats/offload-protocol.md` documents, reusing `be_read16`).
+
+**Verified two ways, deliberately not three:**
+1. `wp_atari_thesaurus_selfcheck()` (run via `ci_atari.sh`) proves
+   `extract_word_before_cursor()` -- the new pure-logic piece -- against
+   fixture cursor positions: a word right at the cursor, no word at the
+   very start of a run, the "skip trailing whitespace" case above, and a
+   run with no alpha content anywhere before the cursor. No offload calls
+   here at all.
+2. The offload_client.c <-> real-gateway round trip over real emulated
+   RS-232 is NOT re-proven here -- it's already covered end to end by
+   T6.3's `atari_serial_smoke.c`/`ci_atari_serial.sh`, calling the exact
+   same `offload_init`/`offload_submit`/`offload_shutdown` API this menu
+   action uses. Re-running that from a second selfcheck would only add a
+   guaranteed-to-fail ~2s connect/handshake timeout to `ci_atari.sh`
+   (which has no gateway attached) for zero new coverage -- a deliberate
+   scope call, not a missing test.
+
+**Known gap, honestly not closed here:** `do_thesaurus()` itself (the
+`form_alert()`-driving wrapper) has never actually been run and
+observed, by this project or by hand -- consistent with
+`do_spell_check()`'s identical, already-accepted gap above. It is not
+just untested by CI: unlike Quit/WM_REDRAW's synthesized-message
+dispatch tests, there is no safe way to exercise this one even manually
+through this project's existing tooling, because `form_alert()` is a
+real blocking AES call waiting for a real click or keypress -- routing a
+synthesized `MN_SELECTED` message into `wp_dispatch_message()` the way
+the Quit test does would block inside that same call with nothing to
+unblock it, hanging Hatari exactly like the T6.3 SIGPIPE incident this
+document already describes at length. Verified instead, transitively:
+`extract_word_before_cursor()` (selfcheck above) and the
+`offload_init`/`offload_submit`/`offload_shutdown` sequence
+(`atari_serial_smoke.c`, T6.3) are each proven correct on their own; this
+function is a thin, mechanical composition of the two plus string
+formatting, not independently re-verified end to end. A future task
+could close this with real `xdotool` mouse-click injection into a form
+alert if that proves reliable enough (T4.1's existing gap note is
+skeptical it will be, in this headless environment) -- not attempted
+here.
