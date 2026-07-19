@@ -43,6 +43,13 @@ wp_status plat_font_metrics_get(plat_font *f, plat_font_metrics *out)
     return WP_OK;
 }
 
+/* Host-only introspection, mirroring mem_host's leak counters: lets
+   tests prove "minimal recompute" (T3.3) by counting how many
+   plat_measure_text calls a relayout/pagination pass actually makes,
+   rather than just trusting that skipped work was skipped. Never called
+   from engine/ or services/ code. */
+static u32 g_measure_call_count = 0;
+
 wp_status plat_measure_text(plat_font *f, const u8 *utf8, u32 len,
                              i32 *width_twips_out)
 {
@@ -52,8 +59,20 @@ wp_status plat_measure_text(plat_font *f, const u8 *utf8, u32 len,
 
     if (hf == NULL || width_twips_out == NULL) return WP_ERR;
 
+    g_measure_call_count++;
+
     cell_width = hf->size_twips / 2;
     cp_count = utf8_cp_count(utf8, len);
     *width_twips_out = cell_width * (i32)cp_count;
     return WP_OK;
+}
+
+u32 metrics_host_measure_call_count(void)
+{
+    return g_measure_call_count;
+}
+
+void metrics_host_reset_measure_count(void)
+{
+    g_measure_call_count = 0;
 }

@@ -43,6 +43,18 @@ void test_edit_delete_mid_run_splits(void);
 void test_edit_delete_rejects_invalid_range(void);
 void test_edit_insert_then_delete_restores_content(void);
 
+/* linebreak.c */
+void test_layout_greedy_wrap_hand_computed_fixture(void);
+void test_layout_single_word_wider_than_column_overflows(void);
+void test_layout_empty_paragraph_gets_one_zero_width_line(void);
+void test_layout_word_spanning_run_boundary_is_one_token(void);
+void test_layout_editing_one_paragraph_does_not_remeasure_whole_document(void);
+
+/* paginate.c */
+void test_paginate_known_page_size_yields_expected_page_count(void);
+void test_paginate_new_section_always_starts_new_page(void);
+void test_paginate_no_leaks(void);
+
 /* undo.c */
 void test_undo_insert_then_undo_then_redo(void);
 void test_undo_delete_all_cases_then_undo_redo(void);
@@ -132,6 +144,16 @@ static const test_case g_cases[] = {
     { "edit_delete_mid_run_splits", test_edit_delete_mid_run_splits },
     { "edit_delete_rejects_invalid_range", test_edit_delete_rejects_invalid_range },
     { "edit_insert_then_delete_restores_content", test_edit_insert_then_delete_restores_content },
+
+    { "layout_greedy_wrap_hand_computed_fixture", test_layout_greedy_wrap_hand_computed_fixture },
+    { "layout_single_word_wider_than_column_overflows", test_layout_single_word_wider_than_column_overflows },
+    { "layout_empty_paragraph_gets_one_zero_width_line", test_layout_empty_paragraph_gets_one_zero_width_line },
+    { "layout_word_spanning_run_boundary_is_one_token", test_layout_word_spanning_run_boundary_is_one_token },
+    { "layout_editing_one_paragraph_does_not_remeasure_whole_document", test_layout_editing_one_paragraph_does_not_remeasure_whole_document },
+
+    { "paginate_known_page_size_yields_expected_page_count", test_paginate_known_page_size_yields_expected_page_count },
+    { "paginate_new_section_always_starts_new_page", test_paginate_new_section_always_starts_new_page },
+    { "paginate_no_leaks", test_paginate_no_leaks },
 
     { "undo_insert_then_undo_then_redo", test_undo_insert_then_undo_then_redo },
     { "undo_delete_all_cases_then_undo_redo", test_undo_delete_all_cases_then_undo_redo },

@@ -2,6 +2,7 @@
 #include "docmodel.h"
 #include "platform.h"
 #include "growth_internal.h"
+#include "layout.h"
 
 static wp_status cstyle_table_grow(wp_document *doc, u32 needed_count)
 {
@@ -155,6 +156,7 @@ void wp_document_free(wp_document *doc)
         u32 j;
 
         for (j = 0; j < sec->para_count; j++) {
+            wp_paragraph_layout_free(&sec->paras[j]);
             mem_free(sec->paras[j].runs);
         }
         mem_free(sec->paras);
