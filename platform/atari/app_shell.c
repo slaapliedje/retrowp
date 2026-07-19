@@ -40,26 +40,28 @@
    string content -- those must be set by hand, in character-cell units
    relative to the parent (screen-relative only for the root). */
 OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
-    /* next,                 head,                  tail,                  type,     flags,     state,     spec, x, y, w, h */
-    { -1,                     WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_TOOLS_TITLE, G_IBOX,   OF_NONE,   OS_NORMAL, {0}, 0, 0, 40, 1 },
-    { WP_MENU_OBJ_EDIT_TITLE, WP_MENU_OBJ_FILE_BOX,   WP_MENU_OBJ_FILE_BOX,   G_TITLE,  OF_NONE,   OS_NORMAL, {0}, 0, 0, 6,  1 },
-    { WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_EDIT_BOX,  WP_MENU_OBJ_EDIT_BOX,   G_TITLE,  OF_NONE,   OS_NORMAL, {0}, 6, 0, 6,  1 },
-    { WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_FILE_OPEN,  WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE,   OS_NORMAL, {0}, 0, 1, 8,  3 },
-    { WP_MENU_OBJ_FILE_SAVE,  -1,                     -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 0, 8,  1 },
-    { WP_MENU_OBJ_FILE_QUIT,  -1,                     -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 1, 8,  1 },
-    { WP_MENU_OBJ_FILE_BOX,   -1,                     -1,                    G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 2, 8,  1 },
-    { WP_MENU_OBJ_EDIT_TITLE, WP_MENU_OBJ_EDIT_CUT,   WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE,   OS_NORMAL, {0}, 6, 1, 8,  3 },
-    { WP_MENU_OBJ_EDIT_COPY,  -1,                     -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 0, 8,  1 },
-    { WP_MENU_OBJ_EDIT_PASTE, -1,                     -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 1, 8,  1 },
-    { WP_MENU_OBJ_EDIT_BOX,   -1,                     -1,                    G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 2, 8,  1 },
-    { WP_MENU_OBJ_ROOT,       WP_MENU_OBJ_TOOLS_BOX,  WP_MENU_OBJ_TOOLS_BOX, G_TITLE,  OF_NONE,   OS_NORMAL, {0}, 12, 0, 7,  1 },
-    { WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_CHAT, G_BOX, OF_NONE, OS_NORMAL, {0}, 12, 1, 16, 4 },
-    { WP_MENU_OBJ_TOOLS_THESAURUS, -1,                -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 0, 16, 1 },
-    { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, -1,              -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 1, 16, 1 },
-    { WP_MENU_OBJ_TOOLS_CHAT, -1,                      -1,                    G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 2, 16, 1 },
-    { WP_MENU_OBJ_TOOLS_BOX,  -1,                     -1,                    G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 3, 16, 1 }
+    /* next,                 head,                  tail,                  type,     flags,       state,     spec, x, y, w, h */
+    { -1,                     WP_MENU_OBJ_DESK_TITLE, WP_MENU_OBJ_TOOLS_TITLE, G_IBOX,   OF_NONE,     OS_NORMAL, {0}, 0, 0, 40, 1 },
+    { WP_MENU_OBJ_EDIT_TITLE, WP_MENU_OBJ_FILE_BOX,   WP_MENU_OBJ_FILE_BOX,   G_TITLE,  OF_NONE,     OS_NORMAL, {0}, 6, 0, 6,  1 },
+    { WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_EDIT_BOX,  WP_MENU_OBJ_EDIT_BOX,   G_TITLE,  OF_NONE,     OS_NORMAL, {0}, 12, 0, 6,  1 },
+    { WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_FILE_OPEN,  WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_HIDETREE, OS_NORMAL, {0}, 0, 1, 8,  3 },
+    { WP_MENU_OBJ_FILE_SAVE,  -1,                     -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 0, 8,  1 },
+    { WP_MENU_OBJ_FILE_QUIT,  -1,                     -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 1, 8,  1 },
+    { WP_MENU_OBJ_FILE_BOX,   -1,                     -1,                    G_STRING, OF_LASTOB,   OS_NORMAL, {0}, 0, 2, 8,  1 },
+    { WP_MENU_OBJ_EDIT_TITLE, WP_MENU_OBJ_EDIT_CUT,   WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_HIDETREE, OS_NORMAL, {0}, 6, 1, 8,  3 },
+    { WP_MENU_OBJ_EDIT_COPY,  -1,                     -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 0, 8,  1 },
+    { WP_MENU_OBJ_EDIT_PASTE, -1,                     -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 1, 8,  1 },
+    { WP_MENU_OBJ_EDIT_BOX,   -1,                     -1,                    G_STRING, OF_LASTOB,   OS_NORMAL, {0}, 0, 2, 8,  1 },
+    { WP_MENU_OBJ_ROOT,       WP_MENU_OBJ_TOOLS_BOX,  WP_MENU_OBJ_TOOLS_BOX, G_TITLE,  OF_NONE,     OS_NORMAL, {0}, 18, 0, 7,  1 },
+    { WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_CHAT, G_BOX, OF_HIDETREE, OS_NORMAL, {0}, 12, 1, 16, 4 },
+    { WP_MENU_OBJ_TOOLS_THESAURUS, -1,                -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 0, 16, 1 },
+    { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, -1,              -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 1, 16, 1 },
+    { WP_MENU_OBJ_TOOLS_CHAT, -1,                      -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 2, 16, 1 },
+    { WP_MENU_OBJ_TOOLS_BOX,  -1,                     -1,                    G_STRING, OF_LASTOB,   OS_NORMAL, {0}, 0, 3, 16, 1 },
+    { WP_MENU_OBJ_FILE_TITLE, -1,                     -1,                    G_TITLE,  OF_NONE,     OS_NORMAL, {0}, 0, 0, 6,  1 }
 };
 
+static char g_text_desk[]  = " Desk ";
 static char g_text_file[]  = " File ";
 static char g_text_edit[]  = " Edit ";
 static char g_text_tools[] = " Tools ";
@@ -76,6 +78,7 @@ static char g_text_chat[] = "  Chat";
 
 void wp_menu_tree_init(void)
 {
+    wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_spec.free_string = g_text_desk;
     wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_spec.free_string = g_text_file;
     wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_spec.free_string = g_text_edit;
     wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_spec.free_string = g_text_tools;
@@ -94,9 +97,15 @@ void wp_menu_tree_init(void)
 wp_bool wp_menu_tree_selfcheck(void)
 {
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_next != -1) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_head != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_head != WP_MENU_OBJ_DESK_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_tail != WP_MENU_OBJ_TOOLS_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_type != G_IBOX) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_next != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_head != -1) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_tail != -1) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_type != G_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_spec.free_string != g_text_desk) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_next != WP_MENU_OBJ_EDIT_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_head != WP_MENU_OBJ_FILE_BOX) return WP_FALSE;
@@ -117,6 +126,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_head != WP_MENU_OBJ_TOOLS_SPELLCHECK) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_CHAT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_type != G_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_next != WP_MENU_OBJ_TOOLS_THESAURUS) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
@@ -134,6 +144,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_head != WP_MENU_OBJ_FILE_OPEN) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_tail != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_type != G_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_next != WP_MENU_OBJ_FILE_SAVE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_next != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
@@ -144,6 +155,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_head != WP_MENU_OBJ_EDIT_CUT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_tail != WP_MENU_OBJ_EDIT_PASTE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_type != G_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_CUT].ob_next != WP_MENU_OBJ_EDIT_COPY) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_COPY].ob_next != WP_MENU_OBJ_EDIT_PASTE) return WP_FALSE;
@@ -2056,6 +2068,29 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
     }
 }
 
+/* Pure decision logic behind the startup 80-column warning, factored
+   out of app_shell_run() so it's testable without a real VDI handle --
+   same reasoning offload_caps_supports() is its own function rather
+   than inlined into do_chat(). screen_width_px is work_out[0]+1 (the
+   real pixel width v_opnvwk reports); 640px is the real threshold
+   SpeedoGDOS's own INSTALL.PRG uses (verified: refuses at 320x200,
+   proceeds at 640x200 -- see docs/atari-platform.md). */
+static wp_bool needs_80_column_warning(short screen_width_px)
+{
+    return (wp_bool)(screen_width_px < 640);
+}
+
+wp_bool wp_atari_resolution_selfcheck(void)
+{
+    wp_bool ok = WP_TRUE;
+
+    if (!needs_80_column_warning(320)) ok = WP_FALSE;  /* ST low-res: under 80 columns */
+    if (needs_80_column_warning(640))  ok = WP_FALSE;  /* ST medium-res: exactly 80 columns */
+    if (needs_80_column_warning(640 * 2)) ok = WP_FALSE; /* wide/overscan: well over 80 columns */
+
+    return ok;
+}
+
 void app_shell_run(void)
 {
     short work_in[11];
@@ -2075,6 +2110,19 @@ void app_shell_run(void)
     for (dummy = 0; dummy < 10; dummy++) work_in[dummy] = 1;
     work_in[10] = 2; /* raster coordinates */
     v_opnvwk(work_in, &vdi_handle, work_out);
+
+    /* work_out[0] is the screen's max addressable X (width in pixels,
+       minus one) -- a standard v_opnvwk output, same field the real
+       SpeedoGDOS INSTALL.PRG checks before it will run at all (verified:
+       it refuses at 320x200 low-res with "needs an 80 column screen",
+       and proceeds at 640x200 medium-res -- see docs/atari-platform.md).
+       This app doesn't need to refuse outright the way an installer
+       does -- editing still works, just cramped -- so this warns once
+       at startup with the same 640px/80-column threshold rather than
+       blocking launch. */
+    if (needs_80_column_warning((short)(work_out[0] + 1))) {
+        form_alert(1, FA_ERROR "[Screen is under 80 columns.|Text and menus may be cramped|at this resolution.][ OK ]");
+    }
 
     wp_menu_tree_init();
     menu_bar(wp_menu_tree, MENU_INSTALL);

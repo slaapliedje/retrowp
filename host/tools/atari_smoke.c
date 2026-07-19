@@ -151,6 +151,9 @@ int main(void)
     check(wp_atari_chat_selfcheck(),
           "capability-bit check for the Chat menu action");
 
+    check(wp_atari_resolution_selfcheck(),
+          "80-column startup warning threshold against real ST resolutions");
+
     {
         long free_before = 0, free_after_load = 0, free_after_free = 0;
         wp_bool budget_ok = wp_atari_memory_budget_selfcheck(&free_before, &free_after_load, &free_after_free);

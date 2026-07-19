@@ -46,7 +46,16 @@
 #define WP_MENU_OBJ_TOOLS_GRAMMARCHECK 15
 /* M8 T8.3: a fourth Tools item, Chat, appended after Grammar Check. */
 #define WP_MENU_OBJ_TOOLS_CHAT   16
-#define WP_MENU_OBJ_COUNT        17
+/* post-M8: the conventional "Desk" title, appended after Chat (same
+   "append, don't renumber" rule as every prior addition) but wired as
+   the ACTUAL leftmost/first sibling via ob_head/ob_next -- the object
+   array's storage order doesn't have to match visual left-to-right
+   order, only the ob_next chain does. No dropdown box (head/tail -1) --
+   this project doesn't implement desk accessory listing, only the
+   title itself needed to reclaim its conventionally-reserved x=0 slot
+   (see docs/atari-platform.md). */
+#define WP_MENU_OBJ_DESK_TITLE   17
+#define WP_MENU_OBJ_COUNT        18
 
 extern OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 
@@ -184,5 +193,14 @@ wp_bool wp_atari_grammar_check_selfcheck(void);
    blocks) or offload_init()/offload_query() against a real gateway --
    same reasoning every other selfcheck in this file already gives. */
 wp_bool wp_atari_chat_selfcheck(void);
+
+/* Proves needs_80_column_warning()'s threshold logic against the three
+   real resolutions this project's target hardware actually has (ST
+   low/medium-res, plus a wide/overscan case) rather than the real
+   form_alert() dialog itself, which -- like every other blocking
+   dialog in this file -- isn't exercised by CI. See
+   docs/atari-platform.md for how the 640px threshold was verified
+   against the real SpeedoGDOS INSTALL.PRG. */
+wp_bool wp_atari_resolution_selfcheck(void);
 
 #endif /* WP_ATARI_APP_SHELL_INTERNAL_H */

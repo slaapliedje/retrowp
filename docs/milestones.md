@@ -151,10 +151,15 @@ Goal: A real, running ST word processor at 1MB.
       end-to-end testing is unreliable in this headless environment (Y
       coordinate steering doesn't work), so the Quit menu item's dispatch
       logic is proven correct via direct synthesized-message calls rather
-      than an actual click routed through evnt_multi; and the menu title
-      text renders as glyph noise in screenshot captures specifically
-      (screenshot/font-capture artifact, not a tree-construction bug --
-      the tree's bytes are verified correct and menu_bar() succeeds).
+      than an actual click routed through evnt_multi.
+      **Revisited post-M8**: the menu title glyph-noise note above was
+      wrong -- it was a real bug (missing OF_HIDETREE on dropdown boxes,
+      found by reading EmuTOS's own AES source), not a screenshot
+      artifact, and is now fixed and visually verified. That same
+      investigation found a second, previously-masked bug -- only the
+      first menu title actually renders -- root-caused but not yet
+      safely fixed (a 3-level tree restructuring hung real Atari CI and
+      was reverted). See docs/atari-platform.md for the full trail.
 - [x] T4.2 VDI/SpeedoGDOS metrics + glyph draw implementation of platform.h.
       AC: Text renders; measured widths drive correct on-screen wrap matching
       the engine's layout.

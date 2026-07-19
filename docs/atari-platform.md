@@ -273,17 +273,73 @@ document view. Verified visually: a real screenshot shows the sample
 paragraph rendering with sensible word-boundary wrapping, filling the
 window without overflowing its right edge.
 
-### Known gap: menu title text renders as glyph noise in screenshots
+### Fixed: menu title text was rendering as real glyph noise (post-M8)
 
-`WP.PRG`'s "File" menu title renders as illegible pixel noise in
-screenshot captures (`import -window root`), isolated (during the prior
-spike investigation) to be independent of the tree's content/width/position
-via a single-character-title control experiment -- likely a EmuTOS-desktop
-or Hatari screenshot-capture interaction, not a tree-construction bug,
-since `wp_menu_tree_selfcheck()` proves the tree's bytes are correct and
-`menu_bar()` returns success live. Not investigated further; flagged here
-so it isn't mistaken for a real rendering defect if a future task revisits
-Atari screenshots.
+The earlier note here ("likely a EmuTOS-desktop or Hatari screenshot-capture
+interaction, not a tree-construction bug") was wrong, and was corrected by
+actually reading EmuTOS's own AES source (`aes/gemmnlib.c`, `aes/gemobjop.c`)
+rather than continuing to trust a screenshot-artifact theory. The real cause:
+`mn_bar()`'s install path calls `ob_draw(tree, THEBAR, MAX_DEPTH)`
+unconditionally, which walks and draws the *entire* subtree under every
+title -- including closed dropdown boxes -- immediately at install time,
+with clipping turned off. `just_draw()` (`aes/gemobjop.c`) only skips an
+object (and its children) if its `ob_flags` has `OF_HIDETREE` (0x0080,
+"object and its children are hidden") set. `wp_menu_tree`'s dropdown boxes
+never set it, so every title's Open/Save/Quit-style items got drawn
+immediately, overlapping the title text -- the "glyph noise."
+
+Verified two ways, not just theorized: (1) bisection -- a minimal hand-built
+probe tree with a bare title (no dropdown) rendered perfectly; the same
+title with a populated `G_BOX` child reproduced the exact corruption; an
+*empty* box (no items) did not, isolating the trigger to a box with real
+children specifically. (2) fix confirmed visually -- adding `OF_HIDETREE`
+to `WP_MENU_OBJ_FILE_BOX`/`EDIT_BOX`/`TOOLS_BOX`'s `ob_flags` (`app_shell.c`)
+and re-booting under real Hatari shows "File" rendering cleanly, no noise.
+`wp_menu_tree_selfcheck()` now asserts `OF_HIDETREE` is set on all three
+boxes so this can't silently regress.
+
+One real, source-grounded lead was investigated and discarded along the
+way: `menu_fixup()` (called unconditionally by `mn_bar()`) hardcodes
+`tree[0].ob_tail` as a "desk accessory" box it rewrites -- a real
+mechanism, but empirically confirmed (via before/after field dumps over
+NF_STDERR on a real boot) to leave `wp_menu_tree` untouched for our tree
+shape, so it is not the cause here and was not worked around.
+
+### Known gap: only the first title actually renders (found post-M8, not yet fixed)
+
+Fixing the glyph-noise corruption above surfaced a second, previously
+masked bug: only *one* title (whichever sits at `wp_menu_tree` array index
+1) is drawn at all -- Desk/Edit/Tools never appear, verified visually on a
+real boot. Root cause, again from reading `ob_draw`/`everyobj`
+(`aes/gemobjop.c`) directly: `mn_bar()` hardcodes array index 1 as
+`THEBAR`, and `everyobj()`'s walk stops as soon as it would revisit
+`tree[THEBAR].ob_next` -- which, when index 1 is itself a title (as in
+every version of this tree so far, including the desk-title addition),
+equals that title's own immediate next sibling, so the walk terminates
+after exactly one object. Tracing `mn_bar()`'s other index-0/1/2 uses
+(`THESCREEN`/`THEBAR`/`THEACTIVE`) strongly suggests EmuTOS's own desktop
+tree is actually a 3-level structure -- an outer root, a `BAR` container
+at index 1 whose *children* are the real titles, and some index-2
+bookkeeping object -- not the 2-level (root directly owns titles)
+structure this tree has used since T4.1.
+
+A 3-level restructuring was implemented and visually ruled out as
+*necessary* for the fix above (the glyph-noise fix needed only
+`OF_HIDETREE`), but attempting it broke something else: real Atari CI
+(`host/tools/ci_atari.sh`) hung (timeout, not a clean crash) partway
+through the smoke test, right after a synthesized `MN_SELECTED` dispatch
+that calls the real `menu_tnormal()` AES function -- consistent with some
+other `mn_bar()`-internal index-0/1/2 assumption (plausibly the
+`ob_actxywh(tree, THEACTIVE, ...)` call) reading nonsense from whatever
+ended up at that array slot in the restructured tree. Given the risk of
+shipping a hung CI, this was reverted; the codebase currently has the
+*working, CI-green, corruption-free* 2-level tree with only one title
+visible. Fixing "only one title renders" for real needs the 3-level
+structure implemented *correctly* (matching all of `THESCREEN`/`THEBAR`/
+`THEACTIVE`'s real roles, not just the ones this investigation identified)
+and re-verified against both a real boot screenshot and `ci_atari.sh`
+before landing -- a good next task for whoever picks this up, with the
+source files above already identified as the ground truth to work from.
 
 ## File I/O, clipboard, timer, and basic editing (T4.3)
 
