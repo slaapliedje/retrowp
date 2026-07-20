@@ -1,6 +1,7 @@
-/* amiberry-based smoke test for platform/amiga's T9.1a non-UI seams
-   (memory/file/clipboard/timer). Cross-compiled with m68k-amigaos-gcc
-   into its own standalone binary and run under amiberry against the
+/* amiberry-based smoke test for platform/amiga's non-UI platform.h seams
+   (T9.1a: memory/file/clipboard/timer; T9.2: layout/metrics; T9.3:
+   transport). Cross-compiled with m68k-amigaos-gcc into its own
+   standalone binary and run under amiberry against the
    docs/amiga-platform.md fixture.
 
    amiberry has no equivalent to Hatari's NF_STDERR/NF_EXIT Native
@@ -41,6 +42,10 @@ int main(void)
 
     ok = wp_amiga_layout_selfcheck();
     report(ok ? "layout: PASS\n" : "layout: FAIL\n");
+    if (!ok) all_ok = WP_FALSE;
+
+    ok = wp_amiga_transport_selfcheck();
+    report(ok ? "transport: PASS\n" : "transport: FAIL\n");
     if (!ok) all_ok = WP_FALSE;
 
     return all_ok ? 0 : 20;

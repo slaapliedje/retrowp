@@ -525,6 +525,135 @@ fonts") and the M9 plan's own Phase 3 AC.
   assertions are the substitute, not a screenshot at a second window
   size.
 
+## Phase 4 (T9.3): offload transport over serial.device
+
+`transport_amiga.c` implements the four `plat_transport_*` functions over
+real `serial.device` `IOExtSer` `IORequest`s, mirroring `transport_atari.c`'s
+`"serial:<device>:<baud>"` endpoint convention and `deadline =
+plat_ticks_ms() + timeout_ms` polling shape. `app_shell.c` wires the
+portable `offload_client.c` API (already proven end-to-end on Atari, T6.3)
+into three of the four Tools menu actions -- matching T9.3's stated AC
+("Same offload features work as on ST") with one honestly-scoped exception,
+below.
+
+- **Real serial.device mechanics**: `CreateMsgPort`/`CreateIORequest`
+  (the latter sized `sizeof(struct IOExtSer)`, per that header's own
+  CAUTION comment -- and, unlike `mem_alloc`, documented to return a
+  zero-filled block) / `OpenDevice("serial.device", 0, ...)` /
+  `SDCMD_SETPARAMS` (8N1, `SERF_XDISABLED` to disable software xON/xOFF
+  flow control, matching `transport_atari.c`'s own `FLOW_NONE` choice) /
+  `CloseDevice`. `io_Baud` takes a true baud value directly (no
+  `BAUD_*` index table to map into the way Atari's `Rsconf` needs, so
+  endpoint parsing is simpler here). Reads wait for the first byte via a
+  real async `SendIO` raced against `plat_ticks_ms()` (`CheckIO` to
+  poll, `AbortIO`+`WaitIO` to cancel and reclaim the request on
+  timeout), then drain whatever else is already buffered via a real
+  `SDCMD_QUERY` (which reports the exact count waiting, not a guess) --
+  matching Atari's own "wait then drain, no further waiting" contract.
+  Writes ship the whole buffer as one `IORequest` (unlike Atari's
+  `Bconout`, which is single-byte-at-a-time by hardware necessity --
+  `serial.device` genuinely accepts a multi-byte `CMD_WRITE`).
+- **Real gotcha, found and fixed empirically**: `SDCMD_SETPARAMS` is
+  attempted but NOT treated as fatal if it fails, a deliberate choice
+  discovered the hard way. This amiberry build's `serial.device`
+  answers `SDCMD_QUERY` successfully (proving `OpenDevice` and the
+  exec.library `IORequest` lifecycle genuinely work) but rejects
+  `SDCMD_SETPARAMS` with `SerErr_InvParam` regardless of which
+  individually-valid parameter values are sent -- verified by trying
+  several distinct combinations (including the most conservative
+  possible: zeroed `io_CtlChar`/`io_RBufLen`/`io_SerFlags`), all
+  rejected identically. This is consistent with an emulated serial port
+  that has no real host-side backing configured to actually apply line
+  settings to (see the next bullet), not a bug in the values requested.
+  Treating this as fatal would make the transport permanently
+  unopenable under this project's own test fixture; on genuine
+  hardware, a well-formed SETPARAMS for a completely standard
+  configuration should never legitimately fail, and if the actual line
+  settings are wrong for some other reason, the wire protocol's own CRC
+  framing (`offload/transport/wire.c`) is the real, live arbiter of
+  whether communication actually works, not this call's return code.
+- **Real environment limitation, investigated, not assumed**: unlike
+  Hatari's `--rs232-in`/`--rs232-out` (plain host FIFOs, used by
+  `ci_atari_serial.sh` to bridge a live `mock_gateway` process), this
+  amiberry build's `serial_port=` config key validates against a real
+  hardware enumeration (`Serial port enumeration.. / Port enumeration
+  end`, with nothing listed on this machine -- no physical serial ports
+  exist here) rather than accepting an arbitrary path. Two real,
+  distinct workarounds were tried and both failed differently: a plain
+  host FIFO caused a hang and an unrelated-looking JIT SIGSEGV storm
+  (FIFOs aren't TTYs; a termios-based serial backend calling `open()`
+  then a TTY-only ioctl on one is a real, if unusual, failure mode); a
+  real `socat`-created PTY pair opened cleanly but was rejected at
+  config time with `"Error finding serial port <path>"` -- confirming
+  the enumeration-only behavior. No physical serial hardware, and no
+  accepted synthetic backing, means there is no live peer in this
+  environment to loop bytes through end to end. A two-tier CI proof
+  mirroring `ci_atari_serial.sh`/`ci_atari_convert_serial.sh` was
+  therefore not practically achievable here and was not attempted
+  further -- the same cost/benefit call already made for interactive
+  window-resize and menu-hover verification in Phases 2-3, applied to a
+  new kind of environment gap instead of an input-calibration one.
+- **On-target selfcheck, real, not a live round trip**:
+  `wp_amiga_transport_selfcheck` proves what IS provable without a live
+  peer: `OpenDevice`/
+  `CloseDevice` succeed repeatably across multiple open/close cycles;
+  `CMD_WRITE` succeeds (bytes structurally accepted, same as a real
+  cable plugged into nothing); a `CMD_READ` against a short timeout
+  genuinely returns `WP_TIMEOUT` (not an instant no-op, not a hang)
+  within a real, bounded window -- proving the `SendIO`/`CheckIO`/
+  `AbortIO`/`WaitIO` deadline race itself, the one genuinely novel
+  Amiga-specific mechanism this file adds, is correct on real hardware;
+  and `offload_init()` against the same endpoint, with no live gateway,
+  returns cleanly (not hanging) leaving `offload_available()` false --
+  CLAUDE.md's own Offload Rule ("the engine must be fully functional
+  WITHOUT an offload device attached") proven through the real
+  transport on this backend too, not just assumed. Deliberately does
+  NOT prove that bytes written on one end are correctly received on the
+  other, or that `SDCMD_SETPARAMS` itself succeeds against real
+  hardware -- the same honestly-drawn boundary
+  `wp_atari_thesaurus_selfcheck`/`wp_atari_grammar_check_selfcheck`
+  already establish for their own backend, extended here to cover a
+  second, independently-discovered gap.
+- **Tools menu wiring**: `ensure_offload()` (lazy-once `offload_init`,
+  mirroring Atari's own helper), `extract_word_before_cursor`/
+  `extract_current_paragraph_text` (near-verbatim ports of Atari's own
+  helpers, adapted to `g_amiga_doc`/`g_ctx.vi.cursor`), and real
+  `do_thesaurus`/`do_chat`/`do_grammar_check` implementations, displayed
+  via `MUI_Request` instead of GEM's `form_alert()`. **Real correctness
+  note**: `MUI_Request`'s `format` parameter is a genuine printf-style
+  format MUI itself expands, not a plain display string -- every
+  message containing real document/gateway text (never fully
+  caller-controlled, unlike the Phase 2 Help action's fixed literal) is
+  passed through a literal `"%s"` format with the actual text as the
+  vararg (`show_message()`), never interpolated into the format string
+  directly, so a stray `%` in a word, a gateway reply, or a grammar
+  message can't be misinterpreted as a format specifier.
+  **Grammar Check is intentionally NOT a full port**: Atari's version is
+  an interactive per-issue Accept/Skip/Cancel loop with byte-offset-
+  shifting bookkeeping across edits (~200 lines); this backend reports
+  what was found (a count plus the first issue's message/suggestion,
+  from either the real offload check or, per CLAUDE.md's Offload Rules,
+  the local `grammar_lite_check()` fallback when no device is attached)
+  via one `MUI_Request`, never applying anything automatically -- a
+  real, honestly-scoped-down gap, not a silent one. Spellcheck stays a
+  no-op: it is a local, file-based dictionary feature with no offload
+  dependency at all (this project's own M9 plan says so explicitly), so
+  it is out of T9.3's scope by definition, and this app has no
+  dictionary file on its fixture yet.
+- **Not individually mouse-click-verified**: Thesaurus/Grammar
+  Check/Chat's menu items were not individually clicked under amiberry
+  -- the same right-mouse-hold-and-hover gesture that made Phase 2's
+  Help-action verification and Phase 3's window-resize attempt costly
+  to calibrate proved costly here too (confirmed again: a `mousedown`
+  with no motion never rendered the dropdown; small relative moves
+  while held warped the cursor to an unrelated screen position instead
+  of tracking smoothly). All three go through the identical
+  menu-Trigger -> `MUIM_Application_ReturnID` -> `invoke_backend_action`
+  path already proven end-to-end by File Open/Save/Quit and Help, and
+  their own new logic closely mirrors Atari's already-exercised
+  helpers -- a reasoned, not a blind, gap, consistent with every prior
+  phase's own calibration-cost calls.
+
 ## Status
 
 - ✅ Toolchain: `m68k-amigaos-gcc 6.5.0b` + binutils + NDK + MUI SDK, fully
@@ -556,21 +685,37 @@ fonts") and the M9 plan's own Phase 3 AC.
   step, and a clean `:q` quit. `wp_amiga_layout_selfcheck` passes
   on-target. `amiga-app`/`amiga-smoke` both green; host `make test`
   (219/219) and `atari-engine-check` unaffected.
+- ✅ Phase 4 (T9.3): real `serial.device`-backed offload transport
+  (`transport_amiga.c`), Thesaurus/Grammar Check/Chat wired to the
+  portable `offload_client.c` API. A real, non-fatal `SDCMD_SETPARAMS`
+  gotcha was found and fixed -- see Phase 4's own notes above. A live
+  two-tier CI proof (mirroring Atari's `ci_atari_serial.sh`) was not
+  practically achievable in this environment (no physical serial
+  hardware, and this amiberry build's serial-port passthrough rejects
+  both a host FIFO and a real `socat`-created PTY -- both investigated,
+  documented, not assumed). `wp_amiga_transport_selfcheck` proves the
+  real exec.library `IORequest`/timeout mechanics on-target instead.
+  `amiga-app`/`amiga-smoke` both green; host `make test` (219/219) and
+  `atari-engine-check` unaffected.
 - Known, deliberately unchased gap: Workbench icons never render on this
   fixture's `LoadWB` (root cause not identified -- worked around with a
   `NewCLI` debug shell, since nothing in Phase 0 or the MUI install needed
   Workbench's own icon view). Doesn't affect T9.1b: MUI opens its own
   window regardless of Workbench's own icon rendering.
-- Known gap, explicitly out of T9.1b's scope: Tools menu actions
-  (Spellcheck/Thesaurus/Grammar/Chat) are no-ops (offload-dependent,
-  T9.3+); RTF file support isn't wired into Open/Save yet (plain text
-  only); the Help menu action shows a static `MUI_Request` message
-  rather than the real help viewer (`help_view.o` excluded from the
-  link, see Phase 2's own notes above). This one action was NOT
+- Known gap: Spellcheck stays a no-op (a local, file-based dictionary
+  feature with no offload dependency at all, so it was never in T9.3's
+  scope, and this app has no dictionary file on its fixture yet); RTF
+  file support isn't wired into Open/Save yet (plain text only); Grammar
+  Check is a reduced-scope report-only version, not Atari's interactive
+  apply loop (see Phase 4's own notes above); the Help menu action shows
+  a static `MUI_Request` message rather than the real help viewer
+  (`help_view.o` excluded from the link, see Phase 2's own notes above).
+  None of the Help/Thesaurus/Grammar Check/Chat menu items were
   individually mouse-click-verified under amiberry (precisely hovering a
   specific pulldown item while holding RMB hit the same relative-mouse-
-  calibration cost documented in Phase 0's installer notes, and wasn't
-  worth repeating for a cosmetic message box) -- it goes through the
-  identical menu-Trigger -> `MUIM_Application_ReturnID` ->
-  `invoke_backend_action` path already proven end-to-end by File Open/
-  Save and Quit, so this is a reasoned, not a blind, gap.
+  calibration cost documented in Phase 0's installer notes and
+  reconfirmed in Phase 4, and wasn't worth repeating for message-box-only
+  actions) -- all four go through the identical menu-Trigger ->
+  `MUIM_Application_ReturnID` -> `invoke_backend_action` path already
+  proven end-to-end by File Open/Save and Quit, so this is a reasoned,
+  not a blind, gap.

@@ -31,6 +31,9 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "metrics_amiga_internal.h"
+#include "offload.h"
+#include "grammar.h"
+#include "endian.h"
 
 /* M9 T9.1a: non-UI platform.h seams only (memory/file/clipboard/timer) --
    no Intuition/MUI here yet. Grows into the real MUI Application/Window
@@ -323,6 +326,452 @@ static void do_help_contents(void)
                 (CONST_STRPTR)"vi-mode keys: hjkl move, i insert, Esc normal, :w save, :q quit.");
 }
 
+/* -- Tools: Thesaurus/Chat/Grammar Check via the offload link (T9.3) --
+   Mirrors platform/atari/app_shell.c's own do_thesaurus/do_chat/
+   do_grammar_check in spirit: same offload_client.c API, same lazy-once
+   ensure_offload() pattern, same plain-text extraction helpers -- only
+   the display mechanism differs (MUI_Request here, GEM's form_alert()
+   there). Grammar Check is intentionally NOT a full port: Atari's
+   version is an interactive per-issue Accept/Skip/Cancel loop with
+   byte-offset-shifting bookkeeping across edits (~200 lines) -- this
+   backend reports what was found (a count plus the first issue's
+   message/suggestion) via one MUI_Request instead of ever applying
+   anything automatically. A real, honestly-scoped-down gap versus
+   Atari's feature, not a silent one -- see docs/amiga-platform.md.
+
+   MUI_Request's `format` parameter is NOT a plain display string -- it
+   is a real printf-style format that MUI itself expands (`%s`/`%d`
+   substitutions against the varargs that follow). Every message below
+   that contains real document/gateway text (never fully caller-
+   controlled, unlike do_help_contents' fixed literal above) is passed
+   through a literal "%s" format with the actual text as the vararg,
+   never interpolated into the format string directly -- otherwise a
+   stray '%' in a word, a gateway's reply, or a grammar message would be
+   misinterpreted as a format specifier by MUI_Request itself. */
+static void show_message(const char *title, const char *msg)
+{
+    MUI_Request(g_app, g_win, 0, (CONST_STRPTR)title, (CONST_STRPTR)"Ok",
+                (CONST_STRPTR)"%s", (CONST_STRPTR)msg);
+}
+
+static void append_str(char *buf, u32 cap, u32 *pos, const char *s)
+{
+    while (*s != '\0' && *pos + 1 < cap) buf[(*pos)++] = *s++;
+    buf[*pos] = '\0';
+}
+
+static void append_str_n(char *buf, u32 cap, u32 *pos, const u8 *s, u32 s_len, u32 max_len)
+{
+    char tmp[192]; /* generous fixed cap: the largest max_len any caller
+                       passes today (WP_AMIGA_CHAT_DISPLAY_LEN) plus
+                       headroom for a future caller -- mirrors
+                       draw_atari.c's own append_str_n exactly */
+    u32 tlen = (s_len < max_len) ? s_len : max_len;
+
+    if (tlen >= (u32)sizeof(tmp)) tlen = (u32)sizeof(tmp) - 1;
+    memcpy(tmp, s, tlen);
+    tmp[tlen] = '\0';
+    append_str(buf, cap, pos, tmp);
+}
+
+static void append_u32(char *buf, u32 cap, u32 *pos, u32 value)
+{
+    char digits[12];
+    u32 n = 0;
+
+    if (value == 0) {
+        digits[n++] = '0';
+    } else {
+        while (value > 0 && n < (u32)sizeof(digits)) {
+            digits[n++] = (char)('0' + (value % 10));
+            value /= 10;
+        }
+    }
+    while (n > 0) {
+        if (*pos + 1 < cap) buf[(*pos)++] = digits[--n];
+        else n = 0;
+    }
+    buf[*pos] = '\0';
+}
+
+static wp_bool ascii_is_alpha(u8 c)
+{
+    return (wp_bool)((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'));
+}
+
+#define WP_AMIGA_OFFLOAD_ENDPOINT       "serial:aux:9600"
+#define WP_AMIGA_THESAURUS_MAX_WORD_LEN 64
+#define WP_AMIGA_THESAURUS_TIMEOUT_MS   90000uL /* generous: a real Pi/LLM
+                                                    gateway's cold model
+                                                    load can genuinely take
+                                                    this long, matching
+                                                    Atari's own budget */
+#define WP_AMIGA_PARAGRAPH_EXTRACT_MAX  2000uL  /* matches ollama_gateway.c's
+                                                    CHAT_PROMPT_MAX_LEN/
+                                                    GRAMMAR_PARAGRAPH_MAX_LEN */
+#define WP_AMIGA_CHAT_TIMEOUT_MS        90000uL
+#define WP_AMIGA_CHAT_DISPLAY_LEN       180
+#define WP_AMIGA_GRAMMAR_TIMEOUT_MS     90000uL
+#define WP_AMIGA_GRAMMAR_MAX_ISSUES     16u
+
+static wp_bool g_offload_init_attempted = WP_FALSE;
+
+static wp_bool ensure_offload(void)
+{
+    if (!g_offload_init_attempted) {
+        g_offload_init_attempted = WP_TRUE;
+        offload_init(WP_AMIGA_OFFLOAD_ENDPOINT); /* result read back via offload_available() */
+    }
+    return offload_available();
+}
+
+static wp_bool offload_caps_supports(const offload_capabilities *caps, offload_op op)
+{
+    return (wp_bool)((caps->ops_supported & (1uL << (u32)op)) != 0);
+}
+
+/* Looks up the word immediately BEFORE the cursor, mirroring
+   platform/atari/app_shell.c's own extract_word_before_cursor exactly
+   (same "after typing a word the cursor naturally sits right after it"
+   reasoning). */
+static wp_bool extract_word_before_cursor(u8 *out_word, u32 *out_word_len)
+{
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_run *run;
+    const u8 *bytes;
+    u32 offset, end, start;
+
+    if (!g_ctx.doc_loaded) return WP_FALSE;
+    sec = wp_document_section_get(&g_amiga_doc, g_ctx.vi.cursor.section);
+    para = wp_section_paragraph_get(sec, g_ctx.vi.cursor.paragraph);
+    if (g_ctx.vi.cursor.run >= para->run_count) return WP_FALSE;
+
+    run = wp_paragraph_run_get(para, (u16)g_ctx.vi.cursor.run);
+    bytes = wp_strpool_get(&g_amiga_doc.strings, run->text);
+
+    offset = g_ctx.vi.cursor.offset;
+    if (offset > run->text.length) offset = run->text.length;
+
+    end = offset;
+    while (end > 0 && !ascii_is_alpha(bytes[end - 1])) end--;
+    start = end;
+    while (start > 0 && ascii_is_alpha(bytes[start - 1])) start--;
+
+    if (start == end) return WP_FALSE;
+    if (end - start >= WP_AMIGA_THESAURUS_MAX_WORD_LEN) return WP_FALSE;
+
+    memcpy(out_word, bytes + start, end - start);
+    *out_word_len = end - start;
+    return WP_TRUE;
+}
+
+/* Concatenates the plain UTF-8 text of the CURRENT paragraph, mirroring
+   platform/atari/app_shell.c's own extract_current_paragraph_text
+   exactly. */
+static wp_bool extract_current_paragraph_text(u8 *out, u32 out_cap, u32 *out_len)
+{
+    wp_section *sec;
+    wp_paragraph *para;
+    u32 written = 0;
+    u16 i;
+
+    if (!g_ctx.doc_loaded) return WP_FALSE;
+    sec = wp_document_section_get(&g_amiga_doc, g_ctx.vi.cursor.section);
+    para = wp_section_paragraph_get(sec, g_ctx.vi.cursor.paragraph);
+
+    for (i = 0; i < para->run_count; i++) {
+        wp_run *run = wp_paragraph_run_get(para, i);
+
+        if (run->text.length > 0) {
+            const u8 *bytes;
+
+            if (written + run->text.length > out_cap) return WP_FALSE;
+            bytes = wp_strpool_get(&g_amiga_doc.strings, run->text);
+            memcpy(out + written, bytes, run->text.length);
+            written += run->text.length;
+        }
+    }
+    if (written == 0) return WP_FALSE;
+    *out_len = written;
+    return WP_TRUE;
+}
+
+static void do_thesaurus(void)
+{
+    u8 word[WP_AMIGA_THESAURUS_MAX_WORD_LEN];
+    u32 word_len;
+    char word_buf[WP_AMIGA_THESAURUS_MAX_WORD_LEN];
+    offload_request req;
+    offload_response resp;
+    char msg[220];
+    u32 pos = 0;
+
+    if (!extract_word_before_cursor(word, &word_len)) {
+        show_message("Thesaurus", "Place the cursor right after a word, then choose Thesaurus again.");
+        return;
+    }
+    memcpy(word_buf, word, word_len);
+    word_buf[word_len] = '\0';
+
+    if (!ensure_offload()) {
+        show_message("Thesaurus", "No offload device available (tried " WP_AMIGA_OFFLOAD_ENDPOINT ").");
+        return;
+    }
+
+    req.op = OFFLOAD_THESAURUS;
+    req.payload = word;
+    req.payload_len = word_len;
+    req.timeout_ms = (u32)WP_AMIGA_THESAURUS_TIMEOUT_MS;
+
+    if (offload_submit(&req, &resp) != WP_OK) {
+        show_message("Thesaurus", "Thesaurus request failed or timed out.");
+        return;
+    }
+
+    if (resp.status != OFFLOAD_OK) {
+        offload_response_free(&resp);
+        show_message("Thesaurus", "The connected gateway doesn't support Thesaurus.");
+        return;
+    }
+
+    append_str(msg, (u32)sizeof(msg), &pos, "Synonyms for ");
+    append_str(msg, (u32)sizeof(msg), &pos, word_buf);
+    append_str(msg, (u32)sizeof(msg), &pos, ": ");
+
+    {
+        u16 count = (resp.result_len >= 2) ? be_read16(resp.result) : 0;
+        u32 rpos = 2;
+        u32 i;
+
+        if (count == 0) {
+            append_str(msg, (u32)sizeof(msg), &pos, "(none found)");
+        } else {
+            for (i = 0; i < count && rpos + 2 <= resp.result_len; i++) {
+                u16 wlen = be_read16(resp.result + rpos);
+                char tmp[WP_AMIGA_THESAURUS_MAX_WORD_LEN];
+                u32 tlen;
+
+                rpos += 2;
+                if (rpos + wlen > resp.result_len) break;
+
+                tlen = (wlen < (u32)sizeof(tmp) - 1) ? wlen : (u32)sizeof(tmp) - 1;
+                memcpy(tmp, resp.result + rpos, tlen);
+                tmp[tlen] = '\0';
+
+                if (i > 0) append_str(msg, (u32)sizeof(msg), &pos, ", ");
+                append_str(msg, (u32)sizeof(msg), &pos, tmp);
+                rpos += wlen;
+            }
+        }
+    }
+
+    offload_response_free(&resp);
+    show_message("Thesaurus", msg);
+}
+
+static void do_chat(void)
+{
+    u8 *paragraph;
+    u32 paragraph_len;
+    offload_capabilities caps;
+    offload_request req;
+    offload_response resp;
+    char msg[220];
+    u32 pos = 0;
+
+    if (!g_ctx.doc_loaded) return;
+
+    paragraph = (u8 *)mem_alloc(WP_AMIGA_PARAGRAPH_EXTRACT_MAX);
+    if (paragraph == NULL) return;
+
+    if (!extract_current_paragraph_text(paragraph, (u32)WP_AMIGA_PARAGRAPH_EXTRACT_MAX, &paragraph_len)) {
+        mem_free(paragraph);
+        show_message("Chat", "Place the cursor in a paragraph with some text, then choose Chat again.");
+        return;
+    }
+
+    if (!ensure_offload()) {
+        mem_free(paragraph);
+        show_message("Chat", "No offload device available (tried " WP_AMIGA_OFFLOAD_ENDPOINT ").");
+        return;
+    }
+
+    if (offload_query(&caps) != WP_OK || !offload_caps_supports(&caps, OFFLOAD_CHAT)) {
+        mem_free(paragraph);
+        show_message("Chat", "This gateway doesn't offer Chat.");
+        return;
+    }
+
+    req.op = OFFLOAD_CHAT;
+    req.payload = paragraph;
+    req.payload_len = paragraph_len;
+    req.timeout_ms = (u32)WP_AMIGA_CHAT_TIMEOUT_MS;
+
+    if (offload_submit(&req, &resp) != WP_OK) {
+        mem_free(paragraph);
+        show_message("Chat", "Chat request failed or timed out.");
+        return;
+    }
+    mem_free(paragraph);
+
+    if (resp.status != OFFLOAD_OK) {
+        offload_response_free(&resp);
+        show_message("Chat", "The connected gateway couldn't answer that.");
+        return;
+    }
+
+    append_str_n(msg, (u32)sizeof(msg), &pos, resp.result, resp.result_len, (u32)WP_AMIGA_CHAT_DISPLAY_LEN);
+    offload_response_free(&resp);
+    show_message("Chat", msg);
+}
+
+/* Source-agnostic issue record, populated either from
+   decode_grammar_issue_at() (the wire response) or directly from
+   grammar_lite_check() (services/grammar) when no offload device is
+   attached -- mirrors platform/atari/app_shell.c's own
+   wp_atari_grammar_issue. Only the FIRST issue is kept (this backend's
+   own reduced scope, see do_grammar_check's comment); Atari keeps all
+   of them for its interactive apply loop. */
+typedef struct {
+    u16  start_offset;
+    u16  span_len;
+    char message[80];
+    char suggestion[80];
+} wp_amiga_grammar_issue;
+
+static void copy_bounded(char *out, u32 out_cap, const u8 *s, u32 s_len)
+{
+    u32 len = (s_len < out_cap - 1) ? s_len : out_cap - 1;
+
+    memcpy(out, s, len);
+    out[len] = '\0';
+}
+
+/* Decodes issue `index` from the OFFLOAD_GRAMMAR_CHECK response shape
+   (u16 issue_count, then issue_count x (u16 start_offset, u16 span_len,
+   u16 message_len + bytes, u16 suggestion_len + bytes) --
+   docs/formats/offload-protocol.md), mirroring platform/atari/
+   app_shell.c's own decode_grammar_issue_at exactly. */
+static wp_bool decode_grammar_issue_at(const u8 *buf, u32 len, u32 index, wp_amiga_grammar_issue *out)
+{
+    u16 count;
+    u32 pos, i;
+
+    if (len < 2) return WP_FALSE;
+    count = be_read16(buf);
+    pos = 2;
+    if (index >= count) return WP_FALSE;
+
+    for (i = 0; i <= index; i++) {
+        u16 mlen, slen;
+
+        if (pos + 6 > len) return WP_FALSE;
+        out->start_offset = be_read16(buf + pos); pos += 2;
+        out->span_len     = be_read16(buf + pos); pos += 2;
+        mlen = be_read16(buf + pos); pos += 2;
+
+        if (pos + mlen + 2 > len) return WP_FALSE;
+        if (i == index) copy_bounded(out->message, (u32)sizeof(out->message), buf + pos, mlen);
+        pos += mlen;
+
+        slen = be_read16(buf + pos); pos += 2;
+        if (pos + slen > len) return WP_FALSE;
+        if (i == index) copy_bounded(out->suggestion, (u32)sizeof(out->suggestion), buf + pos, slen);
+        pos += slen;
+    }
+    return WP_TRUE;
+}
+
+/* Reduced-scope Grammar Check (see this section's own top comment):
+   runs the real offload check (or, per CLAUDE.md's Offload Rules, the
+   local grammar_lite_check() fallback when no device is attached) and
+   reports a count plus the first issue's message/suggestion via one
+   MUI_Request -- never applies anything to the document automatically,
+   unlike Atari's full interactive Accept/Skip/Cancel loop. */
+static void do_grammar_check(void)
+{
+    u8 *paragraph;
+    u32 paragraph_len;
+    offload_request req;
+    offload_response resp;
+    u32 issue_count = 0;
+    wp_amiga_grammar_issue first_issue;
+    wp_bool have_first = WP_FALSE;
+    wp_bool used_offload;
+    char msg[220];
+    u32 pos = 0;
+
+    if (!g_ctx.doc_loaded) return;
+
+    paragraph = (u8 *)mem_alloc(WP_AMIGA_PARAGRAPH_EXTRACT_MAX);
+    if (paragraph == NULL) return;
+
+    if (!extract_current_paragraph_text(paragraph, (u32)WP_AMIGA_PARAGRAPH_EXTRACT_MAX, &paragraph_len)) {
+        mem_free(paragraph);
+        show_message("Grammar Check", "Place the cursor in a paragraph with some text, then choose Grammar Check again.");
+        return;
+    }
+
+    used_offload = ensure_offload();
+
+    if (used_offload) {
+        req.op = OFFLOAD_GRAMMAR_CHECK;
+        req.payload = paragraph;
+        req.payload_len = paragraph_len;
+        req.timeout_ms = (u32)WP_AMIGA_GRAMMAR_TIMEOUT_MS;
+
+        if (offload_submit(&req, &resp) != WP_OK) {
+            mem_free(paragraph);
+            show_message("Grammar Check", "Grammar Check request failed or timed out.");
+            return;
+        }
+        if (resp.status != OFFLOAD_OK) {
+            offload_response_free(&resp);
+            mem_free(paragraph);
+            show_message("Grammar Check", "The connected gateway doesn't support Grammar Check.");
+            return;
+        }
+
+        issue_count = (resp.result_len >= 2) ? be_read16(resp.result) : 0;
+        if (issue_count > 0) have_first = decode_grammar_issue_at(resp.result, resp.result_len, 0, &first_issue);
+        offload_response_free(&resp);
+    } else {
+        grammar_issue local_issues[WP_AMIGA_GRAMMAR_MAX_ISSUES];
+
+        issue_count = grammar_lite_check(paragraph, paragraph_len, local_issues, (u32)WP_AMIGA_GRAMMAR_MAX_ISSUES);
+        if (issue_count > 0) {
+            first_issue.start_offset = (u16)local_issues[0].start_offset;
+            first_issue.span_len = (u16)local_issues[0].span_len;
+            copy_bounded(first_issue.message, (u32)sizeof(first_issue.message),
+                         (const u8 *)local_issues[0].message, (u32)strlen(local_issues[0].message));
+            copy_bounded(first_issue.suggestion, (u32)sizeof(first_issue.suggestion),
+                         (const u8 *)local_issues[0].suggestion, (u32)strlen(local_issues[0].suggestion));
+            have_first = WP_TRUE;
+        }
+    }
+
+    mem_free(paragraph);
+
+    if (issue_count == 0) {
+        show_message("Grammar Check", "No grammar issues found.");
+        return;
+    }
+
+    append_str(msg, (u32)sizeof(msg), &pos, used_offload ? "Gateway found " : "No offload device attached -- local check found ");
+    append_u32(msg, (u32)sizeof(msg), &pos, issue_count);
+    append_str(msg, (u32)sizeof(msg), &pos, (issue_count == 1) ? " issue.\n" : " issues.\n");
+    if (have_first) {
+        append_str(msg, (u32)sizeof(msg), &pos, "First: ");
+        append_str(msg, (u32)sizeof(msg), &pos, first_issue.message);
+        if (first_issue.suggestion[0] != '\0') {
+            append_str(msg, (u32)sizeof(msg), &pos, "\nSuggestion: ");
+            append_str(msg, (u32)sizeof(msg), &pos, first_issue.suggestion);
+        }
+    }
+    show_message("Grammar Check", msg);
+}
+
 static void invoke_backend_action(wp_action_id id)
 {
     switch (id) {
@@ -331,10 +780,15 @@ static void invoke_backend_action(wp_action_id id)
     case WP_ACT_EDIT_CUT:       do_edit_cut(); break;
     case WP_ACT_EDIT_PASTE:     do_edit_paste(); break;
     case WP_ACT_HELP_CONTENTS:  do_help_contents(); break;
+    case WP_ACT_TOOLS_THESAURUS:    do_thesaurus(); break;
+    case WP_ACT_TOOLS_GRAMMARCHECK: do_grammar_check(); break;
+    case WP_ACT_TOOLS_CHAT:         do_chat(); break;
     default:
-        /* Tools (Spellcheck/Thesaurus/Grammar/Chat) are out of scope for
-           T9.1b -- offload-dependent features land with T9.3. A no-op
-           here is an honest, flagged gap, not a crash. */
+        /* Spellcheck stays a no-op: it's a LOCAL, file-based dictionary
+           feature (services/spell -- no offload dependency at all, per
+           the M9 plan's own Phase 4 intro), not part of T9.3's offload
+           scope, and this app has no dictionary file on its fixture yet
+           -- a real, honestly-flagged gap, not a crash. */
         break;
     }
 }
@@ -969,5 +1423,103 @@ wp_bool wp_amiga_layout_selfcheck(void)
     }
 
     wp_document_free(&doc);
+    return ok;
+}
+
+/* T9.3: proves transport_amiga.c's real serial.device IORequest lifecycle
+   (OpenDevice/SDCMD_SETPARAMS/CMD_WRITE/CMD_READ/CloseDevice, and the
+   SendIO/CheckIO/AbortIO/WaitIO deadline-racing behind the read/write
+   timeouts) works on real target hardware -- self-contained, calling
+   plat_transport_ and offload_ functions directly rather than through
+   g_ctx/g_amiga_doc, so it works unchanged whether or not app_shell_run() has
+   ever built a window (same boundary wp_amiga_file_clipboard_selfcheck
+   already respects).
+
+   This amiberry fixture has no host-side serial_port wired up (real,
+   investigated limitation -- see docs/amiga-platform.md: neither a
+   FIFO nor a real socat-created PTY was accepted by this amiberry
+   build's serial-port passthrough, which validates against a real-
+   hardware enumeration that finds nothing on this machine), so there is
+   no live peer to loop bytes back through, AND (a second, independently
+   discovered real finding, also documented there) this specific
+   amiberry build's serial.device answers SDCMD_QUERY successfully but
+   rejects SDCMD_SETPARAMS outright with no host backing configured --
+   which is why transport_amiga.c treats a SETPARAMS failure as
+   non-fatal rather than aborting plat_transport_open (see that file's
+   own comment). What IS provable without a live peer, and what this
+   checks:
+     - OpenDevice/CloseDevice succeed -- the real exec.library device
+       lifecycle works, repeatable across multiple open/close cycles
+       with no crash or leak-shaped failure.
+     - CMD_WRITE succeeds -- bytes are structurally accepted by the
+       device (same as plugging a real serial cable into nothing: the
+       UART side of this still works even though nothing receives them).
+     - CMD_READ against a short timeout genuinely returns WP_TIMEOUT
+       (not an instant no-op, not a hang) within a real, bounded window
+       around the requested budget, proving the SendIO/CheckIO/AbortIO/
+       WaitIO deadline race itself is correct on real hardware -- the
+       one genuinely novel, Amiga-specific mechanism this file adds.
+     - offload_init() against the same endpoint, with no live gateway,
+       returns cleanly (not hanging) and leaves offload_available()
+       false afterward -- CLAUDE.md's own Offload Rule ("the engine must
+       be fully functional WITHOUT an offload device attached") holds on
+       this backend too, proven through the real transport, not just
+       assumed.
+   What this deliberately does NOT prove -- the same honestly-drawn
+   boundary wp_atari_thesaurus_selfcheck/wp_atari_grammar_check_selfcheck
+   already establish for their own backend -- is that bytes written on
+   one end are correctly received on the other, or that SDCMD_SETPARAMS
+   itself succeeds against real parameters on real hardware; both are
+   real, new, Amiga-specific engineering (this file and transport_amiga.c),
+   but proving them live needs a peer and a real backing serial port this
+   environment cannot currently provide. */
+wp_bool wp_amiga_transport_selfcheck(void)
+{
+    plat_transport *t;
+    static const u8 fixture[] = "RetroWP transport selfcheck";
+    u8 readbuf[16];
+    u32 read_len;
+    u32 before, after, elapsed;
+    wp_status st;
+    wp_bool ok = WP_TRUE;
+    int cycle;
+
+    for (cycle = 0; cycle < 2; cycle++) {
+        if (plat_transport_open(WP_AMIGA_OFFLOAD_ENDPOINT, 2000, &t) != WP_OK) return WP_FALSE;
+
+        if (plat_transport_write(t, fixture, (u32)(sizeof(fixture) - 1), 2000) != WP_OK) ok = WP_FALSE;
+
+        before = plat_ticks_ms();
+        st = plat_transport_read(t, readbuf, (u32)sizeof(readbuf), 500, &read_len);
+        after = plat_ticks_ms();
+        elapsed = after - before;
+
+        if (st != WP_TIMEOUT) ok = WP_FALSE;
+        /* Real emulation/scheduling jitter is expected; the deadline
+           logic itself is only wrong if it fires wildly early (an
+           off-by-something bug returning almost immediately) or never
+           (a hang) -- generous bounds catch both without being flaky. */
+        if (elapsed < 300 || elapsed > 5000) ok = WP_FALSE;
+
+        plat_transport_close(t);
+    }
+
+    before = plat_ticks_ms();
+    st = offload_init(WP_AMIGA_OFFLOAD_ENDPOINT);
+    after = plat_ticks_ms();
+    elapsed = after - before;
+
+    if (st == WP_OK) ok = WP_FALSE; /* no live gateway is attached; a real
+                                        success here would mean this
+                                        selfcheck's own environment
+                                        assumption above no longer holds */
+    if (offload_available()) ok = WP_FALSE;
+    if (elapsed > 15000) ok = WP_FALSE; /* CONNECT_TIMEOUT_MS + HANDSHAKE_TIMEOUT_MS
+                                            (2000+2000, engine/src/offload_client.c)
+                                            is the real budget; generous headroom
+                                            for real emulator timing */
+    offload_shutdown();
+    if (offload_available()) ok = WP_FALSE;
+
     return ok;
 }

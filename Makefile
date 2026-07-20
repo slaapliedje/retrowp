@@ -327,27 +327,37 @@ $(AMIGA_BUILD)/smoke/%.o: host/tools/%.c | $(AMIGA_BUILD)/smoke
 # (mirroring platform/atari/app_shell.c's own single-big-file precedent),
 # so both AMISMOKE and RETROWP need the same broad link set below --
 # splitting the smoke test's link line narrower stopped being possible
-# once app_shell.c grew past the non-UI seams alone. AMIGA_APP_ENGINE_OBJ
-# excludes only offload_client.o (plat_transport_*/wire_*/caps_*, T9.3 --
-# nothing here touches offload). linebreak.o IS linked: wp_document_free/
-# edit.c call wp_paragraph_layout_free unconditionally (also defined in
-# linebreak.c), so metrics_amiga.c supplies real-but-unreachable-today
-# stubs for the plat_font_* functions linebreak.o's OWN
-# wp_paragraph_relayout references, rather than excluding the whole
-# object (see metrics_amiga.c's own comment). AMIGA_APP_COMMON_OBJ
-# excludes help_doc.o/help_view.o/statusline.o -- T9.1b's minimal shell
-# doesn't use the help viewer or vi-mode status bar (both real, but out
-# of this phase's stated AC), and linking them would need
+# once app_shell.c grew past the non-UI seams alone. linebreak.o IS
+# linked: wp_document_free/edit.c call wp_paragraph_layout_free
+# unconditionally (also defined in linebreak.c), so metrics_amiga.c
+# supplies real-but-unreachable-today stubs for the plat_font_*
+# functions linebreak.o's OWN wp_paragraph_relayout references, rather
+# than excluding the whole object (see metrics_amiga.c's own comment).
+# AMIGA_APP_COMMON_OBJ excludes help_doc.o/help_view.o/statusline.o --
+# this app doesn't use the help viewer or vi-mode status bar (both real,
+# but out of scope so far), and linking them would need
 # plat_draw_text/plat_fill_rect/plat_gc_flush, which metrics_amiga.c
 # deliberately does NOT stub (nothing in this app's own code references
 # them, unlike the font-metrics functions above).
-AMIGA_APP_ENGINE_OBJ = $(filter-out $(AMIGA_BUILD)/engine/offload_client.o,$(AMIGA_ENGINE_OBJ))
+#
+# T9.3: AMIGA_ENGINE_OBJ now links unfiltered -- offload_client.o
+# (plat_transport_*/wire_*/caps_* -- previously excluded, since nothing
+# called it) is genuinely used now (ensure_offload()/do_thesaurus()/
+# do_chat()/do_grammar_check()), so the previous AMIGA_APP_ENGINE_OBJ
+# filter-out became a no-op filter and was removed rather than kept as
+# dead indirection. AMIGA_TRANSPORT_OBJ (offload_client.o's own
+# wire.o/caps_codec.o dependencies) and AMIGA_SERVICES_OBJ (grammar.o,
+# for do_grammar_check's local grammar_lite_check() fallback when no
+# offload device is attached -- CLAUDE.md's Offload Rules; spell.o rides
+# along unused, since AMIGA_SERVICES_OBJ bundles both -- see
+# app_shell.c's own comment on why Spellcheck itself stays a no-op) are
+# both added to the link for the same reason.
 AMIGA_APP_COMMON_OBJ = $(filter-out $(AMIGA_BUILD)/common/help_doc.o $(AMIGA_BUILD)/common/help_view.o $(AMIGA_BUILD)/common/statusline.o,$(AMIGA_COMMON_OBJ))
 
-$(AMIGA_BIN)/AMISMOKE: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/smoke/amiga_smoke.o $(AMIGA_APP_COMMON_OBJ) $(AMIGA_APP_ENGINE_OBJ) | $(AMIGA_BIN)
+$(AMIGA_BIN)/AMISMOKE: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/smoke/amiga_smoke.o $(AMIGA_APP_COMMON_OBJ) $(AMIGA_ENGINE_OBJ) $(AMIGA_TRANSPORT_OBJ) $(AMIGA_SERVICES_OBJ) | $(AMIGA_BIN)
 	$(AMIGACC) -noixemul $^ -o $@ -lmui
 
-$(AMIGA_BIN)/RETROWP: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/app/main.o $(AMIGA_APP_COMMON_OBJ) $(AMIGA_APP_ENGINE_OBJ) | $(AMIGA_BIN)
+$(AMIGA_BIN)/RETROWP: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/app/main.o $(AMIGA_APP_COMMON_OBJ) $(AMIGA_ENGINE_OBJ) $(AMIGA_TRANSPORT_OBJ) $(AMIGA_SERVICES_OBJ) | $(AMIGA_BIN)
 	$(AMIGACC) -noixemul $^ -o $@ -lmui
 
 .PHONY: amiga-app

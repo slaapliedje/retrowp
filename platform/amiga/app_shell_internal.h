@@ -18,4 +18,11 @@ wp_bool wp_amiga_file_clipboard_selfcheck(void);
    comment on wp_amiga_layout_selfcheck for what it checks and why. */
 wp_bool wp_amiga_layout_selfcheck(void);
 
+/* T9.3: proves transport_amiga.c's real serial.device IORequest
+   lifecycle and offload_client.c's graceful-no-gateway behavior --
+   see app_shell.c's own comment on wp_amiga_transport_selfcheck for
+   what it checks, why, and what it deliberately does not (a real,
+   investigated environment limitation, not an oversight). */
+wp_bool wp_amiga_transport_selfcheck(void);
+
 #endif /* WP_AMIGA_APP_SHELL_INTERNAL_H */
