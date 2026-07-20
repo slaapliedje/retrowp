@@ -415,6 +415,116 @@ quit"). All verified for real under amiberry, not just linked.
   the same grown `app_shell.c`) still reports `file_clipboard: PASS`
   against the same fixture.
 
+## Phase 3 (T9.2): real font metrics + text rendering
+
+`metrics_amiga.c`/`draw_amiga.c` replace T9.1a's real-but-unreachable
+`plat_font_*` stubs with a genuine `graphics.library`/`diskfont.library`
+implementation, and `app_shell.c`'s `editor_draw` is rewritten to call real
+`wp_paragraph_relayout` and paint each engine-computed wrapped line, instead
+of dumping each paragraph's raw run bytes as one unwrapped line -- matching
+T9.2's stated AC ("On-screen wrap matches engine layout using real Amiga
+fonts") and the M9 plan's own Phase 3 AC.
+
+- **No true physical DPI query exists below AmigaOS 3.9**: unlike the ST's
+  `v_opnvwk`, which reports real device pixel size in microns straight from
+  VDI, stock `graphics.library` has no equivalent below `GetDiskFontCtrl`
+  (`DFCTRL_XDPI`/`YDPI`), which needs `diskfont.library` V45 (AmigaOS 3.9)
+  -- far above this project's Kickstart 2.04+ floor and this fixture's own
+  MUI-3.8-era install. Y is therefore pinned at 72 DPI, not an arbitrary
+  guess but AmigaOS's own long-standing font-engine convention
+  (`diskfonttag.h`'s own comment: "Default is 72 dpi"; `TextAttr.ta_YSize`
+  has always meant "pixels at 72dpi" the same way Mac/PostScript point
+  sizing did). X is derived from a REAL, queried, per-mode value:
+  `DisplayInfo.Resolution` (real ticks-per-pixel per axis for the current
+  public screen's video mode, via `LockPubScreen` + `GetVPModeID` +
+  `FindDisplayInfo` + `GetDisplayInfoData(DTAG_DISP)` -- all real V36+
+  `graphics.library` calls, within this project's floor), scaled relative
+  to the Y=72 pin. Falls back to 72/72 (square) defensively if any of
+  those queries fail, mirroring `ATARI_ASSUMED_DPI`'s own role.
+- **Font selection**: `OpenDiskFont` (not the narrower `OpenFont`, which
+  only searches already-resident fonts) with `ta_Name` taken from the
+  current public screen's own default font (`Screen->Font->ta_Name`,
+  cached at first query) rather than a hardcoded `"topaz.font"` literal --
+  a real, user/Preferences-driven value when available, falling back to
+  the literal only if the screen can't be queried. `ta_YSize` is the
+  requested point size converted through the real Y DPI above; `ta_Style`
+  maps `WP_STYLE_BOLD/ITALIC/UNDERLINE` to `FSF_BOLD/ITALIC/UNDERLINED`
+  (no `FS_*` equivalent for STRIKE/SUPER/SUB, same documented gap
+  `metrics_atari.c`'s `map_effects` already has). Falls back to the
+  exec-guaranteed-non-`NULL` `GfxBase->DefaultFont` if `OpenDiskFont`
+  itself fails (shouldn't happen for a `topaz.font` request on real
+  hardware) -- never `CloseFont`s a font this code didn't open.
+- **Measurement**: `TextLength` on a lazily-initialized metrics-only
+  `RastPort`, separate from any real window's own RastPort -- the same
+  "font metrics can be queried before a window exists" case
+  `platform.h`'s own comment calls out, mirroring `metrics_atari.c`'s
+  separate metrics-only VDI workstation. **Real memory-corruption bug,
+  found and fixed empirically, the hard way**: the commonly-cited
+  reasoning for a bitmap-less measuring `RastPort` ("`TextLength` only
+  reads the font's own advance tables, never touches `rp_BitMap`") does
+  NOT hold on this real target -- a bare `InitRastPort()` with no `BitMap`
+  attached produced genuine heap corruption under repeated real redraws
+  (live `wp_strpool` bytes overwritten with NUL, visible as garbled glyph
+  boxes on screen), reproducible even from a single bare Shift keypress
+  with no other key involved (a harmless, no-op `wp_key_event` by every
+  measure -- traced all the way through `engine/src/vimode.c`'s own
+  source to confirm `codepoint == 0` hits nothing but a no-op `default:
+  BEEP` case, ruling out the engine before suspecting the backend).
+  Fixed by allocating a real, minimal (1x1, depth 1) `BitMap` via
+  `AllocBitMap` and attaching it to the metrics `RastPort` before first
+  use -- the same graphics.library primitive any real off-screen-
+  measuring Amiga program uses -- removing the whole class of "passing
+  graphics.library an incompletely-initialized structure" risk, not just
+  the one call path that happened to corrupt memory first. Re-verified
+  clean afterward: `wp_amiga_layout_selfcheck` (below) plus a real,
+  repeated on-target stress sequence (`j` x3, a bare Shift tap, `:q` +
+  Enter) under amiberry, with the document text checked intact at every
+  step and a clean quit at the end.
+- **Rendering**: `editor_draw` now calls `wp_paragraph_relayout` (via a
+  `relayout_document` helper mirroring `platform/atari/app_shell.c`'s own)
+  and paints each real `wp_line` -- alignment (`amiga_align_offset_twips`,
+  the same pure LEFT/CENTER/RIGHT arithmetic
+  `atari_align_offset_twips` already has; JUSTIFY unimplemented, same
+  documented gap), per-line font caching, and ascent-based baseline
+  placement all mirror `platform/atari/app_shell.c`'s `paint_document`
+  structure closely. Real difference from Atari: MUI gives the editor
+  object no valid pixel geometry until MUI's own layout pass has run
+  (unlike Atari's `wind_open_grect`, which returns real geometry
+  immediately), so relayout can't happen eagerly on document load the way
+  Atari's `replace_document` does it -- it happens lazily instead, the
+  first time `editor_draw` sees a real object width, and again whenever
+  that width changes (a real resize) or the document itself just
+  changed. The cursor-line marker (added in Phase 2, before real
+  per-paragraph line layout existed) is upgraded to mark the exact
+  wrapped line containing the cursor's `(run, offset)`, via a small
+  `line_contains_pos` range check, rather than always the paragraph's
+  first line.
+- **`plat_draw_text`/`plat_fill_rect`/`plat_gc_flush`** (`draw_amiga.c`,
+  alongside the encoding functions already pulled forward into Phase 1):
+  real `RastPort` `Move`/`Text`/`RectFill` calls. `(r,g,b)` maps to a real
+  MUI pen (`dri_Pens[TEXTPEN]`/`[BACKGROUNDPEN]`) via the same luminance
+  threshold `draw_atari.c`'s `rgb_to_vdi_color` already uses, since pens
+  are screen-relative palette slots, not direct RGB -- `plat_gc` for this
+  backend therefore carries a `DrawInfo*` alongside the destination
+  `RastPort*`.
+- **On-target verification, real, not just linked**: a real amiberry
+  screenshot shows genuinely proportional real-font text (the public
+  screen's own default font, not a fixed-pitch placeholder) wrapping
+  cleanly within the window's actual pixel width, matching the sample
+  document's real word boundaries -- a visible, qualitative upgrade over
+  Phase 2's fixed-9px-row raw-byte dump. `wp_amiga_layout_selfcheck`
+  (mirroring `wp_atari_layout_selfcheck` exactly: same fixture text, same
+  900-twip column, same two assertions -- more than one line, no line
+  wider than the column) passes on-target through the real
+  `plat_measure_text`/`plat_font_open` path, both before and after the
+  stress sequence above. Interactive window resize (to visually confirm
+  re-wrap at a new width) was attempted via `xdotool` drag but could not
+  be reliably calibrated against amiberry's SDL relative-mouse handling
+  -- the same documented cost/benefit call Phase 2 made for the Help
+  menu's mouse-click verification; the selfcheck's quantitative width
+  assertions are the substitute, not a screenshot at a second window
+  size.
+
 ## Status
 
 - ✅ Toolchain: `m68k-amigaos-gcc 6.5.0b` + binutils + NDK + MUI SDK, fully
@@ -435,6 +545,16 @@ quit"). All verified for real under amiberry, not just linked.
   -- all verified under amiberry against the real fixture (menu drops
   down correctly, document text renders, cursor moves on j/k, `:q` quits
   cleanly). `amiga-app`/`amiga-smoke` both green; host `make test`
+  (219/219) and `atari-engine-check` unaffected.
+- ✅ Phase 3 (T9.2): real `graphics.library`/`diskfont.library` font
+  metrics and `RastPort`-based rendering; `editor_draw` now paints real
+  engine-computed wrapped lines instead of raw unwrapped paragraph text.
+  A real on-target memory-corruption bug (a bitmap-less measuring
+  `RastPort`) was found and fixed -- see Phase 3's own notes above.
+  Verified under amiberry: real proportional wrapped text, a repeated
+  on-target stress sequence with document text checked intact at every
+  step, and a clean `:q` quit. `wp_amiga_layout_selfcheck` passes
+  on-target. `amiga-app`/`amiga-smoke` both green; host `make test`
   (219/219) and `atari-engine-check` unaffected.
 - Known, deliberately unchased gap: Workbench icons never render on this
   fixture's `LoadWB` (root cause not identified -- worked around with a

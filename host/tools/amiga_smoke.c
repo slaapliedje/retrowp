@@ -33,9 +33,15 @@ static void report(const char *line)
 int main(void)
 {
     wp_bool ok;
+    wp_bool all_ok = WP_TRUE;
 
     ok = wp_amiga_file_clipboard_selfcheck();
     report(ok ? "file_clipboard: PASS\n" : "file_clipboard: FAIL\n");
+    if (!ok) all_ok = WP_FALSE;
 
-    return ok ? 0 : 20;
+    ok = wp_amiga_layout_selfcheck();
+    report(ok ? "layout: PASS\n" : "layout: FAIL\n");
+    if (!ok) all_ok = WP_FALSE;
+
+    return all_ok ? 0 : 20;
 }
