@@ -238,5 +238,83 @@ atari-serial-smoke: $(ATARI_BIN)/SERIALTST.PRG
 
 atari-convert-smoke: $(ATARI_BIN)/CONVERTST.PRG
 
+# ---------------------------------------------------------------------
+# Amiga cross build (M9). Real target toolchain, not a host stub: Bebbo's
+# m68k-amigaos-gcc (github.com/amiga-mui/muidev-adjacent NDK/SDK tooling
+# lives under the same toolchain; see docs/amiga-platform.md), built from
+# source into ~/opt/amiga (not a stock package -- see
+# docs/toolchain-amiga-notes.md if present, or the upstream project's own
+# docs/toolchain-amiga.md this recipe was adapted from).
+#
+# CPU tier is a deliberate baseline choice, not a codegen accident: this
+# project's Amiga floor is a stock machine (512KB-1MB chip RAM, no
+# accelerator), matching the Atari ST backend's own "widest real-hardware
+# floor" baseline -- so -m68000 -msoft-float, not -m68020, is the default
+# here (a different, unrelated project on this machine that also uses
+# this exact toolchain targets AGA/68020 as ITS baseline; that choice
+# doesn't apply to RetroWP).
+#
+# -fbbb=abcefilmnprsz0 (default minus "h") works around a real GCC 6.5
+# miscompiler bug in Bebbo's toolchain: the "optimize shift instructions"
+# pass can narrow a (long)short*1024-shaped shift to HImode across an
+# intervening call and silently drop the carry-out (confirmed via a
+# reproducer on this same toolchain by a different project before this
+# backend existed) -- included defensively from the start rather than
+# waiting to rediscover it.
+# ---------------------------------------------------------------------
+
+AMIGA_TOOLROOT ?= $(HOME)/opt/amiga
+AMIGACC        ?= $(AMIGA_TOOLROOT)/bin/m68k-amigaos-gcc
+
+AMIGA_CPU = -m68000 -msoft-float -fbbb=abcefilmnprsz0
+
+AMIGA_STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror $(AMIGA_CPU)
+AMIGA_RELAXED_CFLAGS = -Wall -Wextra $(AMIGA_CPU)
+AMIGA_INCLUDES       = -Iengine/include -Iplatform/amiga -Iplatform/common -Ioffload/transport -I$(GENERATED)
+
+AMIGA_BUILD = build/amiga
+AMIGA_BIN   = bin/amiga
+
+AMIGA_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(AMIGA_BUILD)/engine/%.o,$(ENGINE_SRC))
+AMIGA_TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(AMIGA_BUILD)/transport/%.o,$(TRANSPORT_SRC))
+AMIGA_SERVICES_OBJ  = $(patsubst services/spell/%.c,$(AMIGA_BUILD)/services/%.o,$(patsubst services/grammar/%.c,$(AMIGA_BUILD)/services/%.o,$(SERVICES_SRC)))
+AMIGA_COMMON_OBJ    = $(patsubst platform/common/%.c,$(AMIGA_BUILD)/common/%.o,$(PLATFORM_COMMON_SRC))
+
+$(AMIGA_BUILD)/common/%.o: platform/common/%.c | $(AMIGA_BUILD)/common
+	$(AMIGACC) $(AMIGA_STRICT_CFLAGS) $(AMIGA_INCLUDES) -c $< -o $@
+
+# amiga-engine-check mirrors atari-engine-check exactly: a link-free
+# portability gate proving the same portable engine/ + offload/transport
+# + services/ sources already tested on host also compile clean under
+# strict C89 for this second real target -- independent of whether
+# platform/amiga/ has any real platform.h implementation yet.
+.PHONY: amiga-engine-check
+amiga-engine-check: $(AMIGA_ENGINE_OBJ) $(AMIGA_TRANSPORT_OBJ) $(AMIGA_SERVICES_OBJ)
+	@echo "engine + offload/transport + services cross-compile clean for m68k-amigaos"
+
+$(AMIGA_BUILD)/engine/%.o: engine/src/%.c | $(AMIGA_BUILD)/engine
+	$(AMIGACC) $(AMIGA_STRICT_CFLAGS) $(AMIGA_INCLUDES) -c $< -o $@
+
+$(AMIGA_BUILD)/transport/%.o: offload/transport/%.c | $(AMIGA_BUILD)/transport
+	$(AMIGACC) $(AMIGA_STRICT_CFLAGS) $(AMIGA_INCLUDES) -c $< -o $@
+
+$(AMIGA_BUILD)/services/%.o: services/spell/%.c | $(AMIGA_BUILD)/services
+	$(AMIGACC) $(AMIGA_STRICT_CFLAGS) $(AMIGA_INCLUDES) -c $< -o $@
+
+$(AMIGA_BUILD)/services/%.o: services/grammar/%.c | $(AMIGA_BUILD)/services
+	$(AMIGACC) $(AMIGA_STRICT_CFLAGS) $(AMIGA_INCLUDES) -c $< -o $@
+
+# platform/amiga/'s own sources (app shell, mem/metrics/draw/transport)
+# -- empty today (M9 Phase 0), populated starting Phase 1. Mirrors
+# ATARI_PLATFORM_SRC/_OBJ's shape exactly, main.c excluded once it exists.
+AMIGA_PLATFORM_SRC = $(filter-out platform/amiga/main.c,$(wildcard platform/amiga/*.c))
+AMIGA_PLATFORM_OBJ = $(patsubst platform/amiga/%.c,$(AMIGA_BUILD)/app/%.o,$(AMIGA_PLATFORM_SRC))
+
+$(AMIGA_BUILD)/app/%.o: platform/amiga/%.c | $(AMIGA_BUILD)/app
+	$(AMIGACC) $(AMIGA_RELAXED_CFLAGS) -Iengine/include -Iplatform/amiga -Iplatform/common -Iservices/spell -Iservices/grammar -I$(GENERATED) -c $< -o $@
+
+$(AMIGA_BUILD)/engine $(AMIGA_BUILD)/transport $(AMIGA_BUILD)/services $(AMIGA_BUILD)/common $(AMIGA_BUILD)/app $(AMIGA_BIN):
+	mkdir -p $@
+
 clean:
 	rm -rf $(BUILD) $(BIN)
