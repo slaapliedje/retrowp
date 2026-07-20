@@ -1,17 +1,19 @@
 /* amiberry-based smoke test for platform/amiga's non-UI platform.h seams
    (T9.1a: memory/file/clipboard/timer; T9.2: layout/metrics; T9.3:
-   transport). Cross-compiled with m68k-amigaos-gcc into its own
-   standalone binary and run under amiberry against the
+   transport; Phase 6: help system). Cross-compiled with m68k-amigaos-gcc
+   into its own standalone binary and run under amiberry against the
    docs/amiga-platform.md fixture.
 
    amiberry has no equivalent to Hatari's NF_STDERR/NF_EXIT Native
-   Features trap (flagged as real, not-yet-solved Phase 5 work in the M9
-   plan) -- so unlike atari_smoke.c, this can't make the emulator process
-   itself exit with a pass/fail status. Instead it writes a plain
-   PASS/FAIL line to a file on the boot volume, host-readable after the
-   run regardless of what the (currently icon-less, see
-   docs/amiga-platform.md) Workbench screen shows -- the same technique
-   proven for the Phase 0 muitest probe. */
+   Features trap -- so unlike atari_smoke.c, this can't make the
+   emulator process itself exit with a pass/fail status. Instead it
+   writes a plain PASS/FAIL line to a file on the boot volume, host-
+   readable after the run regardless of what the (currently icon-less,
+   see docs/amiga-platform.md) Workbench screen shows -- the same
+   technique proven for the Phase 0 muitest probe, and (Phase 5) now the
+   basis of a fully headless CI run: host/tools/ci_amiga.sh's own
+   Startup-Sequence hook runs this binary automatically and polls for
+   its completion, no interactive step at all. */
 
 #include <string.h>
 #include <proto/dos.h>
@@ -46,6 +48,10 @@ int main(void)
 
     ok = wp_amiga_transport_selfcheck();
     report(ok ? "transport: PASS\n" : "transport: FAIL\n");
+    if (!ok) all_ok = WP_FALSE;
+
+    ok = wp_amiga_help_selfcheck();
+    report(ok ? "help: PASS\n" : "help: FAIL\n");
     if (!ok) all_ok = WP_FALSE;
 
     return all_ok ? 0 : 20;

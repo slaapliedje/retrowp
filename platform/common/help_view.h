@@ -74,14 +74,32 @@ wp_bool wp_help_view_feed_key(wp_help_view_state *vs, wp_key_event key);
    atari_twips_to_px_x/y) -- so the caller supplies content_width_twips
    directly (typically atari_px_to_twips_x(w_px), the exact conversion
    the main document body already performs) rather than this function
-   guessing at one. line_height_px is likewise supplied by the caller
-   (its own plat_font_metrics_get result, already converted to pixels --
-   see statusline_height_px() in app_shell.c for the established
-   pattern this mirrors) rather than recomputed here. */
+   guessing at one. line_height_px/ascent_px are likewise supplied by
+   the caller (its own plat_font_metrics_get result, already converted
+   to pixels -- see statusline_height_px() in app_shell.c for the
+   established pattern this mirrors) rather than recomputed here.
+
+   ascent_px matters because plat_draw_text (like every real backend's
+   Text()/v_gtext()) positions text by BASELINE, not top-left -- every
+   row's y-coordinate is y_px + ascent_px + row*line_height_px, mirroring
+   exactly how the main document body's own paint loop adds its font's
+   ascent before calling plat_draw_text. Found and fixed the hard way
+   (M9 Phase 6): every caller of this function used to pass a bare
+   y_px with no ascent offset at all, which drew row 0's ascending
+   strokes ABOVE the viewport's own top edge -- genuinely outside any
+   rectangle the caller's own background-clear covers, so the leaked
+   pixels never got cleared by a subsequent redraw either. Invisible on
+   host (draw_host.c's plat_draw_text/plat_fill_rect are real no-ops, so
+   host/tests/test_help_view.c can only prove this function doesn't
+   crash, never that it draws in the right place) and never caught on
+   Atari either, since platform/atari/app_shell.c's own pager was never
+   interactively verified end-to-end (docs/help.md's own documented
+   gap) -- only Amiga's Phase 6 work actually clicked through the real
+   pager on real target hardware, which is what surfaced this. */
 void wp_help_view_paint(plat_gc *gc, plat_font *font,
                          i32 x_px, i32 y_px, i32 w_px, i32 h_px,
                          i32 content_width_twips, i32 line_height_px,
-                         const wp_help_view_state *vs);
+                         i32 ascent_px, const wp_help_view_state *vs);
 
 /* Splits [text, text+len) into greedy word-wrapped rows no wider than
    max_width_twips (via plat_measure_text -- the same measurement seam

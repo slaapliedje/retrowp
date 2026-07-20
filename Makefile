@@ -116,6 +116,23 @@ $(BUILD)/gen_help_header: host/tools/gen_help_header.c | $(BUILD)
 $(GENERATED)/help_retrowp.h: docs/help/retrowp.help $(BUILD)/gen_help_header | $(GENERATED)
 	$(BUILD)/gen_help_header docs/help/retrowp.help $@ g_help_source_retrowp
 
+# gen_help_guide (M9 Phase 6): a real AmigaGuide (.guide) exporter, a
+# genuine deliverable (not a spike-and-defer the way ST Guide's .HYP
+# stayed, docs/help.md) since AmigaGuide needs no external compiler --
+# unlike gen_help_header above, this links against the real portable
+# parser (help_doc.o + strpool.o + the host stub's mem_host.o for
+# mem_alloc/mem_free) instead of just copying bytes, so it walks the
+# same node/line graph app_shell.c's own pager does rather than
+# re-deriving the format by hand. See the tool's own file comment.
+$(BUILD)/gen_help_guide: host/tools/gen_help_guide.c $(BUILD)/platform_common/help_doc.o $(BUILD)/engine/strpool.o $(BUILD)/platform/mem_host.o | $(BUILD)
+	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) $^ -o $@
+
+$(GENERATED)/retrowp.guide: docs/help/retrowp.help $(BUILD)/gen_help_guide | $(GENERATED)
+	$(BUILD)/gen_help_guide docs/help/retrowp.help $@ "RetroWP Help"
+
+.PHONY: help-guide
+help-guide: $(GENERATED)/retrowp.guide
+
 test: $(BIN)/host_tests $(BIN)/mock_gateway
 	./$(BIN)/host_tests
 
@@ -333,12 +350,15 @@ $(AMIGA_BUILD)/smoke/%.o: host/tools/%.c | $(AMIGA_BUILD)/smoke
 # supplies real-but-unreachable-today stubs for the plat_font_*
 # functions linebreak.o's OWN wp_paragraph_relayout references, rather
 # than excluding the whole object (see metrics_amiga.c's own comment).
-# AMIGA_APP_COMMON_OBJ excludes help_doc.o/help_view.o/statusline.o --
-# this app doesn't use the help viewer or vi-mode status bar (both real,
-# but out of scope so far), and linking them would need
-# plat_draw_text/plat_fill_rect/plat_gc_flush, which metrics_amiga.c
-# deliberately does NOT stub (nothing in this app's own code references
-# them, unlike the font-metrics functions above).
+# AMIGA_COMMON_OBJ now links unfiltered too (a prior revision excluded
+# help_doc.o/help_view.o/statusline.o: they need plat_draw_text/
+# plat_fill_rect/plat_gc_flush, which metrics_amiga.c didn't stub before
+# T9.2 landed). Phase 6 wires the real help viewer into app_shell.c
+# (do_help_contents/amiga_dispatch_key/editor_draw all reference it
+# now), so that filter-out became a no-op and was dropped, the same way
+# T9.3 dropped AMIGA_ENGINE_OBJ's own now-pointless one below --
+# AMIGA_APP_COMMON_OBJ was this variable's name until this revision;
+# removed as dead indirection once its filter had nothing left to do.
 #
 # T9.3: AMIGA_ENGINE_OBJ now links unfiltered -- offload_client.o
 # (plat_transport_*/wire_*/caps_* -- previously excluded, since nothing
@@ -352,12 +372,15 @@ $(AMIGA_BUILD)/smoke/%.o: host/tools/%.c | $(AMIGA_BUILD)/smoke
 # along unused, since AMIGA_SERVICES_OBJ bundles both -- see
 # app_shell.c's own comment on why Spellcheck itself stays a no-op) are
 # both added to the link for the same reason.
-AMIGA_APP_COMMON_OBJ = $(filter-out $(AMIGA_BUILD)/common/help_doc.o $(AMIGA_BUILD)/common/help_view.o $(AMIGA_BUILD)/common/statusline.o,$(AMIGA_COMMON_OBJ))
 
-$(AMIGA_BIN)/AMISMOKE: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/smoke/amiga_smoke.o $(AMIGA_APP_COMMON_OBJ) $(AMIGA_ENGINE_OBJ) $(AMIGA_TRANSPORT_OBJ) $(AMIGA_SERVICES_OBJ) | $(AMIGA_BIN)
+# Phase 6: app_shell.c #includes the generated help_retrowp.h (shared
+# verbatim with platform/atari/app_shell.c's own dependency line below).
+$(AMIGA_BUILD)/app/app_shell.o: $(GENERATED)/help_retrowp.h
+
+$(AMIGA_BIN)/AMISMOKE: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/smoke/amiga_smoke.o $(AMIGA_COMMON_OBJ) $(AMIGA_ENGINE_OBJ) $(AMIGA_TRANSPORT_OBJ) $(AMIGA_SERVICES_OBJ) | $(AMIGA_BIN)
 	$(AMIGACC) -noixemul $^ -o $@ -lmui
 
-$(AMIGA_BIN)/RETROWP: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/app/main.o $(AMIGA_APP_COMMON_OBJ) $(AMIGA_ENGINE_OBJ) $(AMIGA_TRANSPORT_OBJ) $(AMIGA_SERVICES_OBJ) | $(AMIGA_BIN)
+$(AMIGA_BIN)/RETROWP: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/app/main.o $(AMIGA_COMMON_OBJ) $(AMIGA_ENGINE_OBJ) $(AMIGA_TRANSPORT_OBJ) $(AMIGA_SERVICES_OBJ) | $(AMIGA_BIN)
 	$(AMIGACC) -noixemul $^ -o $@ -lmui
 
 .PHONY: amiga-app

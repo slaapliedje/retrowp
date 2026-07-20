@@ -265,20 +265,20 @@ void test_help_view_paint_does_not_crash_with_various_states(void)
     ASSERT_TRUE(plat_window_get_gc(win, &gc) == WP_OK);
     open_test_font(&font);
 
-    wp_help_view_paint(gc, font, 0, 0, 640, 380, 6000, 20, &vs);
+    wp_help_view_paint(gc, font, 0, 0, 640, 380, 6000, 20, 16, &vs);
 
     vs.scroll_row = 50; /* well past the real content -- must not crash */
-    wp_help_view_paint(gc, font, 0, 0, 640, 380, 6000, 20, &vs);
+    wp_help_view_paint(gc, font, 0, 0, 640, 380, 6000, 20, 16, &vs);
 
     wp_help_view_feed_key(&vs, key_char('j'));
-    wp_help_view_paint(gc, font, 0, 0, 640, 380, 6000, 20, &vs);
+    wp_help_view_paint(gc, font, 0, 0, 640, 380, 6000, 20, 16, &vs);
 
-    wp_help_view_paint(gc, font, 0, 0, 640, 380, 6000, 20, NULL);
+    wp_help_view_paint(gc, font, 0, 0, 640, 380, 6000, 20, 16, NULL);
 
     {
         wp_help_view_state empty_vs;
         wp_help_view_init(&empty_vs, NULL, 0);
-        wp_help_view_paint(gc, font, 0, 0, 640, 380, 6000, 20, &empty_vs);
+        wp_help_view_paint(gc, font, 0, 0, 640, 380, 6000, 20, 16, &empty_vs);
     }
 
     plat_font_close(font);

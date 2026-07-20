@@ -2503,8 +2503,21 @@ static void paint_help(short window_handle, VdiHdl vdi)
     if (body_h_px < 0) body_h_px = 0;
 
     if (plat_font_open((const u8 *)"", 0, WP_ATARI_HELP_BODY_SIZE_TWIPS, 0, &body_font) == WP_OK) {
+        /* wp_help_view_paint positions text by BASELINE (plat_draw_text's
+           own convention, matching v_gtext) -- ascent_px tells it where
+           row 0's baseline sits below the viewport's own top edge. A
+           bare y_px with no ascent offset drew row 0's ascending strokes
+           above the viewport entirely -- a real bug found and fixed via
+           Amiga's own Phase 6 interactive verification (see
+           help_view.h's own comment), latent here too since this pager
+           was never interactively exercised end to end. */
+        plat_font_metrics body_fm;
+        i32 body_ascent_px = 0;
+        if (plat_font_metrics_get(body_font, &body_fm) == WP_OK) {
+            body_ascent_px = atari_twips_to_px_y(body_fm.ascent);
+        }
         wp_help_view_paint((plat_gc *)&gc, body_font, work.g_x, work.g_y, work.g_w, body_h_px,
-                            atari_px_to_twips_x((i32)work.g_w), body_line_h_px, &g_help_view);
+                            atari_px_to_twips_x((i32)work.g_w), body_line_h_px, body_ascent_px, &g_help_view);
         plat_font_close(body_font);
     }
 

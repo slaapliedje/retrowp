@@ -251,7 +251,7 @@ u32 wp_help_wrap_line(plat_font *font, const u8 *text, u32 len, i32 max_width_tw
 void wp_help_view_paint(plat_gc *gc, plat_font *font,
                          i32 x_px, i32 y_px, i32 w_px, i32 h_px,
                          i32 content_width_twips, i32 line_height_px,
-                         const wp_help_view_state *vs)
+                         i32 ascent_px, const wp_help_view_state *vs)
 {
     const wp_help_node *node;
     u32 li, row_index, link_seen, max_rows;
@@ -300,11 +300,16 @@ void wp_help_view_paint(plat_gc *gc, plat_font *font,
 
             for (ri = 0; ri < row_count; ri++) {
                 if (row_index >= vs->scroll_row && row_index - vs->scroll_row < max_rows) {
+                    /* py is this row's TOP (a rect-fill origin, same
+                       top-left convention x_px/y_px/w_px/h_px already
+                       use); plat_draw_text needs the BASELINE instead
+                       (py + ascent_px) -- see this function's own
+                       header comment on why the distinction matters. */
                     i32 py = y_px + (i32)(row_index - vs->scroll_row) * line_height_px;
                     if (is_selected) {
                         plat_fill_rect(gc, x_px, py, w_px, line_height_px, 0xC0, 0xC0, 0xC0);
                     }
-                    plat_draw_text(gc, font, x_px, py, text + row_starts[ri], row_lens[ri], 0, 0, 0);
+                    plat_draw_text(gc, font, x_px, py + ascent_px, text + row_starts[ri], row_lens[ri], 0, 0, 0);
                 }
                 row_index++;
                 if (row_index >= vs->scroll_row + max_rows) break;

@@ -1017,15 +1017,64 @@ the deliberate decision not to touch `wp_menu_tree[]`'s own structure.
 ## M9 — Second Platform: Amiga (MUI)
 Goal: Validate the portability thesis.
 
-- [ ] T9.1 `platform/amiga`: MUI shell, event loop, menus/dialogs.
-      AC: App runs under an Amiga emulator; clean quit.
-- [ ] T9.2 graphics.library/diskfont/bullet metrics + render impl of platform.h.
+- [x] T9.1 `platform/amiga`: MUI shell, event loop, menus/dialogs.
+      AC: App runs under an Amiga emulator; clean quit. **Met.** Real
+      `m68k-amigaos-gcc`/MUI SDK toolchain and a bootable amiberry
+      Workbench 3.1 + MUI fixture (Phase 0); memory/file/clipboard/timer
+      `platform.h` seams (Phase 1); a real MUI Application/Window/
+      Menustrip, `IDCMP_RAWKEY` -> vi-mode dispatch via a custom `Area.mui`
+      subclass, File Open/Save/Cut/Copy/Paste, and clean quit (Phase 2).
+      Full account, including the BOOPSI-calling-convention research and
+      the `MUIA_Application_Menustrip` init-order gotcha:
+      `docs/amiga-platform.md`.
+- [x] T9.2 graphics.library/diskfont/bullet metrics + render impl of platform.h.
       AC: On-screen wrap matches engine layout using real Amiga fonts.
-- [ ] T9.3 Amiga serial.device / bsdsocket transport hook.
-      AC: Same offload features work as on ST.
+      **Met.** Real `graphics.library`/`diskfont.library` metrics and
+      `RastPort` rendering; `wp_amiga_layout_selfcheck` confirms real
+      diskfont-measured wrap on-target. A real on-target memory-corruption
+      bug (a bitmap-less measuring `RastPort`) was found and fixed --
+      `docs/amiga-platform.md`'s Phase 3 section.
+- [x] T9.3 Amiga serial.device / bsdsocket transport hook.
+      AC: Same offload features work as on ST. **Met**, with one honestly
+      documented gap: `transport_amiga.c`'s real `serial.device`
+      `IORequest`-based implementation is proven via
+      `wp_amiga_transport_selfcheck`'s on-target exec.library round trip
+      rather than a live two-tier serial CI proof (no physical serial
+      hardware, and this amiberry build's serial passthrough rejects both
+      a host FIFO and a real `socat` PTY -- both investigated, not
+      assumed). `bsdsocket.library` TCP transport stayed out of scope per
+      the plan's own "optional/stretch" framing. Full account:
+      `docs/amiga-platform.md`'s Phase 4 section.
+
+Beyond the plan's original three tasks, this milestone also delivered:
+CI infrastructure (`ci_amiga.sh` + a real Kickstart 2.04/2.05/3.1 matrix,
+`ci_amiga_matrix.sh` -- Kickstart 3.0 excluded for a real, documented
+68000-incompatibility reason, not silently skipped), and a help-system
+retrofit (the same portable `help_doc.h`/`help_view.h` pager Atari uses,
+wired to F1 and the Help menu; a real AmigaGuide `.guide` export spike
+that, unlike the Atari `.HYP` spike, fully panned out and was verified
+on-target with `amigaguide.library`/MultiView). Two real, independently
+significant bugs were found and fixed along the way: bare Escape closing
+the whole RETROWP window (a MUI global-hotkey-table propagation issue,
+Amiga-only), and a shared `platform/common/help_view.c` baseline/ascent
+positioning bug that affected Atari's own pager too, fixed once at the
+shared layer. Full account of both: `docs/amiga-platform.md`'s Phase 6
+section.
 
 Artifact: Amiga build "indistinguishable by function." Engine/services reused
-unchanged (diff shows changes only under platform/amiga).
+unchanged -- confirmed by diff: `engine/` and `services/` show zero changes
+across the entire milestone (`git diff --stat d99ae7e^..HEAD -- engine/
+services/` is empty); every change lives under `platform/amiga/`,
+`platform/common/`, `host/`, `Makefile`, and `docs/`. The one cross-backend
+touch is `platform/common/help_view.c`'s shared ascent fix (also benefiting
+Atari's own pager) plus the matching one-line fix to `platform/atari/
+app_shell.c`'s own call site -- not a portability-thesis violation, since
+it's a bug fix to code both backends already shared, not new Amiga-specific
+logic leaking into a shared file. Confirmed: `make test`
+stayed at 219/219 throughout M9 (no engine/services test count regressions);
+`atari-engine-check` and the full 6-image Atari TOS matrix stayed green
+through every phase that touched shared code (Phase 6's `help_view.c`
+change and Atari's own `paint_help` ascent fix).
 
 ---
 

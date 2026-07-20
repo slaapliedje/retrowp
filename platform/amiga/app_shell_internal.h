@@ -25,4 +25,10 @@ wp_bool wp_amiga_layout_selfcheck(void);
    investigated environment limitation, not an oversight). */
 wp_bool wp_amiga_transport_selfcheck(void);
 
+/* M9 Phase 6: proves the help system's non-blocking pieces against the
+   real compiled-in help content and real diskfont-measured font metrics
+   -- see app_shell.c's own comment on wp_amiga_help_selfcheck for what
+   it checks and why. */
+wp_bool wp_amiga_help_selfcheck(void);
+
 #endif /* WP_AMIGA_APP_SHELL_INTERNAL_H */

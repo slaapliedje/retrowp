@@ -728,6 +728,105 @@ the same way the Atari scripts share `atari_ci_lib.sh`.
   floor would test configurations this backend's own MUI dependency
   makes structurally unable to run, not a real coverage gap.
 
+## Phase 6: help system + AmigaGuide export spike
+
+Closes out M9. Two pieces, matching the plan's own Phase 6 scope: wiring
+`platform/common/help_doc.h`/`help_view.h`'s already-target-agnostic pager
+into the real MUI shell (parity with Atari, not new engineering), and
+spiking a real `.guide` export as the plan's called-for "confirm before
+committing" check on the idea that AmigaGuide is a more natural fit here
+than Atari's own `.HYP` research spike was.
+
+- **AmigaGuide export spike: real, and it pans out.** `host/tools/
+  gen_help_guide.c` reuses `wp_help_doc_parse` (the same portable parser
+  the in-app pager itself uses, not a second hand-rolled one) and walks
+  the node/line graph emitting real AmigaGuide syntax (`@database`,
+  `@node NAME "Title"`/`@endnode`, `@{"label" link target}`, `@wordwrap`),
+  verified against WB3.1's own official `amigaguide.guide` documentation
+  file already present on this machine's fixture
+  (`Locale/Help/english/Sys/amigaguide.guide`) rather than recalled from
+  memory. This confirms the M9 plan's own "Explicitly deferred" section
+  had it right in advance: RetroWP's portable `{label|target}` format was
+  deliberately designed close to AmigaGuide's own shape, so the export is
+  a genuine mechanical per-line transform, not a new format's worth of
+  engineering. Verified on-target under amiberry with the real
+  `amigaguide.library` and MultiView: node text and link buttons both
+  render correctly, clicking a link button navigates to its target node
+  -- a more complete interactive verification than the Atari `.HYP` spike
+  achieved there (no real ST Guide viewer was available in that
+  environment). `make help-guide` builds `generated/retrowp.guide` from
+  `docs/help/retrowp.help` via the new `gen_help_guide` host tool.
+- **Real in-app help pager wiring**: F1 and the Help menu action both now
+  open the real `wp_help_view_state` pager (replacing Phase 2's static
+  `MUI_Request` placeholder), painted by a new `paint_help_amiga()` using
+  the same `plat_draw_text`/`plat_fill_rect` seam the document body
+  already uses, with a one-line hint bar (`wp_statusline_paint`, reused
+  as-is) showing the pager's own key bindings. `amiga_dispatch_key` checks
+  `g_help_active` first and routes to `wp_help_view_feed_key` while the
+  pager is open, falling through to the normal vi-mode/action dispatch
+  otherwise. `wp_amiga_help_selfcheck` (mirroring
+  `wp_atari_help_selfcheck`) proves node lookup and real
+  diskfont-measured word-wrap on-target; wired into `AMISMOKE`'s report.
+  Verified interactively under amiberry: F1 opens real help content,
+  j/k/Enter/Backspace navigate and follow links, Escape/`q` closes back to
+  the document, and the document's own text is unaffected by a
+  help-view round trip.
+- **Real bug found and fixed: bare Escape closed the whole RETROWP
+  window**, present since Phase 2 but never noticed until this phase's
+  pager needed Escape to mean "close the help view" instead. Root cause:
+  `editor_handleevent` (`MUIM_HandleEvent`) always returned `0` ("event
+  not consumed"), so the raw key kept propagating past the app's own
+  dispatch to MUI's *global*, per-window hotkey table, where
+  `MUIKEY_WINDOW_CLOSE` defaults to Escape and independently fired the
+  window's already-wired `MUIA_Window_CloseRequest` notification --
+  a second, parallel path to "quit" that had nothing to do with this
+  app's own vi-mode Escape handling. Isolated by temporary file-based
+  checkpoint logging (`SYS:retrowp_debug.out`, the same technique Phase 4
+  used to isolate its `SDCMD_SETPARAMS` gotcha) proving `amiga_dispatch_key`
+  itself never requested quit for that key. Fixed with two changes,
+  both required: `editor_handleevent` now returns `MUI_EventHandlerRC_Eat`
+  (stops the raw key propagating further), and the window's own
+  `NewObject` tag list gains `MUIA_Window_DisableKeys,
+  (IPTR)MUIKEYF_WINDOW_CLOSE` (disables the global hotkey binding itself
+  -- the `Eat` fix alone was insufficient, since MUI's hotkey table
+  operates at a different level than the custom class's own event-handler
+  chain). Verified by repeated interactive Escape presses post-fix: window
+  stays open, vi-mode correctly returns to Normal mode instead.
+- **Real bug found and fixed, shared with Atari: `wp_help_view_paint`
+  drew text with no ascent offset**, positioning row 0's glyphs above the
+  viewport's own top edge -- genuinely outside any rectangle the caller's
+  background-clear covers, so the leaked pixels survived every redraw.
+  Invisible on host (`draw_host.c`'s `plat_draw_text`/`plat_fill_rect` are
+  no-ops, so the host suite could only prove `wp_help_view_paint` doesn't
+  crash, never that it draws in the right place) and never caught on
+  Atari either, since its own pager had never been interactively
+  exercised end-to-end before now (`docs/help.md`'s own documented gap)
+  -- only this phase's real on-target Amiga click-through surfaced it.
+  Fixed once at the shared `platform/common/help_view.c`/`.h` level (a
+  new `ascent_px` parameter, supplied by each caller's own
+  `plat_font_metrics_get` result, mirroring how the main document body
+  already adds its font's ascent before calling `plat_draw_text`) rather
+  than patched per-backend, so Atari's own pager gets the same fix for
+  free. Both platform call sites and all 5 host `test_help_view.c` call
+  sites updated. Verified under amiberry: the ghosting is gone and both
+  short and long help nodes render completely and correctly.
+- **False alarm, investigated and ruled out, not left ambiguous**: an
+  early re-test session appeared to show content-length-dependent
+  incomplete rendering plus a RETROWP crash (`error #80000003`). Traced to
+  two unrelated causes, not a real defect: (1) test-methodology confusion
+  -- keystrokes intended as "close the app and relaunch" were sent to an
+  *already-open* help view, where Backspace means "go back" and letter
+  keys are navigation, not shell input; (2) a genuinely separate,
+  pre-existing flaky background-process crash (`IPrefs`, `error
+  #80000004`, unrelated to F1/help at all) that reproduced on a fresh
+  boot with zero help interaction. A controlled re-test (fresh boot,
+  immediate F1, full checkpoint logging) showed zero crashes and complete
+  correct rendering of both short and long nodes, refuting the "real bug"
+  theory. Recorded honestly per this project's own documentation
+  discipline, rather than silently dropped.
+- `amiga-app`/`amiga-smoke` both green; host `make test` (219/219),
+  `atari-engine-check` and `amiga-engine-check` all unaffected.
+
 ## Status
 
 - ✅ Toolchain: `m68k-amigaos-gcc 6.5.0b` + binutils + NDK + MUI SDK, fully
@@ -781,6 +880,15 @@ the same way the Atari scripts share `atari_ci_lib.sh`.
   trap" open question. `AMIGA KICKSTART MATRIX: 3 passed, 0 failed`; a
   real Kickstart 3.0/68000 incompatibility was found along the way (see
   above), not a regression in this project's own code.
+- ✅ Phase 6: real AmigaGuide export (`gen_help_guide`), verified on-target
+  under `amigaguide.library`/MultiView; the real in-app help pager wired
+  to F1 and the Help menu (replacing Phase 2's static placeholder). Two
+  real bugs found and fixed: bare Escape closing the whole window
+  (`MUIKEY_WINDOW_CLOSE` propagation, see Phase 6's own notes above), and
+  a shared `platform/common/help_view.c` baseline/ascent bug fixed once
+  for both Atari and Amiga. `amiga-app`/`amiga-smoke` both green; host
+  `make test` (219/219), `atari-engine-check` and `amiga-engine-check`
+  all unaffected. **M9 complete.**
 - Known, deliberately unchased gap: Workbench icons never render on this
   fixture's `LoadWB` (root cause not identified -- worked around with a
   `NewCLI` debug shell, since nothing in Phase 0 or the MUI install needed
@@ -791,15 +899,14 @@ the same way the Atari scripts share `atari_ci_lib.sh`.
   scope, and this app has no dictionary file on its fixture yet); RTF
   file support isn't wired into Open/Save yet (plain text only); Grammar
   Check is a reduced-scope report-only version, not Atari's interactive
-  apply loop (see Phase 4's own notes above); the Help menu action shows
-  a static `MUI_Request` message rather than the real help viewer
-  (`help_view.o` excluded from the link, see Phase 2's own notes above).
-  None of the Help/Thesaurus/Grammar Check/Chat menu items were
-  individually mouse-click-verified under amiberry (precisely hovering a
-  specific pulldown item while holding RMB hit the same relative-mouse-
-  calibration cost documented in Phase 0's installer notes and
-  reconfirmed in Phase 4, and wasn't worth repeating for message-box-only
-  actions) -- all four go through the identical menu-Trigger ->
-  `MUIM_Application_ReturnID` -> `invoke_backend_action` path already
-  proven end-to-end by File Open/Save and Quit, so this is a reasoned,
-  not a blind, gap.
+  apply loop (see Phase 4's own notes above). The Help menu action now
+  opens the real help viewer as of Phase 6 (see Phase 6's own notes
+  above) -- this gap is resolved, not open. Thesaurus/Grammar
+  Check/Chat menu items were not individually mouse-click-verified under
+  amiberry (precisely hovering a specific pulldown item while holding RMB
+  hit the same relative-mouse-calibration cost documented in Phase 0's
+  installer notes and reconfirmed in Phase 4, and wasn't worth repeating
+  for message-box-only actions) -- all three go through the identical
+  menu-Trigger -> `MUIM_Application_ReturnID` -> `invoke_backend_action`
+  path already proven end-to-end by File Open/Save, Quit, and (as of
+  Phase 6) Help, so this is a reasoned, not a blind, gap.

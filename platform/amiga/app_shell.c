@@ -34,6 +34,10 @@
 #include "offload.h"
 #include "grammar.h"
 #include "endian.h"
+#include "help_doc.h"
+#include "help_view.h"
+#include "statusline.h"
+#include "help_retrowp.h"
 
 /* M9 T9.1a: non-UI platform.h seams only (memory/file/clipboard/timer) --
    no Intuition/MUI here yet. Grows into the real MUI Application/Window
@@ -158,6 +162,22 @@ static Object           *g_editor;
    shortcuts from the ORIGINAL raw key value rather than the decoded
    wp_key_event (see that function's own comment). */
 static u8 g_last_raw_ascii = 0;
+
+/* M9 Phase 6: the help system, reusing platform/common/help_doc.h/
+   help_view.h unchanged -- mirrors platform/atari/app_shell.c's own
+   g_help_doc/g_help_doc_loaded/g_help_view/g_help_active exactly.
+   g_help_active is a whole separate UI mode: while set,
+   amiga_dispatch_key routes every key to wp_help_view_feed_key instead
+   of vi-mode, and editor_draw paints the pager instead of the document
+   -- see paint_help_amiga() and the g_help_active checks in both.
+   Reachable via F1 (amiga_dispatch_key) or the real Help menu action
+   (do_help_contents, below) -- unlike Atari, which only ever wired F1
+   (no menu path existed for it at the time), Amiga gets both from the
+   start since the Help menu was already real since Phase 2. */
+static wp_help_doc       g_help_doc;
+static wp_bool           g_help_doc_loaded = WP_FALSE;
+static wp_help_view_state g_help_view;
+static wp_bool           g_help_active = WP_FALSE;
 
 /* T9.2: the width (in twips) every paragraph's real wp_paragraph_layout
    was last built against, plus a "the document itself just changed"
@@ -320,10 +340,27 @@ static void do_edit_paste(void)
     set_document_from_text(buf, out_len);
 }
 
+/* M9 Phase 6: opens the real help pager at the named node (falling back
+   to node 0 if the name doesn't resolve), mirroring platform/atari/
+   app_shell.c's own open_help_node exactly. Replaces the earlier
+   static-MUI_Request placeholder (Phase 2/4) now that the real pager's
+   platform.h dependencies (plat_draw_text/plat_fill_rect/plat_gc_flush)
+   exist (Phase 3). The caller (invoke_backend_action's menu dispatch,
+   or amiga_dispatch_key's F1 handling) already triggers a MUI_Redraw
+   afterward -- see both call sites -- so this doesn't force one itself. */
+static void open_help_node(const char *node_name, u32 node_name_len)
+{
+    if (!g_help_doc_loaded) return;
+    {
+        u32 node = wp_help_doc_find_node(&g_help_doc, (const u8 *)node_name, node_name_len);
+        wp_help_view_init(&g_help_view, &g_help_doc, (node != WP_HELP_NODE_NONE) ? node : 0);
+    }
+    g_help_active = WP_TRUE;
+}
+
 static void do_help_contents(void)
 {
-    MUI_Request(g_app, g_win, 0, (CONST_STRPTR)"RetroWP Help", (CONST_STRPTR)"Ok",
-                (CONST_STRPTR)"vi-mode keys: hjkl move, i insert, Esc normal, :w save, :q quit.");
+    open_help_node("Main", 4);
 }
 
 /* -- Tools: Thesaurus/Chat/Grammar Check via the offload link (T9.3) --
@@ -860,6 +897,22 @@ static wp_bool amiga_dispatch_key(wp_key_event ev)
     wp_vimode_action action;
     const wp_action *act;
 
+    /* Help is a whole separate UI mode (M9 Phase 6): while active,
+       every key goes to wp_help_view_feed_key instead of vi-mode, full
+       stop, until the viewer itself reports a close request (Escape or
+       'q' -- see help_view.h) -- mirrors platform/atari/app_shell.c's
+       own wp_dispatch_key exactly. F1 opens it from any vi-mode mode/
+       state; pressing F1 again while already showing help is a
+       harmless no-op rather than resetting the user's position. */
+    if (g_help_active) {
+        if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
+        return WP_FALSE;
+    }
+    if (ev.special == (u16)WP_KEY_F1) {
+        do_help_contents();
+        return WP_FALSE;
+    }
+
     if (!g_ctx.doc_loaded) return WP_FALSE;
 
     action = wp_vimode_feed_key(&g_ctx.vi, ev);
@@ -996,6 +1049,89 @@ static wp_bool line_contains_pos(const wp_line *line, u32 run, u32 offset)
     return WP_TRUE;
 }
 
+/* M9 Phase 6: help pager sizing, mirroring platform/atari/app_shell.c's
+   own WP_ATARI_HELP_BODY_SIZE_TWIPS/WP_ATARI_STATUSLINE_SIZE_TWIPS and
+   font_line_height_px exactly -- "how tall is one line of some font, in
+   pixels" always comes from real plat_font_metrics_get, never a
+   hardcoded guess. */
+#define WP_AMIGA_HELP_BODY_SIZE_TWIPS 200
+#define WP_AMIGA_HINT_BAR_SIZE_TWIPS  160
+
+static i32 amiga_font_line_height_px(i32 size_twips)
+{
+    plat_font *font;
+    plat_font_metrics fm;
+    i32 h_px;
+
+    if (plat_font_open((const u8 *)"", 0, size_twips, 0, &font) != WP_OK) return 0;
+    plat_font_metrics_get(font, &fm);
+    h_px = amiga_twips_to_px_y(fm.ascent + fm.descent + fm.leading);
+    plat_font_close(font);
+    return h_px;
+}
+
+/* Paints the help pager full-object (replacing the document body
+   entirely while g_help_active is set -- see editor_draw's own check)
+   plus a small fixed hint bar along the bottom, reusing
+   wp_statusline_paint for that hint exactly the way platform/atari/
+   app_shell.c's paint_help does (platform/common/statusline.c is
+   deliberately generic, not vi-mode-specific, per its own header
+   comment -- a static hint string is exactly the kind of use it names). */
+static void paint_help_amiga(amiga_gc *gc, Object *obj)
+{
+    plat_font *body_font;
+    i32 hint_bar_h_px, body_line_h_px, body_h_px, total_h_px;
+    i32 x_px, y_px, w_px;
+
+    x_px = (i32)_mleft(obj);
+    y_px = (i32)_mtop(obj);
+    w_px = (i32)(_mright(obj) - _mleft(obj) + 1);
+    total_h_px = (i32)(_mbottom(obj) - _mtop(obj) + 1);
+
+    hint_bar_h_px = amiga_font_line_height_px(WP_AMIGA_HINT_BAR_SIZE_TWIPS);
+    if (hint_bar_h_px > total_h_px) hint_bar_h_px = 0;
+    body_line_h_px = amiga_font_line_height_px(WP_AMIGA_HELP_BODY_SIZE_TWIPS);
+    body_h_px = total_h_px - hint_bar_h_px;
+    if (body_h_px < 0) body_h_px = 0;
+
+    if (plat_font_open((const u8 *)"", 0, WP_AMIGA_HELP_BODY_SIZE_TWIPS, 0, &body_font) == WP_OK) {
+        /* wp_help_view_paint positions text by BASELINE (plat_draw_text's
+           own convention) -- ascent_px tells it where row 0's baseline
+           sits below the viewport's own top edge. A bare y_px with no
+           ascent offset drew row 0's ascending strokes above the
+           viewport entirely, into the window's own title-bar area --
+           a real bug found via THIS interactive test (see
+           help_view.h's own comment for the full story) and fixed at
+           the shared platform/common/help_view.c level, not just papered
+           over here. */
+        plat_font_metrics body_fm;
+        i32 body_ascent_px = 0;
+        if (plat_font_metrics_get(body_font, &body_fm) == WP_OK) {
+            body_ascent_px = amiga_twips_to_px_y(body_fm.ascent);
+        }
+        wp_help_view_paint((plat_gc *)gc, body_font, x_px, y_px, w_px, body_h_px,
+                            amiga_px_to_twips_x(w_px), body_line_h_px, body_ascent_px, &g_help_view);
+        plat_font_close(body_font);
+    }
+
+    if (hint_bar_h_px > 0) {
+        plat_font *hint_font;
+        wp_vi_status_view view;
+        static const u8 hint[] = "HELP -- j/k select, Enter follow, Backspace back, Esc/q close";
+
+        if (plat_font_open((const u8 *)"", 0, WP_AMIGA_HINT_BAR_SIZE_TWIPS, 0, &hint_font) == WP_OK) {
+            view.mode_label_utf8 = hint;
+            view.mode_label_len = (u32)(sizeof(hint) - 1);
+            view.pending_count = 0;
+            view.pending_cmd_utf8 = NULL;
+            view.pending_cmd_len = 0;
+            wp_statusline_paint((plat_gc *)gc, hint_font, x_px, y_px + total_h_px - hint_bar_h_px,
+                                 w_px, hint_bar_h_px, &view);
+            plat_font_close(hint_font);
+        }
+    }
+}
+
 static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
 {
     amiga_gc gc;
@@ -1020,6 +1156,14 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
        clears its own area explicitly every time rather than trusting it. */
     SetAPen(_rp(obj), _dri(obj)->dri_Pens[BACKGROUNDPEN]);
     RectFill(_rp(obj), _mleft(obj), _mtop(obj), _mright(obj), _mbottom(obj));
+
+    if (g_help_active) {
+        amiga_gc help_gc;
+        help_gc.rp = _rp(obj);
+        help_gc.dri = _dri(obj);
+        paint_help_amiga(&help_gc, obj);
+        return 0;
+    }
 
     if (!g_ctx.doc_loaded) return 0;
 
@@ -1144,7 +1288,26 @@ static ULONG editor_handleevent(struct IClass *cl, Object *obj, struct MUIP_Hand
     if (quit) {
         DoMethod(_app(obj), MUIM_Application_ReturnID, (LONG)MUIV_Application_ReturnID_Quit);
     }
-    return 0;
+
+    /* Real, empirically-found bug (M9 Phase 6): returning a plain 0 here
+       means "this event was not consumed" (MUI's own documented
+       MUIM_HandleEvent contract, libraries/mui.h's own comment on
+       MUI_EventHandlerRC_Eat -- "stop MUI from calling other
+       handlers"), which was letting Escape keep propagating past this
+       class to whatever handles it next -- and something further along
+       that chain was treating an unconsumed Escape as equivalent to a
+       close-gadget click, closing the whole window (confirmed by
+       instrumenting this function directly: the raw key WAS reaching
+       here, amiga_dispatch_key correctly returned WP_FALSE for it via
+       vi-mode's own Escape-is-harmless-in-Normal-mode behavior, yet the
+       window still closed). This wasn't Phase 6-specific -- any bare
+       Escape press would have hit it since Phase 2 -- it just had never
+       been pressed during this project's own interactive verification
+       until the help pager's own close key made that unavoidable. Every
+       raw key this app receives is meant to be fully handled by it, so
+       this always eats the event now, never falling through to
+       whatever default handling caused the spurious close. */
+    return MUI_EventHandlerRC_Eat;
 }
 
 static WP_DISPATCHER(wp_editor_dispatch)
@@ -1301,6 +1464,17 @@ void app_shell_run(void)
     wp_app_ctx_init(&g_ctx, &g_amiga_doc, &g_amiga_journal);
     load_sample_document();
 
+    /* M9 Phase 6: parsed ONCE at startup from the generated
+       g_help_source_retrowp array (build/generated/help_retrowp.h,
+       shared verbatim with the Atari backend -- produced from
+       docs/help/retrowp.help by host/tools/gen_help_header.c, see
+       docs/help.md), same as platform/atari/app_shell.c. If parsing
+       ever fails, g_help_doc_loaded stays WP_FALSE and F1/Help are a
+       silent no-op rather than a crash (open_help_node's own guard). */
+    g_help_doc_loaded = (wp_bool)(wp_help_doc_parse(g_help_source_retrowp,
+                                                     (u32)g_help_source_retrowp_len,
+                                                     &g_help_doc) == WP_OK);
+
     g_editor_class = MUI_CreateCustomClass(NULL, MUIC_Area, NULL,
                                             sizeof(struct wp_editor_data),
                                             (APTR)wp_editor_dispatch);
@@ -1327,6 +1501,21 @@ void app_shell_run(void)
         SubWindow, g_win = WindowObject,
             MUIA_Window_Title, (IPTR)"RetroWP",
             MUIA_Window_ID,    MAKE_ID('R','W','P','1'),
+            /* Real, empirically-found bug (M9 Phase 6, see
+               editor_handleevent's own comment for how this was
+               isolated): MUI's GLOBAL keyboard-hotkey system
+               (independent of any per-object IDCMP_RAWKEY event
+               handler -- see libraries/mui.h's own MUIKEY_ enum and
+               the MUIA_Window_DisableKeys attribute) binds
+               MUIKEY_WINDOW_CLOSE to Escape by default, closing the
+               whole window before vi-mode ever gets a chance to treat
+               Escape as "return to Normal mode". Disabled here -- and
+               ONLY here, not the other MUIKEYF_ bits (Cut/Copy/Paste/
+               Undo/Redo etc, which don't apply to this app's own
+               custom Area class anyway, since it isn't a MUI text/
+               string gadget) -- so Escape reaches this app's own
+               dispatch instead. */
+            MUIA_Window_DisableKeys, (IPTR)MUIKEYF_WINDOW_CLOSE,
             WindowContents, VGroup,
                 Child, g_editor = NewObject(g_editor_class->mcc_Class, NULL, TAG_DONE),
             End,
@@ -1376,6 +1565,7 @@ void app_shell_run(void)
     MUI_DisposeObject(g_app);
     MUI_DeleteCustomClass(g_editor_class);
     if (g_ctx.doc_loaded) wp_document_free(&g_amiga_doc);
+    if (g_help_doc_loaded) wp_help_doc_free(&g_help_doc);
     close_libraries();
 }
 
@@ -1522,4 +1712,60 @@ wp_bool wp_amiga_transport_selfcheck(void)
     if (offload_available()) ok = WP_FALSE;
 
     return ok;
+}
+
+/* M9 Phase 6: proves the help system's non-blocking pieces against the
+   REAL compiled-in help content and REAL graphics.library/diskfont.library
+   font metrics, mirroring platform/atari/app_shell.c's own
+   wp_atari_help_selfcheck exactly (same fixture text, same two
+   assertions). Deliberately does NOT call wp_help_view_paint or
+   actually open the pager (F1) -- same no-real-window/no-blocking-call
+   boundary every other selfcheck in this file respects. What IS real
+   and worth proving here: the parser accepts the shipped content and
+   the "Main" node resolves (every link resolving at all is already a
+   build-time guarantee via host/tests/test_help_content.c -- this just
+   re-confirms the same compiled bytes still parse after a genuine m68k
+   cross-compile), and wp_help_wrap_line -- the greedy word-wrap
+   algorithm the pager relies on -- runs correctly against a REAL
+   diskfont-measured font rather than host's simplified fake-monospace
+   one. */
+#define WP_AMIGA_HELP_SELFCHECK_MAX_ROWS 8
+
+wp_bool wp_amiga_help_selfcheck(void)
+{
+    wp_help_doc doc;
+    plat_font *font;
+    u32 starts[WP_AMIGA_HELP_SELFCHECK_MAX_ROWS];
+    u32 lens[WP_AMIGA_HELP_SELFCHECK_MAX_ROWS];
+    u32 row_count;
+    static const char sample[] =
+        "RetroWP wraps this sentence across more than one real Amiga diskfont-measured row.";
+
+    if (wp_help_doc_parse(g_help_source_retrowp, (u32)g_help_source_retrowp_len, &doc) != WP_OK) {
+        return WP_FALSE;
+    }
+    if (doc.node_count == 0 ||
+        wp_help_doc_find_node(&doc, (const u8 *)"Main", 4) == WP_HELP_NODE_NONE) {
+        wp_help_doc_free(&doc);
+        return WP_FALSE;
+    }
+    wp_help_doc_free(&doc);
+
+    if (plat_font_open((const u8 *)"", 0, WP_AMIGA_HELP_BODY_SIZE_TWIPS, 0, &font) != WP_OK) {
+        return WP_FALSE;
+    }
+    /* A narrow column forces real wrapping (not just a single row) --
+       proves more than "it returned something" against real measurement. */
+    row_count = wp_help_wrap_line(font, (const u8 *)sample, (u32)strlen(sample), 3000,
+                                   starts, lens, WP_AMIGA_HELP_SELFCHECK_MAX_ROWS);
+    plat_font_close(font);
+
+    if (row_count < 2 || row_count > WP_AMIGA_HELP_SELFCHECK_MAX_ROWS) return WP_FALSE;
+    {
+        u32 i;
+        for (i = 0; i < row_count; i++) {
+            if (lens[i] == 0) return WP_FALSE; /* every row must carry real content */
+        }
+    }
+    return WP_TRUE;
 }
