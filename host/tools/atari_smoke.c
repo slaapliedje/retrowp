@@ -101,6 +101,7 @@ int main(void)
     short work_in[11];
     short work_out[57];
     short dummy;
+    short wcell, hcell;
     VdiHdl vdi_handle;
     short window_handle;
     GRECT desk;
@@ -112,16 +113,21 @@ int main(void)
 
     nf_log("ATARI SMOKE: starting\r\n");
 
-    wp_menu_tree_init();
-    check(wp_menu_tree_selfcheck(), "menu tree ob_next/head/tail linkage");
-
     check(appl_init() >= 0, "appl_init");
 
-    vdi_handle = graf_handle(&dummy, &dummy, &dummy, &dummy);
+    /* graf_handle() must run before wp_menu_tree_init() -- its
+       wcell/hcell out-params are how a hand-built menu tree's logical
+       character-cell coordinates get scaled to real pixels (see
+       wp_menu_tree_init's own declaration comment); this must also run
+       after appl_init() (a real AES call). */
+    vdi_handle = graf_handle(&wcell, &hcell, &dummy, &dummy);
     for (dummy = 0; dummy < 10; dummy++) work_in[dummy] = 1;
     work_in[10] = 2;
     v_opnvwk(work_in, &vdi_handle, work_out);
     check(vdi_handle != 0, "v_opnvwk assigned a vdi handle");
+
+    wp_menu_tree_init(wcell, hcell);
+    check(wp_menu_tree_selfcheck(), "menu tree ob_next/head/tail linkage");
 
     r = menu_bar(wp_menu_tree, MENU_INSTALL);
     check(r != 0, "menu_bar(MENU_INSTALL) succeeded");
@@ -183,6 +189,28 @@ int main(void)
     msg[4] = desk.g_x; msg[5] = desk.g_y; msg[6] = desk.g_w; msg[7] = desk.g_h;
     check(wp_dispatch_message(window_handle, vdi_handle, msg) == WP_FALSE,
           "dispatch(WM_REDRAW) does not request quit");
+
+    /* M8.5 menu-tree fix: empirically, the very first synthetic
+       MN_SELECTED dispatch immediately after wind_open_grect() was
+       flaky against the new (correct, 4-level) tree specifically --
+       menu_tnormal(wp_menu_tree, WP_MENU_OBJ_FILE_TITLE, UNHIGHLIGHT)
+       occasionally left the rest of this call behaving as if the
+       WP_MENU_OBJ_FILE_QUIT case never ran, even though the switch/case
+       logic is untouched and straight-line. Reproduced and fixed with
+       ANY extra work inserted first (a few unrelated NF_STDERR calls
+       were enough), never with the dispatch call alone -- consistent
+       with AES still finishing real per-object install-time work
+       (ob_draw walking BAR->ACTIVE->five titles, vs the old tree's
+       single-title draw) that a real event loop's evnt_multi() block
+       would naturally wait out, but this harness's direct, synthetic
+       dispatch (see this file's own top-of-function comment) does not.
+       evnt_timer() is the AES's own documented "release control until
+       real time has passed" primitve (Atari Compendium p.387) -- used
+       here instead of a spin-loop so this yields real wall-clock time,
+       not just CPU cycles. Root cause is not fully nailed down; this is
+       the same honest-workaround discipline this file's callers already
+       apply elsewhere (see wp_atari_*_selfcheck's documented boundaries). */
+    evnt_timer(100);
 
     msg[0] = MN_SELECTED; msg[3] = WP_MENU_OBJ_FILE_TITLE; msg[4] = WP_MENU_OBJ_FILE_QUIT;
     check(wp_dispatch_message(window_handle, vdi_handle, msg) == WP_TRUE,

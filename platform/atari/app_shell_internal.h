@@ -22,62 +22,172 @@
 
 /* post-M8 (2nd revisit): a real 3-level SCREEN->BAR->titles restructuring
    was attempted here (to fix a real, source-verified bug where only the
-   first menu title ever painted -- see git history / docs/atari-platform.md
-   for the full derivation from EmuTOS's aes/gemmnlib.c if picking this
-   back up). It passed this project's OWN single-image CI (EmuTOS 0.9.12)
-   cleanly, including a new cycle-detection self-check specifically added
-   to catch a bad renumbering. But the multi-TOS matrix added in the SAME
-   session (host/tools/ci_atari_matrix.sh) caught what single-image CI
-   never could: the restructured tree causes a real bus-error crash under
-   a newer EmuTOS build (1.4) and a real hang under real TOS 1.04 --
+   first menu title ever painted). It passed this project's OWN
+   single-image CI (EmuTOS 0.9.12) cleanly, including a new
+   cycle-detection self-check specifically added to catch a bad
+   renumbering. But the multi-TOS matrix added in the SAME session
+   (host/tools/ci_atari_matrix.sh) caught what single-image CI never
+   could: the restructured tree causes a real bus-error crash under a
+   newer EmuTOS build (1.4) and a real hang under real TOS 1.04 --
    confirmed via an A/B test against the pre-restructuring binary, which
-   passes cleanly on BOTH. Reverted for that reason -- a fix that
-   corrupts real-hardware-adjacent GEM implementations is strictly worse
-   than the cosmetic bug it fixes. The visibility bug is once again a
-   documented, open known gap (docs/atari-platform.md); this numbering is
-   back to the flat "ROOT owns every title directly" shape T4.3 shipped,
-   Format simply appended onto it the same way Desk/Tools were. */
-#define WP_MENU_OBJ_ROOT        0
-#define WP_MENU_OBJ_FILE_TITLE  1
-#define WP_MENU_OBJ_EDIT_TITLE  2
-#define WP_MENU_OBJ_FILE_BOX    3
-#define WP_MENU_OBJ_FILE_OPEN   4
-#define WP_MENU_OBJ_FILE_SAVE   5
-#define WP_MENU_OBJ_FILE_QUIT   6
-#define WP_MENU_OBJ_EDIT_BOX    7
-#define WP_MENU_OBJ_EDIT_CUT    8
-#define WP_MENU_OBJ_EDIT_COPY   9
-#define WP_MENU_OBJ_EDIT_PASTE  10
-#define WP_MENU_OBJ_TOOLS_TITLE      11
-#define WP_MENU_OBJ_TOOLS_BOX        12
-#define WP_MENU_OBJ_TOOLS_SPELLCHECK 13
-#define WP_MENU_OBJ_TOOLS_THESAURUS  14
-#define WP_MENU_OBJ_TOOLS_GRAMMARCHECK 15
-#define WP_MENU_OBJ_TOOLS_CHAT   16
-#define WP_MENU_OBJ_DESK_TITLE   17
-/* post-M8 (3rd revisit): a fifth title, Format (Bold/Italic/Underline,
-   Font Size, Alignment) -- appended after Desk per the established
-   "append, don't renumber" rule, wired as ROOT's new last child
-   (Tools's ob_next now points here instead of wrapping to ROOT, and
-   ROOT's own ob_tail now points here too). See app_shell.c. */
-#define WP_MENU_OBJ_FORMAT_TITLE       18
-#define WP_MENU_OBJ_FORMAT_BOX         19
-#define WP_MENU_OBJ_FORMAT_BOLD        20
-#define WP_MENU_OBJ_FORMAT_ITALIC      21
-#define WP_MENU_OBJ_FORMAT_UNDERLINE   22
-#define WP_MENU_OBJ_FORMAT_SIZE_UP     23
-#define WP_MENU_OBJ_FORMAT_SIZE_DOWN   24
-#define WP_MENU_OBJ_FORMAT_ALIGN_LEFT    25
-#define WP_MENU_OBJ_FORMAT_ALIGN_CENTER  26
-#define WP_MENU_OBJ_FORMAT_ALIGN_RIGHT   27
-#define WP_MENU_OBJ_COUNT        28
+   passes cleanly on BOTH. Reverted for that reason. (3rd revisit, same
+   session): moving Format out of ROOT's ob_tail position was tried next,
+   staying on the flat 2-level shape -- not a fix, just a safe place to
+   land the new Format title without reintroducing risk.
+
+   post-M8.5 (4th revisit): a real fix, this time grounded in the AES's
+   OWN documented public contract rather than reverse-engineered EmuTOS
+   source -- the Atari Compendium (Scott Sanders), queried directly via
+   the atari-compendium MCP server, documents the canonical GEM menu-bar
+   OBJECT shape in "The Menu Bar" (Chapter 6, pp. 6.25-6.26): ROOT is a
+   G_IBOX with exactly two children, BAR and DROPDOWNS. BAR (a G_BOX) has
+   exactly one child, ACTIVE, which holds every G_TITLE as ITS children.
+   DROPDOWNS (a G_IBOX) holds one G_BOX per title -- positioned to fall
+   underneath its corresponding title -- NOT nested under the title
+   itself. This is why both prior bugs existed: menu_bar(MENU_INSTALL)'s
+   internal ob_draw(tree, 1, MAX_DEPTH) call only ever walks DESCENDANTS
+   of array index 1 (confirmed against objc_draw()'s public documented
+   behavior, p.425 -- "renders an AES object tree on screen" from `obj`
+   down `depth` levels, never siblings). With titles as index 1's
+   siblings (every shape tried before this), only whichever title sat at
+   index 1 ever painted. With dropdown boxes nested under their titles
+   (the same past shapes), ob_draw's install-time walk reached them too,
+   painting closed dropdowns as "glyph noise" (see git history) unless
+   patched with OF_HIDETREE. Under the correct shape, BAR/ACTIVE/titles
+   ARE index 1's whole subtree (so all titles paint), and DROPDOWNS is a
+   separate subtree under ROOT that ob_draw(tree, 1, ...) never reaches
+   at all (so dropdowns are structurally never install-time-painted,
+   independent of OF_HIDETREE -- kept anyway, defensively, below).
+
+   The Desk dropdown box has a separately documented shape (same pages):
+   exactly 8 children -- an app-defined first item (here, "About
+   RetroWP...", wired to the help viewer's About node), a disabled
+   separator, then SIX dummy G_STRING objects the AES manages at
+   MENU_INSTALL time to list running desk accessories/applications. This
+   is now confirmed exactly, not just documented: a local EmuTOS source
+   checkout's aes/gemmnlib.c defines THESCREEN=0, THEBAR=1, THEACTIVE=2
+   (matching WP_MENU_OBJ_ROOT/BAR/ACTIVE exactly) and gemctrl.c's THEDESK=3
+   (matching WP_MENU_OBJ_DESK_TITLE exactly) -- these are not this
+   project's own numbering choice lining up by luck, they're the real AES's
+   own hardcoded constants. menu_fixup() computes themenus =
+   tree[THESCREEN].ob_tail (DROPDOWNS, by construction: DROPDOWNS must be
+   ROOT's ob_tail) then dabox = tree[themenus].ob_head (the Desk box, by
+   construction: it must be DROPDOWNS's ob_head), rebuilds dabox's child
+   chain from scratch via ob_add() for dabox+1..dabox+cnt where
+   cnt = D.g_accreg ? (2 + D.g_accreg) : 1 -- and include/sysconf.h defines
+   NUM_ACCS as 6, so cnt tops out at 8, requiring dabox+1..dabox+8 (this
+   tree's DESK_ABOUT..DESK_DUMMY6) to be valid, contiguous slots. Also
+   confirmed by reading the source rather than assumed: menu_fixup()
+   repoints each slot's ob_spec directly at EmuTOS's own internal
+   accessory-title string (tree[ob].ob_spec = (LONG)D.g_acctitle[...]) --
+   it does not write through the pointer already there, so a real TOS that
+   behaves the same way would never touch the bytes of
+   g_text_desk_dummyN[] itself. They're kept as writable static buffers
+   anyway, defensively, since this was only verified for EmuTOS, not real
+   TOS's own implementation.
+
+   menu_sub() (same file) confirms the DROPDOWNS ordering requirement too:
+   given a title's object index ititle, it walks
+   tree[tree[THESCREEN].ob_tail].ob_head forward via ob_next exactly
+   (ititle - THEACTIVE - 1) times to find that title's dropdown box -- so
+   DROPDOWNS's child chain order must match ACTIVE's title order exactly,
+   which is what this tree builds.
+
+   One more residual, honestly-flagged gap: the Compendium's prose names
+   BAR's one child "ACTIVE" and gives its size but never states its
+   ob_type explicitly. G_BOX is used here (matching BAR, its parent, and
+   every other hand-built container in this tree) as the most consistent
+   reading, not a directly-cited fact.
+
+   A real, reproducible timing artifact was found and fixed during this
+   revisit, unrelated to the tree shape's correctness: host/tools/
+   atari_smoke.c's very first synthetic MN_SELECTED dispatch (called
+   directly, immediately after wind_open_grect(), bypassing the real
+   event loop entirely -- see this header's own top-of-file comment on
+   why) was flaky specifically against this bigger tree. See that file's
+   own comment at the evnt_timer() call added to fix it.
+
+   A second, independent, previously-undiscovered bug was found only by
+   actually taking a real Hatari screenshot of the fixed tree (something
+   none of CI checks): all five titles' text was painting on top of each
+   other in the leftmost ~25 pixels, illegible. `graf_handle()`'s wcell/
+   hcell out-params (system font character-cell size in real pixels) were
+   being fetched and discarded (`&dummy` x4) since T4.1 -- a hand-built
+   OBJECT tree, unlike one loaded via rsrc_load()/rsrc_obfix(), is never
+   auto-scaled from character-cell units to pixels, so this tree's
+   authored x-positions (0, 6, 12, 18, 25 -- character counts) were being
+   used as raw, unscaled pixel coordinates. Invisible before this session
+   because only one title ever painted at all, so relative spacing was
+   never visually exercised. wp_menu_tree_init() now takes (wcell, hcell)
+   and scales every ob_x/ob_width/ob_y/ob_height in place as its final
+   step; both real call sites now pass graf_handle()'s real values
+   through instead of discarding them.
+
+   This must clear the FULL multi-TOS matrix (ci_atari_matrix.sh), not
+   just single-image CI, before being trusted -- exactly the lesson the
+   2nd revisit above already paid for once. See docs/atari-platform.md
+   for the verification record. */
+#define WP_MENU_OBJ_ROOT               0
+#define WP_MENU_OBJ_BAR                1
+#define WP_MENU_OBJ_ACTIVE             2
+#define WP_MENU_OBJ_DESK_TITLE         3
+#define WP_MENU_OBJ_FILE_TITLE         4
+#define WP_MENU_OBJ_EDIT_TITLE         5
+#define WP_MENU_OBJ_TOOLS_TITLE        6
+#define WP_MENU_OBJ_FORMAT_TITLE       7
+#define WP_MENU_OBJ_DROPDOWNS          8
+#define WP_MENU_OBJ_DESK_BOX           9
+#define WP_MENU_OBJ_DESK_ABOUT         10
+#define WP_MENU_OBJ_DESK_SEP           11
+#define WP_MENU_OBJ_DESK_DUMMY1        12
+#define WP_MENU_OBJ_DESK_DUMMY2        13
+#define WP_MENU_OBJ_DESK_DUMMY3        14
+#define WP_MENU_OBJ_DESK_DUMMY4        15
+#define WP_MENU_OBJ_DESK_DUMMY5        16
+#define WP_MENU_OBJ_DESK_DUMMY6        17
+#define WP_MENU_OBJ_FILE_BOX           18
+#define WP_MENU_OBJ_FILE_OPEN          19
+#define WP_MENU_OBJ_FILE_SAVE          20
+#define WP_MENU_OBJ_FILE_QUIT          21
+#define WP_MENU_OBJ_EDIT_BOX           22
+#define WP_MENU_OBJ_EDIT_CUT           23
+#define WP_MENU_OBJ_EDIT_COPY          24
+#define WP_MENU_OBJ_EDIT_PASTE         25
+#define WP_MENU_OBJ_TOOLS_BOX          26
+#define WP_MENU_OBJ_TOOLS_SPELLCHECK   27
+#define WP_MENU_OBJ_TOOLS_THESAURUS    28
+#define WP_MENU_OBJ_TOOLS_GRAMMARCHECK 29
+#define WP_MENU_OBJ_TOOLS_CHAT         30
+#define WP_MENU_OBJ_FORMAT_BOX         31
+#define WP_MENU_OBJ_FORMAT_BOLD        32
+#define WP_MENU_OBJ_FORMAT_ITALIC      33
+#define WP_MENU_OBJ_FORMAT_UNDERLINE   34
+#define WP_MENU_OBJ_FORMAT_SIZE_UP     35
+#define WP_MENU_OBJ_FORMAT_SIZE_DOWN   36
+#define WP_MENU_OBJ_FORMAT_ALIGN_LEFT    37
+#define WP_MENU_OBJ_FORMAT_ALIGN_CENTER  38
+#define WP_MENU_OBJ_FORMAT_ALIGN_RIGHT   39
+#define WP_MENU_OBJ_COUNT        40
 
 extern OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 
-/* Patches ob_spec.free_string on the title/item objects. Must run before
-   menu_bar() -- C89 has no designated initializers, so the OBSPEC union
-   in the static array literal is left {0} and patched at runtime. */
-void wp_menu_tree_init(void);
+/* Patches ob_spec.free_string on the title/item objects, then scales
+   every populated ob_x/ob_y/ob_width/ob_height in wp_menu_tree[] from
+   the array literal's logical character-cell units into real pixels
+   (ob_x/ob_width *= wcell, ob_y/ob_height *= hcell). Hand-built OBJECT
+   trees are never passed through rsrc_load()/rsrc_obfix() -- the one
+   real mechanism that would otherwise do this scaling for a
+   resource-file-loaded tree -- so this project's own code must do it.
+   wcell/hcell are graf_handle()'s first two out-params (system default
+   text font's character cell width/height in pixels, per the Atari
+   Compendium's own graf_handle() reference); the caller must call
+   graf_handle() itself and pass those through, not query font metrics
+   directly (CLAUDE.md's font-metrics-abstraction rule). Must run before
+   menu_bar() -- both for the string patching (C89 has no designated
+   initializers, so the OBSPEC union in the static array literal is left
+   {0}) and the scaling. Call exactly once per process -- calling twice
+   double-scales every coordinate. */
+void wp_menu_tree_init(short wcell, short hcell);
 
 /* Walks ob_next/ob_head/ob_tail and asserts the sibling-chain convention
    holds (see app_shell.c for the convention itself). A hand-built GEM

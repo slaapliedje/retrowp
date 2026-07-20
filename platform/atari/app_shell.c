@@ -25,19 +25,15 @@
 #include "help_view.h"
 #include "help_retrowp.h"
 
-/* Hand-built menu bar OBJECT tree: File (Open/Save/Quit) and Edit
-   (Cut/Copy/Paste). There is no resource editor or .rsc file anywhere
-   in this project's toolchain (no ResourceMaster/Human68k-style tool,
-   no packaged .rsc -- see docs/atari-platform.md), so for a menu bar
-   this small, a static hand-built OBJECT[] is the practical choice;
-   .rsc loading (rsrc_load) remains the better tool for anything with
-   real dialog layout (multi-field forms), which this project doesn't
-   need yet.
+/* Hand-built menu bar OBJECT tree. There is no resource editor or .rsc
+   file anywhere in this project's toolchain (no ResourceMaster/
+   Human68k-style tool, no packaged .rsc -- see docs/atari-platform.md),
+   so a static hand-built OBJECT[] is the practical choice; .rsc loading
+   (rsrc_load) remains the better tool for anything with real dialog
+   layout (multi-field forms), which this project doesn't need yet.
 
    ob_next/ob_head/ob_tail are OBJECT-ARRAY INDICES, not pointers.
-   Convention (verified against a running AES under Hatari, and cross-
-   checked against EmuTOS's own desktop menu tree, since this is the
-   single easiest thing to get silently wrong from memory):
+   Convention (verified against a running AES under Hatari):
      - ob_head/ob_tail on a parent bound its child sibling chain
        (first/last child index).
      - ob_next on a non-last sibling is the next sibling's index.
@@ -48,42 +44,79 @@
    string content -- those must be set by hand, in character-cell units
    relative to the parent (screen-relative only for the root).
 
-   FLAT shape: ROOT (index 0) is the true root and directly owns every
-   title as its children -- see app_shell_internal.h's block comment
-   for why a real 3-level SCREEN->BAR->titles restructuring was tried
-   and reverted (it fixed the "only File renders" cosmetic bug but
-   crashed newer EmuTOS and hung real TOS 1.04, caught by the multi-TOS
-   matrix this project's CI didn't have before). */
+   4-LEVEL shape, grounded in the Atari Compendium's documented menu-bar
+   contract (see app_shell_internal.h's block comment for the full
+   derivation and the two reverted flatter attempts this replaces):
+
+     ROOT (G_IBOX)
+      |-- BAR (G_BOX) -- ROOT's ob_head
+      |    `-- ACTIVE (G_BOX) -- BAR's only child
+      |         `-- Desk/File/Edit/Tools/Format G_TITLEs, in on-screen order
+      `-- DROPDOWNS (G_IBOX) -- ROOT's ob_tail
+           |-- Desk's dropdown G_BOX (8 children -- see below) -- DROPDOWNS's ob_head
+           |-- File's dropdown G_BOX (Open/Save/Quit)
+           |-- Edit's dropdown G_BOX (Cut/Copy/Paste)
+           |-- Tools's dropdown G_BOX (Spell/Thesaurus/Grammar/Chat)
+           `-- Format's dropdown G_BOX (Bold/.../Align Right) -- DROPDOWNS's ob_tail
+
+   Each dropdown G_BOX's ob_x matches its own title's ob_x (screen-relative,
+   since DROPDOWNS itself starts at x=0) so it falls directly underneath.
+   menu_bar(MENU_INSTALL)'s internal ob_draw(tree, 1, MAX_DEPTH) walks only
+   BAR's subtree (BAR->ACTIVE->titles) -- DROPDOWNS is a sibling of BAR
+   under ROOT, so it is never install-time-painted by that call, which is
+   what fixes both the "only one title renders" bug (all titles are now
+   descendants of index 1) and the old dropdown "glyph noise" bug (dropdowns
+   are no longer descendants of index 1 at all). OF_HIDETREE is kept on
+   every dropdown box anyway, defensively -- cheap, and not proven
+   unnecessary for every code path that might redraw DROPDOWNS directly.
+
+   Desk's dropdown box is deliberately real (the old flat trees shipped
+   with none at all): exactly 8 children per the Compendium -- an
+   app-defined "About RetroWP..." item (opens the help viewer's About
+   node), a disabled separator, and 6 AES-reserved dummy slots the AES
+   overwrites at MENU_INSTALL time to list running accessories/apps. */
 OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
-    /* next,                 head,                  tail,                  type,     flags,       state,     spec, x, y, w, h */
-    { -1,                     WP_MENU_OBJ_DESK_TITLE, WP_MENU_OBJ_TOOLS_TITLE, G_IBOX,   OF_NONE,     OS_NORMAL, {0}, 0, 0, 40, 1 },
-    { WP_MENU_OBJ_EDIT_TITLE, WP_MENU_OBJ_FILE_BOX,   WP_MENU_OBJ_FILE_BOX,   G_TITLE,  OF_NONE,     OS_NORMAL, {0}, 6, 0, 6,  1 },
-    { WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_EDIT_BOX,  WP_MENU_OBJ_EDIT_BOX,   G_TITLE,  OF_NONE,     OS_NORMAL, {0}, 12, 0, 6,  1 },
-    { WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_FILE_OPEN,  WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_HIDETREE, OS_NORMAL, {0}, 0, 1, 8,  3 },
-    { WP_MENU_OBJ_FILE_SAVE,  -1,                     -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 0, 8,  1 },
-    { WP_MENU_OBJ_FILE_QUIT,  -1,                     -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 1, 8,  1 },
-    { WP_MENU_OBJ_FILE_BOX,   -1,                     -1,                    G_STRING, OF_LASTOB,   OS_NORMAL, {0}, 0, 2, 8,  1 },
-    { WP_MENU_OBJ_EDIT_TITLE, WP_MENU_OBJ_EDIT_CUT,   WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_HIDETREE, OS_NORMAL, {0}, 6, 1, 8,  3 },
-    { WP_MENU_OBJ_EDIT_COPY,  -1,                     -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 0, 8,  1 },
-    { WP_MENU_OBJ_EDIT_PASTE, -1,                     -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 1, 8,  1 },
-    { WP_MENU_OBJ_EDIT_BOX,   -1,                     -1,                    G_STRING, OF_LASTOB,   OS_NORMAL, {0}, 0, 2, 8,  1 },
-    { WP_MENU_OBJ_ROOT,       WP_MENU_OBJ_TOOLS_BOX,  WP_MENU_OBJ_TOOLS_BOX, G_TITLE,  OF_NONE,     OS_NORMAL, {0}, 18, 0, 7,  1 },
-    { WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_CHAT, G_BOX, OF_HIDETREE, OS_NORMAL, {0}, 12, 1, 16, 4 },
-    { WP_MENU_OBJ_TOOLS_THESAURUS, -1,                -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 0, 16, 1 },
-    { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, -1,              -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 1, 16, 1 },
-    { WP_MENU_OBJ_TOOLS_CHAT, -1,                      -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 2, 16, 1 },
-    { WP_MENU_OBJ_TOOLS_BOX,  -1,                     -1,                    G_STRING, OF_LASTOB,   OS_NORMAL, {0}, 0, 3, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_TITLE, -1,                   -1,                    G_TITLE,  OF_NONE,     OS_NORMAL, {0}, 0, 0, 6,  1 },
-    { WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_FORMAT_BOX, WP_MENU_OBJ_FORMAT_BOX, G_TITLE,  OF_NONE,     OS_NORMAL, {0}, 25, 0, 8,  1 },
-    { WP_MENU_OBJ_FORMAT_TITLE, WP_MENU_OBJ_FORMAT_BOLD, WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, G_BOX, OF_HIDETREE, OS_NORMAL, {0}, 0, 1, 16, 8 },
-    { WP_MENU_OBJ_FORMAT_ITALIC,      -1, -1, G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 0, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_UNDERLINE,   -1, -1, G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 1, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_SIZE_UP,     -1, -1, G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 2, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_SIZE_DOWN,   -1, -1, G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 3, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_ALIGN_LEFT,  -1, -1, G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 4, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_ALIGN_CENTER, -1, -1, G_STRING, OF_NONE,  OS_NORMAL, {0}, 0, 5, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, -1, -1, G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 6, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_BOX,         -1, -1, G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 7, 16, 1 }
+    /* next,                    head,                   tail,                   type,     flags,       state,       spec, x,  y, w,  h */
+    { -1,                        WP_MENU_OBJ_BAR,         WP_MENU_OBJ_DROPDOWNS,  G_IBOX,   OF_NONE,     OS_NORMAL,   {0}, 0,  0, 40, 1 },
+    { WP_MENU_OBJ_DROPDOWNS,     WP_MENU_OBJ_ACTIVE,      WP_MENU_OBJ_ACTIVE,     G_BOX,    OF_NONE,     OS_NORMAL,   {0}, 0,  0, 40, 1 },
+    { WP_MENU_OBJ_BAR,           WP_MENU_OBJ_DESK_TITLE,  WP_MENU_OBJ_FORMAT_TITLE, G_BOX,  OF_NONE,     OS_NORMAL,   {0}, 0,  0, 40, 1 },
+    { WP_MENU_OBJ_FILE_TITLE,    -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 0,  0, 6,  1 },
+    { WP_MENU_OBJ_EDIT_TITLE,    -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 6,  0, 6,  1 },
+    { WP_MENU_OBJ_TOOLS_TITLE,   -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 12, 0, 6,  1 },
+    { WP_MENU_OBJ_FORMAT_TITLE,  -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 18, 0, 7,  1 },
+    { WP_MENU_OBJ_ACTIVE,        -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 25, 0, 8,  1 },
+    { WP_MENU_OBJ_ROOT,          WP_MENU_OBJ_DESK_BOX,    WP_MENU_OBJ_FORMAT_BOX, G_IBOX,   OF_NONE,     OS_NORMAL,   {0}, 0,  1, 40, 8 },
+    { WP_MENU_OBJ_FILE_BOX,      WP_MENU_OBJ_DESK_ABOUT,  WP_MENU_OBJ_DESK_DUMMY6, G_BOX,   OF_HIDETREE, OS_NORMAL,   {0}, 0,  0, 20, 8 },
+    { WP_MENU_OBJ_DESK_SEP,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 20, 1 },
+    { WP_MENU_OBJ_DESK_DUMMY1,   -1,                      -1,                     G_STRING, OF_NONE,     OS_DISABLED, {0}, 0,  1, 20, 1 },
+    { WP_MENU_OBJ_DESK_DUMMY2,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 20, 1 },
+    { WP_MENU_OBJ_DESK_DUMMY3,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  3, 20, 1 },
+    { WP_MENU_OBJ_DESK_DUMMY4,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  4, 20, 1 },
+    { WP_MENU_OBJ_DESK_DUMMY5,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  5, 20, 1 },
+    { WP_MENU_OBJ_DESK_DUMMY6,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  6, 20, 1 },
+    { WP_MENU_OBJ_DESK_BOX,      -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  7, 20, 1 },
+    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_OPEN,   WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_HIDETREE, OS_NORMAL,   {0}, 6,  0, 8,  3 },
+    { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 8,  1 },
+    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 8,  1 },
+    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  2, 8,  1 },
+    { WP_MENU_OBJ_TOOLS_BOX,     WP_MENU_OBJ_EDIT_CUT,    WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_HIDETREE, OS_NORMAL,   {0}, 12, 0, 8,  3 },
+    { WP_MENU_OBJ_EDIT_COPY,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 8,  1 },
+    { WP_MENU_OBJ_EDIT_PASTE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 8,  1 },
+    { WP_MENU_OBJ_EDIT_BOX,      -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  2, 8,  1 },
+    { WP_MENU_OBJ_FORMAT_BOX,    WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_CHAT, G_BOX, OF_HIDETREE, OS_NORMAL, {0}, 18, 0, 16, 4 },
+    { WP_MENU_OBJ_TOOLS_THESAURUS, -1,                    -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 16, 1 },
+    { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, -1,                 -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 16, 1 },
+    { WP_MENU_OBJ_TOOLS_CHAT,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 16, 1 },
+    { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  3, 16, 1 },
+    { WP_MENU_OBJ_DROPDOWNS,     WP_MENU_OBJ_FORMAT_BOLD, WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, G_BOX, OF_HIDETREE, OS_NORMAL, {0}, 25, 0, 16, 8 },
+    { WP_MENU_OBJ_FORMAT_ITALIC, -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_UNDERLINE, -1,                   -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_SIZE_UP, -1,                     -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_SIZE_DOWN, -1,                   -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  3, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_ALIGN_LEFT, -1,                  -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  4, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_ALIGN_CENTER, -1,                -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  5, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, -1,                 -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  6, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_BOX,    -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  7, 16, 1 }
 };
 
 static char g_text_desk[]  = " Desk ";
@@ -109,8 +142,28 @@ static char g_text_size_down[] = "  Size -";
 static char g_text_align_left[] = "  Align Left";
 static char g_text_align_center[] = "  Align Center";
 static char g_text_align_right[] = "  Align Right";
-void wp_menu_tree_init(void)
+
+/* Desk dropdown: an app-defined item, a disabled separator, then 6
+   AES-reserved dummy slots (see app_shell_internal.h's block comment --
+   EmuTOS's real menu_fixup() rebuilds this box's 8-child chain and
+   REPOINTS each dummy's ob_spec at its own internal accessory-title
+   string, confirmed by reading aes/gemmnlib.c directly; it does not
+   write through the pointer already there). Kept as writable static
+   buffers anyway rather than string literals -- that repoint-not-write
+   behavior was only confirmed for EmuTOS, not real TOS's own AES. */
+static char g_text_desk_about[] = "  About RetroWP...";
+static char g_text_desk_sep[]   = "  ----------------";
+static char g_text_desk_dummy1[32];
+static char g_text_desk_dummy2[32];
+static char g_text_desk_dummy3[32];
+static char g_text_desk_dummy4[32];
+static char g_text_desk_dummy5[32];
+static char g_text_desk_dummy6[32];
+
+void wp_menu_tree_init(short wcell, short hcell)
 {
+    short i;
+
     wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_spec.free_string = g_text_desk;
     wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_spec.free_string = g_text_file;
     wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_spec.free_string = g_text_edit;
@@ -134,6 +187,27 @@ void wp_menu_tree_init(void)
     wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_LEFT].ob_spec.free_string = g_text_align_left;
     wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_CENTER].ob_spec.free_string = g_text_align_center;
     wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_spec.free_string = g_text_align_right;
+    wp_menu_tree[WP_MENU_OBJ_DESK_ABOUT].ob_spec.free_string = g_text_desk_about;
+    wp_menu_tree[WP_MENU_OBJ_DESK_SEP].ob_spec.free_string = g_text_desk_sep;
+    wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY1].ob_spec.free_string = g_text_desk_dummy1;
+    wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY2].ob_spec.free_string = g_text_desk_dummy2;
+    wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY3].ob_spec.free_string = g_text_desk_dummy3;
+    wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY4].ob_spec.free_string = g_text_desk_dummy4;
+    wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY5].ob_spec.free_string = g_text_desk_dummy5;
+    wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_spec.free_string = g_text_desk_dummy6;
+
+    /* Scale the whole tree from the array literal's logical
+       character-cell units into real pixels -- see this function's own
+       declaration comment (app_shell_internal.h) for why a hand-built
+       tree needs this done explicitly. Every object needs it (titles,
+       boxes, and items alike), not just titles -- ROOT's own
+       screen-sized w/h included. */
+    for (i = 0; i < WP_MENU_OBJ_COUNT; i++) {
+        wp_menu_tree[i].ob_x = (short)(wp_menu_tree[i].ob_x * wcell);
+        wp_menu_tree[i].ob_width = (short)(wp_menu_tree[i].ob_width * wcell);
+        wp_menu_tree[i].ob_y = (short)(wp_menu_tree[i].ob_y * hcell);
+        wp_menu_tree[i].ob_height = (short)(wp_menu_tree[i].ob_height * hcell);
+    }
 }
 
 /* Walks every parent's child chain (ob_head -> ob_next -> ... ->
@@ -166,53 +240,152 @@ static wp_bool child_chain_ok(short parent)
 wp_bool wp_menu_tree_selfcheck(void)
 {
     if (!child_chain_ok(WP_MENU_OBJ_ROOT)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_DESK_TITLE)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_FILE_TITLE)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_EDIT_TITLE)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_TOOLS_TITLE)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_BAR)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_ACTIVE)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_DROPDOWNS)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_DESK_BOX)) return WP_FALSE;
     if (!child_chain_ok(WP_MENU_OBJ_FILE_BOX)) return WP_FALSE;
     if (!child_chain_ok(WP_MENU_OBJ_EDIT_BOX)) return WP_FALSE;
     if (!child_chain_ok(WP_MENU_OBJ_TOOLS_BOX)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_FORMAT_TITLE)) return WP_FALSE;
     if (!child_chain_ok(WP_MENU_OBJ_FORMAT_BOX)) return WP_FALSE;
 
+    /* ROOT -> BAR (ob_head), DROPDOWNS (ob_tail). */
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_next != -1) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_head != WP_MENU_OBJ_DESK_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_tail != WP_MENU_OBJ_TOOLS_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_head != WP_MENU_OBJ_BAR) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_tail != WP_MENU_OBJ_DROPDOWNS) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_type != G_IBOX) return WP_FALSE;
 
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_next != WP_MENU_OBJ_FORMAT_TITLE) return WP_FALSE;
+    /* BAR -> ACTIVE, its only child. menu_bar() draws index 1's subtree,
+       so BAR must be array index 1 -- this is the whole fix; assert it
+       explicitly rather than trusting the enum ordering above. */
+    if (WP_MENU_OBJ_BAR != 1) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_BAR].ob_next != WP_MENU_OBJ_DROPDOWNS) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_BAR].ob_head != WP_MENU_OBJ_ACTIVE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_BAR].ob_tail != WP_MENU_OBJ_ACTIVE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_BAR].ob_type != G_BOX) return WP_FALSE;
+
+    /* ACTIVE -> Desk/File/Edit/Tools/Format titles, in on-screen order. */
+    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_next != WP_MENU_OBJ_BAR) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_head != WP_MENU_OBJ_DESK_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_tail != WP_MENU_OBJ_FORMAT_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_type != G_BOX) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_next != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_head != -1) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_tail != -1) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_type != G_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_spec.free_string != g_text_desk) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_next != WP_MENU_OBJ_EDIT_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_head != WP_MENU_OBJ_FILE_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_tail != WP_MENU_OBJ_FILE_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_type != G_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_spec.free_string != g_text_file) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_next != WP_MENU_OBJ_TOOLS_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_head != WP_MENU_OBJ_EDIT_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_tail != WP_MENU_OBJ_EDIT_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_type != G_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_spec.free_string != g_text_edit) return WP_FALSE;
 
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_next != WP_MENU_OBJ_ROOT) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_head != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_tail != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_next != WP_MENU_OBJ_FORMAT_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_type != G_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_spec.free_string != g_text_tools) return WP_FALSE;
 
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_next != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_head != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_tail != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_next != WP_MENU_OBJ_ACTIVE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_type != G_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_spec.free_string != g_text_format) return WP_FALSE;
 
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_next != WP_MENU_OBJ_FORMAT_TITLE) return WP_FALSE;
+    /* DROPDOWNS -> one G_BOX per title, same left-to-right order, each
+       structurally unreachable from BAR's subtree (see the tree's own
+       top-of-file comment for why that's the actual fix). */
+    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_next != WP_MENU_OBJ_ROOT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_head != WP_MENU_OBJ_DESK_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_tail != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_type != G_IBOX) return WP_FALSE;
+
+    /* Desk's dropdown: exactly 8 children (About, disabled separator, 6
+       AES-reserved dummy slots), contiguous in the array -- menu_fixup()
+       is understood to patch these by raw index arithmetic from
+       tree[DROPDOWNS].ob_head, not by chain traversal, so contiguity is
+       load-bearing, not cosmetic. */
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_next != WP_MENU_OBJ_FILE_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_head != WP_MENU_OBJ_DESK_ABOUT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_tail != WP_MENU_OBJ_DESK_DUMMY6) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_type != G_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
+    if (WP_MENU_OBJ_DESK_DUMMY6 != WP_MENU_OBJ_DESK_ABOUT + 7) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_ABOUT].ob_next != WP_MENU_OBJ_DESK_SEP) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_ABOUT].ob_spec.free_string != g_text_desk_about) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_SEP].ob_next != WP_MENU_OBJ_DESK_DUMMY1) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_SEP].ob_state != OS_DISABLED) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_SEP].ob_spec.free_string != g_text_desk_sep) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY1].ob_next != WP_MENU_OBJ_DESK_DUMMY2) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY1].ob_spec.free_string != g_text_desk_dummy1) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY2].ob_next != WP_MENU_OBJ_DESK_DUMMY3) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY3].ob_next != WP_MENU_OBJ_DESK_DUMMY4) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY4].ob_next != WP_MENU_OBJ_DESK_DUMMY5) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY5].ob_next != WP_MENU_OBJ_DESK_DUMMY6) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_next != WP_MENU_OBJ_DESK_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_spec.free_string != g_text_desk_dummy6) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_next != WP_MENU_OBJ_EDIT_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_head != WP_MENU_OBJ_FILE_OPEN) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_tail != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_type != G_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_x) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_next != WP_MENU_OBJ_FILE_SAVE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_spec.free_string != g_text_open) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_next != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_spec.free_string != g_text_save) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_next != WP_MENU_OBJ_FILE_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_spec.free_string != g_text_quit) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_head != WP_MENU_OBJ_EDIT_CUT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_tail != WP_MENU_OBJ_EDIT_PASTE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_type != G_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_x) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_CUT].ob_next != WP_MENU_OBJ_EDIT_COPY) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_CUT].ob_spec.free_string != g_text_cut) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_COPY].ob_next != WP_MENU_OBJ_EDIT_PASTE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_COPY].ob_spec.free_string != g_text_copy) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_next != WP_MENU_OBJ_EDIT_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_spec.free_string != g_text_paste) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_next != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_head != WP_MENU_OBJ_TOOLS_SPELLCHECK) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_CHAT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_type != G_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_x) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_next != WP_MENU_OBJ_TOOLS_THESAURUS) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_spec.free_string != g_text_spellcheck) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_next != WP_MENU_OBJ_TOOLS_GRAMMARCHECK) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_spec.free_string != g_text_thesaurus) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_next != WP_MENU_OBJ_TOOLS_CHAT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_spec.free_string != g_text_grammarcheck) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_spec.free_string != g_text_chat) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_next != WP_MENU_OBJ_DROPDOWNS) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_head != WP_MENU_OBJ_FORMAT_BOLD) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_tail != WP_MENU_OBJ_FORMAT_ALIGN_RIGHT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_type != G_BOX) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_x) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOLD].ob_next != WP_MENU_OBJ_FORMAT_ITALIC) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOLD].ob_spec.free_string != g_text_bold) return WP_FALSE;
@@ -231,56 +404,6 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_next != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_spec.free_string != g_text_align_right) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
-
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_next != WP_MENU_OBJ_TOOLS_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_head != WP_MENU_OBJ_TOOLS_SPELLCHECK) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_CHAT) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
-
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_next != WP_MENU_OBJ_TOOLS_THESAURUS) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
-
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_next != WP_MENU_OBJ_TOOLS_GRAMMARCHECK) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
-
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_next != WP_MENU_OBJ_TOOLS_CHAT) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
-
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
-
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_next != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_head != WP_MENU_OBJ_FILE_OPEN) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_tail != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
-
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_next != WP_MENU_OBJ_FILE_SAVE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_next != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_next != WP_MENU_OBJ_FILE_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
-
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_next != WP_MENU_OBJ_EDIT_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_head != WP_MENU_OBJ_EDIT_CUT) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_tail != WP_MENU_OBJ_EDIT_PASTE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
-
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_CUT].ob_next != WP_MENU_OBJ_EDIT_COPY) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_COPY].ob_next != WP_MENU_OBJ_EDIT_PASTE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_next != WP_MENU_OBJ_EDIT_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
-
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_spec.free_string != g_text_file) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_spec.free_string != g_text_edit) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_spec.free_string != g_text_tools) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_spec.free_string != g_text_quit) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_spec.free_string != g_text_paste) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_spec.free_string != g_text_spellcheck) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_spec.free_string != g_text_thesaurus) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_spec.free_string != g_text_grammarcheck) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_spec.free_string != g_text_chat) return WP_FALSE;
 
     return WP_TRUE;
 }
@@ -2677,6 +2800,24 @@ static void invoke_backend_action(wp_action_id id)
    registered as any g_wp_action shortcut -- see the mods-guard fix in
    engine/src/vimode.c and docs/vimode.md), so a Ctrl-chord is guaranteed
    to reach here un-consumed by vi-mode. */
+/* Opens the help viewer at the named node (falling back to node 0 if the
+   name doesn't resolve). Shared by F1 (opens at "Main") and the Desk
+   menu's "About RetroWP..." item (opens at "About") so both routes
+   through the one help system this project already built (M8.5 Phase
+   10) rather than a second, ad hoc dialog. */
+static void open_help_node(short window_handle, VdiHdl vdi,
+                            const char *node_name, u32 node_name_len)
+{
+    if (!g_help_doc_loaded) return;
+    {
+        u32 node = wp_help_doc_find_node(&g_help_doc, (const u8 *)node_name, node_name_len);
+        wp_help_view_init(&g_help_view, &g_help_doc,
+                           (node != WP_HELP_NODE_NONE) ? node : 0);
+    }
+    g_help_active = WP_TRUE;
+    redraw_window(window_handle, vdi);
+}
+
 wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key)
 {
     wp_key_event ev;
@@ -2702,13 +2843,7 @@ wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key)
         return WP_FALSE;
     }
     if (ev.special == (u16)WP_KEY_F1) {
-        if (g_help_doc_loaded) {
-            u32 main_node = wp_help_doc_find_node(&g_help_doc, (const u8 *)"Main", 4);
-            wp_help_view_init(&g_help_view, &g_help_doc,
-                               (main_node != WP_HELP_NODE_NONE) ? main_node : 0);
-            g_help_active = WP_TRUE;
-            redraw_window(window_handle, vdi);
-        }
+        open_help_node(window_handle, vdi, "Main", 4);
         return WP_FALSE;
     }
 
@@ -2763,6 +2898,9 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
     case MN_SELECTED:
         menu_tnormal(wp_menu_tree, msg[3], UNHIGHLIGHT);
         switch (msg[4]) {
+        case WP_MENU_OBJ_DESK_ABOUT:
+            open_help_node(window_handle, vdi, "About", 5);
+            break;
         case WP_MENU_OBJ_FILE_QUIT:
             wp_action_find(WP_ACT_FILE_QUIT)->handler(&g_ctx);
             return (wp_bool)g_ctx.quit_requested;
@@ -2967,6 +3105,7 @@ void app_shell_run(void)
     short work_in[11];
     short work_out[57];
     short dummy;
+    short wcell, hcell;
     VdiHdl vdi_handle;
     short window_handle;
     GRECT desk;
@@ -2993,7 +3132,7 @@ void app_shell_run(void)
                                                      (u32)g_help_source_retrowp_len,
                                                      &g_help_doc) == WP_OK);
 
-    vdi_handle = graf_handle(&dummy, &dummy, &dummy, &dummy);
+    vdi_handle = graf_handle(&wcell, &hcell, &dummy, &dummy);
     for (dummy = 0; dummy < 10; dummy++) work_in[dummy] = 1;
     work_in[10] = 2; /* raster coordinates */
     v_opnvwk(work_in, &vdi_handle, work_out);
@@ -3011,7 +3150,7 @@ void app_shell_run(void)
         form_alert(1, FA_ERROR "[Screen is under 80 columns.|Text and menus may be cramped|at this resolution.][ OK ]");
     }
 
-    wp_menu_tree_init();
+    wp_menu_tree_init(wcell, hcell);
     menu_bar(wp_menu_tree, MENU_INSTALL);
 
     /* Query the desktop work area AFTER installing the menu bar -- AES

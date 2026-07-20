@@ -251,7 +251,7 @@ that knows how to boot `SMOKE.PRG` under Hatari.
   measurably speeds up every real-TOS boot in the matrix by skipping the
   memory-test/POST sequence outright.
 
-Also see "Known gap: only the first title actually renders" above for a
+Also see "Fixed: only the first title actually renders" above for a
 concrete example of a real regression this matrix caught that
 `ci_atari.sh` alone never could -- the whole reason this was worth
 building.
@@ -440,7 +440,7 @@ mechanism, but empirically confirmed (via before/after field dumps over
 NF_STDERR on a real boot) to leave `wp_menu_tree` untouched for our tree
 shape, so it is not the cause here and was not worked around.
 
-### Known gap: only the first title actually renders (found post-M8, two fix attempts reverted)
+### Fixed: only the first title actually renders (found post-M8, two fix attempts reverted, fixed M8.5 via the Atari Compendium MCP)
 
 Fixing the glyph-noise corruption above surfaced a second, previously
 masked bug: only *one* title (whichever sits at `wp_menu_tree` array index
@@ -500,17 +500,143 @@ it's the revert, done carefully enough to also land the new Format title
 (see "Format controls wired into the UI") without reintroducing risk.
 Verified clean across the full 6-image TOS matrix afterward.
 
-**Current state, honestly**: the codebase has the *working, matrix-green*
-2-level tree; only the first title (File) is visible on screen, the same
-gap as before this session, now with two documented, reverted fix
-attempts and their root causes on record. A real fix needs the 3-level
-structure implemented *correctly enough to survive the full TOS matrix*,
-not just single-image EmuTOS CI -- re-verify against
-`host/tools/ci_atari_matrix.sh`, not just `ci_atari.sh`, before landing
-anything here next. The DA-box mechanism (`menu_fixup()`'s
-`dabox+1/+2/+3` raw index arithmetic, requiring a real reserved Desk
-dropdown rather than `NIL`) is now understood and documented above --
-reuse it rather than rediscovering it a third time.
+**State at the end of that session**: the codebase had the *working,
+matrix-green* 2-level tree; only the first title (File) was visible on
+screen, the same gap as before that session, with two documented,
+reverted fix attempts and their root causes on record.
+
+**Third fix attempt (M8.5, this session) -- fixed.** The two attempts
+above were both built by reverse-engineering EmuTOS's own AES source
+(`aes/gemmnlib.c`, `aes/gemobjop.c`) under time pressure mid-investigation
+-- workable, but a guess at the *real* public contract, not the contract
+itself. This session built and registered a standalone MCP server
+(`~/tools/atari-compendium-mcp/`, see its own README) exposing Scott
+Sanders' *Atari Compendium* -- the canonical AES/VDI/GEM reference -- as a
+queryable tool, then used it directly: `search_compendium("menu_bar")` and
+`get_compendium_page_range(343, 345)` turned up "The Menu Bar" (Chapter 6,
+pp. 6.25-6.26), which documents the menu-bar `OBJECT` shape explicitly,
+by name, as **4 levels**, not the 3-level shape either prior attempt
+tried:
+
+```
+ROOT (G_IBOX, screen-sized)
+ |-- BAR (G_BOX) -- ROOT's ob_head
+ |    `-- ACTIVE -- BAR's ONE child
+ |         `-- every G_TITLE, as ACTIVE's children (not BAR's)
+ `-- DROPDOWNS (G_IBOX) -- ROOT's ob_tail
+      `-- one G_BOX per title, positioned underneath it -- NOT nested
+          under the title itself
+```
+
+The first prior attempt's `SCREEN -> BAR -> titles` shape put titles
+directly under `BAR` (matching `mn_bar()`'s hardcoded `ob_draw(tree, 1,
+MAX_DEPTH)` call at index 1) but never separated dropdowns into their own
+subtree, and never built a real 8-child Desk box -- both gaps this
+attempt closes. `objc_draw()`'s own public documentation (p.425 -- "renders
+an AES object tree on screen" from an object down N depth levels) confirms
+`ob_draw(tree, 1, MAX_DEPTH)` only ever walks *descendants* of index 1,
+never siblings, which is the actual mechanism behind both the "only one
+title renders" bug (titles were siblings of index 1 in every shape tried
+before this) and the earlier "glyph noise" bug (dropdowns were
+descendants of their titles, so install-time `ob_draw` painted them too).
+Under the new shape, `BAR/ACTIVE/titles` fully constitute index 1's
+subtree (so `ob_draw` reaches every title), and `DROPDOWNS` is a sibling
+of `BAR` under `ROOT` that `ob_draw(tree, 1, ...)` never reaches at all
+(so dropdowns are structurally never install-time-painted, independent of
+`OF_HIDETREE` -- kept anyway, defensively).
+
+**Independently confirmed against a real EmuTOS source checkout**
+(`~/dev/emutos`, already present on this machine from earlier work), not
+just the Compendium's prose: `aes/gemmnlib.c` `#define`s `THESCREEN 0`,
+`THEBAR 1`, `THEACTIVE 2`; `aes/gemctrl.c` defines `THEDESK 3`. These are
+the *real* AES's own hardcoded constants, and they match this tree's
+`WP_MENU_OBJ_ROOT`/`BAR`/`ACTIVE`/`DESK_TITLE` indices exactly -- not a
+coincidence of this project's own numbering, independent verification
+that the derived shape is right. `menu_fixup()`'s DA-box mechanism (the
+`dabox+N` raw-index rebuild first documented from the earlier attempt) is
+now understood exactly, not approximately: `cnt = D.g_accreg ? (2 +
+D.g_accreg) : 1`, and `include/sysconf.h` defines `NUM_ACCS` as **6** --
+so `cnt` tops out at **8**, requiring `dabox+1..dabox+8` (this tree's
+`DESK_ABOUT`..`DESK_DUMMY6`) to be valid, contiguous objects. (The earlier
+attempt's note about "3 contiguous placeholder slots" was an
+under-precise read of the same source under time pressure; the real
+number, confirmed by the `NUM_ACCS` constant itself, is 6.) Also
+confirmed by reading `menu_fixup()` directly: it repoints each dummy
+slot's `ob_spec` at EmuTOS's own internal accessory-title string
+(`tree[ob].ob_spec = (LONG)D.g_acctitle[...]`) rather than writing through
+whatever pointer is already there -- so, for EmuTOS specifically, the
+dummy slots' own buffer contents are never touched. `menu_sub()` (same
+file) independently confirms the DROPDOWNS-ordering requirement: given a
+title's object index, it walks `DROPDOWNS`'s child chain via `ob_next`
+exactly `(ititle - THEACTIVE - 1)` times to find that title's own dropdown
+box, so `DROPDOWNS`'s children must be in the same left-to-right order as
+`ACTIVE`'s titles -- which is what this tree builds.
+
+**A real, separate timing artifact was found and fixed along the way**,
+unrelated to the tree's correctness: `host/tools/atari_smoke.c`'s very
+first synthetic `MN_SELECTED` dispatch (called directly, immediately
+after `wind_open_grect()`, bypassing the real event loop entirely -- see
+`app_shell_internal.h`'s own top-of-file comment on why this smoke test
+does that at all) was flaky specifically against this bigger tree --
+`menu_tnormal()` on a title object now sitting deeper in a real 5-title
+subtree, versus the old tree's single always-painted title. Reproduced
+and fixed by inserting a real `evnt_timer(100)` settle call (the AES's own
+documented "release control until real time has passed" primitive, p.387)
+between window setup and the first synthetic dispatch -- any extra
+real-time-consuming work before that first call was sufficient to make it
+reliable; the dispatch call alone, immediately after `wind_open_grect()`,
+was not. Verified reliable across 3 consecutive `ci_atari.sh` runs. Root
+cause not fully nailed down (a real `evnt_multi()`-driven event loop, as
+every actual run of `RETROWP.PRG` uses, would never hit this -- it's an
+artifact of this one synthetic test harness), documented rather than
+silently spun past, matching this file's own established discipline for
+gaps of this kind.
+
+**A second, independent, previously-undiscovered bug was found by finally
+taking a real Hatari screenshot of the fixed tree** -- something CI
+(single-image or matrix, both message-dispatch- and structure-only, never
+pixel-checking) cannot catch by construction. The first screenshot after
+the structural fix above showed all the RIGHT amount of *something*
+painting at the start of row 0, but as illegible overlapping glyph noise,
+not five clean, separately-spaced titles. Root cause, this time found by
+reading `graf_handle()`'s own Compendium reference (p.402) rather than
+EmuTOS source: `graf_handle(&wcell, &hcell, &wbox, &hbox)` returns the
+system default font's real character-cell width/height *in pixels* --
+and this project's existing code (`app_shell.c`, present since T4.1, long
+before this session) already called it, but discarded all four out-params
+into a throwaway `dummy` variable. A hand-built `OBJECT[]` tree (never
+passed through `rsrc_load()`/`rsrc_obfix()`, the one real mechanism that
+converts a resource's authored character-cell coordinates into pixels for
+a loaded tree) needs the SAME conversion done explicitly -- confirmed by
+reading `menu_fixup()` and `just_draw()` (`aes/gemmnlib.c`,
+`aes/gemoblib.c`) directly: nothing in EmuTOS's own menu-drawing path
+scales `ob_x`/`ob_width` for a hand-built tree, so raw values of 0, 6, 12,
+18, 25 (this tree's authored title x-positions, intended as character
+counts) were being used as literal, unscaled PIXEL coordinates -- cramming
+five titles' worth of text into the leftmost ~25 pixels. This bug existed
+in every version of this tree back to T4.1; it was invisible before now
+because only one title (whatever sat at array index 1) ever painted at
+all, so relative spacing between titles was never visually exercised.
+
+Fixed by having `wp_menu_tree_init()` (`app_shell.c`) take `(wcell,
+hcell)` as new parameters and, as a final pass after string-patching,
+multiply every object's `ob_x`/`ob_width` by `wcell` and `ob_y`/
+`ob_height` by `hcell` in place -- both real call sites
+(`app_shell_run()`, `host/tools/atari_smoke.c`) now capture
+`graf_handle()`'s real out-params instead of discarding them. Verified
+visually: a fresh Hatari screenshot after this fix shows "Desk File Edit
+Tools Format" cleanly, each title distinctly spaced, no overlap.
+
+Verified clean across `host/tools/ci_atari.sh` (multiple consecutive runs,
+after both fixes above) and the full `host/tools/ci_atari_matrix.sh` --
+*the* bar this project set for itself after the first two attempts, given
+single-image CI already missed a real crash and a real hang once before.
+Screenshots are not part of any automated gate (this project's own
+"no real mouse-driven end-to-end test" gap applies to screenshot capture
+too -- it was scripted ad hoc for this investigation, not added as a
+reusable CI script), so this specific class of bug (correct structure,
+wrong units) has no automated regression guard going forward -- a real,
+honestly-flagged gap, not a silent one.
 
 **Screen resolution ruled out as a factor (this session).** A natural
 hypothesis: ST Low (320x200, a 40-column screen) is notoriously tight --
@@ -1389,7 +1515,7 @@ in `wp_menu_tree` (`app_shell.c`) -- Bold/Italic/Underline (checkmarked
 via `menu_icheck()`, reflecting `g_current_style_flags`), Font Size
 +/-, and Align Left/Center/Right. Appended after Desk in storage order,
 chain-linked between Desk and File (**not** as the tree's new tail --
-see "Known gap: only the first title actually renders" above for why
+see "Fixed: only the first title actually renders" above for why
 that specific positioning mattered enough to get its own investigation)
 so Tools keeps sitting at `ROOT.ob_tail` exactly as in every previously-
 shipped version of this tree.
