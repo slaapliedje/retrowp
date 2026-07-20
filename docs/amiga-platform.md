@@ -292,6 +292,129 @@ ahead of Phase 2's real GUI shell work.
   with a status code -- flagged as real, not-yet-solved Phase 5 work, not
   silently ignored). Result against the real fixture: `PASS`.
 
+## Phase 2 (T9.1b): the real MUI shell
+
+`platform/amiga/app_shell.c` grows from T9.1a's bare selfcheck into a real
+Application/Window/Menustrip, a custom `Area.mui` subclass for the
+document body, `IDCMP_RAWKEY` -> vi-mode dispatch, File Open/Save via
+`asl.library`, Cut/Copy/Paste, and clean quit -- matching T9.1's stated AC
+("App runs under an Amiga emulator; clean quit") and the M9 plan's own
+Phase 2 AC ("menu, a document window, vi-mode Normal-mode movement, clean
+quit"). All verified for real under amiberry, not just linked.
+
+- **BOOPSI dispatcher calling convention under plain GCC/m68k**: not
+  found written down anywhere in the docs/guide read for this -- resolved
+  by reading real, compilable MUI SDK example source already on this
+  machine (`~/src/amiga-gcc/build/mui/SDK/MUI/C/Examples/Class1.c` +
+  `SDI_hook.h`'s non-MorphOS/non-AROS branch) rather than guessing:
+  `struct IClass *cl`, `Object *obj` and `Msg msg` are passed in
+  registers a0, a2 and a1 respectively (`arg __asm("reg")` parameter
+  declarations, a real GCC extension), `__saveds` preserves the caller's
+  A4. `MUI_CreateCustomClass(NULL, MUIC_Area, NULL, sizeof(instdata),
+  (APTR)dispatcher)` is the real entry point; `ENTRY(func)` collapses to
+  a plain `(APTR)func` cast for this target (no trampoline needed, unlike
+  MorphOS/AROS).
+- **Menu construction**: folds `platform/common/actions.c`'s
+  `g_wp_actions[]` over a `Menustrip.mui`/`Menu.mui`/`Menuitem.mui`
+  hierarchy, children attached dynamically via `OM_ADDMEMBER` (`doc/
+  MUI_Group.doc`'s documented "add/remove children at will" mechanism --
+  the per-group item count isn't known at compile time as a literal
+  nested tag list). Each item's `MUIA_Menuitem_Trigger` notifies
+  `MUIV_Notify_Application` + `MUIM_Application_ReturnID` with a
+  per-action numeric ID, checked in the main loop -- the same real,
+  documented pattern `doc/MUI_Application.doc`'s own
+  `MUIA_Application_Iconified` example uses for custom notification IDs.
+  **Real gotcha, verified empirically**: `MUIA_Application_Menustrip` is
+  documented `[ISG]` (Init/Set/Get all legal), but a post-creation
+  `SetAttrs` on an already-open window did NOT make the menu strip
+  populate under amiberry -- it had to be passed in the Application's
+  *initial* `NewObject` tag list instead (built before the Application
+  even exists; the per-item notifications target `MUIV_Notify_Application`
+  rather than a literal `g_app` pointer, so this ordering is safe).
+- **Raw keyboard input**: `MUIM_HandleEvent` on the custom class (guide
+  node `CSC_HANDLEEVENT`'s documented real path), registered/deregistered
+  via `MUIM_Window_AddEventHandler`/`RemEventHandler` in `MUIM_Setup`/
+  `MUIM_Cleanup`, `ehn_Events = IDCMP_RAWKEY`. `MUIA_Window_IDCMP` does
+  **not exist** in this MUI version -- confirmed absent, not a typo.
+  Translation to the portable `wp_key_event` mirrors
+  `platform/atari/app_shell.c`'s `atari_translate_key` in spirit: a small
+  set of raw scan codes (Backspace 0x41, Tab 0x42, Enter 0x44, Esc 0x45,
+  Delete 0x46, arrows 0x4C-0x4F, F1-F10 0x50-0x59 -- the standard, stable
+  Amiga hardware codes, no offline RKM available to cross-check against,
+  verified empirically under amiberry instead) get an early
+  `wp_special_key`; everything else goes through `MapRawKey()`
+  (`keymap.library`) for the real, keymap-correct ASCII/Latin-1 result,
+  including automatic Ctrl+letter -> C0-control-code translation. The
+  action-shortcut lookup (`wp_action_find_by_shortcut`) uses that SAME
+  raw byte, not the decoded `wp_key_event` -- exactly mirroring
+  `wp_dispatch_key`'s own documented reason (a Ctrl-chord is guaranteed
+  to reach it un-consumed by vi-mode, since every vi-mode command
+  requires an unmodified key).
+- **Library bases**: `muimaster.library`/`intuition.library`/
+  `graphics.library`/`utility.library`/`asl.library`/`keymap.library` all
+  need an explicit `OpenLibrary` (unlike `dos.library`/`exec.library`,
+  pre-opened by Kickstart for every process) -- confirmed against the
+  real MUI SDK example sources' own `init()`/`fail()` functions, not
+  assumed. Each library's own `proto/*.h` header already `extern`-
+  declares its base global (e.g. `proto/intuition.h` declares `struct
+  IntuitionBase *IntuitionBase`); this code only assigns them, never
+  redeclares. **Real version gotcha**: `mui.h`'s own suggested
+  `MUIMASTER_VMIN` (20) is *newer* than the actually-installed MUI 3.8's
+  library version (19, per the Install-MUI script's own
+  `current_libver 19`) -- `OpenLibrary` with that minimum silently fails
+  on this real fixture. Fixed by opening with version 0 (accept whatever
+  is installed), matching the already-proven Phase 0 `muitest` probe.
+- **Rendering, deliberately minimal**: `editor_draw` (the custom class's
+  `MUIM_Draw`) walks the real document tree directly (`wp_document_
+  section_get`/`wp_section_paragraph_get`/`wp_paragraph_run_get`/
+  `wp_strpool_get`) and renders plain text via `RastPort` `Move`/`Text`
+  calls, bypassing `plat_draw_text`/`plat_measure_text` entirely --
+  neither exists yet (T9.2's job). A cursor-line marker (a small filled
+  rect at the left margin) proves vi-mode movement visually without
+  needing per-column glyph-width precision. **Real redraw bug, found and
+  fixed empirically**: `MUI_Redraw()`-triggered repaints (as opposed to
+  the window's initial open) did not reliably clear stale pixels first --
+  repeated key-driven redraws left ghosted/garbled text where a line's
+  old and new glyphs overlapped, worsening over successive redraws.
+  Fixed by having the class explicitly `RectFill` its own area with
+  `BACKGROUNDPEN` at the start of every `MUIM_Draw`, rather than trusting
+  the Area superclass's own `MADF_DRAWOBJECT` handling to do a full clear
+  on this path.
+- **`plat_dialog_choice`**: implemented directly in `app_shell.c` (not a
+  separate `dialog_amiga.c`) since it needs direct access to the
+  Application/Window objects the shell already owns. Uses `MUI_Request`'s
+  real multi-gadget form (`"Yes|No|Cancel"`-style `gadgets` string,
+  documented in `doc/MUI_Application.doc`), not a new dialog window/class
+  -- `platform/common/actions.c`'s `act_format_size`/`act_format_align`
+  call this unconditionally, so it has to exist for `actions.o` to link
+  at all, not just for a hypothetical future Format-menu action.
+- **Linking**: `platform/common/actions.c`'s `act_edit_copy` calls
+  `plat_dialog_choice`, and `docmodel.c`/`edit.c` call `linebreak.c`'s
+  `wp_paragraph_layout_free` unconditionally (freeing a paragraph's
+  layout cache, always `NULL` in this app since relayout is never
+  triggered) -- both real, unavoidable link dependencies once
+  `platform/common`'s actions and the engine's document/edit code are
+  pulled in for the first time. `metrics_amiga.c` supplies
+  real-but-unreachable-today stubs for the four `plat_font_*` functions
+  `linebreak.c`'s (uncalled) `wp_paragraph_relayout` references, so the
+  object links without needing T9.2's real font metrics yet.
+  `help_doc.o`/`help_view.o`/`statusline.o` are excluded from the link
+  (would need `plat_draw_text`/`plat_fill_rect`/`plat_gc_flush`, which
+  nothing in this phase's own code calls) -- the help viewer and vi-mode
+  status bar are real gaps, not silently dropped, just out of this
+  phase's stated scope.
+- **Verified end-to-end under amiberry**: a real MUI window titled
+  "RetroWP" opens showing the sample document's text; holding the right
+  mouse button (classic AmigaOS menu convention -- there is no
+  permanently-visible menu bar) drops down a real menu strip reading
+  "Project | Edit | Format | Tools | Help", built dynamically from
+  `g_wp_actions[]`; `j`/`k` move the cursor-line marker down/up
+  correctly; `:q` + Enter closes the window and returns cleanly to the
+  shell prompt with no crash. `AMISMOKE` (Phase 1's smoke test, now
+  linking the same broader object set as `RETROWP` since both live in
+  the same grown `app_shell.c`) still reports `file_clipboard: PASS`
+  against the same fixture.
+
 ## Status
 
 - ✅ Toolchain: `m68k-amigaos-gcc 6.5.0b` + binutils + NDK + MUI SDK, fully
@@ -307,9 +430,27 @@ ahead of Phase 2's real GUI shell work.
   on-target (`file_clipboard: PASS` under amiberry against the real
   fixture) -- `amiga-engine-check` and `amiga-smoke` both green, host's
   `make test` (219/219) and `atari-engine-check` unaffected.
+- ✅ Phase 2 (T9.1b): real MUI Application/Window/Menustrip, custom-class
+  rawkey dispatch into vi-mode, File Open/Save/Cut/Copy/Paste, clean quit
+  -- all verified under amiberry against the real fixture (menu drops
+  down correctly, document text renders, cursor moves on j/k, `:q` quits
+  cleanly). `amiga-app`/`amiga-smoke` both green; host `make test`
+  (219/219) and `atari-engine-check` unaffected.
 - Known, deliberately unchased gap: Workbench icons never render on this
   fixture's `LoadWB` (root cause not identified -- worked around with a
   `NewCLI` debug shell, since nothing in Phase 0 or the MUI install needed
-  Workbench's own icon view). Revisit if a later phase's verification
-  genuinely needs Workbench icons specifically (Phase 2's MUI shell opens
-  its own screen/window and does not depend on this).
+  Workbench's own icon view). Doesn't affect T9.1b: MUI opens its own
+  window regardless of Workbench's own icon rendering.
+- Known gap, explicitly out of T9.1b's scope: Tools menu actions
+  (Spellcheck/Thesaurus/Grammar/Chat) are no-ops (offload-dependent,
+  T9.3+); RTF file support isn't wired into Open/Save yet (plain text
+  only); the Help menu action shows a static `MUI_Request` message
+  rather than the real help viewer (`help_view.o` excluded from the
+  link, see Phase 2's own notes above). This one action was NOT
+  individually mouse-click-verified under amiberry (precisely hovering a
+  specific pulldown item while holding RMB hit the same relative-mouse-
+  calibration cost documented in Phase 0's installer notes, and wasn't
+  worth repeating for a cosmetic message box) -- it goes through the
+  identical menu-Trigger -> `MUIM_Application_ReturnID` ->
+  `invoke_backend_action` path already proven end-to-end by File Open/
+  Save and Quit, so this is a reasoned, not a blind, gap.

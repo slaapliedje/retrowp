@@ -323,19 +323,35 @@ $(AMIGA_BUILD)/app/%.o: platform/amiga/%.c | $(AMIGA_BUILD)/app
 $(AMIGA_BUILD)/smoke/%.o: host/tools/%.c | $(AMIGA_BUILD)/smoke
 	$(AMIGACC) $(AMIGA_RELAXED_CFLAGS) -Iengine/include -Iplatform/amiga -c $< -o $@
 
-# draw_amiga.o's plat_utf8_to_native/plat_native_to_utf8 call engine/src/
-# utf8.c's utf8_decode/utf8_encode directly (portable helpers, not a
-# layering violation -- platform/ may call engine/ utility functions; the
-# rule is engine/ and services/ must never call platform/ back). Only
-# utf8.o is linked here, deliberately NOT the full AMIGA_ENGINE_OBJ set:
-# unlike Atari's SMOKE.PRG (built after GEM's app_shell.c already
-# implemented the WHOLE platform.h surface), T9.1a is a real, narrower
-# phase -- pulling in linebreak.o/offload_client.o here would drag in
-# plat_font_*/plat_measure_text (T9.2) and plat_transport_*/wire_*/
-# caps_* (T9.3) just to link, before either phase exists. utf8.c itself
-# is a leaf (only includes utf8.h, no other engine or platform deps).
-$(AMIGA_BIN)/AMISMOKE: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/smoke/amiga_smoke.o $(AMIGA_BUILD)/engine/utf8.o | $(AMIGA_BIN)
-	$(AMIGACC) -noixemul $^ -o $@
+# T9.1b's MUI shell and T9.1a's selfcheck live in the same app_shell.c
+# (mirroring platform/atari/app_shell.c's own single-big-file precedent),
+# so both AMISMOKE and RETROWP need the same broad link set below --
+# splitting the smoke test's link line narrower stopped being possible
+# once app_shell.c grew past the non-UI seams alone. AMIGA_APP_ENGINE_OBJ
+# excludes only offload_client.o (plat_transport_*/wire_*/caps_*, T9.3 --
+# nothing here touches offload). linebreak.o IS linked: wp_document_free/
+# edit.c call wp_paragraph_layout_free unconditionally (also defined in
+# linebreak.c), so metrics_amiga.c supplies real-but-unreachable-today
+# stubs for the plat_font_* functions linebreak.o's OWN
+# wp_paragraph_relayout references, rather than excluding the whole
+# object (see metrics_amiga.c's own comment). AMIGA_APP_COMMON_OBJ
+# excludes help_doc.o/help_view.o/statusline.o -- T9.1b's minimal shell
+# doesn't use the help viewer or vi-mode status bar (both real, but out
+# of this phase's stated AC), and linking them would need
+# plat_draw_text/plat_fill_rect/plat_gc_flush, which metrics_amiga.c
+# deliberately does NOT stub (nothing in this app's own code references
+# them, unlike the font-metrics functions above).
+AMIGA_APP_ENGINE_OBJ = $(filter-out $(AMIGA_BUILD)/engine/offload_client.o,$(AMIGA_ENGINE_OBJ))
+AMIGA_APP_COMMON_OBJ = $(filter-out $(AMIGA_BUILD)/common/help_doc.o $(AMIGA_BUILD)/common/help_view.o $(AMIGA_BUILD)/common/statusline.o,$(AMIGA_COMMON_OBJ))
+
+$(AMIGA_BIN)/AMISMOKE: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/smoke/amiga_smoke.o $(AMIGA_APP_COMMON_OBJ) $(AMIGA_APP_ENGINE_OBJ) | $(AMIGA_BIN)
+	$(AMIGACC) -noixemul $^ -o $@ -lmui
+
+$(AMIGA_BIN)/RETROWP: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/app/main.o $(AMIGA_APP_COMMON_OBJ) $(AMIGA_APP_ENGINE_OBJ) | $(AMIGA_BIN)
+	$(AMIGACC) -noixemul $^ -o $@ -lmui
+
+.PHONY: amiga-app
+amiga-app: $(AMIGA_BIN)/RETROWP
 
 $(AMIGA_BUILD)/engine $(AMIGA_BUILD)/transport $(AMIGA_BUILD)/services $(AMIGA_BUILD)/common $(AMIGA_BUILD)/app $(AMIGA_BUILD)/smoke $(AMIGA_BIN):
 	mkdir -p $@
