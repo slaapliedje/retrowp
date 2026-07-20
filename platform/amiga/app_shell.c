@@ -28,6 +28,8 @@
 #include "editing.h"
 #include "vimode.h"
 #include "keyevent.h"
+#include "keymap.h"
+#include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
 #include "metrics_amiga_internal.h"
@@ -230,8 +232,15 @@ static void set_document_from_text(const u8 *utf8, u32 len)
     if (format_txt_import(utf8, len, &new_doc) != WP_OK) return;
     if (g_ctx.doc_loaded) wp_document_free(&g_amiga_doc);
     g_amiga_doc = new_doc;
-    wp_vimode_init(&g_ctx.vi, &g_amiga_doc, &g_amiga_journal);
-    g_ctx.vi.cursor = wp_pos_doc_start(&g_amiga_doc);
+    /* M10: re-points the active scheme's own .doc/.journal at the new
+       document -- keymap_id itself never changes here, only re-selects
+       the same arm. Matches this function's own pre-M10 behavior
+       exactly, including NOT calling wp_keymap_free first (unlike
+       platform/atari/app_shell.c's own replace_document, which does --
+       a real, pre-existing asymmetry between the two backends, not
+       introduced by this refactor and not fixed here either). */
+    wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id, &g_amiga_doc, &g_amiga_journal);
+    (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_start(&g_amiga_doc);
     g_ctx.doc_loaded = WP_TRUE;
     g_needs_relayout = WP_TRUE; /* new paragraphs -- see this flag's own comment */
 }
@@ -480,14 +489,14 @@ static wp_bool extract_word_before_cursor(u8 *out_word, u32 *out_word_len)
     u32 offset, end, start;
 
     if (!g_ctx.doc_loaded) return WP_FALSE;
-    sec = wp_document_section_get(&g_amiga_doc, g_ctx.vi.cursor.section);
-    para = wp_section_paragraph_get(sec, g_ctx.vi.cursor.paragraph);
-    if (g_ctx.vi.cursor.run >= para->run_count) return WP_FALSE;
+    sec = wp_document_section_get(&g_amiga_doc, (*wp_keymap_cursor(&g_ctx)).section);
+    para = wp_section_paragraph_get(sec, (*wp_keymap_cursor(&g_ctx)).paragraph);
+    if ((*wp_keymap_cursor(&g_ctx)).run >= para->run_count) return WP_FALSE;
 
-    run = wp_paragraph_run_get(para, (u16)g_ctx.vi.cursor.run);
+    run = wp_paragraph_run_get(para, (u16)(*wp_keymap_cursor(&g_ctx)).run);
     bytes = wp_strpool_get(&g_amiga_doc.strings, run->text);
 
-    offset = g_ctx.vi.cursor.offset;
+    offset = (*wp_keymap_cursor(&g_ctx)).offset;
     if (offset > run->text.length) offset = run->text.length;
 
     end = offset;
@@ -514,8 +523,8 @@ static wp_bool extract_current_paragraph_text(u8 *out, u32 out_cap, u32 *out_len
     u16 i;
 
     if (!g_ctx.doc_loaded) return WP_FALSE;
-    sec = wp_document_section_get(&g_amiga_doc, g_ctx.vi.cursor.section);
-    para = wp_section_paragraph_get(sec, g_ctx.vi.cursor.paragraph);
+    sec = wp_document_section_get(&g_amiga_doc, (*wp_keymap_cursor(&g_ctx)).section);
+    para = wp_section_paragraph_get(sec, (*wp_keymap_cursor(&g_ctx)).paragraph);
 
     for (i = 0; i < para->run_count; i++) {
         wp_run *run = wp_paragraph_run_get(para, i);
@@ -830,6 +839,22 @@ static void invoke_backend_action(wp_action_id id)
     }
 }
 
+/* Dispatches a wp_action_id exactly the way the pre-M10 vi-mode
+   shortcut-fallback path always has (handler-or-backend, no menu-
+   checkmark sync here -- this backend never had one, unlike Atari's own
+   sync_format_check) -- now the one place that logic lives, shared
+   between that fallback (inside wp_keymap_feed_key's own VI arm) and
+   any other scheme's WP_KEYMAP_RESULT_ACTION outcome. */
+static void invoke_action(wp_action_id id)
+{
+    const wp_action *act = wp_action_find(id);
+    if (act->handler != NULL) {
+        act->handler(&g_ctx);
+    } else {
+        invoke_backend_action(id);
+    }
+}
+
 /* -- IDCMP_RAWKEY -> wp_key_event, mirroring platform/atari/app_shell.c's
    atari_translate_key exactly in spirit: scan/raw code is consulted
    FIRST for keys needing a dedicated wp_special_key (early return),
@@ -888,22 +913,23 @@ static void translate_rawkey(struct IntuiMessage *imsg, wp_key_event *out)
     }
 }
 
-/* Mirrors platform/atari/app_shell.c's wp_dispatch_key: feed vi-mode
-   first, then fall back to the action-shortcut table using the RAW
-   ascii byte (not the translated wp_key_event) -- see g_last_raw_ascii's
-   own comment for why. Returns WP_TRUE if the app should quit. */
+/* Mirrors platform/atari/app_shell.c's wp_dispatch_key: feed the active
+   keymap scheme first (which, for WP_KEYMAP_VI, itself falls back to
+   the action-shortcut table using the RAW ascii byte -- not the
+   translated wp_key_event -- see g_last_raw_ascii's own comment for
+   why). Returns WP_TRUE if the app should quit. */
 static wp_bool amiga_dispatch_key(wp_key_event ev)
 {
-    wp_vimode_action action;
-    const wp_action *act;
+    wp_keymap_outcome outcome;
 
     /* Help is a whole separate UI mode (M9 Phase 6): while active,
-       every key goes to wp_help_view_feed_key instead of vi-mode, full
-       stop, until the viewer itself reports a close request (Escape or
-       'q' -- see help_view.h) -- mirrors platform/atari/app_shell.c's
-       own wp_dispatch_key exactly. F1 opens it from any vi-mode mode/
-       state; pressing F1 again while already showing help is a
-       harmless no-op rather than resetting the user's position. */
+       every key goes to wp_help_view_feed_key instead of the active
+       keymap scheme, full stop, until the viewer itself reports a close
+       request (Escape or 'q' -- see help_view.h) -- mirrors platform/
+       atari/app_shell.c's own wp_dispatch_key exactly. F1 opens it from
+       any scheme/mode/state; pressing F1 again while already showing
+       help is a harmless no-op rather than resetting the user's
+       position. */
     if (g_help_active) {
         if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
         return WP_FALSE;
@@ -915,30 +941,19 @@ static wp_bool amiga_dispatch_key(wp_key_event ev)
 
     if (!g_ctx.doc_loaded) return WP_FALSE;
 
-    action = wp_vimode_feed_key(&g_ctx.vi, ev);
+    outcome = wp_keymap_feed_key(&g_ctx, ev, g_last_raw_ascii);
 
-    switch ((wp_vimode_action_kind)action.kind) {
-    case WP_VIACTION_QUIT:
+    switch ((wp_keymap_result_kind)outcome.kind) {
+    case WP_KEYMAP_RESULT_QUIT:
         return WP_TRUE;
-    case WP_VIACTION_SAVE_QUIT:
+    case WP_KEYMAP_RESULT_SAVE_QUIT:
         do_file_save();
         return WP_TRUE;
-    case WP_VIACTION_SAVE:
-        do_file_save();
+    case WP_KEYMAP_RESULT_ACTION:
+        invoke_action((wp_action_id)outcome.action_id);
         break;
     default:
         break;
-    }
-
-    if (wp_vimode_get_mode(&g_ctx.vi) != WP_VIMODE_COMMAND) {
-        act = wp_action_find_by_shortcut(g_last_raw_ascii);
-        if (act != NULL) {
-            if (act->handler != NULL) {
-                act->handler(&g_ctx);
-            } else {
-                invoke_backend_action(act->id);
-            }
-        }
     }
 
     return g_ctx.quit_requested;
@@ -1198,7 +1213,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
             const wp_para_style *pstyle = wp_document_pstyle_get(&g_amiga_doc, para->style);
             u8 align = (pstyle != NULL) ? pstyle->align : WP_ALIGN_LEFT;
             wp_bool is_cursor_para =
-                (g_ctx.vi.cursor.section == si && g_ctx.vi.cursor.paragraph == pi)
+                ((*wp_keymap_cursor(&g_ctx)).section == si && (*wp_keymap_cursor(&g_ctx)).paragraph == pi)
                 ? WP_TRUE : WP_FALSE;
             u32 cursor_line_index = 0;
 
@@ -1207,8 +1222,8 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
             if (is_cursor_para && layout->line_count > 0) {
                 cursor_line_index = layout->line_count - 1; /* fallback: last line */
                 for (li = 0; li < layout->line_count; li++) {
-                    if (line_contains_pos(&layout->lines[li], g_ctx.vi.cursor.run,
-                                           g_ctx.vi.cursor.offset)) {
+                    if (line_contains_pos(&layout->lines[li], (*wp_keymap_cursor(&g_ctx)).run,
+                                           (*wp_keymap_cursor(&g_ctx)).offset)) {
                         cursor_line_index = li;
                         break;
                     }
@@ -1454,14 +1469,27 @@ wp_status plat_dialog_choice(plat_window *parent,
 
 /* -- Application/Window construction + event loop -------------------- */
 
+/* M10: PROGDIR: is a standard, always-available AmigaDOS assign (the
+   directory the program launched from) -- no dependency on a full
+   ENV:/Preferences tree, which docs/amiga-platform.md already notes
+   this fixture's own WB install doesn't fully have working (icon.library
+   etc.). See docs/keymaps.md. */
+#define WP_AMIGA_CONFIG_PATH "PROGDIR:RetroWP.cfg"
+
 void app_shell_run(void)
 {
     Object *menustrip;
     ULONG open;
+    wp_config cfg;
 
     if (!open_libraries()) { close_libraries(); return; }
 
-    wp_app_ctx_init(&g_ctx, &g_amiga_doc, &g_amiga_journal);
+    /* M10: read once at startup, fixed for the process lifetime.
+       Missing/unreadable/malformed all quietly yield the documented
+       default (WP_KEYMAP_VI), so an existing zero-config install
+       behaves exactly as it always has. */
+    wp_config_load(WP_AMIGA_CONFIG_PATH, &cfg);
+    wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_amiga_doc, &g_amiga_journal);
     load_sample_document();
 
     /* M9 Phase 6: parsed ONCE at startup from the generated

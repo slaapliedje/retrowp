@@ -107,6 +107,27 @@ void test_actions_format_size_uses_dialog_choice(void);
 /* test_statusline.c */
 void test_statusline_paint_does_not_crash_with_various_views(void);
 
+/* test_config.c */
+void test_config_defaults_to_vi_on_empty_input(void);
+void test_config_parses_keymap_vim(void);
+void test_config_key_and_value_are_case_insensitive(void);
+void test_config_tolerates_surrounding_whitespace(void);
+void test_config_skips_comment_and_blank_lines(void);
+void test_config_unrecognized_value_falls_back_to_default(void);
+void test_config_unrecognized_key_is_ignored(void);
+void test_config_malformed_line_without_equals_is_skipped(void);
+void test_config_tolerates_crlf_line_endings(void);
+void test_config_last_line_without_trailing_newline_is_parsed(void);
+void test_config_load_missing_file_yields_default(void);
+
+/* test_keymap.c */
+void test_keymap_app_ctx_size_stays_under_ceiling(void);
+void test_keymap_init_selects_vi_and_seeds_cursor_at_doc_start(void);
+void test_keymap_feed_key_moves_cursor_through_vi_arm(void);
+void test_keymap_feed_key_insert_reports_inserted_char(void);
+void test_keymap_feed_key_quit_reports_quit_kind(void);
+void test_keymap_get_status_view_reports_vi_mode_label(void);
+
 /* test_help_doc.c */
 void test_help_doc_parses_single_node(void);
 void test_help_doc_node_without_title_falls_back_to_name(void);
@@ -368,6 +389,25 @@ static const test_case g_cases[] = {
     { "actions_format_size_uses_dialog_choice", test_actions_format_size_uses_dialog_choice },
 
     { "statusline_paint_does_not_crash_with_various_views", test_statusline_paint_does_not_crash_with_various_views },
+
+    { "config_defaults_to_vi_on_empty_input", test_config_defaults_to_vi_on_empty_input },
+    { "config_parses_keymap_vim", test_config_parses_keymap_vim },
+    { "config_key_and_value_are_case_insensitive", test_config_key_and_value_are_case_insensitive },
+    { "config_tolerates_surrounding_whitespace", test_config_tolerates_surrounding_whitespace },
+    { "config_skips_comment_and_blank_lines", test_config_skips_comment_and_blank_lines },
+    { "config_unrecognized_value_falls_back_to_default", test_config_unrecognized_value_falls_back_to_default },
+    { "config_unrecognized_key_is_ignored", test_config_unrecognized_key_is_ignored },
+    { "config_malformed_line_without_equals_is_skipped", test_config_malformed_line_without_equals_is_skipped },
+    { "config_tolerates_crlf_line_endings", test_config_tolerates_crlf_line_endings },
+    { "config_last_line_without_trailing_newline_is_parsed", test_config_last_line_without_trailing_newline_is_parsed },
+    { "config_load_missing_file_yields_default", test_config_load_missing_file_yields_default },
+
+    { "keymap_app_ctx_size_stays_under_ceiling", test_keymap_app_ctx_size_stays_under_ceiling },
+    { "keymap_init_selects_vi_and_seeds_cursor_at_doc_start", test_keymap_init_selects_vi_and_seeds_cursor_at_doc_start },
+    { "keymap_feed_key_moves_cursor_through_vi_arm", test_keymap_feed_key_moves_cursor_through_vi_arm },
+    { "keymap_feed_key_insert_reports_inserted_char", test_keymap_feed_key_insert_reports_inserted_char },
+    { "keymap_feed_key_quit_reports_quit_kind", test_keymap_feed_key_quit_reports_quit_kind },
+    { "keymap_get_status_view_reports_vi_mode_label", test_keymap_get_status_view_reports_vi_mode_label },
 
     { "help_doc_parses_single_node", test_help_doc_parses_single_node },
     { "help_doc_node_without_title_falls_back_to_name", test_help_doc_node_without_title_falls_back_to_name },

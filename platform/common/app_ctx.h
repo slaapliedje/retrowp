@@ -4,7 +4,7 @@
 #include "types.h"
 #include "docmodel.h"
 #include "editing.h"
-#include "vimode.h"
+#include "keymap.h"
 #include "platform.h"
 
 /* Shared application state threaded through the action registry
@@ -18,16 +18,20 @@
    action handlers that don't need drawing, like the Format toggles,
    never touch them).
 
-   wp_vimode_state is embedded by value (not a pointer) -- vi.doc/
-   vi.journal are wired to point at *doc / *journal below via
-   wp_app_ctx_init, so vi.cursor is always the single source of truth
-   for "where editing currently applies," matching how app_shell.c's
-   pre-M8.5 g_cursor already worked (this app has no separate mouse-
-   driven text cursor concept). */
+   wp_keymap_state is embedded by value (not a pointer) -- see
+   keymap.h's own comment for why (this codebase's transparent-struct
+   convention; a tagged union, not an opaque handle, since the active
+   scheme is fixed at startup and never switches live). Whichever arm
+   is active has its own .doc/.journal wired to point at *doc / *journal
+   below via wp_app_ctx_init/wp_keymap_init, so wp_keymap_cursor(ctx) is
+   always the single source of truth for "where editing currently
+   applies," matching how app_shell.c's pre-M8.5 g_cursor already worked
+   (this app has no separate mouse-driven text cursor concept). */
 typedef struct wp_app_ctx {
     wp_document     *doc;      /* not owned */
     wp_undo_journal *journal;  /* not owned */
-    wp_vimode_state  vi;
+    u8               keymap_id; /* wp_keymap_id; fixed for the process lifetime */
+    wp_keymap_state  km;
 
     plat_window *window; /* may be NULL (e.g. a backend, like Atari today,
                              that owns its native window handle directly
@@ -49,13 +53,16 @@ typedef struct wp_app_ctx {
                                 keeps FILE_QUIT itself fully portable */
 } wp_app_ctx;
 
-/* Wires vi.doc/vi.journal to point at *doc / *journal and initializes
-   everything else to sane defaults (doc_loaded/quit_requested false,
-   style_flags 0, current_size_twips/align left for the caller to seed
-   from the document's own default style once one is loaded -- mirrors
-   how replace_document() seeds g_current_style_flags/g_current_size_twips
+/* Selects keymap_id (see keymap.h -- typically read from config.h's
+   wp_config just before this call) and wires the active scheme's own
+   .doc/.journal to point at *doc / *journal, then initializes everything
+   else to sane defaults (doc_loaded/quit_requested false, style_flags 0,
+   current_size_twips/align left for the caller to seed from the
+   document's own default style once one is loaded -- mirrors how
+   replace_document() seeds g_current_style_flags/g_current_size_twips
    today, see docs/atari-platform.md). window/gc/font are left NULL for
    the caller to fill in. */
-void wp_app_ctx_init(wp_app_ctx *ctx, wp_document *doc, wp_undo_journal *journal);
+void wp_app_ctx_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
+                      wp_document *doc, wp_undo_journal *journal);
 
 #endif /* WP_APP_CTX_H */

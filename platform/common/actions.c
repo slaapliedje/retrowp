@@ -89,9 +89,9 @@ static wp_status act_format_align(wp_app_ctx *ctx)
         ctx->align = aligns[chosen];
 
         if (!ctx->doc_loaded) return WP_OK;
-        sec = wp_document_section_get(ctx->doc, ctx->vi.cursor.section);
+        sec = wp_document_section_get(ctx->doc, wp_keymap_cursor(ctx)->section);
         if (sec == NULL) return WP_OK;
-        para = wp_section_paragraph_get(sec, ctx->vi.cursor.paragraph);
+        para = wp_section_paragraph_get(sec, wp_keymap_cursor(ctx)->paragraph);
         if (para == NULL) return WP_OK;
         cur = wp_document_pstyle_get(ctx->doc, para->style);
         if (cur == NULL) return WP_OK;

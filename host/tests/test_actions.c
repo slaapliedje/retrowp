@@ -64,7 +64,7 @@ void test_actions_format_bold_toggles_style_flags(void)
 
     build_doc_with_text(&doc, "Hello");
     wp_undo_journal_init(&journal);
-    wp_app_ctx_init(&ctx, &doc, &journal);
+    wp_app_ctx_init(&ctx, WP_KEYMAP_VI, &doc, &journal);
 
     ASSERT_EQ_U32(ctx.style_flags & WP_STYLE_BOLD, 0);
     ASSERT_TRUE(a->handler(&ctx) == WP_OK);
@@ -72,7 +72,7 @@ void test_actions_format_bold_toggles_style_flags(void)
     ASSERT_TRUE(a->handler(&ctx) == WP_OK);
     ASSERT_EQ_U32(ctx.style_flags & WP_STYLE_BOLD, 0);
 
-    wp_vimode_free(&ctx.vi);
+    wp_keymap_free(&ctx);
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
 }
@@ -86,13 +86,13 @@ void test_actions_file_quit_sets_flag(void)
 
     build_doc_with_text(&doc, "");
     wp_undo_journal_init(&journal);
-    wp_app_ctx_init(&ctx, &doc, &journal);
+    wp_app_ctx_init(&ctx, WP_KEYMAP_VI, &doc, &journal);
 
     ASSERT_TRUE(!ctx.quit_requested);
     ASSERT_TRUE(a->handler(&ctx) == WP_OK);
     ASSERT_TRUE(ctx.quit_requested);
 
-    wp_vimode_free(&ctx.vi);
+    wp_keymap_free(&ctx);
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
 }
@@ -108,7 +108,7 @@ void test_actions_edit_copy_sets_clipboard(void)
 
     build_doc_with_text(&doc, "Hello World");
     wp_undo_journal_init(&journal);
-    wp_app_ctx_init(&ctx, &doc, &journal);
+    wp_app_ctx_init(&ctx, WP_KEYMAP_VI, &doc, &journal);
     ctx.doc_loaded = WP_TRUE;
 
     ASSERT_TRUE(a->handler(&ctx) == WP_OK);
@@ -117,7 +117,7 @@ void test_actions_edit_copy_sets_clipboard(void)
     buf[len] = '\0';
     ASSERT_EQ_STR((const char *)buf, "Hello World\n"); /* format_txt_export terminates every paragraph with '\n' */
 
-    wp_vimode_free(&ctx.vi);
+    wp_keymap_free(&ctx);
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
 }
@@ -131,13 +131,13 @@ void test_actions_format_size_uses_dialog_choice(void)
 
     build_doc_with_text(&doc, "");
     wp_undo_journal_init(&journal);
-    wp_app_ctx_init(&ctx, &doc, &journal);
+    wp_app_ctx_init(&ctx, WP_KEYMAP_VI, &doc, &journal);
     ctx.current_size_twips = 240; /* 12pt -- matches the host stub's "always pick the default" behavior */
 
     ASSERT_TRUE(a->handler(&ctx) == WP_OK);
     ASSERT_EQ_U32(ctx.current_size_twips, 240); /* host's plat_dialog_choice stub always keeps the default */
 
-    wp_vimode_free(&ctx.vi);
+    wp_keymap_free(&ctx);
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
 }

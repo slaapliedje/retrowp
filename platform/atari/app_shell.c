@@ -18,6 +18,8 @@
 #include "endian.h"
 #include "keyevent.h"
 #include "vimode.h"
+#include "keymap.h"
+#include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
 #include "statusline.h"
@@ -419,9 +421,10 @@ static wp_document g_doc;
 static wp_undo_journal g_journal;
 static i32 g_content_width_twips = 0;
 
-/* M8.5: the vi-mode state machine (engine/vimode.c) and the rest of the
-   shared cross-platform app state (platform/common/app_ctx.h) -- see
-   wp_app_ctx_init's call in app_shell_run(). g_ctx.vi.cursor is now the
+/* M8.5/M10: the active keybinding scheme's own state (platform/common/
+   keymap.h) and the rest of the shared cross-platform app state
+   (platform/common/app_ctx.h) -- see wp_app_ctx_init's call in
+   app_shell_run(). wp_keymap_cursor(&g_ctx) is now the
    SINGLE source of truth for "where editing currently applies" (it
    replaces the pre-M8.5 g_cursor global), g_ctx.doc_loaded replaces
    g_doc_loaded, and g_ctx.style_flags/current_size_twips replace
@@ -518,21 +521,21 @@ static void replace_document(wp_document *new_doc, i32 content_width_twips)
     wp_undo_journal_init(&g_journal);
     relayout_document(content_width_twips);
 
-    /* M8.5: a whole-document swap invalidates any Insert/Visual/pending-
-       operator state vi-mode was holding for the PREVIOUS document (its
-       cursor, register contents, etc. -- none of it means anything once
-       the tree underneath has been freed and replaced), so vi-mode is
-       reset the same way the undo journal above already is, not just
-       resynced. wp_vimode_init's own cursor default (doc start) is
-       overridden right after to match this app's existing "cursor sits
-       at the end of a freshly loaded document" behavior. Safe to call
-       unconditionally: wp_app_ctx_init (app_shell_run) already ran
-       wp_vimode_init once before the first possible replace_document
-       call, so vi.register_bytes is always a valid mem_free target
-       here, NULL or not. */
-    wp_vimode_free(&g_ctx.vi);
-    wp_vimode_init(&g_ctx.vi, &g_doc, &g_journal);
-    g_ctx.vi.cursor = wp_pos_doc_end(&g_doc);
+    /* M8.5/M10: a whole-document swap invalidates any Insert/Visual/
+       pending-operator state the active keymap scheme was holding for
+       the PREVIOUS document (its cursor, register contents, etc. --
+       none of it means anything once the tree underneath has been freed
+       and replaced), so the scheme is reset the same way the undo
+       journal above already is, not just resynced. wp_keymap_init's own
+       cursor default (doc start) is overridden right after to match
+       this app's existing "cursor sits at the end of a freshly loaded
+       document" behavior. Safe to call unconditionally: wp_app_ctx_init
+       (app_shell_run) already ran wp_keymap_init once before the first
+       possible replace_document call, so the scheme's own owned memory
+       is always a valid wp_keymap_free target here, populated or not. */
+    wp_keymap_free(&g_ctx);
+    wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id, &g_doc, &g_journal);
+    (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_end(&g_doc);
 
     def_cs = wp_document_cstyle_get(&g_doc, g_doc.default_cstyle);
     g_ctx.style_flags = def_cs->flags;
@@ -770,7 +773,7 @@ static void change_font_size(int delta_steps)
     g_ctx.current_size_twips = g_font_sizes_twips[delta_steps > 0 ? WP_FONT_SIZE_COUNT - 1 : 0];
 }
 
-/* Applies to the paragraph g_ctx.vi.cursor is currently in -- vi-mode
+/* Applies to the paragraph (*wp_keymap_cursor(&g_ctx)) is currently in -- vi-mode
    motions move that cursor now (M8.5), but "alignment always applies to
    the CURRENT paragraph, not a selection" is unchanged from before vi-
    mode existed (Visual mode's own selection doesn't have an alignment
@@ -790,8 +793,8 @@ static void apply_alignment(u8 align)
 
     if (!g_ctx.doc_loaded) return;
 
-    sec = wp_document_section_get(&g_doc, g_ctx.vi.cursor.section);
-    para = wp_section_paragraph_get(sec, g_ctx.vi.cursor.paragraph);
+    sec = wp_document_section_get(&g_doc, (*wp_keymap_cursor(&g_ctx)).section);
+    para = wp_section_paragraph_get(sec, (*wp_keymap_cursor(&g_ctx)).paragraph);
     cur = wp_document_pstyle_get(&g_doc, para->style);
     style = *cur;
     style.align = align;
@@ -1149,6 +1152,16 @@ static void do_edit_paste(void)
 #define WP_ATARI_SPELL_DICT_PATH "C:\\WPSPELL.DIC"
 #define WP_ATARI_SPELL_MAX_SUGGESTIONS 3
 
+/* M10: same fixed-path convention as WP_ATARI_SPELL_DICT_PATH above --
+   a user who wants a non-default keybinding layout drops a plain-text
+   `keymap=<name>` config file at this path (docs/keymaps.md). A missing
+   file is a normal, silent, zero-config case (wp_config_load's own
+   documented default), not an error -- unlike the spell dictionary,
+   there is no user-visible alert for a missing config file, since "no
+   config" is the expected common case, not a feature the user opted
+   into and might be missing an asset for. */
+#define WP_ATARI_CONFIG_PATH "C:\\RETROWP.CFG"
+
 static spell_dict *g_spell_dict = NULL;
 static wp_bool g_spell_dict_open_attempted = WP_FALSE;
 
@@ -1310,14 +1323,14 @@ static wp_bool extract_word_before_cursor(u8 *out_word, u32 *out_word_len)
     u32 offset, end, start;
 
     if (!g_ctx.doc_loaded) return WP_FALSE;
-    sec = wp_document_section_get(&g_doc, g_ctx.vi.cursor.section);
-    para = wp_section_paragraph_get(sec, g_ctx.vi.cursor.paragraph);
-    if (g_ctx.vi.cursor.run >= para->run_count) return WP_FALSE;
+    sec = wp_document_section_get(&g_doc, (*wp_keymap_cursor(&g_ctx)).section);
+    para = wp_section_paragraph_get(sec, (*wp_keymap_cursor(&g_ctx)).paragraph);
+    if ((*wp_keymap_cursor(&g_ctx)).run >= para->run_count) return WP_FALSE;
 
-    run = wp_paragraph_run_get(para, (u16)g_ctx.vi.cursor.run);
+    run = wp_paragraph_run_get(para, (u16)(*wp_keymap_cursor(&g_ctx)).run);
     bytes = wp_strpool_get(&g_doc.strings, run->text);
 
-    offset = g_ctx.vi.cursor.offset;
+    offset = (*wp_keymap_cursor(&g_ctx)).offset;
     if (offset > run->text.length) offset = run->text.length;
 
     end = offset;
@@ -1427,7 +1440,7 @@ static void do_thesaurus(void)
 #define WP_ATARI_GRAMMAR_MAX_ISSUES        16u /* matches gw_common.h's GRAMMAR_MAX_ISSUES */
 #define WP_ATARI_GRAMMAR_DISPLAY_LEN       40 /* dialog-text truncation only -- never touches what gets applied */
 
-/* Concatenates the plain UTF-8 text of the CURRENT paragraph (g_ctx.vi.cursor's
+/* Concatenates the plain UTF-8 text of the CURRENT paragraph ((*wp_keymap_cursor(&g_ctx))'s
    section/paragraph, every run in order) into out. Returns WP_FALSE if
    there's no document loaded, the paragraph is empty, or the text
    wouldn't fit in out_cap -- all three are "nothing to check" for the
@@ -1442,8 +1455,8 @@ static wp_bool extract_current_paragraph_text(u8 *out, u32 out_cap, u32 *out_len
     u16 i;
 
     if (!g_ctx.doc_loaded) return WP_FALSE;
-    sec = wp_document_section_get(&g_doc, g_ctx.vi.cursor.section);
-    para = wp_section_paragraph_get(sec, g_ctx.vi.cursor.paragraph);
+    sec = wp_document_section_get(&g_doc, (*wp_keymap_cursor(&g_ctx)).section);
+    para = wp_section_paragraph_get(sec, (*wp_keymap_cursor(&g_ctx)).paragraph);
 
     for (i = 0; i < para->run_count; i++) {
         wp_run *run = wp_paragraph_run_get(para, i);
@@ -1482,8 +1495,8 @@ static wp_bool map_paragraph_offset_to_run(u32 start, u32 end, u16 *out_run_inde
     u32 base = 0;
     u16 i;
 
-    sec = wp_document_section_get(&g_doc, g_ctx.vi.cursor.section);
-    para = wp_section_paragraph_get(sec, g_ctx.vi.cursor.paragraph);
+    sec = wp_document_section_get(&g_doc, (*wp_keymap_cursor(&g_ctx)).section);
+    para = wp_section_paragraph_get(sec, (*wp_keymap_cursor(&g_ctx)).paragraph);
 
     for (i = 0; i < para->run_count; i++) {
         wp_run *run = wp_paragraph_run_get(para, i);
@@ -1757,13 +1770,13 @@ static void do_grammar_check(void)
                 continue;
             }
 
-            if (wp_edit_delete_range(&g_doc, &g_journal, g_ctx.vi.cursor.section, g_ctx.vi.cursor.paragraph,
+            if (wp_edit_delete_range(&g_doc, &g_journal, (*wp_keymap_cursor(&g_ctx)).section, (*wp_keymap_cursor(&g_ctx)).paragraph,
                                       run_index, run_start, run_end) == WP_OK) {
                 wp_pos insert_pos;
                 wp_pos out_pos;
 
-                insert_pos.section = g_ctx.vi.cursor.section;
-                insert_pos.paragraph = g_ctx.vi.cursor.paragraph;
+                insert_pos.section = (*wp_keymap_cursor(&g_ctx)).section;
+                insert_pos.paragraph = (*wp_keymap_cursor(&g_ctx)).paragraph;
                 insert_pos.run = (u32)run_index;
                 insert_pos.offset = run_start;
 
@@ -1788,7 +1801,7 @@ static void do_grammar_check(void)
     if (used_offload) offload_response_free(&resp);
     mem_free(paragraph);
 
-    /* At least one edit landed somewhere in this paragraph -- g_ctx.vi.cursor's
+    /* At least one edit landed somewhere in this paragraph -- (*wp_keymap_cursor(&g_ctx))'s
        old run/offset may now be a stale index into a run array that was
        resized by those edits (run_remove_at/run_insert_at can shift or
        shrink it). Resetting to this paragraph's start is always valid:
@@ -1796,8 +1809,8 @@ static void do_grammar_check(void)
        least one run (insert_span_at_pos's para->run_count == 0 case
        creates one), so run 0 / offset 0 is guaranteed to exist. */
     if (any_applied) {
-        g_ctx.vi.cursor.run = 0;
-        g_ctx.vi.cursor.offset = 0;
+        (*wp_keymap_cursor(&g_ctx)).run = 0;
+        (*wp_keymap_cursor(&g_ctx)).offset = 0;
         relayout_document(g_content_width_twips);
     }
 }
@@ -2207,18 +2220,18 @@ wp_bool wp_atari_thesaurus_selfcheck(void)
     g_ctx.doc_loaded = WP_TRUE;
 
     /* cursor at document end ("hello world|") -> "world" */
-    g_ctx.vi.cursor = wp_pos_doc_end(&g_doc);
+    (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_end(&g_doc);
     if (!extract_word_before_cursor(word, &word_len) || word_len != 5 ||
         memcmp(word, "world", 5) != 0) {
         ok = WP_FALSE;
     }
 
     /* cursor at the very start of the run -> nothing before it at all */
-    g_ctx.vi.cursor.offset = 0;
+    (*wp_keymap_cursor(&g_ctx)).offset = 0;
     if (extract_word_before_cursor(word, &word_len)) ok = WP_FALSE;
 
     /* cursor right after "hello" ("hello| world") -> "hello" */
-    g_ctx.vi.cursor.offset = 5;
+    (*wp_keymap_cursor(&g_ctx)).offset = 5;
     if (!extract_word_before_cursor(word, &word_len) || word_len != 5 ||
         memcmp(word, "hello", 5) != 0) {
         ok = WP_FALSE;
@@ -2226,7 +2239,7 @@ wp_bool wp_atari_thesaurus_selfcheck(void)
 
     /* cursor after the space, before "world" ("hello |world") -- skips
        back over the space to find "hello", the nearest preceding word */
-    g_ctx.vi.cursor.offset = 6;
+    (*wp_keymap_cursor(&g_ctx)).offset = 6;
     if (!extract_word_before_cursor(word, &word_len) || word_len != 5 ||
         memcmp(word, "hello", 5) != 0) {
         ok = WP_FALSE;
@@ -2239,7 +2252,7 @@ wp_bool wp_atari_thesaurus_selfcheck(void)
        not just "no word immediately adjacent" */
     if (format_txt_import((const u8 *)blank_text, (u32)strlen(blank_text), &g_doc) != WP_OK) return WP_FALSE;
     g_ctx.doc_loaded = WP_TRUE;
-    g_ctx.vi.cursor = wp_pos_doc_end(&g_doc);
+    (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_end(&g_doc);
     if (extract_word_before_cursor(word, &word_len)) ok = WP_FALSE;
 
     wp_document_free(&g_doc);
@@ -2280,10 +2293,10 @@ wp_bool wp_atari_grammar_check_selfcheck(void)
     wp_strpool_append(&g_doc.strings, (const u8 *)"bold", 4, &span2);
     wp_paragraph_run_add(para, span2, g_doc.default_cstyle, &run_idx);
 
-    g_ctx.vi.cursor.section = sec_idx;
-    g_ctx.vi.cursor.paragraph = para_idx;
-    g_ctx.vi.cursor.run = 0;
-    g_ctx.vi.cursor.offset = 0;
+    (*wp_keymap_cursor(&g_ctx)).section = sec_idx;
+    (*wp_keymap_cursor(&g_ctx)).paragraph = para_idx;
+    (*wp_keymap_cursor(&g_ctx)).run = 0;
+    (*wp_keymap_cursor(&g_ctx)).offset = 0;
 
     /* extract_current_paragraph_text concatenates both runs regardless
        of the style boundary between them. */
@@ -2439,19 +2452,13 @@ static void paint_status_line(short window_handle, VdiHdl vdi, GRECT full_work, 
     vs_clip(vdi, 1, pxy);
 
     if (plat_font_open((const u8 *)"", 0, WP_ATARI_STATUSLINE_SIZE_TWIPS, 0, &font) == WP_OK) {
-        wp_vimode_get_status_text(&g_ctx.vi, mode_buf, (u32)sizeof(mode_buf));
-        view.mode_label_utf8 = (const u8 *)mode_buf;
-        view.mode_label_len = (u32)strlen(mode_buf);
-        /* wp_vimode_get_status_text already folds the Command-line
-           buffer into its one composed string -- pending_count has no
-           public accessor (vi.count_pending is readable directly, since
-           wp_vimode_state is a transparent struct, but showing it
-           without the matching operator/prefix context it's paired with
-           would be more confusing than showing nothing; a documented,
-           minor gap, not fixed here). */
-        view.pending_count = 0;
-        view.pending_cmd_utf8 = NULL;
-        view.pending_cmd_len = 0;
+        /* wp_keymap_get_status_view already folds the Command-line
+           buffer into its one composed mode string and leaves
+           pending_count/pending_cmd at 0/NULL -- see its own header
+           comment for why (no per-mode accessor exists yet that
+           wouldn't be more confusing shown alone; a documented, minor
+           gap, not fixed here). */
+        wp_keymap_get_status_view(&g_ctx, mode_buf, (u32)sizeof(mode_buf), &view);
 
         wp_statusline_paint((plat_gc *)&gc, font, (i32)pxy[0], (i32)pxy[1],
                              (i32)(pxy[2] - pxy[0] + 1), bar_h_px, &view);
@@ -2831,25 +2838,39 @@ static void open_help_node(short window_handle, VdiHdl vdi,
     redraw_window(window_handle, vdi);
 }
 
+/* Dispatches a wp_action_id exactly the way the pre-M10 vi-mode
+   shortcut-fallback path always has (handler-or-backend, plus the
+   Atari-specific menu-checkmark sync) -- now the one place that logic
+   lives, shared between that fallback (inside wp_keymap_feed_key's own
+   VI arm) and any other scheme's WP_KEYMAP_RESULT_ACTION outcome. */
+static void invoke_action(wp_action_id id)
+{
+    const wp_action *act = wp_action_find(id);
+    if (act->handler != NULL) {
+        act->handler(&g_ctx);
+        sync_format_check(id);
+    } else {
+        invoke_backend_action(id);
+    }
+}
+
 wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key)
 {
     wp_key_event ev;
-    wp_vimode_mode mode_before;
-    wp_vimode_action action;
-    const wp_action *act;
+    wp_keymap_outcome outcome;
 
     if (!g_ctx.doc_loaded) return WP_FALSE;
 
     ev = atari_translate_key(key);
 
     /* Help is a whole separate UI mode (M8.5 Phase 10): while active,
-       every key goes to wp_help_view_feed_key instead of vi-mode, full
-       stop, until the viewer itself reports a close request (Escape or
-       'q' -- see help_view.h). F1 opens it from any vi-mode mode/state;
-       there is no menu path this pass (see g_help_active's own
-       comment), and pressing F1 again while already showing help is a
-       harmless no-op rather than resetting the user's position back to
-       the index node. */
+       every key goes to wp_help_view_feed_key instead of the active
+       keymap scheme, full stop, until the viewer itself reports a close
+       request (Escape or 'q' -- see help_view.h). F1 opens it from any
+       scheme/mode/state; there is no menu path this pass (see
+       g_help_active's own comment), and pressing F1 again while already
+       showing help is a harmless no-op rather than resetting the user's
+       position back to the index node. */
     if (g_help_active) {
         if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
         redraw_window(window_handle, vdi);
@@ -2860,43 +2881,29 @@ wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key)
         return WP_FALSE;
     }
 
-    mode_before = wp_vimode_get_mode(&g_ctx.vi);
-    action = wp_vimode_feed_key(&g_ctx.vi, ev);
+    outcome = wp_keymap_feed_key(&g_ctx, ev, (u8)(key & 0xFF));
 
-    /* vi-mode has no notion of this app's "current input style" toggle
-       state (see apply_current_style_to_run_at's own comment) -- restamp
-       the run it just created, but ONLY when this keystroke really was
-       an Insert-mode character insertion (matching feed_insert's own
-       exact condition in vimode.c), never on a bare cursor motion, or
+    /* The active scheme has no notion of this app's "current input
+       style" toggle state (see apply_current_style_to_run_at's own
+       comment) -- restamp the run it just created, but ONLY when this
+       keystroke really was a character insertion (wp_keymap_outcome's
+       own inserted_char contract), never on a bare cursor motion, or
        moving over already-styled text would silently overwrite it. */
-    if (mode_before == WP_VIMODE_INSERT &&
-        ev.special == (u16)WP_KEY_NONE && ev.mods == 0 && ev.codepoint >= 0x20) {
-        apply_current_style_to_run_at(g_ctx.vi.cursor);
+    if (outcome.inserted_char) {
+        apply_current_style_to_run_at((*wp_keymap_cursor(&g_ctx)));
     }
 
-    switch ((wp_vimode_action_kind)action.kind) {
-    case WP_VIACTION_QUIT:
+    switch ((wp_keymap_result_kind)outcome.kind) {
+    case WP_KEYMAP_RESULT_QUIT:
         return WP_TRUE;
-    case WP_VIACTION_SAVE_QUIT:
+    case WP_KEYMAP_RESULT_SAVE_QUIT:
         do_file_save();
         return WP_TRUE;
-    case WP_VIACTION_SAVE:
-        do_file_save();
+    case WP_KEYMAP_RESULT_ACTION:
+        invoke_action((wp_action_id)outcome.action_id);
         break;
     default:
         break;
-    }
-
-    if (wp_vimode_get_mode(&g_ctx.vi) != WP_VIMODE_COMMAND) {
-        act = wp_action_find_by_shortcut((u8)(key & 0xFF));
-        if (act != NULL) {
-            if (act->handler != NULL) {
-                act->handler(&g_ctx);
-                sync_format_check(act->id);
-            } else {
-                invoke_backend_action(act->id);
-            }
-        }
     }
 
     if (g_ctx.quit_requested) return WP_TRUE;
@@ -3129,12 +3136,23 @@ void app_shell_run(void)
 
     appl_init();
 
-    /* M8.5: wires g_ctx.vi.doc/journal to &g_doc/&g_journal and seeds
-       everything else to sane defaults -- see g_ctx's own comment above.
-       Safe to call before any document is loaded: it only stores
-       pointers, never dereferences them (mirrors how replace_document
-       itself doesn't run until load_sample_document below). */
-    wp_app_ctx_init(&g_ctx, &g_doc, &g_journal);
+    /* M10: read once at startup, fixed for the process lifetime -- see
+       WP_ATARI_CONFIG_PATH's own comment and docs/keymaps.md. Missing/
+       unreadable/malformed all quietly yield the documented default
+       (WP_KEYMAP_VI), so an existing zero-config install behaves
+       exactly as it always has. */
+    {
+        wp_config cfg;
+        wp_config_load(WP_ATARI_CONFIG_PATH, &cfg);
+
+        /* M8.5/M10: wires the active scheme's own .doc/.journal to
+           &g_doc/&g_journal and seeds everything else to sane defaults
+           -- see g_ctx's own comment above. Safe to call before any
+           document is loaded: it only stores pointers, never
+           dereferences them (mirrors how replace_document itself
+           doesn't run until load_sample_document below). */
+        wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_doc, &g_journal);
+    }
 
     /* M8.5 Phase 10: parses the compiled-in help content once at
        startup. WP_NOMEM is the only realistic failure (the source is
@@ -3198,7 +3216,7 @@ void app_shell_run(void)
     }
 
     if (g_ctx.doc_loaded) {
-        wp_vimode_free(&g_ctx.vi);
+        wp_keymap_free(&g_ctx);
         wp_undo_journal_free(&g_journal);
         wp_document_free(&g_doc);
         g_ctx.doc_loaded = WP_FALSE;
