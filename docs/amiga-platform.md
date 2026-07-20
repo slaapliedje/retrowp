@@ -221,6 +221,77 @@ this same toolchain and run under amiberry against the fixture. Output:
 *and* independent confirmation that MUI itself is genuinely loadable here,
 ahead of Phase 2's real GUI shell work.
 
+## Phase 1 (T9.1a): non-UI `platform.h` seams
+
+`platform/amiga/mem_amiga.c`, `file_amiga.c`, `clipboard_amiga.c`,
+`timer_amiga.c` -- no Intuition/MUI yet, per the M9 plan's own phasing.
+
+- **Memory**: libnix's `malloc`/`realloc`/`free` under `-noixemul`, same
+  reasoning as the Atari backend's mintlib `malloc` -- a standalone C
+  runtime's allocator, not a raw `AllocMem()` wrapper. Alloc/free counters
+  mirror `mem_atari.h`'s test-only introspection pattern exactly.
+- **File I/O**: real `dos.library` calls (`Open`/`Read`/`Write`/`Seek`/
+  `Close`/`DeleteFile`/`Lock`+`UnLock`), not a stdio wrapper -- the M9
+  plan calls this out explicitly, and it also sidesteps a real, documented
+  toolchain gotcha (`-noixemul` is link-only; passing it to a *compile*
+  step flips newlib's reent header path and breaks `<stdio.h>`). `Seek()`
+  returns the **old** position on success (not the new one, unlike
+  `fseek()`), and there's no separate "tell" primitive -- the documented
+  idiom, `Seek(file, 0, OFFSET_CURRENT)`, is what `plat_file_tell`/
+  `plat_file_size` both use. `DOSBase` needs no explicit `OpenLibrary` --
+  confirmed already open by the time `main()` runs (the Phase 0 `muitest`
+  probe already relied on this).
+- **Clipboard**: a real typed IFF stream over `clipboard.device` (unit 0)
+  via `iffparse.library` -- a `FORM FTXT` containing one `CHRS` chunk,
+  written/read with `AllocIFF`/`OpenClipboard`/`InitIFFasClip`/`OpenIFF`/
+  `PushChunk`/`WriteChunkBytes`/`PopChunk`/`CloseIFF`/`CloseClipboard`/
+  `FreeIFF` (write) and the `StopChunk`+`ParseIFF(IFFPARSE_SCAN)` pattern
+  (read). Deliberately **not** a port of the Atari backend's `SCRAP.TXT`
+  file convention -- genuinely different mechanism, and this one
+  interoperates with real Amiga software's clipboard, not just itself.
+  Verified against the real NDK headers on this machine
+  (`~/opt/amiga/m68k-amigaos/ndk-include/{libraries,clib}/iffparse.h`)
+  before writing any code, not recalled from memory alone.
+- **Timer**: `DateStamp()` (fixed `TICKS_PER_SECOND` = 50 by AmigaDOS API
+  contract, not tied to the chipset's actual PAL/NTSC vblank rate) tracked
+  as a delta from the first call, same relative-clock shape as the Atari
+  backend's `clock()` wrapper. `plat_sleep_ms` uses a real yielding
+  `Delay()` -- unlike the Atari backend's busy-wait (only ever justified
+  by plain TOS having no yield primitive), AmigaOS has always had one.
+- **Encoding edge** (`plat_utf8_to_native`/`plat_native_to_utf8`,
+  `draw_amiga.c`): pulled forward from T9.2 because the clipboard needs it
+  to link at all -- only the two encoding functions exist there for now,
+  `plat_draw_text`/`plat_fill_rect`/`plat_gc_flush` are still T9.2's job.
+  Unlike the Atari backend's ASCII-only `'?'` fallback for every byte
+  above 0x7F (a documented, deliberate gap), Amiga's native charset
+  genuinely **is** ISO-8859-1 from Kickstart 2.0's `topaz.font` onward --
+  this project's Amiga floor is already 2.04+ for MUI, so codepoints
+  0x80-0xFF map identically to native bytes, a real correctness
+  improvement landing now rather than as a later revisit.
+- **Linking gotcha, `AMISMOKE` (the T9.1a smoke test)**: pulling in the
+  *whole* `AMIGA_ENGINE_OBJ` set (mirroring how `SMOKE.PRG` links the
+  full Atari engine) fails to link here -- `linebreak.o` and
+  `offload_client.o` reference `plat_font_*`/`plat_measure_text` (T9.2)
+  and `plat_transport_*`/`wire_*`/`caps_*` (T9.3), neither of which exists
+  yet. Atari's `SMOKE.PRG` never hit this because GEM's `app_shell.c`
+  implemented the *whole* `platform.h` surface before its smoke test was
+  written -- M9 deliberately phases `platform.h` across T9.1a/T9.1b/T9.2/
+  T9.3, so its smoke tests can't yet link the full engine object set the
+  same way. Fix: link only `build/amiga/engine/utf8.o` (the one leaf
+  object `draw_amiga.c`'s encoding functions actually call), not
+  `$(AMIGA_ENGINE_OBJ)` -- revisit once T9.2/T9.3 land and the full
+  `platform.h` surface exists.
+- **Verified end-to-end under amiberry**, not just cross-compiled:
+  `wp_amiga_file_clipboard_selfcheck()` (mirrors
+  `wp_atari_file_clipboard_selfcheck()` exactly -- write/read/delete a
+  file, then set/get/has-text round-trip through the clipboard, `memcmp`
+  against the fixture text at every step) runs from `host/tools/
+  amiga_smoke.c`, writing `file_clipboard: PASS` or `FAIL` to a
+  host-readable file on the boot volume (amiberry has no Hatari-style
+  `NF_STDERR`/`NF_EXIT` trap to make the emulator process itself exit
+  with a status code -- flagged as real, not-yet-solved Phase 5 work, not
+  silently ignored). Result against the real fixture: `PASS`.
+
 ## Status
 
 - ✅ Toolchain: `m68k-amigaos-gcc 6.5.0b` + binutils + NDK + MUI SDK, fully
@@ -232,6 +303,10 @@ ahead of Phase 2's real GUI shell work.
   Phase 0's stated AC ("a hello world hunk executable boots under amiberry
   to a visible result") is met and exceeded (MUI itself verified loadable,
   not just a boot).
+- ✅ Phase 1 (T9.1a): memory/file/clipboard/timer implemented and verified
+  on-target (`file_clipboard: PASS` under amiberry against the real
+  fixture) -- `amiga-engine-check` and `amiga-smoke` both green, host's
+  `make test` (219/219) and `atari-engine-check` unaffected.
 - Known, deliberately unchased gap: Workbench icons never render on this
   fixture's `LoadWB` (root cause not identified -- worked around with a
   `NewCLI` debug shell, since nothing in Phase 0 or the MUI install needed

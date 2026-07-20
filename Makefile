@@ -313,8 +313,35 @@ AMIGA_PLATFORM_OBJ = $(patsubst platform/amiga/%.c,$(AMIGA_BUILD)/app/%.o,$(AMIG
 $(AMIGA_BUILD)/app/%.o: platform/amiga/%.c | $(AMIGA_BUILD)/app
 	$(AMIGACC) $(AMIGA_RELAXED_CFLAGS) -Iengine/include -Iplatform/amiga -Iplatform/common -Iservices/spell -Iservices/grammar -I$(GENERATED) -c $< -o $@
 
-$(AMIGA_BUILD)/engine $(AMIGA_BUILD)/transport $(AMIGA_BUILD)/services $(AMIGA_BUILD)/common $(AMIGA_BUILD)/app $(AMIGA_BIN):
+# T9.1a smoke test (memory/file/clipboard/timer only -- no MUI/Intuition
+# yet). -noixemul is a LINK-time-only flag (selects libnix's standalone
+# crt0/libc instead of ixemul) -- passing it to a *compile* step instead
+# flips newlib's reent header path and breaks <stdio.h> for anything that
+# uses it (a real gotcha hit by the unrelated OpenUA project on this same
+# toolchain; see docs/amiga-platform.md), so it appears only on the final
+# link line below, never in AMIGA_STRICT_CFLAGS/AMIGA_RELAXED_CFLAGS.
+$(AMIGA_BUILD)/smoke/%.o: host/tools/%.c | $(AMIGA_BUILD)/smoke
+	$(AMIGACC) $(AMIGA_RELAXED_CFLAGS) -Iengine/include -Iplatform/amiga -c $< -o $@
+
+# draw_amiga.o's plat_utf8_to_native/plat_native_to_utf8 call engine/src/
+# utf8.c's utf8_decode/utf8_encode directly (portable helpers, not a
+# layering violation -- platform/ may call engine/ utility functions; the
+# rule is engine/ and services/ must never call platform/ back). Only
+# utf8.o is linked here, deliberately NOT the full AMIGA_ENGINE_OBJ set:
+# unlike Atari's SMOKE.PRG (built after GEM's app_shell.c already
+# implemented the WHOLE platform.h surface), T9.1a is a real, narrower
+# phase -- pulling in linebreak.o/offload_client.o here would drag in
+# plat_font_*/plat_measure_text (T9.2) and plat_transport_*/wire_*/
+# caps_* (T9.3) just to link, before either phase exists. utf8.c itself
+# is a leaf (only includes utf8.h, no other engine or platform deps).
+$(AMIGA_BIN)/AMISMOKE: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/smoke/amiga_smoke.o $(AMIGA_BUILD)/engine/utf8.o | $(AMIGA_BIN)
+	$(AMIGACC) -noixemul $^ -o $@
+
+$(AMIGA_BUILD)/engine $(AMIGA_BUILD)/transport $(AMIGA_BUILD)/services $(AMIGA_BUILD)/common $(AMIGA_BUILD)/app $(AMIGA_BUILD)/smoke $(AMIGA_BIN):
 	mkdir -p $@
+
+.PHONY: amiga-smoke
+amiga-smoke: $(AMIGA_BIN)/AMISMOKE
 
 clean:
 	rm -rf $(BUILD) $(BIN)
