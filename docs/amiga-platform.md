@@ -654,6 +654,80 @@ below.
   helpers -- a reasoned, not a blind, gap, consistent with every prior
   phase's own calibration-cost calls.
 
+## Phase 5: CI infrastructure -- Kickstart-version matrix
+
+Mirrors the Atari multi-TOS matrix's own founding lesson: single-image CI
+missed two real regressions that only a real multi-version matrix caught
+(see `platform/atari/app_shell_internal.h`'s own history). `ci_amiga.sh`
+(a single fast Kickstart 3.1 gate) and `ci_amiga_matrix.sh` (real
+Kickstart-version coverage) mirror `ci_atari.sh`/`ci_atari_matrix.sh`'s
+own two-tier shape, both sourcing a shared `host/tools/amiga_ci_lib.sh`
+the same way the Atari scripts share `atari_ci_lib.sh`.
+
+- **The headless pass/fail signal, resolved**: amiberry has no
+  equivalent to Hatari's NF_STDERR/NF_EXIT trap -- there is no way to
+  make the emulator *process* exit with a pass/fail status the way
+  `ci_atari.sh` reads Hatari's own exit code. The fixture's own
+  `S/Startup-Sequence` gets one small, conditional addition instead: if
+  `SYS:AMISMOKE` exists on the volume at boot time, it runs
+  automatically (writing its usual `SYS:amiga_smoke.out` PASS/FAIL log,
+  unchanged from every earlier phase's interactive use) and then writes
+  a `SYS:amiga_ci_done` sentinel file. A normal interactive session
+  never has `AMISMOKE` present at boot (it only gets copied in mid-
+  session, as every earlier phase's manual verification did), so this
+  hook is a real no-op then -- verified by re-running Phase 1-4's own
+  interactive workflow unchanged after adding it. Since `DH0:` is a
+  real host directory (`mounts.uae`'s `filesystem2`/`uaehf0` lines, not
+  a disk image), both files are ordinary host filesystem entries
+  `amiga_ci_lib.sh` polls and reads directly -- no in-emulator
+  interaction, no screenshot, no `xdotool` needed at all. This is a
+  real, working instance of the M9 plan's own called-for "debug-log
+  file convention with a sentinel line."
+- **`amiga_ci_lib.sh`'s `run_amiga_smoke_once`**: copies `AMISMOKE`
+  onto the fixture, launches amiberry against a given Kickstart ROM (a
+  per-call scratch `$HOME` and a per-call-offset Xvfb display, mirroring
+  `atari_ci_lib.sh`'s own collision-avoidance reasoning for a matrix
+  loop), polls for `amiga_ci_done` (bounded at 90s -- real boot plus
+  AMISMOKE's own serial.device round trip and `offload_init`'s real
+  2s+2s timeout budget against a dead endpoint together run
+  15-25s under this project's config, so this is generous real margin),
+  then kills the amiberry process directly (there is nothing else to
+  `wait()` on) and reads back `amiga_smoke.out`. Leaves the fixture
+  exactly as clean as every prior phase's manual testing did (`AMISMOKE`
+  /`amiga_smoke.out`/`amiga_ci_done`/`trace*` all removed again before
+  returning), on every exit path including timeout.
+- **Real finding: Kickstart 3.0 cannot boot on this fixture's `--model
+  A500` (68000) floor.** Tested first (the matrix's whole point is
+  catching exactly this kind of thing, not just re-confirming what
+  already works): both the real `(A1200)` and `(A4000)` release ROMs
+  hit an identical `Illegal instruction` trap inside the ROM itself
+  partway through boot and hang before ever reaching `AMISMOKE`. This
+  is a real, structural CPU-generation boundary, not a fixable bug or a
+  ROM-image-choice mistake -- Kickstart 3.0 was the first AGA-era ROM,
+  shipped only with 68020+ machines (A1200/A4000); unlike 3.1, which
+  continued to see real 68000 A500/A600 use via reloc-kickstart
+  upgrades and was evidently kept compatible with that CPU class, 3.0's
+  own boot code apparently was not. Excluded from `ci_amiga_matrix.sh`'s
+  tested list with this reasoning recorded in the script itself, the
+  same "excluded with a real reason, not silently skipped" treatment
+  `ci_atari_matrix.sh` already gives TOS 1.00/TT/Falcon images -- a
+  matrix entry known in advance to always fail for a reason this
+  project's code can never fix would just make the gate permanently
+  red, defeating its purpose as a regression signal.
+- **The curated list**: Kickstart 2.04 (`A500+`-labeled -- an exact
+  model match), 2.05 (`A600HD`-labeled -- no A500-specific 2.05 release
+  exists; 2.05 shipped only with the A600), and 3.1 (`A500-A600-A2000`-
+  labeled -- also an exact match, and the same ROM image
+  `docs/amiga-platform.md`'s own fixture has used as `kick31.rom` since
+  Phase 0). All three are real, unmodified Commodore release images (no
+  `[b]`/`[h]`/beta/encrypted variants), and all three pass cleanly --
+  `AMIGA KICKSTART MATRIX: 3 passed, 0 failed`. 1.2/1.3 were never
+  candidates: MUI itself requires BOOPSI, which shipped in Kickstart
+  2.04 -- a Kickstart-1.3 machine cannot run MUI at all, full stop (the
+  M9 plan's own "real, honest tension" note), so testing below that
+  floor would test configurations this backend's own MUI dependency
+  makes structurally unable to run, not a real coverage gap.
+
 ## Status
 
 - ✅ Toolchain: `m68k-amigaos-gcc 6.5.0b` + binutils + NDK + MUI SDK, fully
@@ -697,6 +771,16 @@ below.
   real exec.library `IORequest`/timeout mechanics on-target instead.
   `amiga-app`/`amiga-smoke` both green; host `make test` (219/219) and
   `atari-engine-check` unaffected.
+- ✅ Phase 5: `ci_amiga.sh` (fast single-Kickstart-3.1 gate) and
+  `ci_amiga_matrix.sh` (2.04/2.05/3.1 -- see Phase 5's own notes above
+  for why 3.0 is excluded, not silently untested), both fully headless,
+  no `xdotool`/interactive step at all -- the fixture's own
+  `Startup-Sequence` now auto-runs `AMISMOKE` and writes a host-visible
+  completion sentinel when a caller has copied it in first, resolving
+  the M9 plan's own "amiberry lacks an NF_STDERR/NF_EXIT-equivalent
+  trap" open question. `AMIGA KICKSTART MATRIX: 3 passed, 0 failed`; a
+  real Kickstart 3.0/68000 incompatibility was found along the way (see
+  above), not a regression in this project's own code.
 - Known, deliberately unchased gap: Workbench icons never render on this
   fixture's `LoadWB` (root cause not identified -- worked around with a
   `NewCLI` debug shell, since nothing in Phase 0 or the MUI install needed
