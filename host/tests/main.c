@@ -95,6 +95,25 @@ void test_vimode_x_deletes_char_forward(void);
 void test_vimode_ctrl_chord_is_not_bare_letter(void);
 void test_vimode_no_leaks(void);
 
+/* test_wordstar.c */
+void test_wordstar_diamond_char_motions(void);
+void test_wordstar_diamond_word_motions(void);
+void test_wordstar_diamond_paragraph_motions(void);
+void test_wordstar_arrow_keys_also_move(void);
+void test_wordstar_plain_typing_is_non_modal(void);
+void test_wordstar_ctrl_g_deletes_char_forward(void);
+void test_wordstar_ctrl_t_deletes_word_forward(void);
+void test_wordstar_ctrl_y_deletes_current_paragraph(void);
+void test_wordstar_block_copy_appends_at_cursor(void);
+void test_wordstar_block_move_cursor_before_block(void);
+void test_wordstar_block_move_cursor_after_block(void);
+void test_wordstar_block_move_refuses_when_cursor_inside_block(void);
+void test_wordstar_block_delete(void);
+void test_wordstar_kx_returns_save_quit_and_kq_returns_quit(void);
+void test_wordstar_unbound_prefix_subkey_beeps(void);
+void test_wordstar_format_prefix_returns_correct_kinds(void);
+void test_wordstar_no_leaks(void);
+
 /* test_actions.c */
 void test_actions_find_by_id(void);
 void test_actions_find_by_shortcut(void);
@@ -110,6 +129,7 @@ void test_statusline_paint_does_not_crash_with_various_views(void);
 /* test_config.c */
 void test_config_defaults_to_vi_on_empty_input(void);
 void test_config_parses_keymap_vim(void);
+void test_config_parses_keymap_wordstar(void);
 void test_config_key_and_value_are_case_insensitive(void);
 void test_config_tolerates_surrounding_whitespace(void);
 void test_config_skips_comment_and_blank_lines(void);
@@ -380,6 +400,24 @@ static const test_case g_cases[] = {
     { "vimode_ctrl_chord_is_not_bare_letter", test_vimode_ctrl_chord_is_not_bare_letter },
     { "vimode_no_leaks", test_vimode_no_leaks },
 
+    { "wordstar_diamond_char_motions", test_wordstar_diamond_char_motions },
+    { "wordstar_diamond_word_motions", test_wordstar_diamond_word_motions },
+    { "wordstar_diamond_paragraph_motions", test_wordstar_diamond_paragraph_motions },
+    { "wordstar_arrow_keys_also_move", test_wordstar_arrow_keys_also_move },
+    { "wordstar_plain_typing_is_non_modal", test_wordstar_plain_typing_is_non_modal },
+    { "wordstar_ctrl_g_deletes_char_forward", test_wordstar_ctrl_g_deletes_char_forward },
+    { "wordstar_ctrl_t_deletes_word_forward", test_wordstar_ctrl_t_deletes_word_forward },
+    { "wordstar_ctrl_y_deletes_current_paragraph", test_wordstar_ctrl_y_deletes_current_paragraph },
+    { "wordstar_block_copy_appends_at_cursor", test_wordstar_block_copy_appends_at_cursor },
+    { "wordstar_block_move_cursor_before_block", test_wordstar_block_move_cursor_before_block },
+    { "wordstar_block_move_cursor_after_block", test_wordstar_block_move_cursor_after_block },
+    { "wordstar_block_move_refuses_when_cursor_inside_block", test_wordstar_block_move_refuses_when_cursor_inside_block },
+    { "wordstar_block_delete", test_wordstar_block_delete },
+    { "wordstar_kx_returns_save_quit_and_kq_returns_quit", test_wordstar_kx_returns_save_quit_and_kq_returns_quit },
+    { "wordstar_unbound_prefix_subkey_beeps", test_wordstar_unbound_prefix_subkey_beeps },
+    { "wordstar_format_prefix_returns_correct_kinds", test_wordstar_format_prefix_returns_correct_kinds },
+    { "wordstar_no_leaks", test_wordstar_no_leaks },
+
     { "actions_find_by_id", test_actions_find_by_id },
     { "actions_find_by_shortcut", test_actions_find_by_shortcut },
     { "actions_every_shortcut_is_unique", test_actions_every_shortcut_is_unique },
@@ -392,6 +430,7 @@ static const test_case g_cases[] = {
 
     { "config_defaults_to_vi_on_empty_input", test_config_defaults_to_vi_on_empty_input },
     { "config_parses_keymap_vim", test_config_parses_keymap_vim },
+    { "config_parses_keymap_wordstar", test_config_parses_keymap_wordstar },
     { "config_key_and_value_are_case_insensitive", test_config_key_and_value_are_case_insensitive },
     { "config_tolerates_surrounding_whitespace", test_config_tolerates_surrounding_whitespace },
     { "config_skips_comment_and_blank_lines", test_config_skips_comment_and_blank_lines },

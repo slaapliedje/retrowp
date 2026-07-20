@@ -436,6 +436,50 @@ wp_status wp_edit_delete_selection(wp_document *doc, wp_undo_journal *journal,
     return WP_OK;
 }
 
+wp_status wp_edit_paste_text(wp_document *doc, wp_undo_journal *journal, wp_pos pos,
+                              const u8 *utf8, u32 len, wp_pos *out_pos)
+{
+    u32 i = 0;
+    wp_pos cur = pos;
+    wp_status st;
+
+    while (i < len) {
+        u32 line_start = i;
+
+        while (i < len && utf8[i] != '\n') i++;
+        if (i > line_start) {
+            wp_pos out;
+            st = wp_edit_insert_text(doc, journal, cur, utf8 + line_start, i - line_start, &out);
+            if (st != WP_OK) {
+                if (out_pos) *out_pos = cur;
+                return st;
+            }
+            cur = out;
+        }
+        if (i < len && utf8[i] == '\n') {
+            i++;
+            /* wp_document_extract_text puts a '\n' AFTER every paragraph
+               it joins, including the last one -- so a range ending on a
+               paragraph boundary already ends "...text\n", not
+               "...text". Splitting on that TRAILING newline too would
+               create one extra empty paragraph beyond what was actually
+               extracted; only split when there's real content after it. */
+            if (i < len) {
+                wp_pos out;
+                st = wp_edit_split_paragraph(doc, journal, cur, &out);
+                if (st != WP_OK) {
+                    if (out_pos) *out_pos = cur;
+                    return st;
+                }
+                cur = out;
+            }
+        }
+    }
+
+    if (out_pos) *out_pos = cur;
+    return WP_OK;
+}
+
 static void apply_single_undo_op(wp_document *doc, wp_op *op)
 {
     wp_section *sec = wp_document_section_get(doc, op->at.section);

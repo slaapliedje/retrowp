@@ -39,11 +39,16 @@ void test_config_skips_comment_and_blank_lines(void)
     ASSERT_EQ_U32((u32)parse(src), (u32)WP_KEYMAP_VI);
 }
 
+void test_config_parses_keymap_wordstar(void)
+{
+    ASSERT_EQ_U32((u32)parse("keymap=WordStar\n"), (u32)WP_KEYMAP_WORDSTAR);
+}
+
 void test_config_unrecognized_value_falls_back_to_default(void)
 {
-    /* Not yet an implemented scheme this phase -- must not produce an
-       invalid/unclamped id, see wp_config_parse's own leniency contract. */
-    ASSERT_EQ_U32((u32)parse("keymap=wordstar\n"), (u32)WP_KEYMAP_VI);
+    /* Not yet an implemented scheme -- must not produce an invalid/
+       unclamped id, see wp_config_parse's own leniency contract. */
+    ASSERT_EQ_U32((u32)parse("keymap=wordperfect\n"), (u32)WP_KEYMAP_VI);
 }
 
 void test_config_unrecognized_key_is_ignored(void)

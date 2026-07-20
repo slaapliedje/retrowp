@@ -91,44 +91,18 @@ static void yank_selection(wp_vimode_state *vs, wp_selection sel, wp_bool linewi
     vs->register_linewise = linewise;
 }
 
-/* Inserts bytes into the document starting at `at`, splitting a new
-   paragraph at each embedded '\n' -- the same separator
-   wp_document_extract_text produces between paragraphs, so a linewise
-   or multi-paragraph yank round-trips through put correctly instead of
-   inserting a literal '\n' byte into a run's text (which the document
-   model never does -- paragraph breaks are structural, not embedded
-   characters). Returns the position immediately after the pasted text. */
+/* wp_edit_paste_text (editing.h) is the shared, engine-level version of
+   what used to be this function's own body -- promoted to editing.h/
+   undo.c in M10 once WordStar's block copy/move needed the exact same
+   "insert text, splitting a new paragraph at each embedded '\n'"
+   behavior this module's own put commands already relied on. This is
+   now a thin wrapper purely for call-site brevity (every caller below
+   already has a wp_vimode_state * in hand). */
 static wp_pos paste_text_at(wp_vimode_state *vs, wp_pos at, const u8 *bytes, u32 len)
 {
-    u32 i = 0;
-    wp_pos pos = at;
-
-    while (i < len) {
-        u32 line_start = i;
-
-        while (i < len && bytes[i] != '\n') i++;
-        if (i > line_start) {
-            wp_pos out;
-            wp_edit_insert_text(vs->doc, vs->journal, pos, bytes + line_start, i - line_start, &out);
-            pos = out;
-        }
-        if (i < len && bytes[i] == '\n') {
-            i++;
-            /* wp_document_extract_text puts a '\n' AFTER every paragraph
-               it joins, including the last one (see docs/editing.md) --
-               so a linewise register from even a single yanked line
-               ends "...text\n", not "...text". Splitting on that
-               TRAILING newline too would create one extra empty
-               paragraph beyond what was actually yanked; only split
-               when there's real content after it. */
-            if (i < len) {
-                wp_pos out;
-                wp_edit_split_paragraph(vs->doc, vs->journal, pos, &out);
-                pos = out;
-            }
-        }
-    }
-    return pos;
+    wp_pos out = at;
+    wp_edit_paste_text(vs->doc, vs->journal, at, bytes, len, &out);
+    return out;
 }
 
 static void put_charwise(wp_vimode_state *vs, wp_bool after)

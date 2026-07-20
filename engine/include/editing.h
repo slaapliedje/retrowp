@@ -214,6 +214,27 @@ wp_status wp_edit_merge_paragraph(wp_document *doc, wp_undo_journal *journal,
 wp_status wp_edit_delete_selection(wp_document *doc, wp_undo_journal *journal,
                                     wp_selection sel, wp_pos *out_pos);
 
+/* Inserts utf8[0..len) at pos, splitting a new paragraph at each
+   embedded '\n' instead of inserting a literal '\n' byte into a run's
+   text (which the document model never does -- paragraph breaks are
+   structural, not embedded characters). This is the write-side
+   counterpart to wp_document_extract_text's own '\n'-per-paragraph
+   convention, so a range extracted by that function round-trips through
+   this one correctly -- the shape every "yank and put elsewhere" or
+   "copy/move a block" feature needs (M8.5's vi-mode put commands and
+   M10's WordStar block copy/move both call this exact function; a
+   future scheme's own paste/yank is expected to as well, rather than
+   re-deriving this same splitting logic per scheme). Not wrapped in its
+   own undo group (M10: verified this preserves vi-mode's own pre-
+   existing, already-ungrouped multi-paragraph-put behavior exactly --
+   see docs/vimode.md); a caller that wants the whole paste to undo as
+   one step must bracket its own call with wp_undo_group_begin/end.
+   *out_pos, if non-NULL, is always set to the position reached so far,
+   even on an early WP_NOMEM exit from one of the underlying
+   wp_edit_insert_text/wp_edit_split_paragraph calls. */
+wp_status wp_edit_paste_text(wp_document *doc, wp_undo_journal *journal, wp_pos pos,
+                              const u8 *utf8, u32 len, wp_pos *out_pos);
+
 /* Undoes/redoes the most recent entry on the respective stack. WP_ERR if
    that stack is empty. A group (a run of ops bracketed by
    wp_undo_group_begin/end -- currently only wp_edit_delete_selection

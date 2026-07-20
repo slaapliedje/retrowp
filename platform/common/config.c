@@ -57,6 +57,8 @@ static void parse_line(const u8 *bytes, u32 len, wp_config *out)
 
     if (ascii_ieq(bytes + val_start, val_len, "vim")) {
         out->keymap_id = (u8)WP_KEYMAP_VI;
+    } else if (ascii_ieq(bytes + val_start, val_len, "wordstar")) {
+        out->keymap_id = (u8)WP_KEYMAP_WORDSTAR;
     }
     /* Any other value (unrecognized, or a scheme not implemented yet)
        is silently left at whatever out->keymap_id already was -- see
