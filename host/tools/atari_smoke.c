@@ -154,6 +154,18 @@ int main(void)
     check(wp_atari_resolution_selfcheck(),
           "80-column startup warning threshold against real ST resolutions");
 
+    check(wp_atari_format_selfcheck(),
+          "style/alignment find_or_add dedup, alignment offset math, and shortcut code uniqueness");
+
+    check(wp_atari_dialog_selfcheck(),
+          "plat_dialog_choice OBJECT-tree construction: index arithmetic and ob_next/head/tail linkage");
+
+    check(wp_atari_key_translate_selfcheck(),
+          "IKBD scan-code table: real key values decode to the right wp_key_event");
+
+    check(wp_atari_help_selfcheck(),
+          "help content parses with every link resolving; word-wrap against real VDI font metrics");
+
     {
         long free_before = 0, free_after_load = 0, free_after_free = 0;
         wp_bool budget_ok = wp_atari_memory_budget_selfcheck(&free_before, &free_after_load, &free_after_free);

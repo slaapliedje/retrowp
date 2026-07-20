@@ -74,7 +74,7 @@ HOME="$SCRATCH" DISPLAY="$XVFB_DISPLAY" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dumm
     --tos "$TOS_IMAGE" \
     --machine st \
     --memsize 1 \
-    --monitor rgb --tos-res low --zoom 4 --statusbar no --borders no \
+    --monitor rgb --tos-res med --zoom 2 --statusbar no --borders no \
     --confirm-quit no \
     --sound off \
     --rs232-in "$FIFO_ATARI_IN" --rs232-out "$FIFO_ATARI_OUT" \

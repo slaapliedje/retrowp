@@ -16,6 +16,14 @@
 #include "grammar.h"
 #include "offload.h"
 #include "endian.h"
+#include "keyevent.h"
+#include "vimode.h"
+#include "app_ctx.h"
+#include "actions.h"
+#include "statusline.h"
+#include "help_doc.h"
+#include "help_view.h"
+#include "help_retrowp.h"
 
 /* Hand-built menu bar OBJECT tree: File (Open/Save/Quit) and Edit
    (Cut/Copy/Paste). There is no resource editor or .rsc file anywhere
@@ -38,7 +46,14 @@
      - Only the true root (no parent) uses ob_next = -1.
    menu_bar() does NOT compute ob_x/ob_y/ob_width/ob_height from the
    string content -- those must be set by hand, in character-cell units
-   relative to the parent (screen-relative only for the root). */
+   relative to the parent (screen-relative only for the root).
+
+   FLAT shape: ROOT (index 0) is the true root and directly owns every
+   title as its children -- see app_shell_internal.h's block comment
+   for why a real 3-level SCREEN->BAR->titles restructuring was tried
+   and reverted (it fixed the "only File renders" cosmetic bug but
+   crashed newer EmuTOS and hung real TOS 1.04, caught by the multi-TOS
+   matrix this project's CI didn't have before). */
 OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     /* next,                 head,                  tail,                  type,     flags,       state,     spec, x, y, w, h */
     { -1,                     WP_MENU_OBJ_DESK_TITLE, WP_MENU_OBJ_TOOLS_TITLE, G_IBOX,   OF_NONE,     OS_NORMAL, {0}, 0, 0, 40, 1 },
@@ -58,7 +73,17 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, -1,              -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 1, 16, 1 },
     { WP_MENU_OBJ_TOOLS_CHAT, -1,                      -1,                    G_STRING, OF_NONE,     OS_NORMAL, {0}, 0, 2, 16, 1 },
     { WP_MENU_OBJ_TOOLS_BOX,  -1,                     -1,                    G_STRING, OF_LASTOB,   OS_NORMAL, {0}, 0, 3, 16, 1 },
-    { WP_MENU_OBJ_FILE_TITLE, -1,                     -1,                    G_TITLE,  OF_NONE,     OS_NORMAL, {0}, 0, 0, 6,  1 }
+    { WP_MENU_OBJ_FORMAT_TITLE, -1,                   -1,                    G_TITLE,  OF_NONE,     OS_NORMAL, {0}, 0, 0, 6,  1 },
+    { WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_FORMAT_BOX, WP_MENU_OBJ_FORMAT_BOX, G_TITLE,  OF_NONE,     OS_NORMAL, {0}, 25, 0, 8,  1 },
+    { WP_MENU_OBJ_FORMAT_TITLE, WP_MENU_OBJ_FORMAT_BOLD, WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, G_BOX, OF_HIDETREE, OS_NORMAL, {0}, 0, 1, 16, 8 },
+    { WP_MENU_OBJ_FORMAT_ITALIC,      -1, -1, G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 0, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_UNDERLINE,   -1, -1, G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 1, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_SIZE_UP,     -1, -1, G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 2, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_SIZE_DOWN,   -1, -1, G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 3, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_ALIGN_LEFT,  -1, -1, G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 4, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_ALIGN_CENTER, -1, -1, G_STRING, OF_NONE,  OS_NORMAL, {0}, 0, 5, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, -1, -1, G_STRING, OF_NONE,   OS_NORMAL, {0}, 0, 6, 16, 1 },
+    { WP_MENU_OBJ_FORMAT_BOX,         -1, -1, G_STRING, OF_LASTOB, OS_NORMAL, {0}, 0, 7, 16, 1 }
 };
 
 static char g_text_desk[]  = " Desk ";
@@ -75,7 +100,15 @@ static char g_text_spellcheck[] = "  Spell Check";
 static char g_text_thesaurus[] = "  Thesaurus";
 static char g_text_grammarcheck[] = "  Grammar Check";
 static char g_text_chat[] = "  Chat";
-
+static char g_text_format[] = " Format ";
+static char g_text_bold[] = "  Bold";
+static char g_text_italic[] = "  Italic";
+static char g_text_underline[] = "  Underline";
+static char g_text_size_up[] = "  Size +";
+static char g_text_size_down[] = "  Size -";
+static char g_text_align_left[] = "  Align Left";
+static char g_text_align_center[] = "  Align Center";
+static char g_text_align_right[] = "  Align Right";
 void wp_menu_tree_init(void)
 {
     wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_spec.free_string = g_text_desk;
@@ -92,16 +125,63 @@ void wp_menu_tree_init(void)
     wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_spec.free_string = g_text_thesaurus;
     wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_spec.free_string = g_text_grammarcheck;
     wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_spec.free_string = g_text_chat;
+    wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_spec.free_string = g_text_format;
+    wp_menu_tree[WP_MENU_OBJ_FORMAT_BOLD].ob_spec.free_string = g_text_bold;
+    wp_menu_tree[WP_MENU_OBJ_FORMAT_ITALIC].ob_spec.free_string = g_text_italic;
+    wp_menu_tree[WP_MENU_OBJ_FORMAT_UNDERLINE].ob_spec.free_string = g_text_underline;
+    wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_UP].ob_spec.free_string = g_text_size_up;
+    wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_DOWN].ob_spec.free_string = g_text_size_down;
+    wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_LEFT].ob_spec.free_string = g_text_align_left;
+    wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_CENTER].ob_spec.free_string = g_text_align_center;
+    wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_spec.free_string = g_text_align_right;
+}
+
+/* Walks every parent's child chain (ob_head -> ob_next -> ... ->
+   ob_tail) with a step budget bounded by WP_MENU_OBJ_COUNT and fails if
+   the chain doesn't reach ob_tail within budget -- catches an
+   accidental ob_next loop or a chain that never reaches its declared
+   tail, either of which a hand-edited renumbering can introduce
+   silently (no compiler error, just a hang the moment AES tries to
+   walk it for real -- exactly the failure class the prior 3-level
+   restructuring attempt is suspected to have hit). Host-testable, no
+   Hatari needed. */
+static wp_bool child_chain_ok(short parent)
+{
+    short head = wp_menu_tree[parent].ob_head;
+    short tail = wp_menu_tree[parent].ob_tail;
+    short cur = head;
+    int steps;
+
+    if (head == -1 && tail == -1) return WP_TRUE; /* no children, fine */
+    if (head == -1 || tail == -1) return WP_FALSE; /* one set, not both */
+
+    for (steps = 0; steps <= WP_MENU_OBJ_COUNT; steps++) {
+        if (cur == tail) return WP_TRUE;
+        if (cur < 0 || cur >= WP_MENU_OBJ_COUNT) return WP_FALSE; /* out of bounds */
+        cur = wp_menu_tree[cur].ob_next;
+    }
+    return WP_FALSE; /* budget exhausted -- cycle or chain never reaches tail */
 }
 
 wp_bool wp_menu_tree_selfcheck(void)
 {
+    if (!child_chain_ok(WP_MENU_OBJ_ROOT)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_DESK_TITLE)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_FILE_TITLE)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_EDIT_TITLE)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_TOOLS_TITLE)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_FILE_BOX)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_EDIT_BOX)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_TOOLS_BOX)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_FORMAT_TITLE)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_FORMAT_BOX)) return WP_FALSE;
+
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_next != -1) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_head != WP_MENU_OBJ_DESK_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_tail != WP_MENU_OBJ_TOOLS_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_type != G_IBOX) return WP_FALSE;
 
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_next != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_next != WP_MENU_OBJ_FORMAT_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_head != -1) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_tail != -1) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_type != G_TITLE) return WP_FALSE;
@@ -121,6 +201,36 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_head != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_tail != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_type != G_TITLE) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_next != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_head != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_tail != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_type != G_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_spec.free_string != g_text_format) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_next != WP_MENU_OBJ_FORMAT_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_head != WP_MENU_OBJ_FORMAT_BOLD) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_tail != WP_MENU_OBJ_FORMAT_ALIGN_RIGHT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_type != G_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOLD].ob_next != WP_MENU_OBJ_FORMAT_ITALIC) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOLD].ob_spec.free_string != g_text_bold) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ITALIC].ob_next != WP_MENU_OBJ_FORMAT_UNDERLINE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ITALIC].ob_spec.free_string != g_text_italic) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_UNDERLINE].ob_next != WP_MENU_OBJ_FORMAT_SIZE_UP) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_UNDERLINE].ob_spec.free_string != g_text_underline) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_UP].ob_next != WP_MENU_OBJ_FORMAT_SIZE_DOWN) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_UP].ob_spec.free_string != g_text_size_up) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_DOWN].ob_next != WP_MENU_OBJ_FORMAT_ALIGN_LEFT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_DOWN].ob_spec.free_string != g_text_size_down) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_LEFT].ob_next != WP_MENU_OBJ_FORMAT_ALIGN_CENTER) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_LEFT].ob_spec.free_string != g_text_align_left) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_CENTER].ob_next != WP_MENU_OBJ_FORMAT_ALIGN_RIGHT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_CENTER].ob_spec.free_string != g_text_align_center) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_next != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_spec.free_string != g_text_align_right) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_next != WP_MENU_OBJ_TOOLS_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_head != WP_MENU_OBJ_TOOLS_SPELLCHECK) return WP_FALSE;
@@ -183,16 +293,71 @@ wp_bool wp_menu_tree_selfcheck(void)
    loads a document -- keeps working unchanged: g_doc_loaded stays
    WP_FALSE there, and paint_document() is a no-op in that case. */
 static wp_document g_doc;
-static wp_bool g_doc_loaded = WP_FALSE;
 static wp_undo_journal g_journal;
-static wp_pos g_cursor;
 static i32 g_content_width_twips = 0;
 
+/* M8.5: the vi-mode state machine (engine/vimode.c) and the rest of the
+   shared cross-platform app state (platform/common/app_ctx.h) -- see
+   wp_app_ctx_init's call in app_shell_run(). g_ctx.vi.cursor is now the
+   SINGLE source of truth for "where editing currently applies" (it
+   replaces the pre-M8.5 g_cursor global), g_ctx.doc_loaded replaces
+   g_doc_loaded, and g_ctx.style_flags/current_size_twips replace
+   g_current_style_flags/g_current_size_twips below -- all four were
+   plain file-scope statics before M8.5's action registry (platform/
+   common/actions.c) needed a single struct its portable handlers could
+   take a pointer to. g_doc/g_journal themselves stay as direct globals
+   (g_ctx.doc/g_ctx.journal just point at them) rather than being folded
+   in too -- every pre-existing call site in this file already spells
+   them `&g_doc`/`&g_journal`, and there is no real duplication to remove
+   by renaming those specifically (unlike cursor/style/size, which the
+   registry and vi-mode both need to be ONE thing, not two kept in sync
+   by hand). Kept as file-scope statics rather than threaded through
+   wp_dispatch_message's signature so the smoke test
+   (host/tools/atari_smoke.c) -- which never loads a document -- keeps
+   working unchanged: g_ctx.doc_loaded stays WP_FALSE there, and
+   paint_document() is a no-op in that case. */
+static wp_app_ctx g_ctx;
+
+/* M8.5 Phase 10: the help system. g_help_doc is parsed ONCE at startup
+   from the generated g_help_source_retrowp array (build/generated/
+   help_retrowp.h, produced from docs/help/retrowp.help by host/tools/
+   gen_help_header.c -- see docs/help.md) -- help content ships compiled
+   into RETROWP.PRG, no runtime file dependency the way the optional
+   spell dictionary has. g_help_active is a whole separate UI mode from
+   normal editing: while it's set, wp_dispatch_key routes keys to
+   wp_help_view_feed_key instead of vi-mode, and redraw_window paints
+   the help pager instead of the document -- see paint_help() and the
+   g_help_active checks in both. Reachable via F1 only this pass (no
+   Help menu item -- see docs/atari-platform.md's "Atari retrofit"
+   section for why this project treats wp_menu_tree[]'s OBJECT array as
+   something to avoid restructuring without a strong reason). */
+static wp_help_doc g_help_doc;
+static wp_bool g_help_doc_loaded = WP_FALSE;
+static wp_help_view_state g_help_view;
+static wp_bool g_help_active = WP_FALSE;
+
+/* "Current input style" -- the classic toggle-before-typing model (Ctrl+B,
+   then subsequently typed characters come out bold) rather than restyling
+   a selection, since this app still has no selection-scoped restyling for
+   plain typing (Visual mode's d/y/c operate on selections; Format toggles
+   still only ever affect what's typed NEXT). Reset to the document's own
+   default on every load/replace (see replace_document) so a freshly
+   opened file doesn't inherit whatever was toggled on for the previous
+   one. Lives in g_ctx.style_flags / g_ctx.current_size_twips now (see
+   above) -- this comment stays with the concept, not a specific global. */
+
+/* Fixed cycle Font Size steps through, in twips (1 point = 20 twips):
+   8/10/12/14/18/24/36pt -- the same kind of small fixed point-size list
+   1980s word processors offered rather than a free-entry field (no
+   numeric-entry dialog exists in this app). */
+static const i32 g_font_sizes_twips[] = { 160, 200, 240, 280, 360, 480, 720 };
+#define WP_FONT_SIZE_COUNT (sizeof(g_font_sizes_twips) / sizeof(g_font_sizes_twips[0]))
+
 static const char g_sample_text[] =
-    "This is the Portable Word Processor Engine running on a real "
-    "Atari ST under Hatari. Word wrap and on-screen rendering are "
-    "driven entirely through the platform.h VDI metrics seam -- the "
-    "engine itself has never heard of GEM.\n";
+    "This is RetroWP, the portable word processor engine, running on "
+    "a real Atari ST under Hatari. Word wrap and on-screen rendering "
+    "are driven entirely through the platform.h VDI metrics seam -- "
+    "the engine itself has never heard of GEM.\n";
 
 static void relayout_document(i32 content_width_twips)
 {
@@ -217,16 +382,41 @@ static void relayout_document(i32 content_width_twips)
    path that doesn't fit set_document_from_text's void-return shape). */
 static void replace_document(wp_document *new_doc, i32 content_width_twips)
 {
-    if (g_doc_loaded) {
+    const wp_char_style *def_cs;
+    const wp_para_style *def_ps;
+
+    if (g_ctx.doc_loaded) {
         wp_undo_journal_free(&g_journal);
         wp_document_free(&g_doc);
     }
 
     g_doc = *new_doc;
-    g_doc_loaded = WP_TRUE;
+    g_ctx.doc_loaded = WP_TRUE;
     wp_undo_journal_init(&g_journal);
     relayout_document(content_width_twips);
-    g_cursor = wp_pos_doc_end(&g_doc);
+
+    /* M8.5: a whole-document swap invalidates any Insert/Visual/pending-
+       operator state vi-mode was holding for the PREVIOUS document (its
+       cursor, register contents, etc. -- none of it means anything once
+       the tree underneath has been freed and replaced), so vi-mode is
+       reset the same way the undo journal above already is, not just
+       resynced. wp_vimode_init's own cursor default (doc start) is
+       overridden right after to match this app's existing "cursor sits
+       at the end of a freshly loaded document" behavior. Safe to call
+       unconditionally: wp_app_ctx_init (app_shell_run) already ran
+       wp_vimode_init once before the first possible replace_document
+       call, so vi.register_bytes is always a valid mem_free target
+       here, NULL or not. */
+    wp_vimode_free(&g_ctx.vi);
+    wp_vimode_init(&g_ctx.vi, &g_doc, &g_journal);
+    g_ctx.vi.cursor = wp_pos_doc_end(&g_doc);
+
+    def_cs = wp_document_cstyle_get(&g_doc, g_doc.default_cstyle);
+    g_ctx.style_flags = def_cs->flags;
+    g_ctx.current_size_twips = def_cs->size_twips;
+
+    def_ps = wp_document_pstyle_get(&g_doc, g_doc.default_pstyle);
+    g_ctx.align = def_ps->align;
 }
 
 static void set_document_from_text(const u8 *utf8, u32 len, i32 content_width_twips)
@@ -252,6 +442,27 @@ static void load_sample_document(i32 content_width_twips)
    stops the paragraph's remaining lines -- there is no scrolling yet
    (T4.3+), so anything past the first screenful is simply not drawn,
    not wrapped around or overwritten. */
+/* The pure arithmetic behind paint_document's per-line alignment
+   offset, pulled out into its own function so wp_atari_format_selfcheck
+   can verify it against hand-computed values without needing a real
+   window/VDI handle -- same reasoning as every other selfcheck's
+   "hand-computed" bar (see wp_atari_layout_selfcheck). Returns a TWIPS
+   offset to add to the line's normal (left-aligned) x origin; callers
+   convert to pixels themselves since the twips<->px ratio is a metrics
+   concern, not an alignment one. LEFT (and any unrecognized value)
+   always returns 0. Never negative -- a line wider than the column
+   (shouldn't happen; relayout guarantees lines fit) just draws at the
+   left edge rather than off the window's left side. */
+static i32 atari_align_offset_twips(u8 align, i32 content_width_twips, i32 line_width_twips)
+{
+    i32 extra_twips = content_width_twips - line_width_twips;
+
+    if (extra_twips <= 0) return 0;
+    if (align == WP_ALIGN_CENTER) return extra_twips / 2;
+    if (align == WP_ALIGN_RIGHT) return extra_twips;
+    return 0;
+}
+
 static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 {
     atari_gc gc;
@@ -262,7 +473,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     wp_bool have_font = WP_FALSE;
     i32 ascent_px = 0;
 
-    if (!g_doc_loaded) return;
+    if (!g_ctx.doc_loaded) return;
 
     gc.vdi = vdi;
     gc.window_handle = window_handle;
@@ -273,6 +484,8 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
         for (pi = 0; pi < sec->para_count; pi++) {
             wp_paragraph *para = wp_section_paragraph_get(sec, pi);
             wp_paragraph_layout *layout = (wp_paragraph_layout *)para->layout;
+            const wp_para_style *pstyle = wp_document_pstyle_get(&g_doc, para->style);
+            u8 align = (pstyle != NULL) ? pstyle->align : WP_ALIGN_LEFT;
 
             if (layout == NULL) continue;
 
@@ -282,9 +495,21 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                 u32 buf_len = 0;
                 u32 r;
                 i32 line_height_px;
+                i32 x_px = area.g_x;
                 wp_cstyle line_style = g_doc.default_cstyle;
 
                 if (y_px > area.g_y + area.g_h) break;
+
+                /* Alignment never changes where lines BREAK (both engine
+                   relayout and this paint pass use the same
+                   g_content_width_twips column), only where each already-
+                   broken line starts drawing -- a pure paint-time x
+                   offset, no engine/layout change needed. Justify is
+                   explicitly not implemented (would need per-word draw
+                   calls with distributed extra spacing, not just one
+                   offset -- documented gap, see docs/atari-platform.md). */
+                x_px += atari_twips_to_px_x(
+                    atari_align_offset_twips(align, g_content_width_twips, line->width_twips));
 
                 for (r = line->start_run; r <= line->end_run && r < para->run_count; r++) {
                     wp_run *run = wp_paragraph_run_get(para, (u16)r);
@@ -315,7 +540,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 
                 line_height_px = atari_twips_to_px_y(line->height_twips);
                 if (buf_len > 0 && font != NULL) {
-                    plat_draw_text((plat_gc *)&gc, font, area.g_x, y_px + ascent_px,
+                    plat_draw_text((plat_gc *)&gc, font, x_px, y_px + ascent_px,
                                     (const u8 *)buf, buf_len, 0, 0, 0);
                 }
                 y_px += line_height_px;
@@ -326,53 +551,130 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     if (font != NULL) plat_font_close(font);
 }
 
-/* Inserting is always a point op regardless of where the cursor sits
-   (docs/editing.md), so typing never needs special-casing. */
-static void do_insert_char(u8 ch)
-{
-    wp_pos out_pos;
+/* M8.5: actual text insertion/deletion now happens inside vi-mode's own
+   Insert-mode handling (engine/src/vimode.c's feed_insert, driven by
+   wp_dispatch_key below) rather than through app-level do_insert_char/
+   do_backspace functions -- those pre-vimode single-paragraph-editor
+   functions are gone; wp_edit_insert_text/wp_edit_delete_range are still
+   the same primitives, just called from the portable engine layer now.
 
-    if (!g_doc_loaded) return;
-    if (wp_edit_insert_text(&g_doc, &g_journal, g_cursor, &ch, 1, &out_pos) == WP_OK) {
-        g_cursor = out_pos;
-        relayout_document(g_content_width_twips);
+   What vi-mode's Insert mode does NOT know about is this app's "current
+   input style" toggle state (g_ctx.style_flags/current_size_twips are
+   platform/common concepts vimode.c has no access to, and rightly so --
+   see CLAUDE.md's engine-has-zero-platform-calls rule, which extends to
+   not depending on platform/common either). wp_edit_insert_text's own
+   style-inheritance rule (docs/editing.md) always wins first when vi-
+   mode inserts a character -- there's no way to hand it an override
+   style directly. So this runs AFTER wp_dispatch_key sees a successful
+   Insert-mode keystroke and overwrites the just-created run's style
+   (identified via insert_span_at_pos's own documented contract: pos.run
+   is ALWAYS the newly-inserted run's index, in every case -- empty
+   paragraph, start, run boundary, or a mid-run split) with whatever the
+   current toggle state says it should be. find_or_add means repeated
+   typing with the same toggle state keeps reusing one cstyle handle
+   rather than growing the table per keystroke. */
+static void apply_current_style_to_run_at(wp_pos pos)
+{
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_run *run;
+    const wp_char_style *base;
+    wp_char_style style;
+    wp_cstyle handle;
+
+    sec = wp_document_section_get(&g_doc, pos.section);
+    para = wp_section_paragraph_get(sec, pos.paragraph);
+    run = wp_paragraph_run_get(para, (u16)pos.run);
+    if (run == NULL) return;
+
+    base = wp_document_cstyle_get(&g_doc, g_doc.default_cstyle);
+    style = *base;
+    style.flags = g_ctx.style_flags;
+    style.size_twips = g_ctx.current_size_twips;
+
+    if (wp_document_cstyle_find_or_add(&g_doc, &style, &handle) == WP_OK) {
+        wp_run_cstyle_set(run, handle);
     }
 }
 
-/* Deleting the character before the cursor is always a SINGLE-run
-   delete by construction: wp_pos_prev() lands either at an earlier
-   offset within the cursor's own run, or (crossing a run boundary) at
-   the end of the PREVIOUS run -- either way the deleted codepoint is
-   entirely inside prev's run, matching wp_edit_delete_range's single-
-   run-only contract (docs/editing.md) without this code needing to
-   loop across runs itself. */
-static void do_backspace(void)
+/* Format menu actions (Font Size +/-, Alignment Left/Center/Right).
+   Neither touches document content directly -- each only changes "what
+   happens to text typed/laid out from here on" (size) or restyles the
+   paragraph at the cursor (alignment), so neither needs an undo-journal
+   entry (consistent with this app's existing scope: undo covers content
+   edits, not view/formatting state -- see docs/editing.md). A repaint is
+   the caller's job (matches every other action in this file).
+
+   M8.5: Bold/Italic/Underline moved to platform/common/actions.c's
+   registry (act_format_bold/italic/underline) -- both the Format menu
+   items and the Ctrl+B/I/U keyboard shortcuts now call
+   wp_action_find(...)->handler(&g_ctx) instead of a local
+   toggle_style_flag, so there is exactly one place, not two, that knows
+   "toggling a style flag is ctx->style_flags ^= flag". Font Size and
+   Alignment stay as these local direct-set functions for the MENU path
+   specifically (Size +/-, Align Left/Center/Right) -- the registry's own
+   WP_ACT_FORMAT_SIZE/FORMAT_ALIGN actions open a real plat_dialog_choice
+   picker instead (see actions.c), a real, deliberate UX difference from
+   "set directly" that this pass intentionally does NOT also carry over
+   to the existing five Format menu items: doing so would mean removing
+   items from wp_menu_tree's hand-built OBJECT array, exactly the kind
+   of menu-tree index-arithmetic surgery that has twice caused real,
+   silent regressions on other TOS/EmuTOS versions (see
+   app_shell_internal.h's own account, and docs/atari-platform.md) --
+   not worth the risk for a cosmetic menu simplification. The two
+   keyboard shortcuts (Ctrl+]/Ctrl+L) DO get the new dialog-based
+   behavior (see wp_dispatch_key below), since that only changes a
+   dispatch table, not the OBJECT tree. */
+
+static void change_font_size(int delta_steps)
 {
-    wp_pos prev;
-    u32 end_offset;
+    unsigned int i;
 
-    if (!g_doc_loaded) return;
+    if (!g_ctx.doc_loaded) return;
 
-    prev = wp_pos_prev(&g_doc, g_cursor);
-    if (prev.section == g_cursor.section && prev.paragraph == g_cursor.paragraph &&
-        prev.run == g_cursor.run && prev.offset == g_cursor.offset) {
-        return; /* already at document start -- wp_pos_prev clamped */
+    for (i = 0; i < WP_FONT_SIZE_COUNT; i++) {
+        if (g_font_sizes_twips[i] == g_ctx.current_size_twips) {
+            int next = (int)i + delta_steps;
+            if (next < 0) next = 0;
+            if (next >= (int)WP_FONT_SIZE_COUNT) next = (int)WP_FONT_SIZE_COUNT - 1;
+            g_ctx.current_size_twips = g_font_sizes_twips[next];
+            return;
+        }
     }
+    /* Current size isn't one of the fixed steps (e.g. a size set by an
+       imported RTF's own \fs value) -- snap to the nearest step rather
+       than doing nothing. */
+    g_ctx.current_size_twips = g_font_sizes_twips[delta_steps > 0 ? WP_FONT_SIZE_COUNT - 1 : 0];
+}
 
-    if (prev.run == g_cursor.run && prev.paragraph == g_cursor.paragraph &&
-        prev.section == g_cursor.section) {
-        end_offset = g_cursor.offset;
-    } else {
-        wp_section *sec = wp_document_section_get(&g_doc, prev.section);
-        wp_paragraph *para = wp_section_paragraph_get(sec, prev.paragraph);
-        wp_run *run = wp_paragraph_run_get(para, (u16)prev.run);
-        end_offset = run->text.length;
-    }
+/* Applies to the paragraph g_ctx.vi.cursor is currently in -- vi-mode
+   motions move that cursor now (M8.5), but "alignment always applies to
+   the CURRENT paragraph, not a selection" is unchanged from before vi-
+   mode existed (Visual mode's own selection doesn't have an alignment
+   operator -- see docs/vimode.md's "Explicitly Deferred" section).
+   Unlike character style, this doesn't need find_or_add's
+   "seed new text" trick -- it directly restyles the EXISTING paragraph,
+   which is what "align this paragraph" means. Alignment never changes
+   line-break points (same content width either way), so no relayout is
+   needed -- only a repaint, done by the caller, picks it up. */
+static void apply_alignment(u8 align)
+{
+    wp_section *sec;
+    wp_paragraph *para;
+    const wp_para_style *cur;
+    wp_para_style style;
+    wp_pstyle handle;
 
-    if (wp_edit_delete_range(&g_doc, &g_journal, prev.section, prev.paragraph,
-                              (u16)prev.run, prev.offset, end_offset) == WP_OK) {
-        g_cursor = prev;
-        relayout_document(g_content_width_twips);
+    if (!g_ctx.doc_loaded) return;
+
+    sec = wp_document_section_get(&g_doc, g_ctx.vi.cursor.section);
+    para = wp_section_paragraph_get(sec, g_ctx.vi.cursor.paragraph);
+    cur = wp_document_pstyle_get(&g_doc, para->style);
+    style = *cur;
+    style.align = align;
+
+    if (wp_document_pstyle_find_or_add(&g_doc, &style, &handle) == WP_OK) {
+        wp_paragraph_pstyle_set(para, handle);
     }
 }
 
@@ -545,7 +847,7 @@ static void do_odt_pdf_save(const char *fullpath, u8 format_id)
     offload_response resp;
     plat_file *f;
 
-    if (!g_doc_loaded) return;
+    if (!g_ctx.doc_loaded) return;
     if (!require_offload_for_convert()) return;
 
     format_rtf_export(&g_doc, NULL, 0, &rtf_needed);
@@ -635,7 +937,7 @@ static void do_file_save(void)
     u8 *buf;
     wp_bool as_rtf;
 
-    if (!g_doc_loaded) return;
+    if (!g_ctx.doc_loaded) return;
 
     strcpy(path, "C:\\*.*");
     strcpy(fname, "UNTITLED.TXT");
@@ -681,7 +983,7 @@ static void do_edit_copy(void)
     u32 needed;
     u8 *buf;
 
-    if (!g_doc_loaded) return;
+    if (!g_ctx.doc_loaded) return;
 
     format_txt_export(&g_doc, NULL, 0, &needed);
     buf = (u8 *)mem_alloc(needed);
@@ -697,7 +999,7 @@ static void do_edit_cut(void)
 {
     static const char empty_text[] = "\n";
 
-    if (!g_doc_loaded) return;
+    if (!g_ctx.doc_loaded) return;
     do_edit_copy();
     set_document_from_text((const u8 *)empty_text, (u32)strlen(empty_text), g_content_width_twips);
 }
@@ -707,7 +1009,7 @@ static void do_edit_paste(void)
     u8 buf[4096];
     u32 out_len;
 
-    if (!g_doc_loaded) return;
+    if (!g_ctx.doc_loaded) return;
     if (plat_clipboard_get_text(buf, (u32)sizeof(buf), &out_len) != WP_OK) return;
     set_document_from_text(buf, out_len, g_content_width_twips);
 }
@@ -716,7 +1018,7 @@ static void do_edit_paste(void)
    (Cut/Copy/Paste), scoped to "no selection model yet". The dictionary
    is queried from disk, never loaded whole (services/spell/spell.c,
    docs/services/spell.md) -- a user who wants real spell-check on
-   WP.PRG drops a sorted word-list file at this fixed path (see
+   RETROWP.PRG drops a sorted word-list file at this fixed path (see
    docs/atari-platform.md's deployment note; there is no shipped
    dictionary asset, and none is needed for this feature to build/link/
    run -- a missing file is reported through the same form_alert path as
@@ -807,7 +1109,7 @@ static void do_spell_check(void)
     u8 word[SPELL_MAX_WORD_LEN];
     u32 word_len;
 
-    if (!g_doc_loaded) return;
+    if (!g_ctx.doc_loaded) return;
 
     dict = get_spell_dict();
     if (dict == NULL) {
@@ -855,8 +1157,9 @@ static void do_spell_check(void)
    out explicitly -- "no 'Thesaurus' menu action wired to the offload
    link"). Looks up the word immediately BEFORE the cursor, same
    directionality as Backspace, and scoped to the CURRENT RUN only, same
-   boundary do_backspace already has -- there is still no mouse-driven
-   word selection (no selection model at all, per docs/editing.md), and
+   boundary vi-mode's own insert_backspace (engine/src/vimode.c) has --
+   there is still no mouse-driven word selection (no selection model at
+   all outside Visual mode, per docs/editing.md), and
    after typing a word the cursor naturally sits right after it, so this
    matches how the app is actually used today rather than inventing a
    word-under-cursor hit-test this editor has no input path to drive.
@@ -883,15 +1186,15 @@ static wp_bool extract_word_before_cursor(u8 *out_word, u32 *out_word_len)
     const u8 *bytes;
     u32 offset, end, start;
 
-    if (!g_doc_loaded) return WP_FALSE;
-    sec = wp_document_section_get(&g_doc, g_cursor.section);
-    para = wp_section_paragraph_get(sec, g_cursor.paragraph);
-    if (g_cursor.run >= para->run_count) return WP_FALSE;
+    if (!g_ctx.doc_loaded) return WP_FALSE;
+    sec = wp_document_section_get(&g_doc, g_ctx.vi.cursor.section);
+    para = wp_section_paragraph_get(sec, g_ctx.vi.cursor.paragraph);
+    if (g_ctx.vi.cursor.run >= para->run_count) return WP_FALSE;
 
-    run = wp_paragraph_run_get(para, (u16)g_cursor.run);
+    run = wp_paragraph_run_get(para, (u16)g_ctx.vi.cursor.run);
     bytes = wp_strpool_get(&g_doc.strings, run->text);
 
-    offset = g_cursor.offset;
+    offset = g_ctx.vi.cursor.offset;
     if (offset > run->text.length) offset = run->text.length;
 
     end = offset;
@@ -1001,7 +1304,7 @@ static void do_thesaurus(void)
 #define WP_ATARI_GRAMMAR_MAX_ISSUES        16u /* matches gw_common.h's GRAMMAR_MAX_ISSUES */
 #define WP_ATARI_GRAMMAR_DISPLAY_LEN       40 /* dialog-text truncation only -- never touches what gets applied */
 
-/* Concatenates the plain UTF-8 text of the CURRENT paragraph (g_cursor's
+/* Concatenates the plain UTF-8 text of the CURRENT paragraph (g_ctx.vi.cursor's
    section/paragraph, every run in order) into out. Returns WP_FALSE if
    there's no document loaded, the paragraph is empty, or the text
    wouldn't fit in out_cap -- all three are "nothing to check" for the
@@ -1015,9 +1318,9 @@ static wp_bool extract_current_paragraph_text(u8 *out, u32 out_cap, u32 *out_len
     u32 written = 0;
     u16 i;
 
-    if (!g_doc_loaded) return WP_FALSE;
-    sec = wp_document_section_get(&g_doc, g_cursor.section);
-    para = wp_section_paragraph_get(sec, g_cursor.paragraph);
+    if (!g_ctx.doc_loaded) return WP_FALSE;
+    sec = wp_document_section_get(&g_doc, g_ctx.vi.cursor.section);
+    para = wp_section_paragraph_get(sec, g_ctx.vi.cursor.paragraph);
 
     for (i = 0; i < para->run_count; i++) {
         wp_run *run = wp_paragraph_run_get(para, i);
@@ -1056,8 +1359,8 @@ static wp_bool map_paragraph_offset_to_run(u32 start, u32 end, u16 *out_run_inde
     u32 base = 0;
     u16 i;
 
-    sec = wp_document_section_get(&g_doc, g_cursor.section);
-    para = wp_section_paragraph_get(sec, g_cursor.paragraph);
+    sec = wp_document_section_get(&g_doc, g_ctx.vi.cursor.section);
+    para = wp_section_paragraph_get(sec, g_ctx.vi.cursor.paragraph);
 
     for (i = 0; i < para->run_count; i++) {
         wp_run *run = wp_paragraph_run_get(para, i);
@@ -1176,7 +1479,7 @@ static void do_grammar_check(void)
     wp_bool used_offload;
     u32 n, i, j;
 
-    if (!g_doc_loaded) return;
+    if (!g_ctx.doc_loaded) return;
 
     paragraph = (u8 *)mem_alloc(WP_ATARI_GRAMMAR_MAX_PARAGRAPH_LEN);
     if (paragraph == NULL) return;
@@ -1331,13 +1634,13 @@ static void do_grammar_check(void)
                 continue;
             }
 
-            if (wp_edit_delete_range(&g_doc, &g_journal, g_cursor.section, g_cursor.paragraph,
+            if (wp_edit_delete_range(&g_doc, &g_journal, g_ctx.vi.cursor.section, g_ctx.vi.cursor.paragraph,
                                       run_index, run_start, run_end) == WP_OK) {
                 wp_pos insert_pos;
                 wp_pos out_pos;
 
-                insert_pos.section = g_cursor.section;
-                insert_pos.paragraph = g_cursor.paragraph;
+                insert_pos.section = g_ctx.vi.cursor.section;
+                insert_pos.paragraph = g_ctx.vi.cursor.paragraph;
                 insert_pos.run = (u32)run_index;
                 insert_pos.offset = run_start;
 
@@ -1362,7 +1665,7 @@ static void do_grammar_check(void)
     if (used_offload) offload_response_free(&resp);
     mem_free(paragraph);
 
-    /* At least one edit landed somewhere in this paragraph -- g_cursor's
+    /* At least one edit landed somewhere in this paragraph -- g_ctx.vi.cursor's
        old run/offset may now be a stale index into a run array that was
        resized by those edits (run_remove_at/run_insert_at can shift or
        shrink it). Resetting to this paragraph's start is always valid:
@@ -1370,8 +1673,8 @@ static void do_grammar_check(void)
        least one run (insert_span_at_pos's para->run_count == 0 case
        creates one), so run 0 / offset 0 is guaranteed to exist. */
     if (any_applied) {
-        g_cursor.run = 0;
-        g_cursor.offset = 0;
+        g_ctx.vi.cursor.run = 0;
+        g_ctx.vi.cursor.offset = 0;
         relayout_document(g_content_width_twips);
     }
 }
@@ -1412,7 +1715,7 @@ static void do_chat(void)
     char msg[220];
     u32 pos = 0;
 
-    if (!g_doc_loaded) return;
+    if (!g_ctx.doc_loaded) return;
 
     paragraph = (u8 *)mem_alloc(WP_ATARI_CHAT_MAX_PARAGRAPH_LEN);
     if (paragraph == NULL) return;
@@ -1778,21 +2081,21 @@ wp_bool wp_atari_thesaurus_selfcheck(void)
     wp_bool ok = WP_TRUE;
 
     if (format_txt_import((const u8 *)text, (u32)strlen(text), &g_doc) != WP_OK) return WP_FALSE;
-    g_doc_loaded = WP_TRUE;
+    g_ctx.doc_loaded = WP_TRUE;
 
     /* cursor at document end ("hello world|") -> "world" */
-    g_cursor = wp_pos_doc_end(&g_doc);
+    g_ctx.vi.cursor = wp_pos_doc_end(&g_doc);
     if (!extract_word_before_cursor(word, &word_len) || word_len != 5 ||
         memcmp(word, "world", 5) != 0) {
         ok = WP_FALSE;
     }
 
     /* cursor at the very start of the run -> nothing before it at all */
-    g_cursor.offset = 0;
+    g_ctx.vi.cursor.offset = 0;
     if (extract_word_before_cursor(word, &word_len)) ok = WP_FALSE;
 
     /* cursor right after "hello" ("hello| world") -> "hello" */
-    g_cursor.offset = 5;
+    g_ctx.vi.cursor.offset = 5;
     if (!extract_word_before_cursor(word, &word_len) || word_len != 5 ||
         memcmp(word, "hello", 5) != 0) {
         ok = WP_FALSE;
@@ -1800,24 +2103,24 @@ wp_bool wp_atari_thesaurus_selfcheck(void)
 
     /* cursor after the space, before "world" ("hello |world") -- skips
        back over the space to find "hello", the nearest preceding word */
-    g_cursor.offset = 6;
+    g_ctx.vi.cursor.offset = 6;
     if (!extract_word_before_cursor(word, &word_len) || word_len != 5 ||
         memcmp(word, "hello", 5) != 0) {
         ok = WP_FALSE;
     }
 
     wp_document_free(&g_doc);
-    g_doc_loaded = WP_FALSE;
+    g_ctx.doc_loaded = WP_FALSE;
 
     /* a run with no alpha bytes anywhere before the cursor -> no word,
        not just "no word immediately adjacent" */
     if (format_txt_import((const u8 *)blank_text, (u32)strlen(blank_text), &g_doc) != WP_OK) return WP_FALSE;
-    g_doc_loaded = WP_TRUE;
-    g_cursor = wp_pos_doc_end(&g_doc);
+    g_ctx.doc_loaded = WP_TRUE;
+    g_ctx.vi.cursor = wp_pos_doc_end(&g_doc);
     if (extract_word_before_cursor(word, &word_len)) ok = WP_FALSE;
 
     wp_document_free(&g_doc);
-    g_doc_loaded = WP_FALSE;
+    g_ctx.doc_loaded = WP_FALSE;
 
     return ok;
 }
@@ -1837,7 +2140,7 @@ wp_bool wp_atari_grammar_check_selfcheck(void)
     wp_atari_grammar_issue issue;
 
     if (wp_document_init(&g_doc) != WP_OK) return WP_FALSE;
-    g_doc_loaded = WP_TRUE;
+    g_ctx.doc_loaded = WP_TRUE;
 
     wp_document_section_add(&g_doc, &sec_idx);
     sec = wp_document_section_get(&g_doc, sec_idx);
@@ -1854,10 +2157,10 @@ wp_bool wp_atari_grammar_check_selfcheck(void)
     wp_strpool_append(&g_doc.strings, (const u8 *)"bold", 4, &span2);
     wp_paragraph_run_add(para, span2, g_doc.default_cstyle, &run_idx);
 
-    g_cursor.section = sec_idx;
-    g_cursor.paragraph = para_idx;
-    g_cursor.run = 0;
-    g_cursor.offset = 0;
+    g_ctx.vi.cursor.section = sec_idx;
+    g_ctx.vi.cursor.paragraph = para_idx;
+    g_ctx.vi.cursor.run = 0;
+    g_ctx.vi.cursor.offset = 0;
 
     /* extract_current_paragraph_text concatenates both runs regardless
        of the style boundary between them. */
@@ -1933,7 +2236,7 @@ wp_bool wp_atari_grammar_check_selfcheck(void)
     }
 
     wp_document_free(&g_doc);
-    g_doc_loaded = WP_FALSE;
+    g_ctx.doc_loaded = WP_FALSE;
 
     return ok;
 }
@@ -1954,12 +2257,173 @@ wp_bool wp_atari_chat_selfcheck(void)
     return ok;
 }
 
-static void redraw_window(short window_handle, VdiHdl vdi)
+/* M8.5: a small, fixed-size system font used ONLY for the status line's
+   own height/drawing -- deliberately independent of the document's
+   current cstyle (which changes per run, per toggle) so the reserved
+   strip's height never shifts underneath the document as the user
+   types. 8pt (160 twips), the smallest step in g_font_sizes_twips. */
+#define WP_ATARI_STATUSLINE_SIZE_TWIPS 160
+
+/* Shared by the vi-mode status bar and the help hint bar/body text
+   below -- both need "how tall is one line of some font, in pixels"
+   from real plat_font_metrics_get, never a hardcoded guess (matters
+   concretely given ST Low's own documented "notoriously tight" 40-
+   column/200-row budget). */
+static i32 font_line_height_px(i32 size_twips)
 {
-    GRECT r, work;
+    plat_font *font;
+    plat_font_metrics fm;
+    i32 h_px;
+
+    if (plat_font_open((const u8 *)"", 0, size_twips, 0, &font) != WP_OK) return 0;
+    plat_font_metrics_get(font, &fm);
+    h_px = atari_twips_to_px_y(fm.ascent + fm.descent + fm.leading);
+    plat_font_close(font);
+    return h_px;
+}
+
+static i32 statusline_height_px(void)
+{
+    return font_line_height_px(WP_ATARI_STATUSLINE_SIZE_TWIPS);
+}
+
+/* Paints the reserved bottom strip showing vi-mode's current mode (and,
+   in Command-line mode, the ':'/'/' buffer being typed) -- see
+   platform/common/statusline.h. Always repaints in full (the strip is
+   small and its content can change on every keystroke, unlike the
+   document body's damaged-rectangle tracking above) and sets its own
+   clip rather than reusing the caller's, since it's called once after
+   redraw_window's own per-rectangle document loop has already finished
+   and reset clipping. A no-op if no document is loaded (nothing to show
+   a vi-mode state for) or the window is too short to fit the bar. */
+static void paint_status_line(short window_handle, VdiHdl vdi, GRECT full_work, i32 bar_h_px)
+{
+    atari_gc gc;
+    plat_font *font;
+    wp_vi_status_view view;
+    char mode_buf[40];
+    short pxy[4];
+
+    if (!g_ctx.doc_loaded || bar_h_px <= 0 || bar_h_px > full_work.g_h) return;
+
+    gc.vdi = vdi;
+    gc.window_handle = window_handle;
+
+    pxy[0] = full_work.g_x;
+    pxy[1] = (short)(full_work.g_y + full_work.g_h - bar_h_px);
+    pxy[2] = (short)(full_work.g_x + full_work.g_w - 1);
+    pxy[3] = (short)(full_work.g_y + full_work.g_h - 1);
+    vs_clip(vdi, 1, pxy);
+
+    if (plat_font_open((const u8 *)"", 0, WP_ATARI_STATUSLINE_SIZE_TWIPS, 0, &font) == WP_OK) {
+        wp_vimode_get_status_text(&g_ctx.vi, mode_buf, (u32)sizeof(mode_buf));
+        view.mode_label_utf8 = (const u8 *)mode_buf;
+        view.mode_label_len = (u32)strlen(mode_buf);
+        /* wp_vimode_get_status_text already folds the Command-line
+           buffer into its one composed string -- pending_count has no
+           public accessor (vi.count_pending is readable directly, since
+           wp_vimode_state is a transparent struct, but showing it
+           without the matching operator/prefix context it's paired with
+           would be more confusing than showing nothing; a documented,
+           minor gap, not fixed here). */
+        view.pending_count = 0;
+        view.pending_cmd_utf8 = NULL;
+        view.pending_cmd_len = 0;
+
+        wp_statusline_paint((plat_gc *)&gc, font, (i32)pxy[0], (i32)pxy[1],
+                             (i32)(pxy[2] - pxy[0] + 1), bar_h_px, &view);
+        plat_font_close(font);
+    }
+
+    vs_clip(vdi, 0, pxy);
+}
+
+/* 10pt -- comfortably readable for help prose, smaller than the
+   document's own 12pt default so more of it fits on ST Low's tight
+   40-column/200-row screen. */
+#define WP_ATARI_HELP_BODY_SIZE_TWIPS 200
+
+/* Paints the help pager full-screen (replacing the document body and
+   the vi-mode status bar entirely while g_help_active is set -- see
+   wp_dispatch_key/redraw_window) plus a small fixed hint bar along the
+   bottom, reusing wp_statusline_paint for that hint the same way the
+   vi-mode status bar does: platform/common/statusline.c is deliberately
+   generic ("usable by anything that wants a labeled status strip, not
+   hard-wired to vi-mode specifically", per its own header comment), and
+   a static hint string is exactly that. */
+static void paint_help(short window_handle, VdiHdl vdi)
+{
+    atari_gc gc;
+    GRECT work;
+    plat_font *body_font;
+    i32 hint_bar_h_px, body_line_h_px, body_h_px;
     short pxy[4];
 
     wind_get_grect(window_handle, WF_WORKXYWH, &work);
+    gc.vdi = vdi;
+    gc.window_handle = window_handle;
+
+    pxy[0] = work.g_x;
+    pxy[1] = work.g_y;
+    pxy[2] = (short)(work.g_x + work.g_w - 1);
+    pxy[3] = (short)(work.g_y + work.g_h - 1);
+    vs_clip(vdi, 1, pxy);
+    vsf_interior(vdi, FIS_SOLID);
+    vsf_color(vdi, G_WHITE);
+    v_bar(vdi, pxy);
+    vs_clip(vdi, 0, pxy);
+
+    hint_bar_h_px = statusline_height_px();
+    if (hint_bar_h_px > work.g_h) hint_bar_h_px = 0;
+    body_line_h_px = font_line_height_px(WP_ATARI_HELP_BODY_SIZE_TWIPS);
+    body_h_px = work.g_h - hint_bar_h_px;
+    if (body_h_px < 0) body_h_px = 0;
+
+    if (plat_font_open((const u8 *)"", 0, WP_ATARI_HELP_BODY_SIZE_TWIPS, 0, &body_font) == WP_OK) {
+        wp_help_view_paint((plat_gc *)&gc, body_font, work.g_x, work.g_y, work.g_w, body_h_px,
+                            atari_px_to_twips_x((i32)work.g_w), body_line_h_px, &g_help_view);
+        plat_font_close(body_font);
+    }
+
+    if (hint_bar_h_px > 0) {
+        plat_font *hint_font;
+        wp_vi_status_view view;
+        static const u8 hint[] = "HELP -- j/k select, Enter follow, Backspace back, Esc/q close";
+
+        pxy[1] = (short)(work.g_y + work.g_h - hint_bar_h_px);
+        vs_clip(vdi, 1, pxy);
+        if (plat_font_open((const u8 *)"", 0, WP_ATARI_STATUSLINE_SIZE_TWIPS, 0, &hint_font) == WP_OK) {
+            view.mode_label_utf8 = hint;
+            view.mode_label_len = (u32)(sizeof(hint) - 1);
+            view.pending_count = 0;
+            view.pending_cmd_utf8 = NULL;
+            view.pending_cmd_len = 0;
+            wp_statusline_paint((plat_gc *)&gc, hint_font, (i32)pxy[0], (i32)pxy[1],
+                                 (i32)work.g_w, hint_bar_h_px, &view);
+            plat_font_close(hint_font);
+        }
+        vs_clip(vdi, 0, pxy);
+    }
+}
+
+static void redraw_window(short window_handle, VdiHdl vdi)
+{
+    GRECT r, work, doc_area;
+    short pxy[4];
+    i32 bar_h_px;
+
+    if (g_help_active) {
+        paint_help(window_handle, vdi);
+        return;
+    }
+
+    wind_get_grect(window_handle, WF_WORKXYWH, &work);
+
+    bar_h_px = statusline_height_px();
+    if (bar_h_px > work.g_h) bar_h_px = 0; /* degenerate/tiny window -- skip the bar rather
+                                               than hand paint_document a negative height */
+    doc_area = work;
+    doc_area.g_h = (short)(work.g_h - bar_h_px);
 
     wind_get_grect(window_handle, WF_FIRSTXYWH, &r);
     while (r.g_w > 0 && r.g_h > 0) {
@@ -1971,28 +2435,326 @@ static void redraw_window(short window_handle, VdiHdl vdi)
         vsf_interior(vdi, FIS_SOLID);
         vsf_color(vdi, G_WHITE);
         v_bar(vdi, pxy);
-        paint_document(window_handle, vdi, work);
+        paint_document(window_handle, vdi, doc_area);
         wind_get_grect(window_handle, WF_NEXTXYWH, &r);
     }
     vs_clip(vdi, 0, pxy);
+
+    paint_status_line(window_handle, vdi, work, bar_h_px);
 }
 
-void wp_dispatch_key(short window_handle, VdiHdl vdi, short key)
+/* Translates one AES key into a portable wp_key_event (M8.5) --
+   evnt_multi's Key output packs the IKBD scan code in the high byte and
+   the ASCII code (0 if the key has none) in the low byte; verified
+   against ~/Documents/Atari's Atari Compendium (Appendix F, IKBD Scan
+   Codes), not just recalled from memory, per this project's own "verify
+   against a real/authoritative source" discipline. Scan code is
+   consulted FIRST for the handful of keys that need a dedicated
+   wp_special_key (Escape, Enter -- main and numeric-keypad, Tab,
+   Backspace, Delete, the four arrows, Home, F1-F10): those all return
+   early below, before ASCII is even inspected, which is what correctly
+   tells apart the physical Escape key (scan 0x01, ascii 0x1B) from
+   Ctrl+[ (scan 0x1A, ALSO ascii 0x1B -- same ASCII control code, real
+   physically different key). Anything else falls through to the ASCII
+   byte: 0 means an unmapped special key this app has no use for (Help/
+   Undo/Insert/numpad/mouse-equivalent keys -- a real, honest gap, not a
+   crash), 0x01-0x1F means a Ctrl+<letter> chord (decoded the same way
+   host/tests/test_vimode.c's own feed_keys script helper already does,
+   e.g. 0x02 => {codepoint:'b', mods:CTRL}, i.e. Ctrl+B), anything else
+   is a plain printable codepoint. The ST keyboard has no dedicated Page
+   Up/Down or End key -- WP_KEY_PAGE_UP/PAGE_DOWN/END are simply never
+   produced here, matching the Compendium's own table (no such rows
+   exist), not an oversight. */
+static wp_key_event atari_translate_key(short key)
 {
     u8 ascii = (u8)(key & 0xFF);
+    u8 scan  = (u8)((key >> 8) & 0xFF);
+    wp_key_event ev;
 
-    if (!g_doc_loaded) return;
+    ev.codepoint = 0;
+    ev.special = (u16)WP_KEY_NONE;
+    ev.mods = 0;
+    ev._pad = 0;
 
-    if (ascii == 0x08) {
-        do_backspace();
-    } else if (ascii >= 0x20 && ascii < 0x7F) {
-        do_insert_char(ascii);
-    } else {
-        return; /* Enter, arrows, function keys, etc. -- no-op; see
-                    app_shell_internal.h for why Enter isn't handled */
+    switch (scan) {
+    case 0x01: ev.special = (u16)WP_KEY_ESCAPE; return ev;
+    case 0x1C: case 0x72: ev.special = (u16)WP_KEY_ENTER; return ev; /* main + numpad Enter */
+    case 0x0F: ev.special = (u16)WP_KEY_TAB; return ev;
+    case 0x0E: ev.special = (u16)WP_KEY_BACKSPACE; return ev;
+    case 0x53: ev.special = (u16)WP_KEY_DELETE; return ev;
+    case 0x48: ev.special = (u16)WP_KEY_UP; return ev;
+    case 0x50: ev.special = (u16)WP_KEY_DOWN; return ev;
+    case 0x4B: ev.special = (u16)WP_KEY_LEFT; return ev;
+    case 0x4D: ev.special = (u16)WP_KEY_RIGHT; return ev;
+    case 0x47: ev.special = (u16)WP_KEY_HOME; return ev;
+    default: break;
+    }
+    if (scan >= 0x3B && scan <= 0x44) {
+        ev.special = (u16)(WP_KEY_F1 + (scan - 0x3B));
+        return ev;
     }
 
+    if (ascii == 0) return ev; /* unmapped special key -- WP_KEY_NONE, harmlessly ignored */
+    if (ascii < 0x20) {
+        ev.codepoint = (u32)(ascii + ('a' - 1));
+        ev.mods = (u8)WP_MOD_CTRL;
+        return ev;
+    }
+    ev.codepoint = (u32)ascii;
+    return ev;
+}
+
+/* M8.5: proves atari_translate_key's scan-code table against real IKBD
+   (scan<<8 | ascii) values taken directly from ~/Documents/Atari's Atari
+   Compendium (Appendix F), the same source atari_translate_key's own
+   comment cites -- not hand-waved from memory. Exists because this
+   function cannot be reached by any host test (host has no AES/IKBD),
+   and because a real interactive verification attempt (RETROWP.PRG
+   under headless Hatari, driven by synthetic xdotool key events into
+   the emulator's SDL window) did not reliably demonstrate a visible
+   keystroke end-to-end in this environment -- consistent with, and
+   reinforcing, the xdotool-fidelity gap docs/atari-platform.md's T4.3
+   section already documents for this exact Hatari/SDL/X11 stack. Same
+   boundary every other wp_atari_*_selfcheck in this file already
+   respects: no blocking call, no real event loop, just the pure
+   translation function against hand-verified expected values.
+
+   The Ctrl+[ vs Escape row is the one case that actually EXERCISES the
+   scan-code-first design decision (see atari_translate_key's own
+   comment): both produce ASCII 0x1B, and only the scan code (0x01 vs
+   0x1A) tells them apart -- a table that only ever inspected the ASCII
+   byte, like the pre-M8.5 wp_dispatch_key did, could not distinguish
+   them at all. */
+wp_bool wp_atari_key_translate_selfcheck(void)
+{
+    static const struct {
+        short key;          /* (scan << 8) | ascii, as evnt_multi returns it */
+        u32   codepoint;
+        u16   special;
+        u8    mods;
+    } cases[] = {
+        { (short)((0x01 << 8) | 0x1B), 0, (u16)WP_KEY_ESCAPE, 0 },
+        { (short)((0x1C << 8) | 0x0D), 0, (u16)WP_KEY_ENTER, 0 },
+        { (short)((0x72 << 8) | 0x0D), 0, (u16)WP_KEY_ENTER, 0 }, /* numpad Enter */
+        { (short)((0x0F << 8) | 0x09), 0, (u16)WP_KEY_TAB, 0 },
+        { (short)((0x0E << 8) | 0x08), 0, (u16)WP_KEY_BACKSPACE, 0 },
+        { (short)((0x53 << 8) | 0x7F), 0, (u16)WP_KEY_DELETE, 0 },
+        { (short)((0x48 << 8) | 0x00), 0, (u16)WP_KEY_UP, 0 },
+        { (short)((0x50 << 8) | 0x00), 0, (u16)WP_KEY_DOWN, 0 },
+        { (short)((0x4B << 8) | 0x00), 0, (u16)WP_KEY_LEFT, 0 },
+        { (short)((0x4D << 8) | 0x00), 0, (u16)WP_KEY_RIGHT, 0 },
+        { (short)((0x47 << 8) | 0x00), 0, (u16)WP_KEY_HOME, 0 },
+        { (short)((0x3B << 8) | 0x00), 0, (u16)WP_KEY_F1, 0 },
+        { (short)((0x44 << 8) | 0x00), 0, (u16)WP_KEY_F10, 0 },
+        { (short)((0x62 << 8) | 0x00), 0, (u16)WP_KEY_NONE, 0 },  /* HELP -- real, unmapped, harmless */
+        { (short)((0x1E << 8) | 0x61), 'a', (u16)WP_KEY_NONE, 0 },        /* plain 'a' */
+        { (short)((0x39 << 8) | 0x20), 0x20, (u16)WP_KEY_NONE, 0 },       /* Space -- printable-range boundary */
+        { (short)((0x1E << 8) | 0x01), 'a', (u16)WP_KEY_NONE, (u8)WP_MOD_CTRL }, /* Ctrl+A */
+        { (short)((0x30 << 8) | 0x02), 'b', (u16)WP_KEY_NONE, (u8)WP_MOD_CTRL }, /* Ctrl+B -- Bold shortcut */
+        { (short)((0x1A << 8) | 0x1B), '{', (u16)WP_KEY_NONE, (u8)WP_MOD_CTRL }  /* Ctrl+[ -- NOT Escape, despite matching ASCII */
+    };
+    u32 i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        wp_key_event ev = atari_translate_key(cases[i].key);
+        if (ev.codepoint != cases[i].codepoint) return WP_FALSE;
+        if (ev.special != cases[i].special) return WP_FALSE;
+        if (ev.mods != cases[i].mods) return WP_FALSE;
+    }
+    return WP_TRUE;
+}
+
+/* M8.5 Phase 10: proves the help system's non-blocking pieces against
+   the REAL compiled-in help content and REAL Atari VDI font metrics,
+   not just host/tests' synthetic fixtures and fake monospace metrics
+   (host/tests/test_help_view.c's own precedent). Deliberately does NOT
+   call wp_help_view_paint or actually open the help viewer (F1) -- like
+   every other selfcheck in this file, no real window/interactive event
+   loop exists in this smoke-test path (see app_shell_internal.h's own
+   header comment on why). What IS real and worth proving here: the
+   parser accepts the shipped content and every link resolves (a build-
+   time guarantee on host already, via test_help_content.c -- this is
+   the same property holding after a genuine m68k cross-compile), and
+   wp_help_wrap_line -- the greedy word-wrap algorithm the pager relies
+   on -- runs correctly against a REAL VDI-measured font rather than
+   host's simplified fake-monospace one, which could plausibly hide a
+   real bug (e.g. a font whose measured widths aren't a clean multiple
+   of anything, unlike host's deliberately round fake metrics). */
+#define WP_HELP_SELFCHECK_MAX_ROWS 8
+
+wp_bool wp_atari_help_selfcheck(void)
+{
+    wp_help_doc doc;
+    plat_font *font;
+    u32 starts[WP_HELP_SELFCHECK_MAX_ROWS];
+    u32 lens[WP_HELP_SELFCHECK_MAX_ROWS];
+    u32 row_count;
+    static const char sample[] =
+        "RetroWP wraps this sentence across more than one real Atari VDI-measured row.";
+
+    if (wp_help_doc_parse(g_help_source_retrowp, (u32)g_help_source_retrowp_len, &doc) != WP_OK) {
+        return WP_FALSE;
+    }
+    if (doc.node_count == 0 ||
+        wp_help_doc_find_node(&doc, (const u8 *)"Main", 4) == WP_HELP_NODE_NONE) {
+        wp_help_doc_free(&doc);
+        return WP_FALSE;
+    }
+    wp_help_doc_free(&doc);
+
+    if (plat_font_open((const u8 *)"", 0, WP_ATARI_HELP_BODY_SIZE_TWIPS, 0, &font) != WP_OK) {
+        return WP_FALSE;
+    }
+    /* A narrow column forces real wrapping (not just a single row) --
+       proves more than "it returned something" against real measurement. */
+    row_count = wp_help_wrap_line(font, (const u8 *)sample, (u32)strlen(sample), 3000,
+                                   starts, lens, WP_HELP_SELFCHECK_MAX_ROWS);
+    plat_font_close(font);
+
+    if (row_count < 2 || row_count > WP_HELP_SELFCHECK_MAX_ROWS) return WP_FALSE;
+    {
+        u32 i;
+        for (i = 0; i < row_count; i++) {
+            if (lens[i] == 0) return WP_FALSE; /* every row must carry real content */
+        }
+    }
+    return WP_TRUE;
+}
+
+/* Reflects a Bold/Italic/Underline toggle's new state onto its menu
+   item's checkmark, regardless of whether it was triggered by a menu
+   click or a Ctrl+<letter> keyboard shortcut (both now call the exact
+   same g_wp_actions handler -- see wp_dispatch_key/wp_dispatch_message
+   below). A no-op for every other action id. */
+static void sync_format_check(wp_action_id id)
+{
+    switch (id) {
+    case WP_ACT_FORMAT_BOLD:
+        menu_icheck(wp_menu_tree, WP_MENU_OBJ_FORMAT_BOLD,
+                    (g_ctx.style_flags & WP_STYLE_BOLD) ? CHECK : UNCHECK);
+        break;
+    case WP_ACT_FORMAT_ITALIC:
+        menu_icheck(wp_menu_tree, WP_MENU_OBJ_FORMAT_ITALIC,
+                    (g_ctx.style_flags & WP_STYLE_ITALIC) ? CHECK : UNCHECK);
+        break;
+    case WP_ACT_FORMAT_UNDERLINE:
+        menu_icheck(wp_menu_tree, WP_MENU_OBJ_FORMAT_UNDERLINE,
+                    (g_ctx.style_flags & WP_STYLE_UNDERLINE) ? CHECK : UNCHECK);
+        break;
+    default:
+        break;
+    }
+}
+
+/* The four backend-supplied (handler == NULL in g_wp_actions) actions
+   that are actually reachable by keyboard shortcut today -- the four
+   Tools actions and Help have shortcut_ascii == 0 (see actions.c), so
+   wp_action_find_by_shortcut can never return them from a real
+   keystroke; this switch only needs to cover what can really arrive. */
+static void invoke_backend_action(wp_action_id id)
+{
+    switch (id) {
+    case WP_ACT_FILE_OPEN:  do_file_open(); break;
+    case WP_ACT_FILE_SAVE:  do_file_save(); break;
+    case WP_ACT_EDIT_CUT:   do_edit_cut(); break;
+    case WP_ACT_EDIT_PASTE: do_edit_paste(); break;
+    default: break;
+    }
+}
+
+/* M8.5: every keystroke is translated to a portable wp_key_event and fed
+   to vi-mode first (engine/src/vimode.c) -- Normal-mode motions/
+   operators, Insert-mode text entry, Visual/Command modes. A key vi-mode
+   itself doesn't claim falls through to wp_action_find_by_shortcut,
+   which covers every app-level Ctrl+<letter> shortcut (Bold/Italic/
+   Underline/Size/Align/Open/Save/Quit/Cut/Paste -- see platform/common/
+   actions.c's g_wp_actions table), EXCEPT while composing a ':' or '/'
+   command line, where every non-Escape/Enter/Backspace key belongs to
+   vi-mode's own cmdline buffer, not an app shortcut. This split is safe
+   by construction, not just convention: vimode.c's Normal/Insert/Visual
+   dispatch now requires an unmodified key for every plain-letter
+   command (the one deliberate exception, Ctrl+R for redo, isn't
+   registered as any g_wp_action shortcut -- see the mods-guard fix in
+   engine/src/vimode.c and docs/vimode.md), so a Ctrl-chord is guaranteed
+   to reach here un-consumed by vi-mode. */
+wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key)
+{
+    wp_key_event ev;
+    wp_vimode_mode mode_before;
+    wp_vimode_action action;
+    const wp_action *act;
+
+    if (!g_ctx.doc_loaded) return WP_FALSE;
+
+    ev = atari_translate_key(key);
+
+    /* Help is a whole separate UI mode (M8.5 Phase 10): while active,
+       every key goes to wp_help_view_feed_key instead of vi-mode, full
+       stop, until the viewer itself reports a close request (Escape or
+       'q' -- see help_view.h). F1 opens it from any vi-mode mode/state;
+       there is no menu path this pass (see g_help_active's own
+       comment), and pressing F1 again while already showing help is a
+       harmless no-op rather than resetting the user's position back to
+       the index node. */
+    if (g_help_active) {
+        if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
+        redraw_window(window_handle, vdi);
+        return WP_FALSE;
+    }
+    if (ev.special == (u16)WP_KEY_F1) {
+        if (g_help_doc_loaded) {
+            u32 main_node = wp_help_doc_find_node(&g_help_doc, (const u8 *)"Main", 4);
+            wp_help_view_init(&g_help_view, &g_help_doc,
+                               (main_node != WP_HELP_NODE_NONE) ? main_node : 0);
+            g_help_active = WP_TRUE;
+            redraw_window(window_handle, vdi);
+        }
+        return WP_FALSE;
+    }
+
+    mode_before = wp_vimode_get_mode(&g_ctx.vi);
+    action = wp_vimode_feed_key(&g_ctx.vi, ev);
+
+    /* vi-mode has no notion of this app's "current input style" toggle
+       state (see apply_current_style_to_run_at's own comment) -- restamp
+       the run it just created, but ONLY when this keystroke really was
+       an Insert-mode character insertion (matching feed_insert's own
+       exact condition in vimode.c), never on a bare cursor motion, or
+       moving over already-styled text would silently overwrite it. */
+    if (mode_before == WP_VIMODE_INSERT &&
+        ev.special == (u16)WP_KEY_NONE && ev.mods == 0 && ev.codepoint >= 0x20) {
+        apply_current_style_to_run_at(g_ctx.vi.cursor);
+    }
+
+    switch ((wp_vimode_action_kind)action.kind) {
+    case WP_VIACTION_QUIT:
+        return WP_TRUE;
+    case WP_VIACTION_SAVE_QUIT:
+        do_file_save();
+        return WP_TRUE;
+    case WP_VIACTION_SAVE:
+        do_file_save();
+        break;
+    default:
+        break;
+    }
+
+    if (wp_vimode_get_mode(&g_ctx.vi) != WP_VIMODE_COMMAND) {
+        act = wp_action_find_by_shortcut((u8)(key & 0xFF));
+        if (act != NULL) {
+            if (act->handler != NULL) {
+                act->handler(&g_ctx);
+                sync_format_check(act->id);
+            } else {
+                invoke_backend_action(act->id);
+            }
+        }
+    }
+
+    if (g_ctx.quit_requested) return WP_TRUE;
+
     redraw_window(window_handle, vdi);
+    return WP_FALSE;
 }
 
 wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
@@ -2002,7 +2764,8 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
         menu_tnormal(wp_menu_tree, msg[3], UNHIGHLIGHT);
         switch (msg[4]) {
         case WP_MENU_OBJ_FILE_QUIT:
-            return WP_TRUE;
+            wp_action_find(WP_ACT_FILE_QUIT)->handler(&g_ctx);
+            return (wp_bool)g_ctx.quit_requested;
         case WP_MENU_OBJ_FILE_OPEN:
             do_file_open();
             redraw_window(window_handle, vdi);
@@ -2015,7 +2778,7 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
             redraw_window(window_handle, vdi);
             break;
         case WP_MENU_OBJ_EDIT_COPY:
-            do_edit_copy();
+            wp_action_find(WP_ACT_EDIT_COPY)->handler(&g_ctx);
             break;
         case WP_MENU_OBJ_EDIT_PASTE:
             do_edit_paste();
@@ -2033,6 +2796,36 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
             break;
         case WP_MENU_OBJ_TOOLS_CHAT:
             do_chat();
+            break;
+        case WP_MENU_OBJ_FORMAT_BOLD:
+            wp_action_find(WP_ACT_FORMAT_BOLD)->handler(&g_ctx);
+            sync_format_check(WP_ACT_FORMAT_BOLD);
+            break;
+        case WP_MENU_OBJ_FORMAT_ITALIC:
+            wp_action_find(WP_ACT_FORMAT_ITALIC)->handler(&g_ctx);
+            sync_format_check(WP_ACT_FORMAT_ITALIC);
+            break;
+        case WP_MENU_OBJ_FORMAT_UNDERLINE:
+            wp_action_find(WP_ACT_FORMAT_UNDERLINE)->handler(&g_ctx);
+            sync_format_check(WP_ACT_FORMAT_UNDERLINE);
+            break;
+        case WP_MENU_OBJ_FORMAT_SIZE_UP:
+            change_font_size(1);
+            break;
+        case WP_MENU_OBJ_FORMAT_SIZE_DOWN:
+            change_font_size(-1);
+            break;
+        case WP_MENU_OBJ_FORMAT_ALIGN_LEFT:
+            apply_alignment(WP_ALIGN_LEFT);
+            redraw_window(window_handle, vdi);
+            break;
+        case WP_MENU_OBJ_FORMAT_ALIGN_CENTER:
+            apply_alignment(WP_ALIGN_CENTER);
+            redraw_window(window_handle, vdi);
+            break;
+        case WP_MENU_OBJ_FORMAT_ALIGN_RIGHT:
+            apply_alignment(WP_ALIGN_RIGHT);
+            redraw_window(window_handle, vdi);
             break;
         default:
             break;
@@ -2056,7 +2849,7 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
 
     case WM_SIZED:
         wind_set(window_handle, WF_CURRXYWH, msg[4], msg[5], msg[6], msg[7]);
-        if (g_doc_loaded) {
+        if (g_ctx.doc_loaded) {
             GRECT work;
             wind_get_grect(window_handle, WF_WORKXYWH, &work);
             relayout_document(atari_px_to_twips_x((i32)work.g_w));
@@ -2091,6 +2884,84 @@ wp_bool wp_atari_resolution_selfcheck(void)
     return ok;
 }
 
+/* Proves the non-blocking pieces behind the Format menu/keyboard-
+   shortcut actions (docs/atari-platform.md's "Format controls wired
+   into the UI" section): cstyle/pstyle find_or_add dedup (real
+   cross-compiled verification of the same engine logic
+   test_docmodel.c already covers on host -- same reasoning
+   wp_atari_grammar_check_selfcheck's own comment gives for
+   grammar_lite_check()), the alignment offset arithmetic against hand-
+   computed values, and that the Ctrl+letter shortcut codes wired into
+   wp_dispatch_key are genuinely distinct from each other and from the
+   existing backspace/printable-insert range. Deliberately builds its
+   own local, throwaway wp_document rather than touching g_doc/
+   g_ctx.doc_loaded -- toggle_style_flag/change_font_size/apply_alignment
+   all operate on this file's global editor state, which a smoke test
+   (never having called load_sample_document) shouldn't be poking at
+   directly, the same boundary every other selfcheck here already
+   respects. */
+wp_bool wp_atari_format_selfcheck(void)
+{
+    wp_document doc;
+    wp_char_style cs;
+    wp_para_style ps;
+    wp_cstyle cs1, cs2, cs3;
+    wp_pstyle ps1, ps2;
+    static const short shortcut_codes[] = {
+        0x02, 0x09, 0x15, 0x1D, 0x1B, 0x0C, 0x05, 0x12
+    };
+    unsigned int i, j;
+
+    if (wp_document_init(&doc) != WP_OK) return WP_FALSE;
+
+    cs = *wp_document_cstyle_get(&doc, doc.default_cstyle);
+    cs.flags |= WP_STYLE_BOLD;
+    if (wp_document_cstyle_find_or_add(&doc, &cs, &cs1) != WP_OK) goto fail;
+    if (wp_document_cstyle_find_or_add(&doc, &cs, &cs2) != WP_OK) goto fail;
+    if (cs1 != cs2) goto fail; /* identical style must reuse the handle */
+    cs.flags |= WP_STYLE_ITALIC;
+    if (wp_document_cstyle_find_or_add(&doc, &cs, &cs3) != WP_OK) goto fail;
+    if (cs3 == cs1) goto fail; /* genuinely different style must NOT reuse it */
+
+    ps = *wp_document_pstyle_get(&doc, doc.default_pstyle);
+    ps.align = WP_ALIGN_CENTER;
+    if (wp_document_pstyle_find_or_add(&doc, &ps, &ps1) != WP_OK) goto fail;
+    if (wp_document_pstyle_find_or_add(&doc, &ps, &ps2) != WP_OK) goto fail;
+    if (ps1 != ps2) goto fail;
+
+    wp_document_free(&doc);
+
+    /* Hand-computed: a 700-twip-wide line in a 1000-twip column has
+       300 twips of slack -- center splits it (150), right takes it all
+       (300), left (and out-of-range values) take none. */
+    if (atari_align_offset_twips(WP_ALIGN_LEFT, 1000, 700) != 0) return WP_FALSE;
+    if (atari_align_offset_twips(WP_ALIGN_CENTER, 1000, 700) != 150) return WP_FALSE;
+    if (atari_align_offset_twips(WP_ALIGN_RIGHT, 1000, 700) != 300) return WP_FALSE;
+    /* A line that exactly fills (or, degenerately, exceeds) the column
+       gets no offset either way -- never draws past the left edge. */
+    if (atari_align_offset_twips(WP_ALIGN_CENTER, 1000, 1000) != 0) return WP_FALSE;
+    if (atari_align_offset_twips(WP_ALIGN_RIGHT, 1000, 1200) != 0) return WP_FALSE;
+
+    /* Every shortcut code must be distinct from the others and from
+       backspace (0x08) and the printable-insert range (0x20-0x7E) --
+       a real hand-editing mistake (typo'ing a duplicate control code)
+       would otherwise silently make one shortcut invoke another's
+       action instead of its own. */
+    for (i = 0; i < sizeof(shortcut_codes) / sizeof(shortcut_codes[0]); i++) {
+        if (shortcut_codes[i] == 0x08) return WP_FALSE;
+        if (shortcut_codes[i] >= 0x20 && shortcut_codes[i] < 0x7F) return WP_FALSE;
+        for (j = i + 1; j < sizeof(shortcut_codes) / sizeof(shortcut_codes[0]); j++) {
+            if (shortcut_codes[i] == shortcut_codes[j]) return WP_FALSE;
+        }
+    }
+
+    return WP_TRUE;
+
+fail:
+    wp_document_free(&doc);
+    return WP_FALSE;
+}
+
 void app_shell_run(void)
 {
     short work_in[11];
@@ -2105,6 +2976,22 @@ void app_shell_run(void)
     wp_bool quit;
 
     appl_init();
+
+    /* M8.5: wires g_ctx.vi.doc/journal to &g_doc/&g_journal and seeds
+       everything else to sane defaults -- see g_ctx's own comment above.
+       Safe to call before any document is loaded: it only stores
+       pointers, never dereferences them (mirrors how replace_document
+       itself doesn't run until load_sample_document below). */
+    wp_app_ctx_init(&g_ctx, &g_doc, &g_journal);
+
+    /* M8.5 Phase 10: parses the compiled-in help content once at
+       startup. WP_NOMEM is the only realistic failure (the source is
+       fixed, already-tested content, not user input) -- if it somehow
+       happens, g_help_doc_loaded stays WP_FALSE and F1 is a silent
+       no-op rather than a crash; see wp_dispatch_key. */
+    g_help_doc_loaded = (wp_bool)(wp_help_doc_parse(g_help_source_retrowp,
+                                                     (u32)g_help_source_retrowp_len,
+                                                     &g_help_doc) == WP_OK);
 
     vdi_handle = graf_handle(&dummy, &dummy, &dummy, &dummy);
     for (dummy = 0; dummy < 10; dummy++) work_in[dummy] = 1;
@@ -2132,7 +3019,7 @@ void app_shell_run(void)
     wind_get_grect(0, WF_WORKXYWH, &desk);
 
     window_handle = wind_create_grect(NAME | MOVER | CLOSER | SIZER, &desk);
-    wind_set_str(window_handle, WF_NAME, "Word Processor");
+    wind_set_str(window_handle, WF_NAME, "RetroWP");
     wind_open_grect(window_handle, &desk);
 
     graf_mouse(ARROW, (const MFORM *)0);
@@ -2154,14 +3041,20 @@ void app_shell_run(void)
             quit = wp_dispatch_message(window_handle, vdi_handle, msg);
         }
         if (!quit && (events & MU_KEYBD)) {
-            wp_dispatch_key(window_handle, vdi_handle, mkey);
+            quit = wp_dispatch_key(window_handle, vdi_handle, mkey);
         }
     }
 
-    if (g_doc_loaded) {
+    if (g_ctx.doc_loaded) {
+        wp_vimode_free(&g_ctx.vi);
         wp_undo_journal_free(&g_journal);
         wp_document_free(&g_doc);
-        g_doc_loaded = WP_FALSE;
+        g_ctx.doc_loaded = WP_FALSE;
+    }
+
+    if (g_help_doc_loaded) {
+        wp_help_doc_free(&g_help_doc);
+        g_help_doc_loaded = WP_FALSE;
     }
 
     if (g_spell_dict != NULL) {

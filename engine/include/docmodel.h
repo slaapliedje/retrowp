@@ -115,7 +115,12 @@ typedef struct {
 
 typedef enum {
     WP_OP_INSERT_TEXT, WP_OP_DELETE_TEXT, WP_OP_SET_CSTYLE, WP_OP_SET_PSTYLE,
-    WP_OP_SPLIT_PARA,  WP_OP_MERGE_PARA
+    WP_OP_SPLIT_PARA,  WP_OP_MERGE_PARA,
+    /* M8.5: markers, not edits -- bracket a run of ops on the undo stack
+       so wp_edit_undo/redo treats them as one user-facing step. Carry no
+       payload (at/text/style_before/style_after all unused). See
+       docs/editing.md's "Undo Grouping" section. */
+    WP_OP_GROUP_BEGIN, WP_OP_GROUP_END
 } wp_op_kind;
 
 typedef struct wp_op {
@@ -148,6 +153,21 @@ wp_status wp_document_pstyle_add(wp_document *doc, const wp_para_style *style,
 /* Returns NULL for handle 0 or any handle >= the table's count. */
 const wp_char_style *wp_document_cstyle_get(const wp_document *doc, wp_cstyle handle);
 const wp_para_style *wp_document_pstyle_get(const wp_document *doc, wp_pstyle handle);
+
+/* Like *_add, but first does a linear scan (index 1..count-1, skipping
+   the reserved sentinel) for a field-by-field-identical existing style
+   and reuses its handle instead of appending a duplicate. For a UI that
+   toggles attributes on and off repeatedly (bold on, bold off, bold on,
+   ...), *_add alone would grow the table by one entry per toggle,
+   eventually risking the table's own documented 65535-handle ceiling
+   over a long editing session; this makes "toggle back to a style
+   already in use" a no-op on the table instead. Compares fields
+   explicitly rather than via memcmp so it doesn't depend on callers
+   having zeroed any struct padding. */
+wp_status wp_document_cstyle_find_or_add(wp_document *doc, const wp_char_style *style,
+                                          wp_cstyle *out);
+wp_status wp_document_pstyle_find_or_add(wp_document *doc, const wp_para_style *style,
+                                          wp_pstyle *out);
 
 /* -- Structural mutation / iteration (T1.2) ---------------------------- */
 /* Each *_add function appends one element to an append-only array and

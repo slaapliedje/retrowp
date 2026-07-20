@@ -76,7 +76,7 @@ T4.1 development by bisecting a series of shrinking reproductions down to
 for this reason -- do not remove it for the smoke test build.
 
 This trap executes a genuinely illegal 68000 opcode. It is test-only code
-that must never ship in `WP.PRG` (it doesn't -- only `host/tools/atari_smoke.c`
+that must never ship in `RETROWP.PRG` (it doesn't -- only `host/tools/atari_smoke.c`
 uses it) and would crash on real hardware or under plain TOS without an
 emulator's NatFeat interceptor.
 
@@ -86,7 +86,7 @@ emulator's NatFeat interceptor.
 Xvfb :97 -screen 0 1280x800x24 &
 HOME=<scratch dir> DISPLAY=:97 SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
   hatari --natfeats on --tos /usr/share/hatari/etos512k.img --machine st \
-  --memsize 1 --monitor rgb --tos-res low --zoom 4 --statusbar no \
+  --memsize 1 --monitor rgb --tos-res med --zoom 2 --statusbar no \
   --borders no --confirm-quit no --sound off --conout 2 \
   --harddrive <scratch>/c_drive --auto SMOKE.PRG
 ```
@@ -95,10 +95,16 @@ Gotchas that cost real time to isolate, worth not re-deriving:
 
 - **`SDL_VIDEODRIVER=dummy` hangs Hatari indefinitely** (stuck after VDI
   init, no error) in this environment. A real X display is required even
-  though nothing needs to be *seen* -- Xvfb is sufficient. `--zoom 4` with
-  `--tos-res low` (320x200) exactly matches a 1280x800 Xvfb screen; this
-  match doesn't appear to be load-bearing for the hang, but wasn't
-  independently varied once a working combination was found.
+  though nothing needs to be *seen* -- Xvfb is sufficient.
+- **The harness boots at Medium (640x200, 80 columns), not Low** (changed
+  post-M8, see "Boot resolution: Medium, not Low" below) -- `--zoom 2`
+  with `--tos-res med` gives a 1280x400 physical image that fits inside
+  the 1280x800 Xvfb screen with room to spare (the original `--zoom 4`
+  with `--tos-res low` filled the full 1280x800 exactly; that exact match
+  never appeared to be load-bearing for the `SDL_VIDEODRIVER=dummy` hang
+  above, and switching resolution while keeping Xvfb's own screen size
+  fixed confirms it -- the hang is about the video *driver*, not the
+  window size).
 - **`--auto <name>` needs the in-emulator path exactly as `man hatari`
   says** ("full path it will have under emulation, e.g. `C:\DIR\PROGRAM.PRG`").
   A bare filename combined with `--harddrive` silently creates the virtual
@@ -119,7 +125,136 @@ Gotchas that cost real time to isolate, worth not re-deriving:
   correct for pre-desktop utilities, not for anything using `<gem.h>`.
 - `etos512k.img` (EmuTOS, GPL) is used deliberately over the genuine
   Atari TOS ROM dumps also present on this machine, to keep CI
-  redistribution-clean.
+  redistribution-clean. It remains the single-image fast default gate;
+  the real ROMs are used by the separate multi-TOS matrix below (never
+  shipped or redistributed by this project -- purely local test fixtures
+  a developer or CI box happens to have installed).
+
+## Boot resolution: Medium, not Low (post-M8)
+
+All harness scripts (`atari_ci_lib.sh`, `ci_atari_serial.sh`,
+`ci_atari_convert_serial.sh`) now boot Hatari at `--tos-res med --zoom 2`
+(640x200, 80 columns) instead of the original `--tos-res low --zoom 4`
+(320x200, 40 columns). Two independent reasons converged on this:
+
+1. It matches the app's own supported floor -- `needs_80_column_warning()`
+   (see "Format controls" below) already tells the user Low is cramped,
+   so testing exclusively at Low was validating a resolution the app
+   itself warns against.
+2. It was tested as a hypothesis for the "only the first title renders"
+   bug (see that section above) -- Low's 40-column width seemed like a
+   plausible culprit given how tight real ST Low is for menu bars. It
+   wasn't (see that section for the direct test and result); the switch
+   was kept anyway for reason 1.
+
+**`DESKTOP.INF`/`NEWDESK.INF`/`EMUDESK.INF` fixtures**
+(`host/tools/atari_inf_fixtures/`): real desktop-configuration files,
+each saved by genuinely booting the corresponding OS to a live desktop at
+Medium resolution and using its own "Save Desktop" command -- not hand-
+authored. Hand-authoring was considered and rejected: the Atari
+Compendium (the canonical reference, `~/Documents/Atari/Atari Compendium
+- Scott Sanders.pdf` on this machine) explicitly declines to document the
+byte format ("This file was not designed to be edited by the user or
+programmer, but, rather from the desktop itself"), and secondary web
+sources disagreed with each other on field layout. Three separate files
+were needed, not one, because three different desktop implementations
+were involved, each with its own filename and on-disk format:
+
+- **`EMUDESK.INF`** -- EmuTOS's own desktop uses this filename, not
+  `NEWDESK.INF`. Its `#E` line is a 5-field format
+  (`#E 1A E1 FF 01 00` at Medium) unrelated to either real-TOS format
+  below.
+- **`DESKTOP.INF`** -- real TOS < 2.00 (saved from `tos104us.img`). `#E`
+  line is 2 fields; the second, `02`, is the resolution byte.
+- **`NEWDESK.INF`** -- real TOS >= 2.00 (saved from `tos206us.img`,
+  `--machine megaste`). `#E` line is 4 fields; the second field's low
+  nibble carries the same resolution encoding (`12`, i.e. `0x12 & 0x0F =
+  0x02`) alongside other bits the old format didn't have room for. This
+  is consistent with a secondhand report found during research of a real
+  STE desktop.inf hack changing `#E D8 12` to `#E D8 13` to force a
+  resolution change -- same low-nibble encoding, different high nibble.
+
+These are **not** wired into the `--auto`-based CI scripts -- `--tos-res
+med` alone already controls boot resolution for that path (Hatari sets
+it at the hardware level before any desktop or INF file is ever
+consulted), and it's confirmed sufficient on its own (all three files
+were verified, in clean scratch directories, to coexist safely with
+`--auto RETROWP.PRG` with no behavior change either way). They exist for
+interactive/manual desktop-boot testing (no `--auto`, a real live
+desktop) and as reference fixtures for real hardware or other emulators,
+where there's no `--tos-res` flag to reach for.
+
+**Gotcha found while generating these, worth not re-deriving**: reusing
+one scratch directory (and therefore one `HOME`, and therefore one
+persisted `hatari.cfg`) across multiple differently-configured Hatari
+invocations produced a spurious `"This application cannot find the
+folder or file you just tried to access"` error on a later `--auto`
+launch. Root-caused to leftover Hatari config state from an earlier
+invocation in the same directory, not the INF file or `--auto` mechanism
+-- confirmed by reproducing it with *no* INF file present at all under
+the same dirty directory, then reproducing a clean boot with the *same*
+INF file in a fresh directory. `atari_ci_lib.sh`'s own `mktemp -d` per
+call already avoids this; it only bit during this ad hoc, by-hand
+investigation.
+
+## Multi-TOS CI matrix (`host/tools/ci_atari_matrix.sh`)
+
+`ci_atari.sh` alone only ever proved this project's Atari code works
+against one specific EmuTOS build -- real ST/STE/MegaSTE TOS versions,
+and even other EmuTOS releases, were never exercised. `ci_atari_matrix.sh`
+closes that gap: it builds `SMOKE.PRG` once, then boots it under Hatari
+against every image in a curated list, printing a per-image PASS/FAIL and
+failing overall if any image fails. The shared boot/Xvfb/pass-fail logic
+lives in `host/tools/atari_ci_lib.sh` (`run_atari_smoke_once`), sourced by
+both `ci_atari.sh` and the matrix script, so there is exactly one place
+that knows how to boot `SMOKE.PRG` under Hatari.
+
+**Curated image list** (label:path:machine in the script):
+- `emutos-512k`/`emutos-256us`/`emutos-512us` -- EmuTOS 0.9.12 and 1.4
+  builds, all `--machine st`.
+- `tos-1.04` -- the original ST/Mega ST ROM, `--machine st`.
+- `tos-1.62-ste` -- STE-only (Hatari itself refuses `--machine st` for
+  this ROM with an `ERROR:` line naming the right family -- that's how
+  the correct value was determined, not guessed), `--machine ste`.
+- `tos-2.06-megaste` -- the MegaSTE ROM, `--machine megaste`.
+
+**Deliberately excluded, not just deprioritized:**
+- **TOS 1.00** (`tos100us.img`) does not support GEMDOS hard-drive
+  emulation at all, which this whole harness's approach (`--harddrive` +
+  auto-launching `SMOKE.PRG` from `C:`) depends on -- there is no working
+  recipe for booting it here.
+- **TT** (`tos306us.img`) and **Falcon** (`tos404.img`, `TOSv4.92.img`)
+  ROMs are installed on this machine but are for hardware CLAUDE.md
+  doesn't list as a project target (ST/Amiga/Mac/DOS only).
+
+**Two real, empirically-found gotchas fixed while building this:**
+- **A blind `sleep 1` after starting Xvfb was flaky** (~1 run in 3 hit
+  Hatari's "Could not initialize the SDL library: x11 not available"
+  because Xvfb hadn't finished creating its display socket yet).
+  `run_atari_smoke_once` now polls for Xvfb's own X lock file
+  (`/tmp/.X<N>-lock`) instead, bounded so a genuinely dead Xvfb still
+  fails fast. Separately, a *fixed* display number (`:97`) raced between
+  two invocations running close together (this script's own sequential
+  loop, or just re-running `ci_atari.sh` by hand right after a prior run)
+  since the trap's `kill` doesn't wait for the old Xvfb to actually
+  release the display -- the display number is now derived from both the
+  shell's PID and a per-call offset (a loop index), so no two calls
+  inside one script run, or across separate invocations, collide.
+- **25s (tuned against EmuTOS's near-instant boot) is nowhere near
+  enough for a real TOS ROM.** TOS 1.04 doesn't reach `SMOKE.PRG`'s first
+  `NF_STDERR` line until ~40-50s in; the MegaSTE ROM's own memory-test/POST
+  sequence (visibly printed: "Memory Test: ST RAM -------- 1024 KB") took
+  it past 90s before completing every check. Two fixes, not one: the
+  Hatari `timeout` budget is now 150s (real margin, not just "bigger"),
+  and `--fast-boot yes` (Hatari's own flag -- "Patch TOS and memvalid
+  system variables for faster boot") is now passed unconditionally, which
+  measurably speeds up every real-TOS boot in the matrix by skipping the
+  memory-test/POST sequence outright.
+
+Also see "Known gap: only the first title actually renders" above for a
+concrete example of a real regression this matrix caught that
+`ci_atari.sh` alone never could -- the whole reason this was worth
+building.
 
 ### Known gap: no real mouse-driven end-to-end test
 
@@ -146,7 +281,7 @@ mouse-driven click sequence proving both together:
 What this does *not* prove: that a real mouse click on the real rendered
 "Quit" menu item, routed through a real `evnt_multi()` call, delivers the
 `MN_SELECTED` message with the item index this code expects. That
-end-to-end path is visually consistent with correct (see `WP.PRG`'s own
+end-to-end path is visually consistent with correct (see `RETROWP.PRG`'s own
 window rendering with working mover/closer/sizer widgets and the AES menu
 bar showing the running app's name), but is not exercised by an automated
 test. If mouse scripting becomes reliable in a future environment, closing
@@ -230,7 +365,7 @@ identically against both a fresh copy of the installed `C:` drive and the
 original, untouched one, with and without a pre-created `C:\SPDTMP`
 directory -- ruling out a simple missing-directory or copy-artifact cause.
 The crash happens entirely inside GDOS's own boot sequence, before any
-application code (including `WP.PRG`/`SMOKE.PRG`) ever gets control, so it
+application code (including `RETROWP.PRG`/`SMOKE.PRG`) ever gets control, so it
 is a real environment/emulation-compatibility limitation, not something this
 project's own code can work around. `host/tools/ci_atari.sh` therefore still
 boots with no GDOS attached (the common case for a real 1MB ST anyway); the
@@ -305,41 +440,93 @@ mechanism, but empirically confirmed (via before/after field dumps over
 NF_STDERR on a real boot) to leave `wp_menu_tree` untouched for our tree
 shape, so it is not the cause here and was not worked around.
 
-### Known gap: only the first title actually renders (found post-M8, not yet fixed)
+### Known gap: only the first title actually renders (found post-M8, two fix attempts reverted)
 
 Fixing the glyph-noise corruption above surfaced a second, previously
 masked bug: only *one* title (whichever sits at `wp_menu_tree` array index
 1) is drawn at all -- Desk/Edit/Tools never appear, verified visually on a
 real boot. Root cause, again from reading `ob_draw`/`everyobj`
 (`aes/gemobjop.c`) directly: `mn_bar()` hardcodes array index 1 as
-`THEBAR`, and `everyobj()`'s walk stops as soon as it would revisit
-`tree[THEBAR].ob_next` -- which, when index 1 is itself a title (as in
-every version of this tree so far, including the desk-title addition),
-equals that title's own immediate next sibling, so the walk terminates
-after exactly one object. Tracing `mn_bar()`'s other index-0/1/2 uses
-(`THESCREEN`/`THEBAR`/`THEACTIVE`) strongly suggests EmuTOS's own desktop
-tree is actually a 3-level structure -- an outer root, a `BAR` container
-at index 1 whose *children* are the real titles, and some index-2
-bookkeeping object -- not the 2-level (root directly owns titles)
-structure this tree has used since T4.1.
+`THEBAR`, and `ob_draw(tree, THEBAR, MAX_DEPTH)` draws exactly one object
+subtree (index 1 and its descendants) -- it never walks to that object's
+*siblings*. In every version of this tree so far, index 1 has been a
+title (a leaf, structurally), so only it ever paints; Desk/Edit/Tools, as
+siblings rather than children of whatever sits at index 1, are simply
+never reached by this call.
 
-A 3-level restructuring was implemented and visually ruled out as
-*necessary* for the fix above (the glyph-noise fix needed only
-`OF_HIDETREE`), but attempting it broke something else: real Atari CI
-(`host/tools/ci_atari.sh`) hung (timeout, not a clean crash) partway
-through the smoke test, right after a synthesized `MN_SELECTED` dispatch
-that calls the real `menu_tnormal()` AES function -- consistent with some
-other `mn_bar()`-internal index-0/1/2 assumption (plausibly the
-`ob_actxywh(tree, THEACTIVE, ...)` call) reading nonsense from whatever
-ended up at that array slot in the restructured tree. Given the risk of
-shipping a hung CI, this was reverted; the codebase currently has the
-*working, CI-green, corruption-free* 2-level tree with only one title
-visible. Fixing "only one title renders" for real needs the 3-level
-structure implemented *correctly* (matching all of `THESCREEN`/`THEBAR`/
-`THEACTIVE`'s real roles, not just the ones this investigation identified)
-and re-verified against both a real boot screenshot and `ci_atari.sh`
-before landing -- a good next task for whoever picks this up, with the
-source files above already identified as the ground truth to work from.
+**First fix attempt (this session, initial pass)**: a real 3-level
+restructuring -- `SCREEN` (the true root) -> `BAR` (a `G_IBOX` container
+at index 1, matching `mn_bar()`'s hardcoded assumption) -> titles as
+`BAR`'s children -- so `ob_draw(tree, 1, MAX_DEPTH)` naturally recurses
+into all of them. This also required satisfying `menu_fixup()` (called
+unconditionally at every `menu_bar(MENU_INSTALL)`): it computes
+`themenus = tree[THESCREEN].ob_tail` then `dabox = tree[themenus].ob_head`
+and unconditionally overwrites `tree[dabox].ob_head/ob_tail`, adding a
+real child at the raw array index `dabox + 1` (index arithmetic, not
+chain traversal) to hold the desk-accessory list -- so `dabox` must
+resolve to a real, in-bounds object (a reserved "Desk" dropdown box plus
+3 contiguous placeholder slots), never `NIL`. This attempt passed
+`host/tools/ci_atari.sh` cleanly, including a new cycle-detection
+self-check (`child_chain_ok()` in `wp_menu_tree_selfcheck()`, still in
+the codebase today -- a genuinely useful, tree-shape-independent
+safety net kept after the revert below) added specifically to catch a
+bad renumbering before ever booting real Hatari.
+
+**What single-image CI couldn't catch, the new multi-TOS matrix did.**
+Building `host/tools/ci_atari_matrix.sh` in the same session (see its
+own section below) to test against real TOS ROMs, not just the one
+EmuTOS build this project's CI had ever used, immediately surfaced a real
+regression: the 3-level tree caused a genuine 68000 bus-error crash under
+a newer EmuTOS build (1.4, `etos256us.img`/`etos512us.img`) and a hang
+under real TOS 1.04, both right around `menu_bar(MENU_INSTALL)`. Confirmed
+via a real A/B test -- a `git worktree` build of the pre-restructuring
+binary passed cleanly against the exact same two images that crashed/hung
+the restructured one. **Reverted for that reason**: a fix that corrupts
+real-hardware-adjacent GEM implementations is strictly worse than the
+cosmetic bug it was fixing, and this project's own standing rule
+(established the first time this exact restructuring was attempted, one
+investigation earlier) is not to ship something CI can't stay green on
+across the target matrix.
+
+**Second fix attempt, same session**: with the DA-box mechanism now
+understood precisely, a hypothesis that the crash was `menu_fixup()`-DA-box
+related (specifically, which title happened to sit at `tree[ROOT].ob_tail`)
+was tested by moving the newly-added Format title out of the tail position
+-- keeping Tools as `ob_tail` exactly as in every previously-shipped
+version of this tree -- while staying on the simple, historically-safe
+2-level (flat root) shape rather than reattempting 3-level. This is **not**
+a fix for "only one title renders" (that gap is still open, see below) --
+it's the revert, done carefully enough to also land the new Format title
+(see "Format controls wired into the UI") without reintroducing risk.
+Verified clean across the full 6-image TOS matrix afterward.
+
+**Current state, honestly**: the codebase has the *working, matrix-green*
+2-level tree; only the first title (File) is visible on screen, the same
+gap as before this session, now with two documented, reverted fix
+attempts and their root causes on record. A real fix needs the 3-level
+structure implemented *correctly enough to survive the full TOS matrix*,
+not just single-image EmuTOS CI -- re-verify against
+`host/tools/ci_atari_matrix.sh`, not just `ci_atari.sh`, before landing
+anything here next. The DA-box mechanism (`menu_fixup()`'s
+`dabox+1/+2/+3` raw index arithmetic, requiring a real reserved Desk
+dropdown rather than `NIL`) is now understood and documented above --
+reuse it rather than rediscovering it a third time.
+
+**Screen resolution ruled out as a factor (this session).** A natural
+hypothesis: ST Low (320x200, a 40-column screen) is notoriously tight --
+it's the exact reason some real ST programs refuse to run in it at all
+(see `needs_80_column_warning()`'s own comment, "Format controls" section
+below) -- so maybe the title-drawing loop was silently clipping at the
+screen edge rather than hitting the `mn_bar()`/`ob_draw()` issue above.
+Tested directly: booted a real `RETROWP.PRG` under Hatari at Medium (640x200,
+80 columns -- twice the horizontal room of Low) against EmuTOS, in a
+clean scratch directory. Result: still only "File" renders, with visibly
+empty menu bar space extending to the right edge of the screen. Screen
+width is not a factor; the bug is exactly the structural single-subtree
+`ob_draw()` issue described above, independent of resolution. (This
+finding is also what motivated switching the harness's default
+resolution to Medium -- see "Boot resolution: Medium, not Low" below --
+even though it didn't fix this particular bug.)
 
 ## File I/O, clipboard, timer, and basic editing (T4.3)
 
@@ -403,7 +590,7 @@ painted), not visually via a rendered caret.
    `host/tools/ci_atari.sh`, and confirmed to catch a regression
    (deliberately dropped the last byte on clipboard read during
    development and watched it fail, then restored it).
-2. **Visual/exploratory**: `WP.PRG` running under Hatari with `xdotool key`
+2. **Visual/exploratory**: `RETROWP.PRG` running under Hatari with `xdotool key`
    injection to type into the live window produced visible document
    mutation (the sample paragraph's tail was edited on screen), confirming
    the keyboard pipeline (`evnt_multi` &rarr; `wp_dispatch_key` &rarr; engine
@@ -416,6 +603,23 @@ painted), not visually via a rendered caret.
    pipeline is wired and live," not as a certified input-fidelity test.
    The automated round-trip check above is the rigorous proof for T4.3's
    AC; this is corroborating evidence on top of it.
+
+   **M8.5 Phase 9 update**: attempting the same kind of live keystroke
+   verification for the vi-mode retrofit (several `xdotool` technique
+   variants -- see `docs/vimode.md`'s "Atari Retrofit" section for the
+   full account) did not reproduce even this earlier "wired and live"
+   corroboration -- no injected keystroke produced a visible character
+   this time, across every variant tried. Combined with the earlier,
+   already-hedged "not independently verified" fidelity caveat, this
+   raises real doubt about whether the original T4.3 finding reflected a
+   reliably-working injection path or a one-off success; either way,
+   `xdotool`-driven live verification of this app under headless Hatari
+   should now be treated as unreliable, not merely imprecise, until a
+   real fix (proper window manager, or Hatari's own remote-control
+   socket) is investigated. M8.5 Phase 9 instead relies on
+   `wp_atari_key_translate_selfcheck` (real Hatari, non-interactive,
+   hand-verified against the Atari Compendium) for its keyboard-
+   dispatch confidence -- see `docs/vimode.md`.
 
 ## Memory budget pass at 1MB (T4.4)
 
@@ -600,7 +804,7 @@ assertions. `do_spell_check()`:
   `spell_dict_open()` -- there is no shipped dictionary asset (that would
   be a real multi-week undertaking of its own, same reasoning
   `docs/services/spell.md` gives for not being Hunspell-compatible); a
-  user who wants real spell-check on `WP.PRG` supplies their own sorted
+  user who wants real spell-check on `RETROWP.PRG` supplies their own sorted
   word-list file at that path. A missing file is reported through the
   same `form_alert()` path as everything else here, not a crash --
   consistent with this project's "absent gracefully" pattern for optional
@@ -648,7 +852,7 @@ building blocks `do_spell_check()` calls, not the menu action itself:
 Run via `host/tools/ci_atari.sh` (added to `atari_smoke.c`'s check list)
 and confirmed passing on real Hatari alongside the rest of the smoke
 suite; `host/tools/ci_atari_serial.sh` also still passes unchanged,
-confirming linking `services/spell` into every Atari binary (`WP.PRG`,
+confirming linking `services/spell` into every Atari binary (`RETROWP.PRG`,
 `SMOKE.PRG`, `SERIALTST.PRG` all now pull in `ATARI_SERVICES_OBJ`, per
 the `Makefile`) didn't disturb the serial offload path.
 
@@ -1113,3 +1317,326 @@ sequence (proven generic over real emulated RS-232 by T6.3/T7.4) are
 each independently proven; `do_chat()` is a thin, mechanical composition
 of all three plus string formatting, not independently re-verified end
 to end.
+
+## Format controls wired into the UI (post-M8): Bold/Italic/Underline, Font Size, Alignment
+
+The classic word-processor bar -- text style, paragraph alignment, font
+size -- requested directly, not part of any milestone's original scope.
+Investigation found the rendering side already fully wired since T4.2:
+`map_effects()`/`vst_effects()` in `metrics_atari.c` already honors
+`wp_char_style.flags` (bold/italic/underline) and `size_twips` end to
+end. Only the UI to *set* these attributes, and paint-time paragraph
+alignment, were missing.
+
+**"Current input style," not selection-based restyling.** This app has
+no selection model and no cursor navigation at all (arrows are a
+documented no-op in `wp_dispatch_key` -- the cursor only ever moves via
+typing forward or backspacing) -- so "restyle the selected text" isn't a
+meaningful operation here yet. Instead, `app_shell.c` tracks
+`g_current_style_flags`/`g_current_size_twips` (reset to the document's
+own default on every load, see `replace_document()`), toggled via
+Ctrl+B/I/U and a Font Size cycle (10/12/14/18/24/36pt fixed steps, the
+same kind of small fixed list 1980s word processors offered rather than
+a free-entry field this app has no dialog for). `do_insert_char()` builds
+a `wp_char_style` matching the current toggle state and calls the new
+`wp_document_cstyle_find_or_add()` (see below) to get a handle, then
+`wp_run_cstyle_set()`s it onto the run `wp_document_insert_text_raw()`
+just created -- reliably identified via that function's own documented
+contract that `out_pos.run` is *always* the newly-inserted run's index,
+in every insertion case (empty paragraph, start, mid-run split, or
+run-boundary), not just the common append-at-end case.
+
+**Alignment is different in kind: it restyles an existing paragraph, not
+future text.** `apply_alignment()` looks up the paragraph containing the
+cursor and calls the new `wp_document_pstyle_find_or_add()` with its
+current style plus a changed `align` field, then `wp_paragraph_pstyle_set()`
+onto that paragraph directly -- well-defined even with no selection model,
+same "cursor is always where you'd expect" reasoning as the character
+style toggles.
+
+**New portable engine helpers, not Atari-specific:**
+`wp_document_cstyle_find_or_add()`/`wp_document_pstyle_find_or_add()`
+(`engine/include/docmodel.h`, `engine/src/docmodel.c`) scan the existing
+style table for a field-by-field-identical match before appending a new
+one. Without this, repeatedly toggling bold on/off/on would grow
+`cstyle_count` by one entry per toggle, eventually risking the table's
+own documented 65535-handle ceiling over a long editing session; with
+it, "toggle back to a style already in use" is a table no-op. Compares
+fields explicitly rather than via `memcmp` so it doesn't depend on
+callers having zeroed any struct padding. Covered on host
+(`test_docmodel_cstyle_find_or_add_reuses_identical_style`,
+`test_docmodel_pstyle_find_or_add_reuses_identical_style`) and re-proven
+cross-compiled for real m68k by `wp_atari_format_selfcheck()` below --
+generically reusable by any future platform backend (M9 Amiga, etc.),
+not tied to this UI.
+
+**Paint-time alignment, not a layout-engine change.** Alignment never
+changes where a paragraph's lines *break* (`wp_paragraph_relayout()` and
+`paint_document()` use the same `g_content_width_twips` column either
+way) -- only where each already-broken line starts *drawing*. The whole
+offset computation is a small, pure, directly-testable function,
+`atari_align_offset_twips(align, content_width_twips, line_width_twips)`:
+`(content_width - line_width)` split in half for CENTER, taken whole for
+RIGHT, zero for LEFT (and defensively for a degenerate line wider than
+its column, which relayout should never produce but this doesn't trust
+blindly). **Justify is explicitly not implemented** -- it would need
+real per-word draw calls with distributed extra spacing (the way T7.3's
+PDF writer does it against real glyph widths), not just one offset;
+documented here as a deliberate scope boundary, not silently dropped.
+
+**New Format menu title**, hand-built the same way as every other title
+in `wp_menu_tree` (`app_shell.c`) -- Bold/Italic/Underline (checkmarked
+via `menu_icheck()`, reflecting `g_current_style_flags`), Font Size
++/-, and Align Left/Center/Right. Appended after Desk in storage order,
+chain-linked between Desk and File (**not** as the tree's new tail --
+see "Known gap: only the first title actually renders" above for why
+that specific positioning mattered enough to get its own investigation)
+so Tools keeps sitting at `ROOT.ob_tail` exactly as in every previously-
+shipped version of this tree.
+
+**Keyboard shortcuts piggyback on real ASCII control codes**, not a
+custom keymap: the ST's own keytable already produces Ctrl+A=0x01 ..
+Ctrl+Z=0x1A for Ctrl+letter (the same convention terminals use), all
+comfortably below `wp_dispatch_key`'s existing `0x20` printable-insert
+threshold, so there's no collision with text entry. Ctrl+B(0x02)/
+I(0x09)/U(0x15) toggle style; Ctrl+](0x1D)/[(0x1B) step font size (no
+numeric-entry dialog exists to type a point size directly); Ctrl+L(0x0C)/
+E(0x05)/R(0x12) set alignment. One real, harmless quirk worth recording:
+Ctrl+I's code (0x09) is the *same byte* the physical Tab key produces on
+this keytable (both are ASCII 0x09 by definition, not something this app
+introduced) -- harmless since Tab has no other meaning in this single-
+paragraph-cursor editor.
+
+**Verified two ways:**
+1. `wp_atari_format_selfcheck()` (run via `ci_atari.sh` and the full TOS
+   matrix) builds its own throwaway `wp_document` (never touching
+   `g_doc`/`g_doc_loaded` -- those `toggle_style_flag()`/
+   `change_font_size()`/`apply_alignment()` operate on this file's
+   global editor state, which a smoke test that never loaded a document
+   shouldn't poke at directly, the same boundary every other selfcheck
+   in this file already respects) to prove `cstyle`/`pstyle` find_or_add
+   dedup, `atari_align_offset_twips()` against hand-computed values
+   (a 700-twip-wide line in a 1000-twip column: 0 offset for LEFT, 150
+   for CENTER, 300 for RIGHT), and that all 8 Ctrl+letter shortcut codes
+   are pairwise distinct and distinct from backspace/printable-insert.
+2. Visual, real Hatari boot: sending Ctrl+E to the running sample
+   document via `xdotool key` visibly re-centers every line with slack
+   (the lines that already fill the column stay put, exactly as
+   `atari_align_offset_twips()` predicts), confirming the paint-time
+   offset lands correctly on real VDI output, not just in isolated
+   arithmetic. Bold/Italic/Underline's own visual rendering was not
+   independently re-confirmed by screenshot this session (typed-
+   character injection via `xdotool type`/`key` proved unreliable in
+   this headless setup beyond the already-documented alt-arrow/click
+   technique -- see "Known gap: no real mouse-driven end-to-end test")
+   but the underlying `vst_effects()` wiring is pre-existing, T4.2-era
+   code this session didn't modify, and the toggle/find_or_add/
+   `wp_run_cstyle_set()` path that feeds it is proven by (1) above.
+
+**Known gaps, honestly scoped:** Justify alignment (see above). Font
+*family*/type switching was investigated and explicitly deferred --
+`wp_char_style.font_name` is a bare `wp_str` offset with no paired
+length (the same locked-struct gap T3.1 already documented for line
+breaking), so real font switching needs that struct to grow a real
+`wp_span`-shaped field plus GDOS font enumeration (`vqt_name()`) on the
+Atari side -- a materially bigger, separate task than the three controls
+shipped here.
+
+## Action registry (`platform/common/actions.h`, M8.5)
+
+Before M8.5, menu dispatch (`wp_dispatch_message`'s `MN_SELECTED`
+switch) and keyboard shortcuts (`wp_dispatch_key`'s ASCII switch) were
+two independently-maintained switch statements hand-duplicating the
+same action set -- adding a new command meant remembering to update
+both. `platform/common/actions.c` replaces this with one canonical
+table, `g_wp_actions[]`, of `{id, group, label, key_hint, shortcut_ascii,
+handler, is_enabled}` entries, built once and shared by every backend
+(see `CLAUDE.md`'s `platform/common/` layer rule).
+
+**Portable (real `.handler` in `actions.c`)**: the three Format style
+toggles (Bold/Italic/Underline -- `ctx->style_flags` XOR, unchanged in
+spirit from the pre-M8.5 `toggle_style_flag()`), Format Size/Alignment
+(real `plat_dialog_choice` pickers -- see the "Format Size/Alignment
+dialogs" section below), Edit Copy (read-only, only touches
+`plat_clipboard_set_text`), and File Quit (`ctx->quit_requested = WP_TRUE`,
+letting each backend's own event loop perform its own native teardown).
+
+**Phase 9 update**: on Atari, Format Size/Alignment's registry handlers
+(the dialog pickers) ended up wired to the Ctrl+]/Ctrl+L **keyboard**
+shortcuts only, not the menu. The five pre-existing Format menu items
+(Size +/-, Align Left/Center/Right) still call the original local
+`change_font_size`/`apply_alignment` functions directly, unchanged --
+see "Format retrofit" below for why (the OBJECT-array risk, not a
+missed follow-up).
+
+**Backend-supplied** (table entry has `handler == NULL`; the backend
+looks the action up by id via `wp_action_find()` at its own call site
+and dispatches to its own existing implementation): File Open/Save
+(needs a native file picker -- `fsel_input()` on Atari today), Edit
+Cut/Paste (both need to replace the *whole document* and trigger a
+backend-specific relayout/repaint this pass doesn't abstract -- this app
+still has no selection-scoped clipboard, see `do_edit_cut`/
+`do_edit_paste`), and all four Tools actions (Spell Check, Thesaurus,
+Grammar Check, Chat). The Tools actions are a **deliberate scope
+decision, not an oversight**: each is currently a multi-hundred-line
+Atari-specific function (dialog loops, offload-gateway round-trips,
+`form_alert()` result reporting) that was not re-architected as part of
+this pass -- re-architecting four large, working, already-tested
+features into the portable registry was judged disproportionate to
+M8.5's actual goal (vi-mode + a *reusable pattern* for a future Amiga/
+Mac/DOS port to build menus from), versus the real risk of introducing
+regressions in features this project already spent M5-M8 getting right.
+Moving their result reporting from `form_alert()` onto the now-available
+`plat_dialog_message` remains a real, worthwhile follow-up -- explicitly
+deferred, not forgotten.
+
+Every shortcut byte in the table is proven pairwise-distinct by
+`test_actions_every_shortcut_is_unique` (`host/tests/test_actions.c`) --
+the same class of bug `wp_atari_format_selfcheck()` already guarded
+against for the pre-M8.5 hardcoded set, now enforced generically for
+the whole table instead of by hand per addition.
+
+## Format Size/Alignment dialogs (`platform/atari/dialog_atari.c`, M8.5)
+
+`plat_dialog_choice` (declared in `platform.h`, Phase-6-added) replaces
+the old "Size +/-" menu-cycling and three separate alignment menu items
+with one real GEM dialog per action. This is the first real
+`form_do()`-based dialog anywhere in this codebase -- `form_alert()`
+(simple message boxes) and `fsel_input()` (the file selector) were the
+only GEM dialog mechanisms used before M8.5; a multi-item picker needed
+genuinely new machinery, not a thin wrapper around either.
+
+**No resource-file compiler exists in this project's toolchain** (the
+same reason the menu bar's own `OBJECT` tree is hand-built rather than
+loaded from a `.rsc` -- see "Hand-built menu OBJECT tree" above), so
+this dialog's tree is built at runtime in `build_dialog_tree()`, sized
+to the caller's actual option count (root box, title, N
+`OF_RBUTTON`-flagged radio buttons, OK, Cancel -- capped at
+`WP_DIALOG_MAX_OPTIONS = 9`, comfortably above the two real callers'
+needs of 7 and 3). It reuses the array-index `ob_next`/`ob_head`/
+`ob_tail` conventions the menu tree already established, but is a
+genuinely separate tree (GEM has no concept of nesting an interactive
+form inside a menu bar's own tree).
+
+**Real character-cell sizing, not a hardcoded guess**: `graf_handle()`
+returns the current resolution's actual character width/height in
+pixels -- `app_shell_run()` already calls this for the 80-column startup
+check but discards the width/height into a dummy; `build_dialog_tree`
+is the first real use of those two output values. Document text layout
+still goes through `plat_measure_text`'s real DPI-correct metrics (per
+CLAUDE.md rule 4) -- a picker dialog's own box sizing only needs to be
+"roughly right," so the system font's cell size alone is sufficient
+without opening a real font handle.
+
+**Verification, same two-tier split as everything else non-trivial in
+this codebase**: `build_dialog_tree` is factored out from the
+interactive `form_dial`/`objc_draw`/`form_do` sequence specifically so
+`wp_atari_dialog_selfcheck()` (`app_shell_internal.h`) can exercise the
+real index arithmetic -- `first_option`/`ok_obj`/`cancel_obj` values,
+`ob_next`/`ob_head`/`ob_tail` linkage via a bounded-step walk (mirroring
+`child_chain_ok()`'s own rationale), exactly-one-option starting
+`OS_SELECTED` -- without ever calling the blocking, interactive
+`form_do()`, the same boundary every other `wp_atari_*_selfcheck` in
+this file respects. Confirmed passing on real Hatari across the full
+6-image TOS matrix (`ci_atari_matrix.sh`), including `graf_handle()`'s
+real return values on real AES implementations, not just EmuTOS.
+**Still not independently confirmed by a real mouse/keyboard-driven
+click-through**, even after Phase 9 wired `plat_dialog_choice` to real
+callers (Ctrl+]/Ctrl+L now call `act_format_size`/`act_format_align`,
+see "Atari retrofit" below): the interactive verification attempt made
+for Phase 9 (`xdotool` key injection into a live Hatari session) did not
+reliably demonstrate ANY keystroke reaching the app end-to-end in this
+environment, let alone a specific dialog interaction -- see
+`docs/vimode.md`'s "Atari Retrofit" section for the full account. This
+remains a real, open gap, now better understood (a test-harness
+limitation, not a reason to doubt the wiring itself, which
+`wp_atari_dialog_selfcheck` and the shortcut-lookup logic both cover
+non-interactively) but still unresolved.
+
+## Atari retrofit: vi-mode, action registry, status line (M8.5 Phase 9)
+
+Wires the vi-mode state machine, the action registry, and the status
+line into the real GEM event loop -- the highest-risk phase of M8.5,
+given this project's own documented history (above) of two real
+regressions from menu/dispatch restructuring. Full design account,
+including the fourth real bug this integration found in `vimode.c`
+itself (a `Ctrl+<letter>` chord being silently treated as its bare
+letter) and the honest, inconclusive result of a real interactive
+Hatari verification attempt, lives in `docs/vimode.md`'s "Atari
+Retrofit" section -- not duplicated here.
+
+**Scope decision worth calling out on its own**: `wp_menu_tree[]`'s
+hand-built `OBJECT` array is completely unchanged by this phase. Every
+prior attempt at "restructure the menu tree" in this project's history
+has cost real regressions caught only by the multi-TOS matrix, for a
+cosmetic payoff (fewer duplicated `menu_icheck`-style call sites). Phase
+9 gets the real payoff of a single canonical action table -- one
+`Ctrl+B` handler instead of two, real `plat_dialog_choice` pickers
+reachable by keyboard -- without touching the array's index arithmetic
+at all: `MN_SELECTED`'s switch still lists every `WP_MENU_OBJ_*` case by
+hand, but the ones with a portable registry handler (Bold/Italic/
+Underline/Copy/Quit) now call `wp_action_find(id)->handler(&g_ctx)`
+instead of a locally-duplicated implementation. `wp_menu_tree_selfcheck()`
+and `child_chain_ok()`'s cycle-detection stay exactly as proven.
+
+**`atari_translate_key`** (real IKBD scan-code table, `scan<<8 | ascii`
+per `evnt_multi`'s own documented output shape) is verified against
+~/Documents/Atari's Atari Compendium (Appendix F) -- not recalled from
+memory -- via `wp_atari_key_translate_selfcheck`, confirmed passing on
+real Hatari across the full 6-image TOS matrix. Scan code is checked
+before ASCII specifically so the physical Escape key (scan `0x01`) and
+Ctrl+[ (scan `0x1A`, but the SAME ASCII `0x1B`) decode differently --
+a table that only ever inspected ASCII, like the pre-M8.5
+`wp_dispatch_key`, could not tell them apart.
+
+Verification: `make test` (196/196), `make atari-engine-check`
+(`-std=c89 -pedantic -Werror` cross-compile, clean), `make atari` +
+`make atari-smoke` (both build clean, `-lgem` link succeeds),
+`./host/tools/ci_atari.sh` (single EmuTOS image, real Hatari, all
+smoke checks including the two new ones above), and
+`./host/tools/ci_atari_matrix.sh` (all 6 real TOS/EmuTOS images) --
+green at every stage. The vi-mode retrofit itself does not trip the
+multi-TOS matrix's own historical failure mode (a bus error on newer
+EmuTOS, a hang on real TOS 1.04), consistent with never having touched
+the menu tree's own structure.
+
+## Help system (M8.5 Phase 10)
+
+Full design (portable format grammar, the pager's word-wrap engine and
+its twips/pixel unit boundary, the compiled-in delivery mechanism, the
+real `.HYP`/ST-Guide research spike and its result) lives in
+`docs/help.md` -- not duplicated here. This section is the Atari-specific
+account: F1 opens a real, separate UI mode (`g_help_active` in
+`app_shell.c`) that takes over `wp_dispatch_key`/`redraw_window` until
+the pager itself reports a close request. No Help menu item this pass --
+same `wp_menu_tree[]`-avoidance reasoning as the retrofit above.
+
+**Confirmed live on real Hatari** -- the one piece of this milestone's
+UI work an interactive screenshot actually confirmed end-to-end (Phase
+9's own attempt was inconclusive; see above). F1 opens the viewer, body
+text word-wraps correctly against real VDI-measured metrics, and the
+link list (with its `> ` marker) and hint bar render as designed.
+
+**Test-harness lesson, worth keeping for next time**: the live
+verification above only worked once a wrong assumption was corrected.
+Hatari's F11 key is "toggle fullscreen" (per `man hatari`), **not** a
+screenshot trigger -- the real screenshot hotkey is `Alt_R+g` (AltGr+g).
+An earlier attempt that used F11 to trigger screenshots produced
+confusing, seemingly-corrupted-content screenshots (text appearing to
+vanish partway down the screen) that were initially, incorrectly
+suspected to be a real rendering bug in the new status-line/help-view
+code; the actual cause was the window's own fullscreen state toggling
+mid-test from the repeated, mistaken F11 presses. Diagnosed by isolating
+variables (a single `h` keypress with long settle waits, confirmed
+via `cmp`-identical screenshots, before reintroducing the real test
+sequence) rather than trusting the first confusing result. `Alt_R+g`
+plus generous settle delays (multiple seconds, not fractions of one)
+between each keystroke and its screenshot is the working recipe --
+alongside T4.1's existing "Alt+Arrow + bare click, never mousemove"
+mouse-injection recipe, this is the second real, hard-won lesson about
+driving this specific headless Hatari/SDL/X11/Xvfb stack.
+
+Verification: the new `wp_atari_help_selfcheck` (parses the real
+compiled-in content, confirms every link resolves, and runs the pager's
+word-wrap algorithm against real Atari VDI font metrics) passes on both
+single-image `ci_atari.sh` and the full 6-image `ci_atari_matrix.sh`.

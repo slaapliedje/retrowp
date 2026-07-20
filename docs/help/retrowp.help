@@ -1,0 +1,157 @@
+@database RetroWP Help
+
+@node Main "RetroWP Help"
+Welcome to RetroWP, the portable word processor.
+
+RetroWP is edited with a vi-style modal editor: most keys are
+commands, not typed text, until you press "i" to start typing.
+
+Pick a topic:
+
+{Normal Mode|Normal}
+{Insert Mode|Insert}
+{Visual Mode|Visual}
+{Command Line|CommandLine}
+{Undo and Redo|UndoRedo}
+{Format Menu and Shortcuts|Format}
+{About RetroWP|About}
+@endnode
+
+@node Normal "Normal Mode"
+Normal mode is where RetroWP starts, and where Escape always
+returns you to. Keys move the cursor or act on text; they are
+never inserted as typed characters.
+
+Movement:
+  h  l        left / right one character
+  j  k        down / up one paragraph
+  w  b  e     forward / back a word, to word end
+  W  B  E     the same, but by WORD (blanks only, punctuation
+              counts as part of the word)
+  0  ^  $     start of line, first non-blank, end of line
+  gg  G       start / end of the document
+  {  }        back / forward a paragraph block
+  3w          a number before a motion repeats it (any motion)
+
+Editing:
+  x           delete the character under the cursor
+  d + motion  delete from cursor to where the motion lands
+  dd          delete the whole current paragraph
+  c + motion  like d, then enters Insert mode
+  cc          change the whole current paragraph
+  y + motion  yank (copy) into the register
+  yy          yank the whole current paragraph
+  p  P        put the register after / before the cursor
+  u           undo
+  Ctrl+R      redo
+
+Entering Insert mode:
+  i  a        insert before / after the cursor
+  I  A        insert at the first non-blank / end of the line
+  o  O        open a new paragraph below / above, and insert
+
+{Back to Main|Main}
+@endnode
+
+@node Insert "Insert Mode"
+Insert mode is where typed characters actually go into the
+document. It behaves like an ordinary text editor:
+
+  any printable key   inserts that character
+  Enter               splits the paragraph in two
+  Backspace           deletes the character before the cursor,
+                       merging into the previous paragraph at
+                       the start of a line
+  Escape               returns to Normal mode
+
+Everything typed during one Insert session -- from entering
+Insert mode until Escape -- undoes as a single step with "u",
+not one keystroke at a time.
+
+The current Bold / Italic / Underline / Size toggles (see the
+Format topic) apply to whatever you type next, the same way
+they did before RetroWP had a modal editor at all.
+
+{Back to Main|Main}
+@endnode
+
+@node Visual "Visual Mode"
+Visual mode selects a range of text to operate on.
+
+  v            start a charwise selection
+  V            start a linewise selection (whole paragraphs)
+  any motion   extends the selection
+  d  x         delete the selection
+  y            yank the selection
+  c            change the selection (delete, then Insert mode)
+  Escape        cancel, back to Normal mode
+
+{Back to Main|Main}
+@endnode
+
+@node CommandLine "Command Line"
+Press ":" to open the command line, or "/" to search forward.
+
+Ex commands:
+  :w      save
+  :q      quit
+  :wq     save and quit
+  :x      save and quit (same as :wq)
+
+Anything else after ":" is not recognized and just beeps.
+
+Search:
+  /text<Enter>   jump to the next occurrence of "text",
+                  wrapping around the end of the document
+  n              repeat the last search forward
+
+{Back to Main|Main}
+@endnode
+
+@node UndoRedo "Undo and Redo"
+  u        undo the last change
+  Ctrl+R   redo
+
+A whole Insert-mode session, or a compound command like "cw",
+undoes as one step -- you do not need to press "u" once per
+keystroke to get back to where you started.
+
+{Back to Main|Main}
+@endnode
+
+@node Format "Format Menu and Shortcuts"
+Bold, Italic, and Underline toggle what typed text looks like
+from here on -- they do not need a selection.
+
+  Ctrl+B   toggle Bold
+  Ctrl+I   toggle Italic
+  Ctrl+U   toggle Underline
+
+Font Size and Alignment open a picker dialog listing the
+available choices.
+
+  Ctrl+]   choose a font size
+  Ctrl+L   choose left / center / right alignment
+
+The Format menu also lists Bold, Italic, Underline, Size, and
+Alignment directly.
+
+{Back to Main|Main}
+@endnode
+
+@node About "About RetroWP"
+RetroWP is an open-source, portable word processor for vintage
+platforms. Its core editing engine is written in strict,
+portable C, with zero platform-specific calls anywhere in the
+engine itself -- the same engine runs unchanged on an Atari ST,
+inside this help viewer, and in this project's own automated
+test suite on a modern PC.
+
+Heavier features -- large-dictionary spell checking, a
+thesaurus, grammar checking, and document format conversion --
+are available through an optional offload link to a small
+companion device, so machines with as little as 1MB of RAM stay
+fast and responsive without needing that data loaded locally.
+
+{Back to Main|Main}
+@endnode

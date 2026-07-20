@@ -16,13 +16,22 @@ consequences for what's simple and what's hard:
 - **Insert** is always a point operation (a caret, never a range).
 - **Delete** in this milestone is scoped to a range **within a single
   run** (`start.section == end.section && start.paragraph == end.paragraph
-  && start.run == end.run`). Deleting a selection that spans multiple
-  runs or paragraphs, and paragraph split/merge (Enter / Backspace-
-  joining-two-paragraphs) are explicitly **not implemented here** --
-  `WP_OP_SPLIT_PARA`/`WP_OP_MERGE_PARA` remain defined-but-unused enum
-  values for that follow-up. This matches the literal T2.2 AC ("tests
+  && start.run == end.run`). This matches the literal T2.2 AC ("tests
   cover start/middle/end of run **and paragraph**" -- i.e. where within
-  a paragraph you edit, not selections spanning paragraphs).
+  a paragraph you edit, not selections spanning paragraphs). Deleting a
+  selection that spans multiple runs or paragraphs is still out of scope
+  *here* -- see `docs/vimode.md` for the M8.5 general delete-range work
+  built on top of this.
+
+**Update (M8.5): paragraph split/merge is now implemented.**
+`WP_OP_SPLIT_PARA`/`WP_OP_MERGE_PARA`, defined since M2 but unused until
+now, back real `wp_document_split_paragraph_raw`/
+`wp_document_merge_paragraph_raw` (+ journaled `wp_edit_split_paragraph`/
+`wp_edit_merge_paragraph`) in `engine/src/edit.c`/`undo.c`. This closed a
+real, pre-existing gap independent of any later modal-editing work: before
+this, Enter was a hard no-op in the one real UI, and a document couldn't
+grow a second paragraph through editing at all. See "Paragraph Split /
+Merge" below.
 
 ## Why the String Pool Never Needs to Move Bytes
 
@@ -77,6 +86,45 @@ len(run[R])`), delete reconstructs run `R`'s slot in one of three ways:
 - **Split** (`O1 > 0 && O2 < len`): run `R` is resized in place to the
   left fragment; a new run for the right fragment is inserted at `R+1`.
 
+## Paragraph Split / Merge (M8.5)
+
+**Split** validates `pos` with exactly the same branch structure "Style
+Inheritance on Insert" above uses (same question: "is this pos meaningful
+in this paragraph's structure," just without inserting text), reporting a
+`split_run` index -- every run at/after it moves into a new paragraph
+inserted at `pos.paragraph + 1`. A `pos` landing strictly mid-run splits
+that run first (identical to insert's mid-run case), so the tail
+fragment becomes a real run the move-loop picks up uniformly. The new
+paragraph's style is a **copy** of the original's (both paragraphs share
+style right after Enter, matching most editors). Runs are moved by
+**value** (a `wp_run` is just a pool span + a style handle, owns no
+memory), so the survivor's `run_count` is simply truncated to `split_run`
+afterward -- nothing to free, the same reasoning `run_remove_at` already
+relies on.
+
+**Merge** is the exact inverse: the second paragraph's runs are
+`wp_paragraph_run_add`-ed onto the first (**never coalesced** into fewer
+runs, matching insert's own never-coalesce rule), then the second
+paragraph's slot is removed. Removing a paragraph is not free the way
+removing a run is -- a paragraph owns a `runs` array and a layout cache,
+so `paragraph_remove_at` (`engine/src/edit.c`, `edit_internal.h`) calls
+`wp_paragraph_layout_free` and frees `runs` before shifting later
+paragraphs down. Single-section only: merging across a section boundary
+is out of scope this pass (nothing user-facing produces multi-section
+documents yet, matching M2's own established precedent for scope limits).
+
+**The canonical "end of paragraph" position, and why split/merge are
+exact inverses of each other.** A position can never be represented as
+`(run = run_count, offset = 0)` -- `wp_pos_next`/`prev`'s own
+`end_of_paragraph` helper (cursor.c) and insert's validation both only
+ever produce `(run = run_count - 1, offset = len(that run))` for "end of
+paragraph" (or `(0, 0)` if the paragraph is empty). Merge's `*out_pos`
+(the journal's `at` for `WP_OP_MERGE_PARA`) is computed the same way,
+captured from the **first** paragraph's run count *before* absorbing the
+second paragraph's runs -- so re-splitting at that exact position always
+reconstructs precisely the runs that were absorbed, whether the absorbed
+paragraph was empty, the survivor was empty, or neither was.
+
 ## Undo Journal: Field Reuse Per Op Kind
 
 `wp_op` is deliberately minimal (`at`, `text`, `style_before`,
@@ -123,6 +171,26 @@ without changing the struct, by reusing fields per kind:
     redo just calls `wp_document_delete_range_raw` again with that
     recomputed range, which independently re-derives the correct case
     from the range itself.
+- **`WP_OP_SPLIT_PARA`** (M8.5): `at` = the pre-split position exactly as
+  passed in; `text`/`style_before`/`style_after` unused. Undo calls
+  `wp_document_merge_paragraph_raw(doc, at.section, at.paragraph, NULL)`;
+  redo calls `wp_document_split_paragraph_raw(doc, at, NULL)` again --
+  both directions reuse the raw structural functions directly, no new
+  logic in `wp_edit_undo`/`redo` beyond dispatching to them.
+- **`WP_OP_MERGE_PARA`** (M8.5): `at` = the **join-point position**
+  `wp_document_merge_paragraph_raw` itself produces as `out_pos` (see
+  "Paragraph Split / Merge" above) -- deliberately chosen because it's
+  exactly what `wp_document_split_paragraph_raw` needs to invert the
+  merge. `style_before` = the **absorbed (second) paragraph's original
+  pstyle handle**, captured by `wp_edit_merge_paragraph` before calling
+  the raw merge. This field is load-bearing, not redundant: the
+  survivor keeps *its own* style through a merge, so a naive re-split on
+  undo would default the resurrected paragraph to the survivor's style
+  (re-split always copies from the current paragraph, matching a real
+  Enter keypress) -- undo must explicitly call `wp_paragraph_pstyle_set`
+  on the resurrected paragraph afterward to restore the style that was
+  actually absorbed. Redo calls `wp_document_merge_paragraph_raw` again
+  at `(at.section, at.paragraph)`.
 
 ## Why Undo Doesn't Need to Restore the *Exact* Original Run Layout
 
@@ -140,6 +208,74 @@ milestone never touch). A `format_txt_export` comparison is a valid
 (insert/delete) never changes cstyle/pstyle -- a future milestone adding
 `WP_OP_SET_CSTYLE`/`WP_OP_SET_PSTYLE` to the fuzz coverage will need a
 comparator that also checks style, not just text.
+
+## General Delete-Range and Undo Grouping (M8.5)
+
+`wp_selection {anchor, caret}` (defined since M2, unused until now) gets
+its first real consumers here: `wp_document_extract_text` (read-only,
+paragraph-boundary-joined-with-`\n`, same two-call sizing convention as
+`format_txt_export`) and `wp_edit_delete_selection` (the general
+multi-run, multi-paragraph delete this milestone's single-run
+`wp_edit_delete_range` deliberately didn't attempt). `wp_pos_compare`
+(pure tuple order -- `wp_pos`'s fields already form a total order by
+construction) normalizes an `(anchor, caret)` pair into `(start, end)`.
+
+**`wp_edit_delete_selection`'s algorithm**, single-section only (same
+scope as split/merge): delete the tail of `start`'s paragraph (from
+`start` to that paragraph's end), delete the head of `end`'s paragraph
+(from its start to `end`), fully **empty out** (not merge away -- see
+below) every whole paragraph strictly between them, then merge
+`start`'s paragraph forward `(end.paragraph - start.paragraph)` times.
+The "empty out, then merge" step is the one non-obvious part: merging a
+middle paragraph directly (without first draining its runs) would
+**splice its content into the survivor** -- the opposite of deleting it.
+Emptying it first (draining runs one at a time via the already-journaled
+`wp_edit_delete_range`) means the subsequent merge just removes a slot
+that already has nothing to contribute.
+
+**`out_pos` recovery after multi-step mutation.** The normalized `start`
+position, captured before any mutation, can become stale by the time
+every delete/merge step above has run -- e.g. if `start.offset == 0`
+lands exactly on the LAST run of its paragraph, that run may get
+`run_remove_at`'d entirely, leaving `start.run` referencing an index
+that no longer exists. The fix: capture `prefix_len` (the byte count
+preceding `start` within its own paragraph) BEFORE any mutation --
+invariant throughout, since nothing before `start` is ever touched --
+then recompute the final `(run, offset)` by walking `prefix_len` bytes
+into the (now-restructured) survivor paragraph afterward
+(`pos_at_byte_offset_in_paragraph`, `undo.c`), landing on the same
+canonical run-boundary convention `wp_pos_next`/insert already use
+(a boundary between two runs always resolves to the START of the LATER
+run, never the raw length of the earlier one).
+
+**Undo grouping.** A single `wp_edit_delete_selection` call can push
+several `wp_op` nodes (one delete per touched run, one merge per
+paragraph boundary crossed) but must undo/redo as exactly ONE
+user-facing step. Two new marker kinds, `WP_OP_GROUP_BEGIN`/
+`WP_OP_GROUP_END` (`wp_undo_group_begin`/`end`, `undo.c`), carry no
+payload -- pure brackets on the stack, not edits. `wp_edit_undo`/`redo`
+became a **depth-counted loop**: a plain op (not part of any group)
+still pops-applies-pushes in exactly one iteration, byte-for-byte the
+same behavior as before this change (verified: every pre-existing
+insert/delete/split/merge test still passes unmodified). Hitting a
+`WP_OP_GROUP_END` while undoing increments a depth counter instead of
+applying anything; the loop then keeps consuming ops -- applying each
+one's inverse -- until a `WP_OP_GROUP_BEGIN` brings depth back to 0,
+which (nesting is always well-formed, since every `group_end` call has a
+matching prior `group_begin`) is guaranteed to be this group's own
+opening marker, not some earlier, unrelated one. Redo mirrors this
+exactly: undo pushes a group's markers onto the redo stack in the same
+order it popped them from the undo stack, which (LIFO twice) restores
+their ORIGINAL chronological order -- so redo walks forward through
+that same sequence, with `GROUP_BEGIN` and `GROUP_END`'s roles swapped
+(entering vs. leaving) since it's now traversing forward instead of
+backward. Depth-counting rather than "stop at the first marker" is what
+makes **nested** groups compose -- not yet exercised by
+`wp_edit_delete_selection` itself (which only ever produces one flat,
+unnested group), but load-bearing for `docs/vimode.md`'s Insert-mode
+session grouping, which wraps an outer group around zero or more
+already-grouped operations (e.g. `cw`'s own leading
+`wp_edit_delete_selection`).
 
 ## Undo/Redo Stacks
 

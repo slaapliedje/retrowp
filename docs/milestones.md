@@ -144,8 +144,8 @@ Goal: A real, running ST word processor at 1MB.
       codes, via the NF_STDERR/NF_EXIT Native Features trap for pass/fail
       signaling -- confirmed to actually catch regressions, not just
       rubber-stamp (verified by deliberately breaking dispatch logic and
-      watching the gate fail). (2) visual -- a real screenshot of WP.PRG
-      showing a live GEM window titled "Word Processor" with working
+      watching the gate fail). (2) visual -- a real screenshot of
+      RETROWP.PRG showing a live GEM window titled "RetroWP" with working
       mover/closer/sizer decorations at the full desktop work area.
       Known gaps (see docs/atari-platform.md): scripted mouse-driven
       end-to-end testing is unreliable in this headless environment (Y
@@ -160,6 +160,20 @@ Goal: A real, running ST word processor at 1MB.
       first menu title actually renders -- root-caused but not yet
       safely fixed (a 3-level tree restructuring hung real Atari CI and
       was reverted). See docs/atari-platform.md for the full trail.
+      **Revisited again post-M8 (2nd time)**: a new multi-TOS CI matrix
+      (host/tools/ci_atari_matrix.sh, see below) was built specifically
+      because this project's CI had only ever tested against one EmuTOS
+      build -- and it immediately caught a real regression a second
+      3-level-tree fix attempt introduced (a genuine bus-error crash
+      under a newer EmuTOS release, a hang under real TOS 1.04) that the
+      single-image `ci_atari.sh` gate could never have detected. Reverted
+      again, more carefully this time (the new Format title landed
+      without reintroducing the risk). "Only the first title renders"
+      remains open, now with two documented, root-caused, reverted fix
+      attempts on record -- see docs/atari-platform.md's "Known gap: only
+      the first title actually renders" section for the full trail,
+      including the now-understood `menu_fixup()` DA-box mechanism a
+      real fix will need to satisfy.
 - [x] T4.2 VDI/SpeedoGDOS metrics + glyph draw implementation of platform.h.
       AC: Text renders; measured widths drive correct on-screen wrap matching
       the engine's layout.
@@ -175,7 +189,7 @@ Goal: A real, running ST word processor at 1MB.
       the real VDI seam and asserts line_count>1 with every line within
       its column, run via host/tools/ci_atari.sh and confirmed to catch
       a deliberately-introduced metrics regression. (2) visual -- a
-      screenshot of WP.PRG rendering a hardcoded sample paragraph with
+      screenshot of RETROWP.PRG rendering a hardcoded sample paragraph with
       correct word-boundary wrap filling the window without overflow.
       Known gaps (see docs/atari-platform.md): color is a black/white
       luminance threshold, not a real palette search; UTF-8-to-native
@@ -741,6 +755,262 @@ one half of "CHAT / IMAGE" this project can actually make use of --
 IMAGE stays a reserved, unimplemented op ID, honestly documented rather
 than faked, until a future milestone gives this project somewhere to
 put image bytes at all.
+
+**Update (post-M8): multi-TOS CI matrix + Format controls.** Two
+requests handled together in one session, unrelated to any milestone's
+original scope. (1) `host/tools/ci_atari_matrix.sh` (shared boot logic
+in `host/tools/atari_ci_lib.sh`) boots the exact same smoke test against
+6 real TOS/EmuTOS images spanning the original ST through MegaSTE, not
+just the single EmuTOS build `ci_atari.sh` alone has ever used --
+immediately valuable: it caught a real regression a menu-tree fix
+attempt introduced that single-image CI never could (see T4.1's
+"Revisited again post-M8" note above). (2) Bold/Italic/Underline, Font
+Size, and paragraph Alignment (Left/Center/Right) are now real menu
+items + Ctrl+letter keyboard shortcuts, the classic 1980s-word-processor
+control set. Rendering itself was already fully wired since T4.2 --
+only the UI to set these attributes (a "current input style" toggle
+model, since this app still has no selection model or cursor
+navigation) and paint-time alignment offset math were new. Two small,
+portable, reusable engine additions
+(`wp_document_cstyle_find_or_add()`/`wp_document_pstyle_find_or_add()`
+in `engine/include/docmodel.h`) came out of this, not tied to Atari at
+all. Deliberately deferred: Justify alignment (needs real per-word
+stretch painting) and font *family* switching (needs a locked-struct
+change to `wp_char_style.font_name` plus GDOS font enumeration -- a
+materially bigger, separate task). Full design, verification, and the
+menu-tree investigation trail: docs/atari-platform.md's "Multi-TOS CI
+matrix" and "Format controls wired into the UI" sections.
+
+**Update (post-M8): boot resolution + real INF fixtures.** Follow-up
+session: tested whether ST Low's 40-column width (not the `mn_bar()`
+structural issue above) was the real cause of "only the first menu title
+renders" -- it wasn't (verified at Medium resolution, same result). The
+harness's default boot resolution was still switched from Low to Medium
+(640x200, 80 columns) across all Atari CI scripts, since Low is already
+below the app's own supported floor. Also added
+`host/tools/atari_inf_fixtures/` -- real `DESKTOP.INF`/`NEWDESK.INF`/
+`EMUDESK.INF` files, each saved by genuinely booting the corresponding
+real desktop (TOS 1.04, TOS 2.06, EmuTOS) rather than hand-authored, for
+interactive/manual testing and real-hardware use. Full details:
+docs/atari-platform.md's "Boot resolution: Medium, not Low" section and
+the new note under "Known gap: only the first title actually renders".
+
+---
+
+## M8.5 — Vi-Mode Editing + Cross-Platform UI Scaffolding + Help System
+Goal: A vi-style modal editor, UI-agnostic and living in the portable
+engine; a `platform/common/` layer so menus/dialogs/status/help behave
+consistently across future backends without pretending Atari GEM, Amiga
+MUI, Mac Toolbox, and a DOS shell can look identical; a help system
+authored once and delivered through each platform's own native-feeling
+viewer. Inserted between M8 and M9 (Amiga/Mac/DOS keep their original
+numbers) because M9's own artifact goal -- "Amiga port touches only
+`platform/amiga/`, diff-clean against engine/services" -- isn't reachable
+unless this scaffolding exists first. Full plan:
+`docs/vimode.md` (design decisions, command reference, four real bugs
+found and fixed), `docs/atari-platform.md` (the Atari retrofit and its
+own deliberate menu-tree-untouched scope decision), `docs/help.md` (the
+help system).
+
+- [x] T8.5.1 Engine: paragraph split/merge.
+      AC: `wp_edit_split_paragraph`/`wp_edit_merge_paragraph`, journaled,
+      undo/redo round-trip.
+      A real, pre-existing gap independent of vi-mode: before this,
+      `WP_OP_SPLIT_PARA`/`WP_OP_MERGE_PARA` were defined in `wp_op_kind`
+      but nothing implemented them, so Enter was a hard no-op anywhere in
+      the app. `wp_document_split_paragraph_raw`/`merge_paragraph_raw`
+      (`engine/src/edit.c`) plus new private `paragraph_insert_at`/
+      `paragraph_remove_at` splice primitives (`edit_internal.h`).
+      `docs/editing.md`'s "Paragraph Split / Merge" section has the full
+      design (canonical-position handling, the undo field-reuse
+      convention). 7 new `test_edit.c` cases, 3 new `test_undo.c` cases.
+- [x] T8.5.2 Engine: general delete-range + undo grouping.
+      AC: Multi-run/multi-paragraph delete as one undo step;
+      `wp_selection`'s first real use anywhere in the codebase.
+      `wp_pos_compare`, `wp_edit_delete_selection`,
+      `wp_document_extract_text` (two-call sizing convention, matches
+      `format_txt_export`), and `WP_OP_GROUP_BEGIN`/`GROUP_END` with a
+      depth-counted undo/redo loop (nested groups compose correctly,
+      needed because Insert-mode sessions wrap an outer group around
+      `cw`'s own inner group). New `test_selection.c`, 9 cases.
+- [x] T8.5.3 Engine: motion family.
+      AC: Word/line/paragraph motions, host-testable with no layout pass.
+      New `engine/src/motion.c`: `wp_pos_word_forward/backward/end`,
+      `wp_pos_line_start/first_nonblank/end`,
+      `wp_pos_paragraph_down/up`, `wp_pos_para_block_forward/backward`.
+      **Design decision**: motions operate on logical paragraphs, not
+      visually-wrapped screen lines (`j`/`k` move by paragraph) -- a
+      real, documented UX deviation from vim, chosen because `wp_pos` has
+      no wrapped-row concept and the layout cache is a lazy, invalidatable
+      rendering artifact motions shouldn't depend on. New `docs/vimode.md`.
+      New `test_motion.c`, 10 cases.
+- [x] T8.5.4 Portable key-event type.
+      AC: `wp_key_event {codepoint, special, mods}`, zero platform calls.
+      New `engine/include/keyevent.h` -- pure value type, same category as
+      `wp_pos`. Each backend translates its own native input into this.
+- [x] T8.5.5 Vi-mode state machine.
+      AC: Normal/Insert/Visual/Visual-Line/Command modes; fully
+      host-testable via synthetic key scripts, zero real backend.
+      New `engine/include/vimode.h` + `engine/src/vimode.c`. Full command
+      reference, the `:w`/`:q`/`:wq` action hand-off seam (vi-mode never
+      calls `plat_file_*` itself -- returns a `wp_vimode_action` the
+      caller executes with save/load logic it already owns), and
+      undo-grouping strategy for Insert sessions and compound operators:
+      `docs/vimode.md`. **Design decision**: simpler insertion-point
+      caret, not vim's on-character caret -- confirmed with the user,
+      reuses existing engine position functions with no new boundary-
+      clamping logic, at the cost of small acknowledged differences
+      around `x`/`$`/post-Escape cursor position. New `test_vimode.c`,
+      18 cases at the time, 19 after a 4th bug found during the Atari
+      retrofit (T8.5.9) added its own regression test.
+      **Three real bugs found by the test suite**: `cw`/`cW` aren't
+      literally `c`+`w` (real vim special case, `:help cw`); a linewise
+      register's trailing `'\n'` was splitting one extra empty paragraph
+      on put; Visual-mode motions must chain from the selection's current
+      extent (`vs->cursor`), not where `v` was pressed. All three: full
+      account in `docs/vimode.md`.
+- [x] T8.5.6 `platform/common/`: action registry + app context.
+      AC: One canonical `{id, group, label, key_hint, shortcut_ascii,
+      handler, is_enabled}` table replaces two independently-maintained
+      switch statements (menu dispatch + keyboard shortcuts).
+      New `platform/common/actions.{h,c}` + `app_ctx.{h,c}`. Portable
+      handlers: Bold/Italic/Underline toggles, Edit Copy, File Quit.
+      Backend-supplied (`handler == NULL`, deliberate scope decision, not
+      an oversight): File Open/Save, Edit Cut/Paste, all four Tools
+      actions -- each already a real, working, multi-hundred-line
+      Atari-specific function; re-architecting them was judged
+      disproportionate to this pass's actual goal. New
+      `platform/common/` build-discipline rule in `CLAUDE.md`: may call
+      `platform.h`, must never `#include` a native header, enforced by
+      construction (every target's own toolchain compiles this
+      directory). New `test_actions.c`, 7 cases including a
+      pairwise-shortcut-uniqueness check generalizing what
+      `wp_atari_format_selfcheck` used to guard by hand.
+- [x] T8.5.7 `plat_dialog_choice` + Atari implementation.
+      AC: A real "choose one of N" native dialog, replacing "Size +/-"
+      cycling and three separate alignment menu items with one picker.
+      New `platform.h` primitive alongside the existing
+      `plat_dialog_message`. `platform/atari/dialog_atari.c`: the first
+      `form_do()`-based dialog anywhere in this codebase (`form_alert`/
+      `fsel_input` were the only GEM dialog mechanisms used before this),
+      a runtime-built `OBJECT` tree sized to the caller's option count (no
+      resource-file compiler in this project's toolchain). Real
+      character-cell sizing via `graf_handle()`. Verified via
+      `wp_atari_dialog_selfcheck` (index arithmetic, without ever calling
+      the blocking `form_do()`) across the full 6-image TOS matrix.
+      Interactive click-through verification: see T8.5.9's own account of
+      what a real attempt found. Full design: docs/atari-platform.md's
+      "Format Size/Alignment dialogs" section.
+- [x] T8.5.8 `platform/common/`: status/mode line.
+      AC: A reserved screen strip showing vi-mode's current mode.
+      New `platform/common/statusline.{h,c}` -- no new `platform.h`
+      primitive needed (`plat_draw_text`/`plat_fill_rect` already take
+      arbitrary rects). New `test_statusline.c` (crash-safety only --
+      `draw_host.c`'s draw calls are no-ops, so host can't verify visual
+      content, the same boundary every drawing-adjacent host test in this
+      project respects).
+- [x] T8.5.9 Atari retrofit: wire everything into the real app shell.
+      AC: Real AES `evnt_multi` key/menu dispatch routes through vi-mode
+      and the action registry; a real Hatari screenshot shows it working.
+      The single highest-risk phase, given this project's own documented
+      history of two real regressions from menu/dispatch restructuring
+      (see docs/atari-platform.md). `atari_translate_key` (real IKBD
+      scan-code table, verified against the Atari Compendium, not
+      memory) feeds every keystroke to vi-mode first; anything vi-mode
+      doesn't consume falls through to `wp_action_find_by_shortcut`.
+      **A fourth real vi-mode bug was found integrating this**: `Ctrl+
+      <letter>` chords were being treated as their bare letter (Ctrl+B
+      silently moved the cursor via `b` instead of reaching Bold) --
+      fixed in `engine/src/vimode.c` itself (a mods-guard on every
+      plain-letter command dispatch), with a new regression test,
+      `docs/vimode.md`'s "Atari Retrofit" section has the full account.
+      **Deliberate scope decision**: `wp_menu_tree[]`'s hand-built
+      `OBJECT` array is completely untouched -- menu dispatch is unified
+      through the registry only where it's a clean 1:1 match
+      (Bold/Italic/Underline/Copy/Quit); Font Size/Alignment's five
+      existing menu items keep calling the pre-M8.5 local functions
+      directly, while the NEW dialog-based behavior (T8.5.7) is reachable
+      by keyboard shortcut only this pass. New `wp_atari_key_translate_
+      selfcheck`, confirmed on the real 6-image TOS matrix.
+      **Real interactive verification, honestly reported**: a live
+      Hatari session driven by synthetic `xdotool` key injection did not
+      reliably demonstrate a keystroke reaching the app end-to-end in
+      this environment, across several technique variations -- a
+      documented test-harness gap (reinforcing an existing, similar
+      caveat from T4.3), not a claimed pass. The automated coverage above
+      is the rigorous verification for this task's AC.
+- [x] T8.5.10 Help system MVP.
+      AC: Portable help content, authored once, rendered through a real
+      pager on every target including Atari from day one.
+      New portable format close to AmigaGuide's own real syntax (`@node
+      NAME "Title"` / `@endnode`, `{label|target}` links -- a deliberate
+      simplification of AmigaGuide's own `@{"label" Link target}`, close
+      enough that a future AmigaGuide export is a per-line mechanical
+      translation, not a redesign). `platform/common/help_doc.{h,c}`
+      (parser, built on the engine's existing `wp_strpool`/`wp_span`
+      rather than reinventing string storage) + `help_view.{h,c}` (a
+      simple scrolling pager: link-line navigation via j/k/Enter, a
+      history stack for Backspace/"back", and its own greedy word-wrap
+      engine, `wp_help_wrap_line`, using the same `plat_measure_text`
+      seam the main document layout uses -- exposed as its own testable
+      function specifically because `draw_host.c`'s draw calls are
+      no-ops and can't otherwise prove wrap correctness on host). Real
+      authored content, `docs/help/retrowp.help` (a command reference
+      covering every vi-mode mode plus Format shortcuts), compiled into
+      every target at build time by a new host tool,
+      `host/tools/gen_help_header.c` (source stays a real, human-editable
+      text file; no hand-escaped C string to keep in sync). Wired into
+      `platform/atari/app_shell.c` behind F1 only (no Help menu item --
+      same menu-tree-avoidance reasoning as T8.5.9); a whole separate UI
+      mode (`g_help_active`) that takes over key dispatch and painting
+      while active. 22 new host tests (`test_help_doc.c`,
+      `test_help_view.c`, including hand-computed word-wrap assertions
+      against the host's deterministic fake-monospace font) plus a
+      `test_help_content.c` case that parses the REAL shipped content and
+      confirms every link resolves -- a real authoring mistake would fail
+      the build, not just be discoverable by clicking through the viewer.
+      A new `wp_atari_help_selfcheck` proves the same wrap algorithm
+      against REAL Atari VDI-measured font metrics, confirmed on the full
+      6-image TOS matrix. **Confirmed live on real Hatari**: F1 opens the
+      viewer, body text word-wraps correctly, and link markers/hint bar
+      render -- a genuine screenshot, unlike T8.5.9's inconclusive
+      attempt (this one landed once the `xdotool` screenshot hotkey
+      mistake from that earlier attempt was found and fixed -- see
+      docs/atari-platform.md). Link-selection *highlighting* specifically
+      (pressing j/k to move between links) was not independently
+      reconfirmed live in this same pass -- covered by
+      `test_help_view_link_selection_clamped_at_bounds` and the paint
+      crash-safety test instead, the same category of gap T8.5.9 already
+      has.
+      **Research spike, real result**: cloned and built HypView's `hcp`
+      (the ST Guide `.HYP` compiler) as a plain host tool -- clean build,
+      no special dependencies beyond glib (already present). Hand-wrote a
+      trivial fixture in hcp's real native syntax (confirmed from its own
+      source: `@node <name> [<title>]`, `@{"text" link <name>}`,
+      matching this project's own format closely enough that translating
+      `{label|target}` to it is genuinely mechanical) and compiled it
+      successfully; `hypinfo` (also built from the same source tree)
+      independently read the result back and confirmed a well-formed
+      ST-Guide database with the right node count and names. **Not done
+      in this pass** (real, separate follow-up, not a failed spike): a
+      real `{label|target}` → hcp-syntax translator, wiring `hcp` as a
+      Makefile-invoked build dependency the way `gen_help_header` is, and
+      an interactive real-ST-Guide-viewer click-through. The spike's job
+      was to answer "is this worth investing in" -- it is; actually doing
+      it is out of scope for this MVP pass, per the plan's own framing.
+      docs/help.md has the full account, including the fixture and
+      `hypinfo` output.
+
+**Verification across the whole milestone**: `make test` grew from 139
+(session start) to 219 (T8.5.10's end) -- host tests kept passing after
+every phase, not just at the end. `make atari-engine-check` (`-std=c89
+-pedantic -Werror` cross-compile) and the full real-Hatari 6-image TOS
+matrix (`ci_atari_matrix.sh`) both stayed green through T8.5.7 and
+T8.5.9/T8.5.10 specifically, the two phases that actually touch the real
+Atari runtime -- including T8.5.9, the exact class of change (menu/
+dispatch restructuring) that caused two real regressions earlier in this
+project's history, this time without incident, attributed directly to
+the deliberate decision not to touch `wp_menu_tree[]`'s own structure.
 
 ---
 

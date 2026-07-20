@@ -1,8 +1,10 @@
-# CLAUDE.md — Portable Word Processor Engine
+# CLAUDE.md — RetroWP
 
 ## What This Project Is
-An open-source, portable word processor for vintage platforms, built around a
-platform-independent core engine written in strict, portable C. Primary target:
+RetroWP: an open-source, portable word processor for vintage platforms, built
+around a platform-independent core engine written in strict, portable C.
+The name fits 8.3 filename limits on every vintage target (`RETROWP.PRG`,
+`RETROWP.EXE`). Primary target:
 Atari ST (1MB, plain TOS). Additional targets: Amiga (MUI), Mac Classic (Toolbox),
 DOS (text-mode). A companion "offload" service (Raspberry Pi + local LLM) provides
 heavy features (grammar, large-dictionary spell, thesaurus, ODT/PDF conversion)
@@ -24,7 +26,17 @@ over a serial/TCP link so low-RAM machines stay lean.
 
 ## Architecture Layers
 - `engine/`   Portable C. Document model, editing, layout, formats, offload client.
-- `platform/` One backend per target. Implements `platform.h`. Owns UI + rendering.
+- `platform/common/` Shared UI scaffolding (action registry, app context, status
+              line, help viewer) used by every backend. MAY call `platform.h`
+              functions; MUST NEVER `#include` a native header (`gem.h`,
+              `exec/types.h`, `MacTypes.h`, `dos.h`, ...). Enforced by
+              construction, not just convention: this directory is compiled by
+              every target's own toolchain (host `cc`, the Atari m68k
+              cross-compiler, and eventually Amiga/Mac/DOS cross-compilers) --
+              a stray native `#include` breaks the host build immediately,
+              since no such header exists there.
+- `platform/<target>/` One backend per target. Implements `platform.h`, plus
+              that target's own native headers freely. Owns UI + rendering.
 - `services/` Standalone algorithmic modules (spell, thesaurus, grammar-lite).
               Pure C, data-driven, no UI, no platform calls. Shared everywhere.
 - `offload/`  The Pi-side gateway (modern C/Python). Mirrors the serial protocol.

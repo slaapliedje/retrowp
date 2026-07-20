@@ -66,6 +66,56 @@ void test_docmodel_cstyle_add_survives_growth(void)
     wp_document_free(&doc);
 }
 
+void test_docmodel_cstyle_find_or_add_reuses_identical_style(void)
+{
+    wp_document doc;
+    wp_char_style style;
+    wp_cstyle first, second, third;
+
+    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
+
+    style = *wp_document_cstyle_get(&doc, doc.default_cstyle);
+    style.flags |= WP_STYLE_BOLD;
+
+    ASSERT_TRUE(wp_document_cstyle_find_or_add(&doc, &style, &first) == WP_OK);
+    ASSERT_TRUE(first != doc.default_cstyle);
+
+    /* Same field values, byte-for-byte, but a distinct local struct --
+       must resolve to the SAME handle, not a new table entry (this is
+       the whole point: repeated toggling must not grow the table). */
+    ASSERT_TRUE(wp_document_cstyle_find_or_add(&doc, &style, &second) == WP_OK);
+    ASSERT_EQ_U32(second, first);
+    ASSERT_EQ_U32(doc.cstyle_count, 3); /* sentinel + default + this one, no dup */
+
+    style.flags |= WP_STYLE_ITALIC;
+    ASSERT_TRUE(wp_document_cstyle_find_or_add(&doc, &style, &third) == WP_OK);
+    ASSERT_TRUE(third != first);
+    ASSERT_EQ_U32(doc.cstyle_count, 4);
+
+    wp_document_free(&doc);
+}
+
+void test_docmodel_pstyle_find_or_add_reuses_identical_style(void)
+{
+    wp_document doc;
+    wp_para_style style;
+    wp_pstyle first, second;
+
+    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
+
+    style = *wp_document_pstyle_get(&doc, doc.default_pstyle);
+    style.align = WP_ALIGN_CENTER;
+
+    ASSERT_TRUE(wp_document_pstyle_find_or_add(&doc, &style, &first) == WP_OK);
+    ASSERT_TRUE(first != doc.default_pstyle);
+
+    ASSERT_TRUE(wp_document_pstyle_find_or_add(&doc, &style, &second) == WP_OK);
+    ASSERT_EQ_U32(second, first);
+    ASSERT_EQ_U32(doc.pstyle_count, 3);
+
+    wp_document_free(&doc);
+}
+
 void test_docmodel_build_known_tree(void)
 {
     wp_document doc;

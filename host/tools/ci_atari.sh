@@ -13,48 +13,38 @@
 set -e
 
 cd "$(dirname "$0")/../.."
+. host/tools/atari_ci_lib.sh
 
 TOS_IMAGE=/usr/share/hatari/etos512k.img
-SCRATCH="$(mktemp -d)"
-XVFB_DISPLAY=":97"
-trap 'kill "$XVFB_PID" 2>/dev/null; rm -rf "$SCRATCH"' EXIT
 
 make atari-engine-check
 make atari-smoke
 
-Xvfb "$XVFB_DISPLAY" -screen 0 1280x800x24 >"$SCRATCH/xvfb.log" 2>&1 &
-XVFB_PID=$!
-sleep 1
-
-mkdir -p "$SCRATCH/c_drive"
-cp bin/atari/SMOKE.PRG "$SCRATCH/c_drive/SMOKE.PRG"
-
-set +e
-HOME="$SCRATCH" DISPLAY="$XVFB_DISPLAY" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
-    timeout 25 hatari \
-    --natfeats on \
-    --tos "$TOS_IMAGE" \
-    --machine st \
-    --memsize 1 \
-    --monitor rgb --tos-res low --zoom 4 --statusbar no --borders no \
-    --confirm-quit no \
-    --sound off \
-    --conout 2 \
-    --harddrive "$SCRATCH/c_drive" \
-    --auto SMOKE.PRG \
-    >"$SCRATCH/stdout.log" 2>"$SCRATCH/stderr.log"
-STATUS=$?
-set -e
+# NOT `run_atari_smoke_once ...; STATUS=$?` -- under `set -e`, a bare
+# statement (not an if/while condition) that returns non-zero kills the
+# script immediately, before STATUS is ever assigned or anything is
+# printed. A real smoke-test FAILURE returning non-zero is an expected,
+# handled outcome here, not a script bug -- it must be exempted from
+# errexit via an if-condition like this, the same reason the original
+# (pre-refactor) version of this script wrapped the raw `hatari` call in
+# `set +e` / `set -e` around it.
+if run_atari_smoke_once "$TOS_IMAGE" 0; then
+    STATUS=0
+else
+    STATUS=$ATARI_CI_STATUS
+fi
+LOG=$ATARI_CI_LOG
 
 echo "--- Hatari conout + NF_STDERR log ---"
-cat "$SCRATCH/stdout.log" "$SCRATCH/stderr.log" | grep -E "SMOKE|PASS|FAIL|Malloc" || true
+grep -E "SMOKE|PASS|FAIL|Malloc" "$LOG" || true
 echo "--- Hatari exit status: $STATUS ---"
 
 if [ "$STATUS" -ne 0 ]; then
     echo "ATARI CI: FAILED (exit $STATUS)"
-    echo "--- full stdout ---"; cat "$SCRATCH/stdout.log"
-    echo "--- full stderr ---"; cat "$SCRATCH/stderr.log"
+    echo "--- full log ---"; cat "$LOG"
+    rm -rf "$(dirname "$LOG")"
     exit 1
 fi
 
+rm -rf "$(dirname "$LOG")"
 echo "ATARI CI: PASSED"

@@ -50,3 +50,25 @@ wp_status plat_dialog_message(plat_window *parent, plat_dialog_kind kind,
     if (out) *out = PLAT_DR_OK;
     return WP_OK;
 }
+
+wp_status plat_dialog_choice(plat_window *parent,
+                              const u8 *title_utf8, u32 title_len,
+                              const u8 * const *option_labels_utf8,
+                              const u32 *option_label_lens,
+                              u32 option_count, u32 default_index,
+                              wp_bool *out_cancelled, u32 *out_index)
+{
+    /* No real UI at this stage -- always "picks" the default, never
+       cancels. Enough to let platform/common code (and host tests
+       exercising it) link and run without a real GUI, same reasoning
+       as plat_dialog_message above. */
+    WP_UNUSED(parent);
+    WP_UNUSED(title_utf8);
+    WP_UNUSED(title_len);
+    WP_UNUSED(option_labels_utf8);
+    WP_UNUSED(option_label_lens);
+    if (option_count == 0) return WP_RANGE;
+    if (out_cancelled) *out_cancelled = WP_FALSE;
+    if (out_index) *out_index = (default_index < option_count) ? default_index : 0;
+    return WP_OK;
+}

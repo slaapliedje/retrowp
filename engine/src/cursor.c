@@ -213,3 +213,12 @@ wp_pos wp_pos_prev(const wp_document *doc, wp_pos pos)
 
     return pos; /* already at the absolute start of the document */
 }
+
+int wp_pos_compare(wp_pos a, wp_pos b)
+{
+    if (a.section != b.section)     return (a.section < b.section) ? -1 : 1;
+    if (a.paragraph != b.paragraph) return (a.paragraph < b.paragraph) ? -1 : 1;
+    if (a.run != b.run)             return (a.run < b.run) ? -1 : 1;
+    if (a.offset != b.offset)       return (a.offset < b.offset) ? -1 : 1;
+    return 0;
+}

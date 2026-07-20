@@ -35,4 +35,23 @@ wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos 
    paragraph -- see docs/editing.md). */
 u16 find_run_by_span(const wp_paragraph *para, wp_span span);
 
+/* Same shape as run_insert_at/run_remove_at, one tree level up. Unlike a
+   run (a POD -- span + style handle, owns no allocation), a removed
+   paragraph owns its runs array and layout cache, so paragraph_remove_at
+   must free both before shifting; a run never needs that. Inserts an
+   empty (zeroed) paragraph -- the caller fills in its runs/style
+   afterward; this only handles the array splice. */
+wp_status paragraph_insert_at(wp_section *sec, u32 index, u32 *out_index);
+void      paragraph_remove_at(wp_section *sec, u32 index);
+
+/* The (run, offset) pair for "the very end of this paragraph's existing
+   content" -- (run_count - 1, that run's length), or (0, 0) if the
+   paragraph has no runs. The same canonical form wp_pos_next/prev's own
+   end_of_paragraph (cursor.c) and insert's "end of run" validation
+   branch both use -- see docs/editing.md. Shared by
+   wp_document_merge_paragraph_raw, wp_document_extract_text, and
+   wp_edit_delete_selection, all of which need "where does paragraph X's
+   content end" as a plain (run, offset) pair rather than a full wp_pos. */
+void paragraph_end_run_offset(const wp_paragraph *para, u32 *out_run, u32 *out_offset);
+
 #endif /* WP_EDIT_INTERNAL_H */

@@ -355,3 +355,149 @@ void test_undo_fuzz_n_ops_then_n_undos_restores_original(void)
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
 }
+
+void test_undo_split_paragraph_then_undo_then_redo(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    u32 sec_idx, para_idx;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_span span;
+    u16 run_idx;
+    wp_pos pos, out_pos;
+    char buf[64];
+
+    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
+    wp_undo_journal_init(&journal);
+    ASSERT_TRUE(wp_document_section_add(&doc, &sec_idx) == WP_OK);
+    sec = wp_document_section_get(&doc, sec_idx);
+    ASSERT_TRUE(wp_section_paragraph_add(sec, &para_idx) == WP_OK);
+    para = wp_section_paragraph_get(sec, para_idx);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"Hello World", 11, &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, doc.default_cstyle, &run_idx) == WP_OK);
+
+    pos.section = 0; pos.paragraph = 0; pos.run = 0; pos.offset = 5;
+    ASSERT_TRUE(wp_edit_split_paragraph(&doc, &journal, pos, &out_pos) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 2);
+    ASSERT_EQ_U32(out_pos.paragraph, 1);
+
+    ASSERT_TRUE(wp_undo_can_undo(&journal));
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 1);
+    para = wp_section_paragraph_get(sec, 0);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "Hello World");
+
+    ASSERT_TRUE(wp_undo_can_redo(&journal));
+    ASSERT_TRUE(wp_edit_redo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 2);
+    para = wp_section_paragraph_get(sec, 0);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "Hello");
+    para = wp_section_paragraph_get(sec, 1);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, " World");
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* Verifies the one genuinely tricky correctness detail from
+   docs/editing.md's field-reuse design for WP_OP_MERGE_PARA: the
+   absorbed paragraph's OWN pstyle (distinct from the survivor's) must
+   come back after undo, not the survivor's style that a naive re-split
+   would default to. */
+void test_undo_merge_paragraph_then_undo_then_redo(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    u32 sec_idx, para0_idx, para1_idx;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_span span;
+    u16 run_idx;
+    wp_pstyle center_style;
+    wp_para_style ps;
+    wp_pos out_pos;
+    char buf[64];
+
+    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
+    wp_undo_journal_init(&journal);
+    ASSERT_TRUE(wp_document_section_add(&doc, &sec_idx) == WP_OK);
+    sec = wp_document_section_get(&doc, sec_idx);
+
+    ASSERT_TRUE(wp_section_paragraph_add(sec, &para0_idx) == WP_OK);
+    para = wp_section_paragraph_get(sec, para0_idx);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"Hello", 5, &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, doc.default_cstyle, &run_idx) == WP_OK);
+
+    ASSERT_TRUE(wp_section_paragraph_add(sec, &para1_idx) == WP_OK);
+    para = wp_section_paragraph_get(sec, para1_idx);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"World", 5, &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, doc.default_cstyle, &run_idx) == WP_OK);
+    /* Give the SECOND paragraph a distinct style from the (default-
+       styled) first, so undo restoring the wrong style is observable. */
+    memset(&ps, 0, sizeof(ps));
+    ps.align = WP_ALIGN_CENTER;
+    ASSERT_TRUE(wp_document_pstyle_add(&doc, &ps, &center_style) == WP_OK);
+    wp_paragraph_pstyle_set(para, center_style);
+
+    ASSERT_TRUE(wp_edit_merge_paragraph(&doc, &journal, 0, 0, &out_pos) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 1);
+    para = wp_section_paragraph_get(sec, 0);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "HelloWorld");
+
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 2);
+    para = wp_section_paragraph_get(sec, 0);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "Hello");
+    para = wp_section_paragraph_get(sec, 1);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "World");
+    ASSERT_EQ_U32(para->style, center_style); /* the real correctness check */
+
+    ASSERT_TRUE(wp_edit_redo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 1);
+    para = wp_section_paragraph_get(sec, 0);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "HelloWorld");
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_undo_split_merge_no_leaks(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    u32 sec_idx, para_idx;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_span span;
+    u16 run_idx;
+    wp_pos pos, out_pos;
+
+    mem_host_reset_counters();
+
+    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
+    wp_undo_journal_init(&journal);
+    ASSERT_TRUE(wp_document_section_add(&doc, &sec_idx) == WP_OK);
+    sec = wp_document_section_get(&doc, sec_idx);
+    ASSERT_TRUE(wp_section_paragraph_add(sec, &para_idx) == WP_OK);
+    para = wp_section_paragraph_get(sec, para_idx);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"Hello World", 11, &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, doc.default_cstyle, &run_idx) == WP_OK);
+
+    pos.section = 0; pos.paragraph = 0; pos.run = 0; pos.offset = 5;
+    ASSERT_TRUE(wp_edit_split_paragraph(&doc, &journal, pos, &out_pos) == WP_OK);
+    ASSERT_TRUE(wp_edit_merge_paragraph(&doc, &journal, 0, 0, NULL) == WP_OK);
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK); /* undo the merge -- redo stack now has 1 */
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+
+    ASSERT_EQ_U32(mem_host_live_count(), 0);
+}

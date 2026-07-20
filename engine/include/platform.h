@@ -156,6 +156,26 @@ wp_status plat_dialog_message(plat_window *parent, plat_dialog_kind kind,
                                const u8 *utf8_msg, u32 len,
                                plat_dialog_result *out);
 
+/* Native "choose one of N" dialog (M8.5) -- same philosophy as
+   plat_dialog_message: the portable side says WHAT (a title and a list
+   of option labels), the backend says HOW (GEM form_do() with
+   OF_RBUTTON-grouped radio items on Atari; a real dialog-manager list/
+   radio widget on Amiga/Mac; a numbered text prompt on DOS -- see
+   docs/atari-platform.md). option_labels_utf8[i]/option_label_lens[i]
+   give each option's label; default_index is pre-selected. *out_index
+   is only meaningful when *out_cancelled is WP_FALSE. Required of every
+   backend (WP_UNSUPPORTED is the documented legal escape hatch, not a
+   reason to skip a target when it's actually being built). No free-text
+   entry variant exists -- nothing in this project's current feature set
+   needs one yet (font size and alignment are both small, fixed,
+   pre-enumerated lists). */
+wp_status plat_dialog_choice(plat_window *parent,
+                              const u8 *title_utf8, u32 title_len,
+                              const u8 * const *option_labels_utf8,
+                              const u32 *option_label_lens,
+                              u32 option_count, u32 default_index,
+                              wp_bool *out_cancelled, u32 *out_index);
+
 
 /* ------------------------------------------------------------------ */
 /* Transport (offload link: serial or network)                         */

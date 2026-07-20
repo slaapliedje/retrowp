@@ -42,6 +42,99 @@ void test_edit_delete_right_partial(void);
 void test_edit_delete_mid_run_splits(void);
 void test_edit_delete_rejects_invalid_range(void);
 void test_edit_insert_then_delete_restores_content(void);
+void test_edit_split_paragraph_mid_run(void);
+void test_edit_split_paragraph_at_start(void);
+void test_edit_split_paragraph_at_end(void);
+void test_edit_split_paragraph_of_empty_paragraph(void);
+void test_edit_merge_paragraph_basic(void);
+void test_edit_merge_paragraph_rejects_last_paragraph(void);
+void test_edit_split_then_merge_roundtrips(void);
+
+/* test_selection.c */
+void test_selection_pos_compare_orders_correctly(void);
+void test_selection_extract_text_single_paragraph(void);
+void test_selection_extract_text_multi_paragraph(void);
+void test_selection_extract_text_reports_size_on_overflow(void);
+void test_selection_delete_single_paragraph(void);
+void test_selection_delete_empty_selection_is_noop(void);
+void test_selection_delete_multi_paragraph_then_undo_then_redo(void);
+void test_selection_delete_out_pos_lands_at_delete_start(void);
+void test_selection_delete_swallows_whole_middle_paragraph(void);
+void test_selection_delete_no_leaks(void);
+
+/* motion.c */
+void test_motion_word_forward_skips_word_then_blank(void);
+void test_motion_word_forward_stops_at_punctuation_boundary(void);
+void test_motion_word_forward_big_word_merges_punct(void);
+void test_motion_word_backward_returns_to_word_starts(void);
+void test_motion_word_end_lands_after_last_char_of_word(void);
+void test_motion_word_forward_crosses_paragraph_boundary(void);
+void test_motion_line_start_end_first_nonblank(void);
+void test_motion_line_first_nonblank_on_all_blank_line_lands_at_end(void);
+void test_motion_paragraph_down_up(void);
+void test_motion_para_block_forward_backward_finds_empty_paragraphs(void);
+
+/* vimode.c */
+void test_vimode_insert_then_escape(void);
+void test_vimode_hjkl_and_word_motion(void);
+void test_vimode_count_prefix_motion(void);
+void test_vimode_dw_deletes_word(void);
+void test_vimode_dw_does_not_eat_paragraph_break(void);
+void test_vimode_dd_deletes_whole_line(void);
+void test_vimode_dd_on_last_paragraph_merges_upward(void);
+void test_vimode_yy_p_duplicates_line_below(void);
+void test_vimode_cw_change_word(void);
+void test_vimode_insert_session_undoes_as_one_step(void);
+void test_vimode_cw_undoes_as_one_step(void);
+void test_vimode_visual_mode_delete(void);
+void test_vimode_visual_line_mode_delete_spans_paragraphs(void);
+void test_vimode_ex_command_save_quit(void);
+void test_vimode_search_forward(void);
+void test_vimode_o_opens_line_below(void);
+void test_vimode_x_deletes_char_forward(void);
+void test_vimode_ctrl_chord_is_not_bare_letter(void);
+void test_vimode_no_leaks(void);
+
+/* test_actions.c */
+void test_actions_find_by_id(void);
+void test_actions_find_by_shortcut(void);
+void test_actions_every_shortcut_is_unique(void);
+void test_actions_format_bold_toggles_style_flags(void);
+void test_actions_file_quit_sets_flag(void);
+void test_actions_edit_copy_sets_clipboard(void);
+void test_actions_format_size_uses_dialog_choice(void);
+
+/* test_statusline.c */
+void test_statusline_paint_does_not_crash_with_various_views(void);
+
+/* test_help_doc.c */
+void test_help_doc_parses_single_node(void);
+void test_help_doc_node_without_title_falls_back_to_name(void);
+void test_help_doc_parses_link_line(void);
+void test_help_doc_braces_without_bar_are_plain_text(void);
+void test_help_doc_find_node_by_name(void);
+void test_help_doc_missing_endnode_at_eof_implicitly_closes(void);
+void test_help_doc_skips_content_before_first_node(void);
+void test_help_doc_blank_line_preserved_as_empty_text_line(void);
+void test_help_doc_empty_source_yields_zero_nodes(void);
+void test_help_doc_no_leaks(void);
+
+/* test_help_view.c */
+void test_help_wrap_line_greedy_word_wrap_hand_computed(void);
+void test_help_wrap_line_overlong_word_gets_its_own_row(void);
+void test_help_wrap_line_empty_text_yields_zero_rows(void);
+void test_help_wrap_line_respects_max_rows_cap(void);
+void test_help_view_init_clamps_start_node(void);
+void test_help_view_escape_and_q_request_close(void);
+void test_help_view_link_selection_clamped_at_bounds(void);
+void test_help_view_enter_follows_link_and_backspace_goes_back(void);
+void test_help_view_enter_on_broken_link_target_is_a_noop(void);
+void test_help_view_page_scroll_clamped_at_zero(void);
+void test_help_view_paint_does_not_crash_with_various_states(void);
+void test_help_view_no_leaks(void);
+
+/* test_help_content.c */
+void test_help_content_retrowp_help_parses_and_all_links_resolve(void);
 
 /* linebreak.c */
 void test_layout_greedy_wrap_hand_computed_fixture(void);
@@ -62,6 +155,9 @@ void test_undo_new_edit_clears_redo(void);
 void test_undo_empty_journal_returns_error(void);
 void test_undo_no_leaks(void);
 void test_undo_fuzz_n_ops_then_n_undos_restores_original(void);
+void test_undo_split_paragraph_then_undo_then_redo(void);
+void test_undo_merge_paragraph_then_undo_then_redo(void);
+void test_undo_split_merge_no_leaks(void);
 
 /* strpool.c */
 void test_strpool_reserves_offset_zero(void);
@@ -72,6 +168,8 @@ void test_strpool_empty_append(void);
 void test_docmodel_init_free_has_no_leaks(void);
 void test_docmodel_init_sets_usable_defaults(void);
 void test_docmodel_cstyle_add_survives_growth(void);
+void test_docmodel_cstyle_find_or_add_reuses_identical_style(void);
+void test_docmodel_pstyle_find_or_add_reuses_identical_style(void);
 void test_docmodel_build_known_tree(void);
 void test_docmodel_pstyle_and_cstyle_set(void);
 
@@ -211,6 +309,91 @@ static const test_case g_cases[] = {
     { "edit_delete_mid_run_splits", test_edit_delete_mid_run_splits },
     { "edit_delete_rejects_invalid_range", test_edit_delete_rejects_invalid_range },
     { "edit_insert_then_delete_restores_content", test_edit_insert_then_delete_restores_content },
+    { "edit_split_paragraph_mid_run", test_edit_split_paragraph_mid_run },
+    { "edit_split_paragraph_at_start", test_edit_split_paragraph_at_start },
+    { "edit_split_paragraph_at_end", test_edit_split_paragraph_at_end },
+    { "edit_split_paragraph_of_empty_paragraph", test_edit_split_paragraph_of_empty_paragraph },
+    { "edit_merge_paragraph_basic", test_edit_merge_paragraph_basic },
+    { "edit_merge_paragraph_rejects_last_paragraph", test_edit_merge_paragraph_rejects_last_paragraph },
+    { "edit_split_then_merge_roundtrips", test_edit_split_then_merge_roundtrips },
+
+    { "selection_pos_compare_orders_correctly", test_selection_pos_compare_orders_correctly },
+    { "selection_extract_text_single_paragraph", test_selection_extract_text_single_paragraph },
+    { "selection_extract_text_multi_paragraph", test_selection_extract_text_multi_paragraph },
+    { "selection_extract_text_reports_size_on_overflow", test_selection_extract_text_reports_size_on_overflow },
+    { "selection_delete_single_paragraph", test_selection_delete_single_paragraph },
+    { "selection_delete_empty_selection_is_noop", test_selection_delete_empty_selection_is_noop },
+    { "selection_delete_multi_paragraph_then_undo_then_redo", test_selection_delete_multi_paragraph_then_undo_then_redo },
+    { "selection_delete_out_pos_lands_at_delete_start", test_selection_delete_out_pos_lands_at_delete_start },
+    { "selection_delete_swallows_whole_middle_paragraph", test_selection_delete_swallows_whole_middle_paragraph },
+    { "selection_delete_no_leaks", test_selection_delete_no_leaks },
+
+    { "motion_word_forward_skips_word_then_blank", test_motion_word_forward_skips_word_then_blank },
+    { "motion_word_forward_stops_at_punctuation_boundary", test_motion_word_forward_stops_at_punctuation_boundary },
+    { "motion_word_forward_big_word_merges_punct", test_motion_word_forward_big_word_merges_punct },
+    { "motion_word_backward_returns_to_word_starts", test_motion_word_backward_returns_to_word_starts },
+    { "motion_word_end_lands_after_last_char_of_word", test_motion_word_end_lands_after_last_char_of_word },
+    { "motion_word_forward_crosses_paragraph_boundary", test_motion_word_forward_crosses_paragraph_boundary },
+    { "motion_line_start_end_first_nonblank", test_motion_line_start_end_first_nonblank },
+    { "motion_line_first_nonblank_on_all_blank_line_lands_at_end", test_motion_line_first_nonblank_on_all_blank_line_lands_at_end },
+    { "motion_paragraph_down_up", test_motion_paragraph_down_up },
+    { "motion_para_block_forward_backward_finds_empty_paragraphs", test_motion_para_block_forward_backward_finds_empty_paragraphs },
+
+    { "vimode_insert_then_escape", test_vimode_insert_then_escape },
+    { "vimode_hjkl_and_word_motion", test_vimode_hjkl_and_word_motion },
+    { "vimode_count_prefix_motion", test_vimode_count_prefix_motion },
+    { "vimode_dw_deletes_word", test_vimode_dw_deletes_word },
+    { "vimode_dw_does_not_eat_paragraph_break", test_vimode_dw_does_not_eat_paragraph_break },
+    { "vimode_dd_deletes_whole_line", test_vimode_dd_deletes_whole_line },
+    { "vimode_dd_on_last_paragraph_merges_upward", test_vimode_dd_on_last_paragraph_merges_upward },
+    { "vimode_yy_p_duplicates_line_below", test_vimode_yy_p_duplicates_line_below },
+    { "vimode_cw_change_word", test_vimode_cw_change_word },
+    { "vimode_insert_session_undoes_as_one_step", test_vimode_insert_session_undoes_as_one_step },
+    { "vimode_cw_undoes_as_one_step", test_vimode_cw_undoes_as_one_step },
+    { "vimode_visual_mode_delete", test_vimode_visual_mode_delete },
+    { "vimode_visual_line_mode_delete_spans_paragraphs", test_vimode_visual_line_mode_delete_spans_paragraphs },
+    { "vimode_ex_command_save_quit", test_vimode_ex_command_save_quit },
+    { "vimode_search_forward", test_vimode_search_forward },
+    { "vimode_o_opens_line_below", test_vimode_o_opens_line_below },
+    { "vimode_x_deletes_char_forward", test_vimode_x_deletes_char_forward },
+    { "vimode_ctrl_chord_is_not_bare_letter", test_vimode_ctrl_chord_is_not_bare_letter },
+    { "vimode_no_leaks", test_vimode_no_leaks },
+
+    { "actions_find_by_id", test_actions_find_by_id },
+    { "actions_find_by_shortcut", test_actions_find_by_shortcut },
+    { "actions_every_shortcut_is_unique", test_actions_every_shortcut_is_unique },
+    { "actions_format_bold_toggles_style_flags", test_actions_format_bold_toggles_style_flags },
+    { "actions_file_quit_sets_flag", test_actions_file_quit_sets_flag },
+    { "actions_edit_copy_sets_clipboard", test_actions_edit_copy_sets_clipboard },
+    { "actions_format_size_uses_dialog_choice", test_actions_format_size_uses_dialog_choice },
+
+    { "statusline_paint_does_not_crash_with_various_views", test_statusline_paint_does_not_crash_with_various_views },
+
+    { "help_doc_parses_single_node", test_help_doc_parses_single_node },
+    { "help_doc_node_without_title_falls_back_to_name", test_help_doc_node_without_title_falls_back_to_name },
+    { "help_doc_parses_link_line", test_help_doc_parses_link_line },
+    { "help_doc_braces_without_bar_are_plain_text", test_help_doc_braces_without_bar_are_plain_text },
+    { "help_doc_find_node_by_name", test_help_doc_find_node_by_name },
+    { "help_doc_missing_endnode_at_eof_implicitly_closes", test_help_doc_missing_endnode_at_eof_implicitly_closes },
+    { "help_doc_skips_content_before_first_node", test_help_doc_skips_content_before_first_node },
+    { "help_doc_blank_line_preserved_as_empty_text_line", test_help_doc_blank_line_preserved_as_empty_text_line },
+    { "help_doc_empty_source_yields_zero_nodes", test_help_doc_empty_source_yields_zero_nodes },
+    { "help_doc_no_leaks", test_help_doc_no_leaks },
+
+    { "help_wrap_line_greedy_word_wrap_hand_computed", test_help_wrap_line_greedy_word_wrap_hand_computed },
+    { "help_wrap_line_overlong_word_gets_its_own_row", test_help_wrap_line_overlong_word_gets_its_own_row },
+    { "help_wrap_line_empty_text_yields_zero_rows", test_help_wrap_line_empty_text_yields_zero_rows },
+    { "help_wrap_line_respects_max_rows_cap", test_help_wrap_line_respects_max_rows_cap },
+    { "help_view_init_clamps_start_node", test_help_view_init_clamps_start_node },
+    { "help_view_escape_and_q_request_close", test_help_view_escape_and_q_request_close },
+    { "help_view_link_selection_clamped_at_bounds", test_help_view_link_selection_clamped_at_bounds },
+    { "help_view_enter_follows_link_and_backspace_goes_back", test_help_view_enter_follows_link_and_backspace_goes_back },
+    { "help_view_enter_on_broken_link_target_is_a_noop", test_help_view_enter_on_broken_link_target_is_a_noop },
+    { "help_view_page_scroll_clamped_at_zero", test_help_view_page_scroll_clamped_at_zero },
+    { "help_view_paint_does_not_crash_with_various_states", test_help_view_paint_does_not_crash_with_various_states },
+    { "help_view_no_leaks", test_help_view_no_leaks },
+
+    { "help_content_retrowp_help_parses_and_all_links_resolve", test_help_content_retrowp_help_parses_and_all_links_resolve },
 
     { "layout_greedy_wrap_hand_computed_fixture", test_layout_greedy_wrap_hand_computed_fixture },
     { "layout_single_word_wider_than_column_overflows", test_layout_single_word_wider_than_column_overflows },
@@ -228,6 +411,9 @@ static const test_case g_cases[] = {
     { "undo_empty_journal_returns_error", test_undo_empty_journal_returns_error },
     { "undo_no_leaks", test_undo_no_leaks },
     { "undo_fuzz_n_ops_then_n_undos_restores_original", test_undo_fuzz_n_ops_then_n_undos_restores_original },
+    { "undo_split_paragraph_then_undo_then_redo", test_undo_split_paragraph_then_undo_then_redo },
+    { "undo_merge_paragraph_then_undo_then_redo", test_undo_merge_paragraph_then_undo_then_redo },
+    { "undo_split_merge_no_leaks", test_undo_split_merge_no_leaks },
 
     { "strpool_reserves_offset_zero", test_strpool_reserves_offset_zero },
     { "strpool_multiple_appends_survive_growth", test_strpool_multiple_appends_survive_growth },
@@ -236,6 +422,8 @@ static const test_case g_cases[] = {
     { "docmodel_init_free_has_no_leaks", test_docmodel_init_free_has_no_leaks },
     { "docmodel_init_sets_usable_defaults", test_docmodel_init_sets_usable_defaults },
     { "docmodel_cstyle_add_survives_growth", test_docmodel_cstyle_add_survives_growth },
+    { "docmodel_cstyle_find_or_add_reuses_identical_style", test_docmodel_cstyle_find_or_add_reuses_identical_style },
+    { "docmodel_pstyle_find_or_add_reuses_identical_style", test_docmodel_pstyle_find_or_add_reuses_identical_style },
     { "docmodel_build_known_tree", test_docmodel_build_known_tree },
     { "docmodel_pstyle_and_cstyle_set", test_docmodel_pstyle_and_cstyle_set },
 

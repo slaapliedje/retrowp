@@ -8,13 +8,20 @@ CC ?= cc
 STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror
 RELAXED_CFLAGS = -Wall -Wextra
 
-INCLUDES = -Iengine/include -Iplatform/host -Ioffload/transport -Iservices/spell -Iservices/grammar -Ihost/tests
+INCLUDES = -Iengine/include -Iplatform/host -Iplatform/common -Ioffload/transport -Iservices/spell -Iservices/grammar -Ihost/tests -I$(GENERATED)
 
 BUILD = build
 BIN   = bin
+GENERATED = build/generated
 
 ENGINE_SRC    = $(wildcard engine/src/*.c)
 PLATFORM_SRC  = $(wildcard platform/host/*.c)
+# platform/common/ (M8.5): the action registry + app context shared by
+# every backend -- see CLAUDE.md's platform/common/ layer rule. May call
+# platform.h but must never #include a native header; built here under
+# STRICT_CFLAGS (like ENGINE_OBJ) rather than PLATFORM_OBJ's RELAXED_CFLAGS,
+# so a stray native #include breaks the host build immediately.
+PLATFORM_COMMON_SRC = $(wildcard platform/common/*.c)
 TRANSPORT_SRC = $(wildcard offload/transport/*.c)
 SERVICES_SRC  = $(wildcard services/spell/*.c) $(wildcard services/grammar/*.c)
 TEST_SRC      = $(wildcard host/tests/*.c)
@@ -22,6 +29,7 @@ GATEWAY_SRC   = $(wildcard offload/gateway/*.c)
 
 ENGINE_OBJ    = $(patsubst engine/src/%.c,$(BUILD)/engine/%.o,$(ENGINE_SRC))
 PLATFORM_OBJ  = $(patsubst platform/host/%.c,$(BUILD)/platform/%.o,$(PLATFORM_SRC))
+PLATFORM_COMMON_OBJ = $(patsubst platform/common/%.c,$(BUILD)/platform_common/%.o,$(PLATFORM_COMMON_SRC))
 TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(BUILD)/transport/%.o,$(TRANSPORT_SRC))
 SERVICES_OBJ  = $(patsubst services/spell/%.c,$(BUILD)/services/%.o,$(patsubst services/grammar/%.c,$(BUILD)/services/%.o,$(SERVICES_SRC)))
 TEST_OBJ      = $(patsubst host/tests/%.c,$(BUILD)/tests/%.o,$(TEST_SRC))
@@ -45,7 +53,7 @@ ENDIAN_OBJ    = $(BUILD)/engine/endian.o
 
 all: $(BIN)/host_tests $(BIN)/mock_gateway $(BIN)/ollama_gateway
 
-$(BIN)/host_tests: $(ENGINE_OBJ) $(PLATFORM_OBJ) $(TRANSPORT_OBJ) $(SERVICES_OBJ) $(TEST_OBJ) | $(BIN)
+$(BIN)/host_tests: $(ENGINE_OBJ) $(PLATFORM_OBJ) $(PLATFORM_COMMON_OBJ) $(TRANSPORT_OBJ) $(SERVICES_OBJ) $(TEST_OBJ) | $(BIN)
 	$(CC) $^ -o $@
 
 $(BIN)/mock_gateway: $(MOCK_GATEWAY_OBJ) $(TRANSPORT_OBJ) $(ENDIAN_OBJ) | $(BIN)
@@ -66,6 +74,9 @@ $(BUILD)/engine/%.o: engine/src/%.c | $(BUILD)/engine
 $(BUILD)/platform/%.o: platform/host/%.c | $(BUILD)/platform
 	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) -c $< -o $@
 
+$(BUILD)/platform_common/%.o: platform/common/%.c | $(BUILD)/platform_common
+	$(CC) $(STRICT_CFLAGS) $(INCLUDES) -c $< -o $@
+
 $(BUILD)/transport/%.o: offload/transport/%.c | $(BUILD)/transport
 	$(CC) $(STRICT_CFLAGS) $(INCLUDES) -c $< -o $@
 
@@ -78,14 +89,32 @@ $(BUILD)/services/%.o: services/grammar/%.c | $(BUILD)/services
 $(BUILD)/tests/%.o: host/tests/%.c | $(BUILD)/tests
 	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) -c $< -o $@
 
+# test_help_content.c #includes the generated help header (M8.5 Phase
+# 10) -- an explicit extra prerequisite, same reasoning as app_shell.o's
+# own below.
+$(BUILD)/tests/test_help_content.o: $(GENERATED)/help_retrowp.h
+
 $(BUILD)/gateway/%.o: offload/gateway/%.c | $(BUILD)/gateway
 	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BUILD)/tools/%.o: host/tools/%.c | $(BUILD)/tools
 	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) -c $< -o $@
 
-$(BUILD)/engine $(BUILD)/platform $(BUILD)/transport $(BUILD)/services $(BUILD)/tests $(BUILD)/gateway $(BUILD)/tools $(BIN):
+$(BUILD)/engine $(BUILD)/platform $(BUILD)/platform_common $(BUILD)/transport $(BUILD)/services $(BUILD)/tests $(BUILD)/gateway $(BUILD)/tools $(GENERATED) $(BIN):
 	mkdir -p $@
+
+# gen_help_header (M8.5 Phase 10) is a standalone host executable, not a
+# .o linked into another binary (unlike everything else host/tools/%.o
+# above) -- it runs AT BUILD TIME to turn docs/help/*.help source files
+# into generated C headers (see the tool's own comment), so both the
+# host test build and the Atari cross-compile can #include the result
+# as ordinary source rather than hand-duplicating help content as an
+# escaped C string someone has to remember to keep in sync.
+$(BUILD)/gen_help_header: host/tools/gen_help_header.c | $(BUILD)
+	$(CC) $(RELAXED_CFLAGS) $< -o $@
+
+$(GENERATED)/help_retrowp.h: docs/help/retrowp.help $(BUILD)/gen_help_header | $(GENERATED)
+	$(BUILD)/gen_help_header docs/help/retrowp.help $@ g_help_source_retrowp
 
 test: $(BIN)/host_tests $(BIN)/mock_gateway
 	./$(BIN)/host_tests
@@ -118,7 +147,7 @@ ATARICC ?= m68k-atari-mint-gcc
 # docs/atari-platform.md.
 ATARI_STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror -O2
 ATARI_RELAXED_CFLAGS = -Wall -Wextra -O2
-ATARI_INCLUDES       = -Iengine/include -Iplatform/atari -Ioffload/transport
+ATARI_INCLUDES       = -Iengine/include -Iplatform/atari -Iplatform/common -Ioffload/transport -I$(GENERATED)
 
 ATARI_BUILD = build/atari
 ATARI_BIN   = bin/atari
@@ -126,6 +155,10 @@ ATARI_BIN   = bin/atari
 ATARI_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(ATARI_BUILD)/engine/%.o,$(ENGINE_SRC))
 ATARI_TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(ATARI_BUILD)/transport/%.o,$(TRANSPORT_SRC))
 ATARI_SERVICES_OBJ  = $(patsubst services/spell/%.c,$(ATARI_BUILD)/services/%.o,$(patsubst services/grammar/%.c,$(ATARI_BUILD)/services/%.o,$(SERVICES_SRC)))
+ATARI_COMMON_OBJ    = $(patsubst platform/common/%.c,$(ATARI_BUILD)/common/%.o,$(PLATFORM_COMMON_SRC))
+
+$(ATARI_BUILD)/common/%.o: platform/common/%.c | $(ATARI_BUILD)/common
+	$(ATARICC) $(ATARI_STRICT_CFLAGS) $(ATARI_INCLUDES) -c $< -o $@
 
 # atari-engine-check is a separate, free portability check: it proves
 # the SAME portable engine/ + offload/transport + services/ sources this
@@ -150,22 +183,27 @@ $(ATARI_BUILD)/services/%.o: services/grammar/%.c | $(ATARI_BUILD)/services
 	$(ATARICC) $(ATARI_STRICT_CFLAGS) $(ATARI_INCLUDES) -c $< -o $@
 
 # platform/atari's own sources, excluding the two files with their own
-# main() (main.c for WP.PRG, and host/tools/atari_smoke.c for
+# main() (main.c for RETROWP.PRG, and host/tools/atari_smoke.c for
 # SMOKE.PRG) -- everything else (app shell, mem/metrics/draw/transport)
 # is shared by both binaries.
 ATARI_PLATFORM_SRC = $(filter-out platform/atari/main.c,$(wildcard platform/atari/*.c))
 ATARI_PLATFORM_OBJ = $(patsubst platform/atari/%.c,$(ATARI_BUILD)/app/%.o,$(ATARI_PLATFORM_SRC))
 
 $(ATARI_BUILD)/app/%.o: platform/atari/%.c | $(ATARI_BUILD)/app
-	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Iservices/spell -Iservices/grammar -c $< -o $@
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Iplatform/common -Iservices/spell -Iservices/grammar -I$(GENERATED) -c $< -o $@
 
-$(ATARI_BIN)/WP.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/app/main.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
+# app_shell.c #includes the generated help header (M8.5 Phase 10) --
+# an explicit extra prerequisite since Make can't see into #include
+# lines on its own the way it tracks the rule graph above.
+$(ATARI_BUILD)/app/app_shell.o: $(GENERATED)/help_retrowp.h
+
+$(ATARI_BIN)/RETROWP.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/app/main.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
 $(ATARI_BUILD)/smoke/%.o: host/tools/%.c | $(ATARI_BUILD)/smoke
 	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -c $< -o $@
 
-$(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
+$(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
 # T6.3's serial offload smoke test doesn't touch any AES/window API
@@ -173,7 +211,7 @@ $(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o
 # cleanup path reaches linebreak.c regardless of whether this test ever
 # lays out text), which needs metrics_atari.c/draw_atari.c's VDI calls
 # -- so this still needs the full platform/atari object set and -lgem,
-# same as WP.PRG/SMOKE.PRG. Only the source file differs.
+# same as RETROWP.PRG/SMOKE.PRG. Only the source file differs.
 $(ATARI_BUILD)/serialsmoke/%.o: host/tools/%.c | $(ATARI_BUILD)/serialsmoke
 	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Ioffload/transport -c $< -o $@
 
@@ -188,11 +226,11 @@ $(ATARI_BUILD)/convertsmoke/%.o: host/tools/%.c | $(ATARI_BUILD)/convertsmoke
 $(ATARI_BIN)/CONVERTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/convertsmoke/atari_convert_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
-$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BUILD)/convertsmoke $(ATARI_BIN):
+$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/common $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BUILD)/convertsmoke $(ATARI_BIN):
 	mkdir -p $@
 
 .PHONY: atari atari-smoke atari-serial-smoke atari-convert-smoke
-atari: $(ATARI_BIN)/WP.PRG
+atari: $(ATARI_BIN)/RETROWP.PRG
 
 atari-smoke: $(ATARI_BIN)/SMOKE.PRG
 

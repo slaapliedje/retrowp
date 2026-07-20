@@ -92,6 +92,48 @@ wp_status wp_document_pstyle_add(wp_document *doc, const wp_para_style *style,
     return WP_OK;
 }
 
+wp_status wp_document_cstyle_find_or_add(wp_document *doc, const wp_char_style *style,
+                                          wp_cstyle *out)
+{
+    u16 i;
+
+    for (i = 1; i < doc->cstyle_count; i++) {
+        const wp_char_style *existing = &doc->cstyles[i];
+        if (existing->font_name == style->font_name &&
+            existing->size_twips == style->size_twips &&
+            existing->flags == style->flags &&
+            existing->color_r == style->color_r &&
+            existing->color_g == style->color_g &&
+            existing->color_b == style->color_b) {
+            *out = (wp_cstyle)i;
+            return WP_OK;
+        }
+    }
+    return wp_document_cstyle_add(doc, style, out);
+}
+
+wp_status wp_document_pstyle_find_or_add(wp_document *doc, const wp_para_style *style,
+                                          wp_pstyle *out)
+{
+    u16 i;
+
+    for (i = 1; i < doc->pstyle_count; i++) {
+        const wp_para_style *existing = &doc->pstyles[i];
+        if (existing->align == style->align &&
+            existing->indent_left == style->indent_left &&
+            existing->indent_right == style->indent_right &&
+            existing->indent_first == style->indent_first &&
+            existing->space_before == style->space_before &&
+            existing->space_after == style->space_after &&
+            existing->line_spacing == style->line_spacing &&
+            existing->style_name == style->style_name) {
+            *out = (wp_pstyle)i;
+            return WP_OK;
+        }
+    }
+    return wp_document_pstyle_add(doc, style, out);
+}
+
 const wp_char_style *wp_document_cstyle_get(const wp_document *doc, wp_cstyle handle)
 {
     if (handle == 0 || handle >= doc->cstyle_count) return NULL;

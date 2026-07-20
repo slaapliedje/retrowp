@@ -20,9 +20,23 @@
    a real evnt_multi() click. That gap is real and documented, not
    silently worked around. */
 
-/* T4.3 grew this from a single "File > Quit" title to two titles: File
-   (Open/Save/Quit) and Edit (Cut/Copy/Paste). Same index/linkage
-   convention as before, just more of it -- see app_shell.c. */
+/* post-M8 (2nd revisit): a real 3-level SCREEN->BAR->titles restructuring
+   was attempted here (to fix a real, source-verified bug where only the
+   first menu title ever painted -- see git history / docs/atari-platform.md
+   for the full derivation from EmuTOS's aes/gemmnlib.c if picking this
+   back up). It passed this project's OWN single-image CI (EmuTOS 0.9.12)
+   cleanly, including a new cycle-detection self-check specifically added
+   to catch a bad renumbering. But the multi-TOS matrix added in the SAME
+   session (host/tools/ci_atari_matrix.sh) caught what single-image CI
+   never could: the restructured tree causes a real bus-error crash under
+   a newer EmuTOS build (1.4) and a real hang under real TOS 1.04 --
+   confirmed via an A/B test against the pre-restructuring binary, which
+   passes cleanly on BOTH. Reverted for that reason -- a fix that
+   corrupts real-hardware-adjacent GEM implementations is strictly worse
+   than the cosmetic bug it fixes. The visibility bug is once again a
+   documented, open known gap (docs/atari-platform.md); this numbering is
+   back to the flat "ROOT owns every title directly" shape T4.3 shipped,
+   Format simply appended onto it the same way Desk/Tools were. */
 #define WP_MENU_OBJ_ROOT        0
 #define WP_MENU_OBJ_FILE_TITLE  1
 #define WP_MENU_OBJ_EDIT_TITLE  2
@@ -34,28 +48,29 @@
 #define WP_MENU_OBJ_EDIT_CUT    8
 #define WP_MENU_OBJ_EDIT_COPY   9
 #define WP_MENU_OBJ_EDIT_PASTE  10
-/* M5 UI wiring: a third title, Tools (Spell Check), appended after Edit
-   rather than inserted between File/Edit -- keeps every existing index
-   stable so nothing above this line needed to change. */
 #define WP_MENU_OBJ_TOOLS_TITLE      11
 #define WP_MENU_OBJ_TOOLS_BOX        12
 #define WP_MENU_OBJ_TOOLS_SPELLCHECK 13
-/* post-M6: a second Tools item, Thesaurus, appended after Spell Check. */
 #define WP_MENU_OBJ_TOOLS_THESAURUS  14
-/* M8 T8.1: a third Tools item, Grammar Check, appended after Thesaurus. */
 #define WP_MENU_OBJ_TOOLS_GRAMMARCHECK 15
-/* M8 T8.3: a fourth Tools item, Chat, appended after Grammar Check. */
 #define WP_MENU_OBJ_TOOLS_CHAT   16
-/* post-M8: the conventional "Desk" title, appended after Chat (same
-   "append, don't renumber" rule as every prior addition) but wired as
-   the ACTUAL leftmost/first sibling via ob_head/ob_next -- the object
-   array's storage order doesn't have to match visual left-to-right
-   order, only the ob_next chain does. No dropdown box (head/tail -1) --
-   this project doesn't implement desk accessory listing, only the
-   title itself needed to reclaim its conventionally-reserved x=0 slot
-   (see docs/atari-platform.md). */
 #define WP_MENU_OBJ_DESK_TITLE   17
-#define WP_MENU_OBJ_COUNT        18
+/* post-M8 (3rd revisit): a fifth title, Format (Bold/Italic/Underline,
+   Font Size, Alignment) -- appended after Desk per the established
+   "append, don't renumber" rule, wired as ROOT's new last child
+   (Tools's ob_next now points here instead of wrapping to ROOT, and
+   ROOT's own ob_tail now points here too). See app_shell.c. */
+#define WP_MENU_OBJ_FORMAT_TITLE       18
+#define WP_MENU_OBJ_FORMAT_BOX         19
+#define WP_MENU_OBJ_FORMAT_BOLD        20
+#define WP_MENU_OBJ_FORMAT_ITALIC      21
+#define WP_MENU_OBJ_FORMAT_UNDERLINE   22
+#define WP_MENU_OBJ_FORMAT_SIZE_UP     23
+#define WP_MENU_OBJ_FORMAT_SIZE_DOWN   24
+#define WP_MENU_OBJ_FORMAT_ALIGN_LEFT    25
+#define WP_MENU_OBJ_FORMAT_ALIGN_CENTER  26
+#define WP_MENU_OBJ_FORMAT_ALIGN_RIGHT   27
+#define WP_MENU_OBJ_COUNT        28
 
 extern OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 
@@ -92,14 +107,17 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8]);
 wp_bool wp_atari_layout_selfcheck(void);
 
 /* Handles one MU_KEYBD event (evnt_multi's Key output: ASCII in the low
-   byte, scan code in the high byte). Backspace (0x08) deletes the
-   character before the cursor; printable ASCII (0x20-0x7E) inserts at
-   the cursor; everything else (Enter included -- WP_OP_SPLIT_PARA is
-   still unimplemented per docs/editing.md, so this app stays a single-
-   paragraph editor) is a no-op. Forces an immediate repaint since AES
-   has no way to know typing changed the window's content. A no-op if no
-   document is loaded (smoke test path). */
-void wp_dispatch_key(short window_handle, VdiHdl vdi, short key);
+   byte, scan code in the high byte -- see atari_translate_key's own
+   comment in app_shell.c for the real IKBD scan-code table this is
+   built from). M8.5: translates the key to a portable wp_key_event and
+   feeds it to vi-mode (engine/src/vimode.c) first; a key vi-mode itself
+   doesn't consume falls through to the action registry's Ctrl+<letter>
+   shortcuts (platform/common/actions.c). Forces an immediate repaint
+   since AES has no way to know typing changed the window's content.
+   Returns WP_TRUE if the app should quit (':q'/':wq' or the Ctrl+Q
+   shortcut), matching wp_dispatch_message's own convention. A no-op
+   (returns WP_FALSE) if no document is loaded (smoke test path). */
+wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key);
 
 /* T4.3: proves plat_file_* and plat_clipboard_* work end to end WITHOUT
    needing the file selector or a real menu click (both GUI-dependent
@@ -202,5 +220,48 @@ wp_bool wp_atari_chat_selfcheck(void);
    docs/atari-platform.md for how the 640px threshold was verified
    against the real SpeedoGDOS INSTALL.PRG. */
 wp_bool wp_atari_resolution_selfcheck(void);
+
+/* post-M8 (3rd revisit): proves the non-blocking pieces behind the
+   Format menu/keyboard-shortcut actions (Bold/Italic/Underline, Font
+   Size, Alignment) -- cstyle/pstyle find_or_add dedup, the paint-time
+   alignment offset arithmetic against hand-computed values, and that
+   every Ctrl+letter shortcut code is distinct from the others and from
+   backspace/printable-insert. Does not call toggle_style_flag/
+   change_font_size/apply_alignment themselves (those operate on this
+   file's global g_doc/g_doc_loaded editor state, which this smoke test
+   never populates -- same boundary every other selfcheck here
+   respects) or wp_dispatch_key end-to-end for the same reason. See
+   docs/atari-platform.md. */
+wp_bool wp_atari_format_selfcheck(void);
+
+/* M8.5: proves plat_dialog_choice's OBJECT-tree construction
+   (platform/atari/dialog_atari.c) for a representative option_count --
+   index arithmetic, ob_next/head/tail linkage, exactly-one-default-
+   selected -- without ever calling the blocking, interactive form_do(),
+   the same boundary every other selfcheck here respects. See
+   docs/atari-platform.md's Format Size/Alignment dialogs section. */
+wp_bool wp_atari_dialog_selfcheck(void);
+
+/* M8.5 Phase 9: proves atari_translate_key (app_shell.c)'s IKBD scan-
+   code table against real (scan, ascii) values from the Atari
+   Compendium, including the Ctrl+[-vs-Escape disambiguation that only
+   works because scan code is checked before ASCII -- see the selfcheck's
+   own comment and docs/vimode.md. A real interactive Hatari verification
+   was attempted for this phase and did not reliably demonstrate a
+   keystroke reaching RETROWP.PRG end-to-end in this environment (see
+   docs/atari-platform.md); this selfcheck is the rigorous substitute,
+   same boundary every other wp_atari_*_selfcheck here already respects. */
+wp_bool wp_atari_key_translate_selfcheck(void);
+
+/* M8.5 Phase 10: proves the compiled-in help content (docs/help/
+   retrowp.help via the generated header) parses cleanly with every
+   link resolving, and that the pager's greedy word-wrap
+   (wp_help_wrap_line, platform/common/help_view.c) runs correctly
+   against REAL Atari VDI-measured font metrics, not just host/tests'
+   simplified fake-monospace ones. Does not open the help viewer itself
+   or call wp_help_view_paint -- same no-real-window/no-blocking-call
+   boundary every other selfcheck in this file respects. See
+   docs/help.md. */
+wp_bool wp_atari_help_selfcheck(void);
 
 #endif /* WP_ATARI_APP_SHELL_INTERNAL_H */

@@ -260,3 +260,169 @@ void test_edit_insert_then_delete_restores_content(void)
 
     wp_document_free(&doc);
 }
+
+void test_edit_split_paragraph_mid_run(void)
+{
+    wp_document doc;
+    wp_paragraph *para;
+    wp_section *sec;
+    wp_pos pos, out_pos;
+    char buf[64];
+
+    build_single_run_doc(&doc, "Hello World", &para);
+    sec = wp_document_section_get(&doc, 0);
+
+    pos.section = 0; pos.paragraph = 0; pos.run = 0; pos.offset = 5;
+    ASSERT_TRUE(wp_document_split_paragraph_raw(&doc, pos, &out_pos) == WP_OK);
+
+    ASSERT_EQ_U32(out_pos.paragraph, 1);
+    ASSERT_EQ_U32(out_pos.run, 0);
+    ASSERT_EQ_U32(out_pos.offset, 0);
+    ASSERT_EQ_U32(sec->para_count, 2);
+
+    para = wp_section_paragraph_get(sec, 0);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "Hello");
+
+    para = wp_section_paragraph_get(sec, 1);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, " World");
+
+    wp_document_free(&doc);
+}
+
+void test_edit_split_paragraph_at_start(void)
+{
+    wp_document doc;
+    wp_paragraph *para;
+    wp_section *sec;
+    wp_pos pos, out_pos;
+    char buf[64];
+
+    build_single_run_doc(&doc, "Hello", &para);
+    sec = wp_document_section_get(&doc, 0);
+
+    pos.section = 0; pos.paragraph = 0; pos.run = 0; pos.offset = 0;
+    ASSERT_TRUE(wp_document_split_paragraph_raw(&doc, pos, &out_pos) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 2);
+
+    para = wp_section_paragraph_get(sec, 0);
+    ASSERT_EQ_U32(para->run_count, 0); /* original becomes empty */
+
+    para = wp_section_paragraph_get(sec, 1);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "Hello"); /* all content moved down */
+
+    wp_document_free(&doc);
+}
+
+void test_edit_split_paragraph_at_end(void)
+{
+    wp_document doc;
+    wp_paragraph *para;
+    wp_section *sec;
+    wp_pos pos, out_pos;
+    char buf[64];
+
+    build_single_run_doc(&doc, "Hello", &para);
+    sec = wp_document_section_get(&doc, 0);
+
+    pos.section = 0; pos.paragraph = 0; pos.run = 0; pos.offset = 5; /* end of run == end of paragraph */
+    ASSERT_TRUE(wp_document_split_paragraph_raw(&doc, pos, &out_pos) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 2);
+
+    para = wp_section_paragraph_get(sec, 0);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "Hello");
+
+    para = wp_section_paragraph_get(sec, 1);
+    ASSERT_EQ_U32(para->run_count, 0); /* new paragraph empty */
+
+    wp_document_free(&doc);
+}
+
+void test_edit_split_paragraph_of_empty_paragraph(void)
+{
+    wp_document doc;
+    u32 sec_idx, para_idx;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_pos pos, out_pos;
+
+    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
+    ASSERT_TRUE(wp_document_section_add(&doc, &sec_idx) == WP_OK);
+    sec = wp_document_section_get(&doc, sec_idx);
+    ASSERT_TRUE(wp_section_paragraph_add(sec, &para_idx) == WP_OK);
+
+    pos.section = 0; pos.paragraph = 0; pos.run = 0; pos.offset = 0;
+    ASSERT_TRUE(wp_document_split_paragraph_raw(&doc, pos, &out_pos) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 2);
+    para = wp_section_paragraph_get(sec, 0);
+    ASSERT_EQ_U32(para->run_count, 0);
+    para = wp_section_paragraph_get(sec, 1);
+    ASSERT_EQ_U32(para->run_count, 0);
+
+    wp_document_free(&doc);
+}
+
+void test_edit_merge_paragraph_basic(void)
+{
+    wp_document doc;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_pos pos, split_pos;
+    char buf[64];
+
+    build_single_run_doc(&doc, "Hello World", &para);
+    sec = wp_document_section_get(&doc, 0);
+
+    pos.section = 0; pos.paragraph = 0; pos.run = 0; pos.offset = 5;
+    ASSERT_TRUE(wp_document_split_paragraph_raw(&doc, pos, &split_pos) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 2);
+
+    ASSERT_TRUE(wp_document_merge_paragraph_raw(&doc, 0, 0, NULL) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 1);
+
+    para = wp_section_paragraph_get(sec, 0);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "Hello World");
+    ASSERT_EQ_U32(para->run_count, 2); /* never coalesced back into one run */
+
+    wp_document_free(&doc);
+}
+
+void test_edit_merge_paragraph_rejects_last_paragraph(void)
+{
+    wp_document doc;
+    wp_paragraph *para;
+
+    build_single_run_doc(&doc, "Hello", &para);
+
+    ASSERT_TRUE(wp_document_merge_paragraph_raw(&doc, 0, 0, NULL) == WP_RANGE);
+    ASSERT_TRUE(wp_document_merge_paragraph_raw(&doc, 0, 5, NULL) == WP_RANGE); /* bad index too */
+
+    wp_document_free(&doc);
+}
+
+void test_edit_split_then_merge_roundtrips(void)
+{
+    wp_document doc;
+    wp_paragraph *para;
+    wp_section *sec;
+    wp_pos pos, split_pos;
+    char buf[64];
+
+    build_single_run_doc(&doc, "Hello World", &para);
+    sec = wp_document_section_get(&doc, 0);
+
+    pos.section = 0; pos.paragraph = 0; pos.run = 0; pos.offset = 5;
+    ASSERT_TRUE(wp_document_split_paragraph_raw(&doc, pos, &split_pos) == WP_OK);
+    ASSERT_TRUE(wp_document_merge_paragraph_raw(&doc, 0, 0, NULL) == WP_OK);
+
+    ASSERT_EQ_U32(sec->para_count, 1);
+    para = wp_section_paragraph_get(sec, 0);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "Hello World");
+
+    wp_document_free(&doc);
+}
