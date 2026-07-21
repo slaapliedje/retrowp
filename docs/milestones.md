@@ -1286,11 +1286,44 @@ independent of source changes, not a regression.
 
 ---
 
-## M12+ — Mac Classic / DOS / Typography Polish
-- [ ] T12.1 `platform/mac` (Toolbox + QuickDraw metrics/render).
-- [ ] T12.2 `platform/dos` (text-mode shell; character-cell metrics).
-- [ ] T12.3 Typography polish: kerning/justification options where supported.
-- [ ] T12.4 PDF polish: font embedding tiers, image support.
+## M12 — Third Platform: Mac Classic (Toolbox + QuickDraw)
+Goal: Validate the portability thesis a third time, against the most
+architecturally different platform yet -- a real Toolbox/QuickDraw
+event loop instead of GEM's or MUI's own, and a boot volume that (unlike
+Amiga's) must be a genuine HFS disk image, not a plain host directory.
+
+- [~] T12.1 `platform/mac`: Toolbox shell, event loop, menus/dialogs.
+      AC: App runs under BasiliskII; clean quit. **In progress.** Real
+      `m68k-apple-macos-gcc` (Retro68) toolchain and a disposable
+      BasiliskII System 7.5.3 fixture (Phase 0); a from-scratch HFS
+      catalog B-tree injector that places a CI smoke app directly into
+      `Startup Items` for fully hands-free headless automation --
+      BasiliskII has no equivalent to amiberry's host-directory-
+      mountable boot volume, so Amiga's own CI-signal trick
+      (`amiga_ci_lib.sh`) doesn't transfer directly and this was built
+      new (`host/tools/mac_hfs/`). Three real bugs found and fixed along
+      the way, including one 100%-reproducible boot-time crash (a
+      missing B-tree node free-space sentinel). One item remains open:
+      written file content doesn't yet reliably persist back through
+      BasiliskII's `--extfs` share, so Phase 0's own AC (a non-flaky
+      host-visible PASS/FAIL signal) isn't fully met yet. Full account,
+      including every byte offset and the candidate next experiments:
+      `docs/mac-platform.md`.
+- [ ] T12.2 QuickDraw metrics/render impl of `platform.h`.
+      AC: On-screen wrap matches engine layout using real Mac fonts.
+- [ ] T12.3 Mac Serial Driver transport hook.
+      AC: Same offload features work as on ST/Amiga.
+
+Artifact target (not yet reached): Mac build "indistinguishable by
+function," `engine/`/`services/` unchanged -- the same bar M9 met for
+Amiga.
+
+---
+
+## M13+ — DOS / Typography Polish
+- [ ] T13.1 `platform/dos` (text-mode shell; character-cell metrics).
+- [ ] T13.2 Typography polish: kerning/justification options where supported.
+- [ ] T13.3 PDF polish: font embedding tiers, image support.
 
 ---
 
