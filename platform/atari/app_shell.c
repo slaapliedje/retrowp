@@ -2607,11 +2607,24 @@ static void redraw_window(short window_handle, VdiHdl vdi)
    is a plain printable codepoint. The ST keyboard has no dedicated Page
    Up/Down or End key -- WP_KEY_PAGE_UP/PAGE_DOWN/END are simply never
    produced here, matching the Compendium's own table (no such rows
-   exist), not an oversight. */
-static wp_key_event atari_translate_key(short key)
+   exist), not an oversight.
+
+   M10 Phase 2: kstate is evnt_multi's own kstate output (real AES
+   bits: 0=Rshift, 1=Lshift, 2=Ctrl, 3=Alt -- Atari Compendium, same
+   source as the scan-code table above) -- previously captured by every
+   caller and silently discarded. Only Alt is consulted here: Ctrl stays
+   entirely ASCII-derived, unchanged from before (kstate's own Ctrl bit
+   is redundant with it and was never needed). Alt is ORed into ev.mods
+   uniformly at the single exit point below, regardless of which case
+   produced ev -- a special key, a Ctrl-chord, or a plain codepoint can
+   each also be Alt-held (Alt+Escape, Alt+Ctrl+B, Alt+b are all real,
+   distinct chords a future scheme may bind), so this is applied after
+   the switch/if chain, not folded into any one branch. */
+static wp_key_event atari_translate_key(short key, short kstate)
 {
     u8 ascii = (u8)(key & 0xFF);
     u8 scan  = (u8)((key >> 8) & 0xFF);
+    u8 alt   = (kstate & 0x08) ? (u8)WP_MOD_ALT : 0;
     wp_key_event ev;
 
     ev.codepoint = 0;
@@ -2620,30 +2633,33 @@ static wp_key_event atari_translate_key(short key)
     ev._pad = 0;
 
     switch (scan) {
-    case 0x01: ev.special = (u16)WP_KEY_ESCAPE; return ev;
-    case 0x1C: case 0x72: ev.special = (u16)WP_KEY_ENTER; return ev; /* main + numpad Enter */
-    case 0x0F: ev.special = (u16)WP_KEY_TAB; return ev;
-    case 0x0E: ev.special = (u16)WP_KEY_BACKSPACE; return ev;
-    case 0x53: ev.special = (u16)WP_KEY_DELETE; return ev;
-    case 0x48: ev.special = (u16)WP_KEY_UP; return ev;
-    case 0x50: ev.special = (u16)WP_KEY_DOWN; return ev;
-    case 0x4B: ev.special = (u16)WP_KEY_LEFT; return ev;
-    case 0x4D: ev.special = (u16)WP_KEY_RIGHT; return ev;
-    case 0x47: ev.special = (u16)WP_KEY_HOME; return ev;
+    case 0x01: ev.special = (u16)WP_KEY_ESCAPE; goto done;
+    case 0x1C: case 0x72: ev.special = (u16)WP_KEY_ENTER; goto done; /* main + numpad Enter */
+    case 0x0F: ev.special = (u16)WP_KEY_TAB; goto done;
+    case 0x0E: ev.special = (u16)WP_KEY_BACKSPACE; goto done;
+    case 0x53: ev.special = (u16)WP_KEY_DELETE; goto done;
+    case 0x48: ev.special = (u16)WP_KEY_UP; goto done;
+    case 0x50: ev.special = (u16)WP_KEY_DOWN; goto done;
+    case 0x4B: ev.special = (u16)WP_KEY_LEFT; goto done;
+    case 0x4D: ev.special = (u16)WP_KEY_RIGHT; goto done;
+    case 0x47: ev.special = (u16)WP_KEY_HOME; goto done;
     default: break;
     }
     if (scan >= 0x3B && scan <= 0x44) {
         ev.special = (u16)(WP_KEY_F1 + (scan - 0x3B));
-        return ev;
+        goto done;
     }
 
-    if (ascii == 0) return ev; /* unmapped special key -- WP_KEY_NONE, harmlessly ignored */
+    if (ascii == 0) goto done; /* unmapped special key -- WP_KEY_NONE, harmlessly ignored */
     if (ascii < 0x20) {
         ev.codepoint = (u32)(ascii + ('a' - 1));
         ev.mods = (u8)WP_MOD_CTRL;
-        return ev;
+        goto done;
     }
     ev.codepoint = (u32)ascii;
+
+done:
+    ev.mods |= alt;
     return ev;
 }
 
@@ -2667,39 +2683,54 @@ static wp_key_event atari_translate_key(short key)
    comment): both produce ASCII 0x1B, and only the scan code (0x01 vs
    0x1A) tells them apart -- a table that only ever inspected the ASCII
    byte, like the pre-M8.5 wp_dispatch_key did, could not distinguish
-   them at all. */
+   them at all.
+
+   M10 Phase 2: every pre-existing row now carries an explicit kstate
+   column, 0 in every one of them -- proves Alt plumbing changed
+   NOTHING about any previously-passing case (the actual regression-
+   safety guard, not just "this still compiles"). The new Alt-flavored
+   rows at the end prove the bit is read correctly, combined correctly
+   with an already-Ctrl'd chord, and left off when kstate's bit 3 is
+   clear despite other kstate bits being set (Shift/Ctrl bits 0-2 are
+   real AES kstate bits too; atari_translate_key must ignore them, per
+   its own header comment that Ctrl stays purely ASCII-derived). */
 wp_bool wp_atari_key_translate_selfcheck(void)
 {
     static const struct {
         short key;          /* (scan << 8) | ascii, as evnt_multi returns it */
+        short kstate;       /* AES kstate: bit0=Rshift,1=Lshift,2=Ctrl,3=Alt */
         u32   codepoint;
         u16   special;
         u8    mods;
     } cases[] = {
-        { (short)((0x01 << 8) | 0x1B), 0, (u16)WP_KEY_ESCAPE, 0 },
-        { (short)((0x1C << 8) | 0x0D), 0, (u16)WP_KEY_ENTER, 0 },
-        { (short)((0x72 << 8) | 0x0D), 0, (u16)WP_KEY_ENTER, 0 }, /* numpad Enter */
-        { (short)((0x0F << 8) | 0x09), 0, (u16)WP_KEY_TAB, 0 },
-        { (short)((0x0E << 8) | 0x08), 0, (u16)WP_KEY_BACKSPACE, 0 },
-        { (short)((0x53 << 8) | 0x7F), 0, (u16)WP_KEY_DELETE, 0 },
-        { (short)((0x48 << 8) | 0x00), 0, (u16)WP_KEY_UP, 0 },
-        { (short)((0x50 << 8) | 0x00), 0, (u16)WP_KEY_DOWN, 0 },
-        { (short)((0x4B << 8) | 0x00), 0, (u16)WP_KEY_LEFT, 0 },
-        { (short)((0x4D << 8) | 0x00), 0, (u16)WP_KEY_RIGHT, 0 },
-        { (short)((0x47 << 8) | 0x00), 0, (u16)WP_KEY_HOME, 0 },
-        { (short)((0x3B << 8) | 0x00), 0, (u16)WP_KEY_F1, 0 },
-        { (short)((0x44 << 8) | 0x00), 0, (u16)WP_KEY_F10, 0 },
-        { (short)((0x62 << 8) | 0x00), 0, (u16)WP_KEY_NONE, 0 },  /* HELP -- real, unmapped, harmless */
-        { (short)((0x1E << 8) | 0x61), 'a', (u16)WP_KEY_NONE, 0 },        /* plain 'a' */
-        { (short)((0x39 << 8) | 0x20), 0x20, (u16)WP_KEY_NONE, 0 },       /* Space -- printable-range boundary */
-        { (short)((0x1E << 8) | 0x01), 'a', (u16)WP_KEY_NONE, (u8)WP_MOD_CTRL }, /* Ctrl+A */
-        { (short)((0x30 << 8) | 0x02), 'b', (u16)WP_KEY_NONE, (u8)WP_MOD_CTRL }, /* Ctrl+B -- Bold shortcut */
-        { (short)((0x1A << 8) | 0x1B), '{', (u16)WP_KEY_NONE, (u8)WP_MOD_CTRL }  /* Ctrl+[ -- NOT Escape, despite matching ASCII */
+        { (short)((0x01 << 8) | 0x1B), 0, 0, (u16)WP_KEY_ESCAPE, 0 },
+        { (short)((0x1C << 8) | 0x0D), 0, 0, (u16)WP_KEY_ENTER, 0 },
+        { (short)((0x72 << 8) | 0x0D), 0, 0, (u16)WP_KEY_ENTER, 0 }, /* numpad Enter */
+        { (short)((0x0F << 8) | 0x09), 0, 0, (u16)WP_KEY_TAB, 0 },
+        { (short)((0x0E << 8) | 0x08), 0, 0, (u16)WP_KEY_BACKSPACE, 0 },
+        { (short)((0x53 << 8) | 0x7F), 0, 0, (u16)WP_KEY_DELETE, 0 },
+        { (short)((0x48 << 8) | 0x00), 0, 0, (u16)WP_KEY_UP, 0 },
+        { (short)((0x50 << 8) | 0x00), 0, 0, (u16)WP_KEY_DOWN, 0 },
+        { (short)((0x4B << 8) | 0x00), 0, 0, (u16)WP_KEY_LEFT, 0 },
+        { (short)((0x4D << 8) | 0x00), 0, 0, (u16)WP_KEY_RIGHT, 0 },
+        { (short)((0x47 << 8) | 0x00), 0, 0, (u16)WP_KEY_HOME, 0 },
+        { (short)((0x3B << 8) | 0x00), 0, 0, (u16)WP_KEY_F1, 0 },
+        { (short)((0x44 << 8) | 0x00), 0, 0, (u16)WP_KEY_F10, 0 },
+        { (short)((0x62 << 8) | 0x00), 0, 0, (u16)WP_KEY_NONE, 0 },  /* HELP -- real, unmapped, harmless */
+        { (short)((0x1E << 8) | 0x61), 0, 'a', (u16)WP_KEY_NONE, 0 },        /* plain 'a' */
+        { (short)((0x39 << 8) | 0x20), 0, 0x20, (u16)WP_KEY_NONE, 0 },       /* Space -- printable-range boundary */
+        { (short)((0x1E << 8) | 0x01), 0, 'a', (u16)WP_KEY_NONE, (u8)WP_MOD_CTRL }, /* Ctrl+A */
+        { (short)((0x30 << 8) | 0x02), 0, 'b', (u16)WP_KEY_NONE, (u8)WP_MOD_CTRL }, /* Ctrl+B -- Bold shortcut */
+        { (short)((0x1A << 8) | 0x1B), 0, '{', (u16)WP_KEY_NONE, (u8)WP_MOD_CTRL }, /* Ctrl+[ -- NOT Escape, despite matching ASCII */
+        { (short)((0x1E << 8) | 0x61), 0x08, 'a', (u16)WP_KEY_NONE, (u8)WP_MOD_ALT }, /* Alt+A -- kstate bit3 set */
+        { (short)((0x30 << 8) | 0x02), 0x08, 'b', (u16)WP_KEY_NONE, (u8)(WP_MOD_CTRL | WP_MOD_ALT) }, /* Alt+Ctrl+B */
+        { (short)((0x01 << 8) | 0x1B), 0x08, 0, (u16)WP_KEY_ESCAPE, (u8)WP_MOD_ALT }, /* Alt+Escape -- a special key can be Alt'd too */
+        { (short)((0x1E << 8) | 0x61), 0x07, 'a', (u16)WP_KEY_NONE, 0 } /* Shift+Ctrl bits (0-2) set, Alt bit clear -- must NOT set WP_MOD_ALT */
     };
     u32 i;
 
     for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-        wp_key_event ev = atari_translate_key(cases[i].key);
+        wp_key_event ev = atari_translate_key(cases[i].key, cases[i].kstate);
         if (ev.codepoint != cases[i].codepoint) return WP_FALSE;
         if (ev.special != cases[i].special) return WP_FALSE;
         if (ev.mods != cases[i].mods) return WP_FALSE;
@@ -2854,14 +2885,14 @@ static void invoke_action(wp_action_id id)
     }
 }
 
-wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key)
+wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key, short kstate)
 {
     wp_key_event ev;
     wp_keymap_outcome outcome;
 
     if (!g_ctx.doc_loaded) return WP_FALSE;
 
-    ev = atari_translate_key(key);
+    ev = atari_translate_key(key, kstate);
 
     /* Help is a whole separate UI mode (M8.5 Phase 10): while active,
        every key goes to wp_help_view_feed_key instead of the active
@@ -3211,7 +3242,7 @@ void app_shell_run(void)
             quit = wp_dispatch_message(window_handle, vdi_handle, msg);
         }
         if (!quit && (events & MU_KEYBD)) {
-            quit = wp_dispatch_key(window_handle, vdi_handle, mkey);
+            quit = wp_dispatch_key(window_handle, vdi_handle, mkey, mkstate);
         }
     }
 

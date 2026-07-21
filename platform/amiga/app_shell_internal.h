@@ -31,4 +31,9 @@ wp_bool wp_amiga_transport_selfcheck(void);
    it checks and why. */
 wp_bool wp_amiga_help_selfcheck(void);
 
+/* M10 Phase 2: proves translate_rawkey's real IEQUALIFIER Alt-bit
+   extraction -- see app_shell.c's own comment on
+   wp_amiga_key_translate_selfcheck for what it checks and why. */
+wp_bool wp_amiga_key_translate_selfcheck(void);
+
 #endif /* WP_AMIGA_APP_SHELL_INTERNAL_H */

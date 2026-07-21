@@ -864,13 +864,28 @@ static void invoke_action(wp_action_id id)
    Amiga hardware scan codes unchanged since the A1000 -- no offline RKM
    was available on this machine to cross-check against (see docs/
    amiga-platform.md's own honest note in the M9 plan), so these are
-   verified empirically under amiberry, not just recalled. */
+   verified empirically under amiberry, not just recalled.
+
+   M10 Phase 2: imsg->Qualifier (real INTUI IEQUALIFIER bits, verified
+   against the real NDK header ~/opt/amiga/m68k-amigaos/ndk-include/
+   devices/inputevent.h -- IEQUALIFIER_CONTROL=0x0008, LALT=0x0010,
+   RALT=0x0020 -- NOT the 0x0200/0x0400 pair some online references
+   cite) was previously captured only to feed MapRawKey()'s own ASCII
+   translation. Alt is now also read directly from it and ORed into
+   out->mods at the single exit point below -- MapRawKey folds Ctrl
+   into a C0 control code (the existing buf[0]<0x20 check), but does
+   NOT fold Alt into the ASCII result the same way, so Alt needs this
+   separate, explicit read. Applied uniformly regardless of which
+   branch produced *out (a special key, a Ctrl-chord, or a plain
+   codepoint can each also be Alt-held), same reasoning
+   atari_translate_key's own header comment gives. */
 static void translate_rawkey(struct IntuiMessage *imsg, wp_key_event *out)
 {
     UWORD code = imsg->Code;
     struct InputEvent ie;
     UBYTE buf[8];
     WORD n;
+    u8 alt = (imsg->Qualifier & (IEQUALIFIER_LALT | IEQUALIFIER_RALT)) ? (u8)WP_MOD_ALT : 0;
 
     out->codepoint = 0;
     out->special = (u16)WP_KEY_NONE;
@@ -878,23 +893,23 @@ static void translate_rawkey(struct IntuiMessage *imsg, wp_key_event *out)
     out->_pad = 0;
     g_last_raw_ascii = 0;
 
-    if (code & IECODE_UP_PREFIX) return; /* key release -- ignore */
+    if (code & IECODE_UP_PREFIX) goto done; /* key release -- ignore */
 
     switch (code) {
-    case 0x41: out->special = (u16)WP_KEY_BACKSPACE; return;
-    case 0x42: out->special = (u16)WP_KEY_TAB; return;
-    case 0x44: out->special = (u16)WP_KEY_ENTER; return;
-    case 0x45: out->special = (u16)WP_KEY_ESCAPE; return;
-    case 0x46: out->special = (u16)WP_KEY_DELETE; return;
-    case 0x4C: out->special = (u16)WP_KEY_UP; return;
-    case 0x4D: out->special = (u16)WP_KEY_DOWN; return;
-    case 0x4E: out->special = (u16)WP_KEY_RIGHT; return;
-    case 0x4F: out->special = (u16)WP_KEY_LEFT; return;
+    case 0x41: out->special = (u16)WP_KEY_BACKSPACE; goto done;
+    case 0x42: out->special = (u16)WP_KEY_TAB; goto done;
+    case 0x44: out->special = (u16)WP_KEY_ENTER; goto done;
+    case 0x45: out->special = (u16)WP_KEY_ESCAPE; goto done;
+    case 0x46: out->special = (u16)WP_KEY_DELETE; goto done;
+    case 0x4C: out->special = (u16)WP_KEY_UP; goto done;
+    case 0x4D: out->special = (u16)WP_KEY_DOWN; goto done;
+    case 0x4E: out->special = (u16)WP_KEY_RIGHT; goto done;
+    case 0x4F: out->special = (u16)WP_KEY_LEFT; goto done;
     default: break;
     }
     if (code >= 0x50 && code <= 0x59) {
         out->special = (u16)(WP_KEY_F1 + (code - 0x50));
-        return;
+        goto done;
     }
 
     memset(&ie, 0, sizeof(ie));
@@ -902,7 +917,7 @@ static void translate_rawkey(struct IntuiMessage *imsg, wp_key_event *out)
     ie.ie_Code = (UBYTE)code;
     ie.ie_Qualifier = imsg->Qualifier;
     n = MapRawKey(&ie, (STRPTR)buf, (LONG)sizeof(buf), NULL);
-    if (n <= 0) return;
+    if (n <= 0) goto done;
 
     g_last_raw_ascii = buf[0];
     if (buf[0] < 0x20) {
@@ -911,6 +926,9 @@ static void translate_rawkey(struct IntuiMessage *imsg, wp_key_event *out)
     } else {
         out->codepoint = (u32)buf[0];
     }
+
+done:
+    out->mods |= alt;
 }
 
 /* Mirrors platform/atari/app_shell.c's wp_dispatch_key: feed the active
@@ -1794,6 +1812,52 @@ wp_bool wp_amiga_help_selfcheck(void)
         for (i = 0; i < row_count; i++) {
             if (lens[i] == 0) return WP_FALSE; /* every row must carry real content */
         }
+    }
+    return WP_TRUE;
+}
+
+/* M10 Phase 2: proves translate_rawkey's new IEQUALIFIER-bit Alt
+   extraction against real raw key codes (Escape/arrows/F-keys -- the
+   same "standard, stable Amiga hardware scan codes unchanged since the
+   A1000" translate_rawkey's own header comment already cites, not
+   guessed). Deliberately stays on the special-key (early-goto) path
+   only, not the MapRawKey-derived plain-codepoint/Ctrl-chord path --
+   that would need a real loaded system keymap and keymap.library open
+   (real, on-target-only state this narrow check has no need to pull
+   in), and every path through translate_rawkey applies Alt via the
+   exact same `out->mods |= alt;` at its one shared exit point, so
+   proving it here proves the mechanism itself, not just one branch of
+   it. Not host-testable at all -- translate_rawkey takes a real struct
+   IntuiMessage, the same boundary wp_atari_key_translate_selfcheck's
+   own header comment explains for its Atari counterpart. */
+wp_bool wp_amiga_key_translate_selfcheck(void)
+{
+    static const struct {
+        UWORD code;
+        UWORD qualifier;
+        u16   special;
+        u8    mods;
+    } cases[] = {
+        { 0x45, 0, (u16)WP_KEY_ESCAPE, 0 },                                     /* Escape, no qualifier */
+        { 0x45, (UWORD)IEQUALIFIER_LALT, (u16)WP_KEY_ESCAPE, (u8)WP_MOD_ALT },   /* Left Alt */
+        { 0x45, (UWORD)IEQUALIFIER_RALT, (u16)WP_KEY_ESCAPE, (u8)WP_MOD_ALT },   /* Right Alt too */
+        { 0x4C, (UWORD)IEQUALIFIER_LALT, (u16)WP_KEY_UP, (u8)WP_MOD_ALT },       /* Alt+Up -- a different special key */
+        { 0x50, (UWORD)IEQUALIFIER_LALT, (u16)WP_KEY_F1, (u8)WP_MOD_ALT },       /* Alt+F1 */
+        { 0x45, (UWORD)IEQUALIFIER_CONTROL, (u16)WP_KEY_ESCAPE, 0 } /* an unrelated qualifier bit set, Alt clear -- must NOT set WP_MOD_ALT */
+    };
+    u32 i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        struct IntuiMessage imsg;
+        wp_key_event ev;
+
+        memset(&imsg, 0, sizeof(imsg));
+        imsg.Code = cases[i].code;
+        imsg.Qualifier = cases[i].qualifier;
+
+        translate_rawkey(&imsg, &ev);
+        if (ev.special != cases[i].special) return WP_FALSE;
+        if (ev.mods != cases[i].mods) return WP_FALSE;
     }
     return WP_TRUE;
 }

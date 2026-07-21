@@ -550,6 +550,54 @@ void test_vimode_ctrl_chord_is_not_bare_letter(void)
     wp_document_free(&doc);
 }
 
+/* M10 Phase 2: the Alt-flavored sibling of
+   test_vimode_ctrl_chord_is_not_bare_letter, added once both backends
+   started actually setting WP_MOD_ALT (previously always 0, so this
+   path was never reachable with a real modifier bit -- see
+   platform/atari/app_shell.c's atari_translate_key and platform/amiga/
+   app_shell.c's translate_rawkey). The same `mods != 0` guard that
+   already protects Ctrl+<letter> app shortcuts is not Ctrl-specific --
+   it rejects ANY nonzero mods -- so this proves that holds for Alt too,
+   the same three modes (Normal/Insert/Visual), rather than assuming it
+   from the Ctrl case alone. */
+void test_vimode_alt_chord_is_not_bare_letter(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    wp_key_event alt_b;
+    char buf[64];
+
+    alt_b.codepoint = 'b';
+    alt_b.special = (u16)WP_KEY_NONE;
+    alt_b.mods = (u8)WP_MOD_ALT;
+    alt_b._pad = 0;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "$"); /* end of "Hello World" -- a bare 'b' from here would move the cursor */
+    ASSERT_TRUE(wp_vimode_feed_key(&vs, alt_b).kind == (u8)WP_VIACTION_BEEP);
+    ASSERT_TRUE(wp_vimode_get_mode(&vs) == WP_VIMODE_NORMAL);
+
+    feed_keys(&vs, "i");
+    ASSERT_TRUE(wp_vimode_get_mode(&vs) == WP_VIMODE_INSERT);
+    wp_vimode_feed_key(&vs, alt_b); /* must NOT insert a literal 'b' */
+    feed_keys(&vs, "\x1b");
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "Hello World");
+
+    feed_keys(&vs, "v");
+    ASSERT_TRUE(wp_vimode_get_mode(&vs) == WP_VIMODE_VISUAL);
+    ASSERT_TRUE(wp_vimode_feed_key(&vs, alt_b).kind == (u8)WP_VIACTION_BEEP);
+    ASSERT_TRUE(wp_vimode_get_mode(&vs) == WP_VIMODE_VISUAL); /* not swallowed as an operator letter */
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
 void test_vimode_no_leaks(void)
 {
     wp_document doc;

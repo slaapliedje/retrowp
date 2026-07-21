@@ -226,8 +226,11 @@ wp_bool wp_atari_layout_selfcheck(void);
    since AES has no way to know typing changed the window's content.
    Returns WP_TRUE if the app should quit (':q'/':wq' or the Ctrl+Q
    shortcut), matching wp_dispatch_message's own convention. A no-op
-   (returns WP_FALSE) if no document is loaded (smoke test path). */
-wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key);
+   (returns WP_FALSE) if no document is loaded (smoke test path).
+   kstate is evnt_multi's own kstate output (M10 Phase 2), passed
+   straight through to atari_translate_key -- see that function's own
+   comment. */
+wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key, short kstate);
 
 /* T4.3: proves plat_file_* and plat_clipboard_* work end to end WITHOUT
    needing the file selector or a real menu click (both GUI-dependent

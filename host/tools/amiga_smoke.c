@@ -54,5 +54,9 @@ int main(void)
     report(ok ? "help: PASS\n" : "help: FAIL\n");
     if (!ok) all_ok = WP_FALSE;
 
+    ok = wp_amiga_key_translate_selfcheck();
+    report(ok ? "key_translate: PASS\n" : "key_translate: FAIL\n");
+    if (!ok) all_ok = WP_FALSE;
+
     return all_ok ? 0 : 20;
 }

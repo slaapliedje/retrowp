@@ -93,6 +93,7 @@ void test_vimode_search_forward(void);
 void test_vimode_o_opens_line_below(void);
 void test_vimode_x_deletes_char_forward(void);
 void test_vimode_ctrl_chord_is_not_bare_letter(void);
+void test_vimode_alt_chord_is_not_bare_letter(void);
 void test_vimode_no_leaks(void);
 
 /* test_wordstar.c */
@@ -398,6 +399,7 @@ static const test_case g_cases[] = {
     { "vimode_o_opens_line_below", test_vimode_o_opens_line_below },
     { "vimode_x_deletes_char_forward", test_vimode_x_deletes_char_forward },
     { "vimode_ctrl_chord_is_not_bare_letter", test_vimode_ctrl_chord_is_not_bare_letter },
+    { "vimode_alt_chord_is_not_bare_letter", test_vimode_alt_chord_is_not_bare_letter },
     { "vimode_no_leaks", test_vimode_no_leaks },
 
     { "wordstar_diamond_char_motions", test_wordstar_diamond_char_motions },
