@@ -396,6 +396,213 @@ void test_wordperfect_shift_f10_with_empty_register_beeps(void)
     wp_document_free(&doc);
 }
 
+void test_wordperfect_search_forward_jumps_to_match(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordperfect_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "Goodbye Moon");
+    wp_undo_journal_init(&journal);
+    wp_wordperfect_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_F2, 0);
+    feed_keys(&vs, "Moon");
+    feed_special(&vs, WP_KEY_F2, 0);
+
+    ASSERT_EQ_U32(vs.cursor.paragraph, 1);
+    ASSERT_EQ_U32(vs.cursor.offset, 8);
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WP_PROMPT_NONE);
+
+    wp_wordperfect_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordperfect_search_backward(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordperfect_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "Goodbye Moon");
+    wp_undo_journal_init(&journal);
+    wp_wordperfect_init(&vs, &doc, &journal);
+    vs.cursor.paragraph = 1; vs.cursor.offset = 12;
+
+    feed_special(&vs, WP_KEY_F2, (u8)WP_MOD_SHIFT);
+    feed_keys(&vs, "Hello");
+    feed_special(&vs, WP_KEY_F2, 0); /* terminates regardless of mods, see wordperfect.c */
+
+    ASSERT_EQ_U32(vs.cursor.paragraph, 0);
+    ASSERT_EQ_U32(vs.cursor.offset, 0);
+
+    wp_wordperfect_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordperfect_search_empty_text_beeps(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordperfect_state vs;
+    wp_wordperfect_action_kind action;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_wordperfect_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_F2, 0);
+    action = feed_special(&vs, WP_KEY_F2, 0);
+
+    ASSERT_TRUE(action == WP_WPACTION_BEEP);
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WP_PROMPT_NONE);
+
+    wp_wordperfect_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordperfect_search_not_found_beeps(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordperfect_state vs;
+    wp_wordperfect_action_kind action;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_wordperfect_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_F2, 0);
+    feed_keys(&vs, "xyz");
+    action = feed_special(&vs, WP_KEY_F2, 0);
+
+    ASSERT_TRUE(action == WP_WPACTION_BEEP);
+
+    wp_wordperfect_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordperfect_search_escape_cancels_prompt(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordperfect_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_wordperfect_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_F2, 0);
+    feed_keys(&vs, "Wor");
+    feed_special(&vs, WP_KEY_ESCAPE, 0);
+
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WP_PROMPT_NONE);
+    ASSERT_EQ_U32(vs.cursor.offset, 0);
+
+    wp_wordperfect_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordperfect_search_f2_twice_repeats_last_search(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordperfect_state vs;
+
+    /* "z" prefix keeps the doc-start cursor from coinciding with the
+       first 'a' -- wp_document_find_text searches STRICTLY AFTER
+       `from`, same reasoning test_wordstar.c's own analogous fixtures
+       document. */
+    build_doc_two_paras(&doc, "zaXaXaX", "");
+    wp_undo_journal_init(&journal);
+    wp_wordperfect_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_F2, 0);
+    feed_keys(&vs, "a");
+    feed_special(&vs, WP_KEY_F2, 0); /* first search -> offset 1 */
+    ASSERT_EQ_U32(vs.cursor.offset, 1);
+
+    feed_special(&vs, WP_KEY_F2, 0); /* enter stage, buffer preserved */
+    feed_special(&vs, WP_KEY_F2, 0); /* terminate with zero new keystrokes -> repeat */
+    ASSERT_EQ_U32(vs.cursor.offset, 3);
+
+    feed_special(&vs, WP_KEY_F2, 0);
+    feed_special(&vs, WP_KEY_F2, 0);
+    ASSERT_EQ_U32(vs.cursor.offset, 5);
+
+    wp_wordperfect_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordperfect_replace_confirm_y_and_n(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordperfect_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "zzz foo foo foo", "");
+    wp_undo_journal_init(&journal);
+    wp_wordperfect_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_F2, (u8)WP_MOD_ALT); /* Alt-F2 */
+    feed_keys(&vs, "y"); /* w/Confirm? Y */
+    feed_keys(&vs, "foo");
+    feed_special(&vs, WP_KEY_F2, 0); /* -> REPLACE_TEXT */
+    feed_keys(&vs, "bar");
+    feed_special(&vs, WP_KEY_F2, 0); /* begins search, pauses at match 1 (offset 4) */
+
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WP_PROMPT_CONFIRM_MATCH);
+
+    feed_keys(&vs, "y"); /* replace match 1, pause at match 2 (offset 8) */
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar foo foo");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WP_PROMPT_CONFIRM_MATCH);
+
+    feed_keys(&vs, "n"); /* skip match 2, pause at match 3 (offset 12) */
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar foo foo");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WP_PROMPT_CONFIRM_MATCH);
+
+    feed_keys(&vs, "y"); /* replace match 3, nothing left */
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar foo bar");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WP_PROMPT_NONE);
+
+    wp_wordperfect_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordperfect_replace_no_confirm_replaces_silently(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordperfect_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "zzz foo foo foo", "");
+    wp_undo_journal_init(&journal);
+    wp_wordperfect_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_F2, (u8)WP_MOD_ALT);
+    feed_keys(&vs, "n"); /* w/Confirm? N */
+    feed_keys(&vs, "foo");
+    feed_special(&vs, WP_KEY_F2, 0);
+    feed_keys(&vs, "bar");
+    feed_special(&vs, WP_KEY_F2, 0);
+
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar bar bar");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WP_PROMPT_NONE);
+
+    wp_wordperfect_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
 void test_wordperfect_no_leaks(void)
 {
     wp_document doc;
@@ -412,6 +619,13 @@ void test_wordperfect_no_leaks(void)
     feed_special(&vs, WP_KEY_RIGHT, (u8)WP_MOD_CTRL);
     feed_special(&vs, WP_KEY_F4, (u8)WP_MOD_CTRL);
     feed_special(&vs, WP_KEY_F10, (u8)WP_MOD_SHIFT);
+
+    feed_special(&vs, WP_KEY_F2, (u8)WP_MOD_ALT);
+    feed_keys(&vs, "n");
+    feed_keys(&vs, "World");
+    feed_special(&vs, WP_KEY_F2, 0);
+    feed_keys(&vs, "Moon");
+    feed_special(&vs, WP_KEY_F2, 0);
 
     wp_wordperfect_free(&vs);
     wp_undo_journal_free(&journal);

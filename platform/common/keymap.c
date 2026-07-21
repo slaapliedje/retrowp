@@ -268,10 +268,14 @@ static wp_keymap_outcome feed_key_wp5(wp_app_ctx *ctx, wp_key_event ev)
     /* Matches wp_wordperfect_feed_key's own exact condition for "this
        keystroke will insert a plain character" -- computed BEFORE the
        call, same reasoning feed_key_ws/feed_key_em's own comments give.
-       No prefix-state check needed here (unlike those two): this
-       scheme has no prefix-key mechanism at all -- see
-       wp_wordperfect_feed_key's own header comment in wordperfect.h. */
-    will_insert = (wp_bool)(ev.special == (u16)WP_KEY_NONE &&
+       M11: a keystroke typed into the Search/Replace prompt
+       (prompt_stage != NONE) edits that prompt's own text field, never
+       the document -- same fix feed_key_ws needed for WordStar's own
+       prompt (see its comment). No pending_prefix check needed here
+       (unlike WordStar/Emacs): this scheme has no prefix-key mechanism
+       at all -- see wp_wordperfect_feed_key's own header comment. */
+    will_insert = (wp_bool)(ctx->km.wp5.prompt_stage == (u8)WP_WP_PROMPT_NONE &&
+                             ev.special == (u16)WP_KEY_NONE &&
                              ev.mods == 0 && ev.codepoint >= 0x20);
 
     action = wp_wordperfect_feed_key(&ctx->km.wp5, ev);
@@ -435,13 +439,11 @@ void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,
         }
         break;
     case WP_KEYMAP_WORDPERFECT:
-        /* Same reasoning as WordStar/Emacs's own fixed label. */
-        if (buf_cap > 0) {
-            const char *label = "WORDPERFECT";
-            u32 n = 0;
-            while (label[n] != '\0' && n + 1 < buf_cap) { buf[n] = label[n]; n++; }
-            buf[n] = '\0';
-        }
+        /* M11: real, dynamic prompt text once a Search/Replace prompt
+           is active ("-> Srch:"/"<- Srch:"/"w/Confirm? (Y/N)"/"Replace
+           with:"/"Replace? (Y/N)"); the fixed "WORDPERFECT" label
+           otherwise, same reasoning WordStar's own status text gives. */
+        wp_wordperfect_get_status_text(&ctx->km.wp5, buf, buf_cap);
         break;
     case WP_KEYMAP_MSWORD:
         /* Same reasoning as every other non-vi scheme's own fixed label. */
