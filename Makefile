@@ -392,5 +392,48 @@ $(AMIGA_BUILD)/engine $(AMIGA_BUILD)/transport $(AMIGA_BUILD)/services $(AMIGA_B
 .PHONY: amiga-smoke
 amiga-smoke: $(AMIGA_BIN)/AMISMOKE
 
+# ---------------------------------------------------------------------
+# Mac Classic (M12) -- platform/mac uses Retro68 (m68k-apple-macos-gcc)
+# via host/tools/mac/CMakeLists.txt for actual app/smoke-test builds:
+# Mac resource-fork packaging needs Retro68's own Rez-based CMake macro
+# (add_application()), not a plain compile+link recipe -- see
+# docs/mac-platform.md. mac-engine-check mirrors atari-engine-check/
+# amiga-engine-check exactly: a link-free portability check of the SAME
+# portable engine/ + offload/transport + services/ sources, independent
+# of CMake -- MAC_BUILD is deliberately its own directory, separate from
+# build/mac (host/tools/ci_mac.sh's own CMake build tree).
+# ---------------------------------------------------------------------
+
+MAC_TOOLROOT ?= $(HOME)/opt/Retro68-build/toolchain
+MACCC        ?= $(MAC_TOOLROOT)/bin/m68k-apple-macos-gcc
+
+MAC_STRICT_CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror -O2
+MAC_INCLUDES      = -Iengine/include -Iplatform/mac -Iplatform/common -Ioffload/transport -I$(GENERATED)
+
+MAC_BUILD = build/mac_engine_check
+
+MAC_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(MAC_BUILD)/engine/%.o,$(ENGINE_SRC))
+MAC_TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(MAC_BUILD)/transport/%.o,$(TRANSPORT_SRC))
+MAC_SERVICES_OBJ  = $(patsubst services/spell/%.c,$(MAC_BUILD)/services/%.o,$(patsubst services/grammar/%.c,$(MAC_BUILD)/services/%.o,$(SERVICES_SRC)))
+
+.PHONY: mac-engine-check
+mac-engine-check: $(MAC_ENGINE_OBJ) $(MAC_TRANSPORT_OBJ) $(MAC_SERVICES_OBJ)
+	@echo "engine + offload/transport + services cross-compile clean for m68k-apple-macos"
+
+$(MAC_BUILD)/engine/%.o: engine/src/%.c | $(MAC_BUILD)/engine
+	$(MACCC) $(MAC_STRICT_CFLAGS) $(MAC_INCLUDES) -c $< -o $@
+
+$(MAC_BUILD)/transport/%.o: offload/transport/%.c | $(MAC_BUILD)/transport
+	$(MACCC) $(MAC_STRICT_CFLAGS) $(MAC_INCLUDES) -c $< -o $@
+
+$(MAC_BUILD)/services/%.o: services/spell/%.c | $(MAC_BUILD)/services
+	$(MACCC) $(MAC_STRICT_CFLAGS) $(MAC_INCLUDES) -c $< -o $@
+
+$(MAC_BUILD)/services/%.o: services/grammar/%.c | $(MAC_BUILD)/services
+	$(MACCC) $(MAC_STRICT_CFLAGS) $(MAC_INCLUDES) -c $< -o $@
+
+$(MAC_BUILD)/engine $(MAC_BUILD)/transport $(MAC_BUILD)/services:
+	mkdir -p $@
+
 clean:
 	rm -rf $(BUILD) $(BIN)

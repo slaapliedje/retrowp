@@ -367,17 +367,75 @@ anywhere in the loop.
   accumulate across runs).
 - `host/tools/ci_mac.sh` -- single-ROM (`PERFORMA.ROM`) smoke gate,
   mirroring `ci_atari.sh`/`ci_amiga.sh`'s role. Builds via CMake directly
-  (no `mac-engine-check`/`mac-smoke` Makefile target yet -- that's
-  Phase 1's, once `platform/mac/` exists to check). **Verified passing
-  repeatedly**, including one real transient failure (an Xvfb display
-  collision, see above) that a clean rerun resolved -- consistent with
-  the same accepted flakiness class the other two backends' matrices
+  (there is no `mac-app`/`mac-smoke` Makefile target driving the actual
+  app/resource build -- Mac's Rez-based packaging is CMake's job, per
+  the toolchain section above; `make mac-engine-check`, added in
+  Phase 1, is a separate free portability check, not a build path).
+  **Verified passing repeatedly**, including one real transient failure
+  (an Xvfb display collision, see above) that a clean rerun resolved --
+  consistent with the same accepted flakiness class the other two
+  backends' matrices
   already carry, not a new defect.
 - `ci_mac_matrix.sh` (both ROMs, looped) is deliberately not added yet --
   matching Phase 6's own scope in `docs/milestones.md`, the same phase
   `ci_amiga_matrix.sh` arrived in for Amiga. Both ROMs were verified
   directly during Phase 0 closeout instead (three independent clean
   boots: two against `PERFORMA.ROM`, one against `maciici.rom`).
+
+## Phase 1: memory/file/clipboard/timer platform.h seams
+
+`platform/mac/mem_mac.c`, `file_mac.c`, `clipboard_mac.c`, `timer_mac.c`
+-- no Toolbox window/menu/event loop yet, mirroring `docs/amiga-platform.md`'s
+own Phase 1 (T9.1a) scope and reasoning exactly (non-UI seams first, the
+real GUI shell in Phase 2).
+
+- `mem_mac.c`: Retro68's newlib-based `malloc`/`realloc`/`free`, already
+  exercised indirectly by `host/tools/mac/smoke.c`'s `fopen`/`fwrite`
+  calls throughout Phase 0 -- no raw `NewPtr`/`DisposePtr` needed, same
+  trust-the-runtime reasoning `mem_amiga.c` gives for libnix's malloc.
+- `file_mac.c`: real File Manager calls (`FSOpen`/`FSRead`/`FSWrite`/
+  `FSClose`/`Create`/`FSDelete`/`SetFPos`/`GetFPos`/`GetEOF`/`SetEOF`),
+  not a stdio wrapper. `SetFPos`'s `posMode` maps onto
+  `plat_seek_whence` directly (`fsFromStart`/`fsFromMark`/`fsFromLEOF`).
+  A C-string path is turned into a Pascal string locally; a
+  fully-qualified colon path like `"Unix:name"` resolves to the named
+  volume regardless of `vRefNum` -- the exact mechanism already proven
+  throughout Phase 0. `FSRead` returning `eofErr` with a valid byte
+  count (including zero) is treated as a clean EOF, not a failure --
+  matching `file_amiga.c`'s own "0 bytes, no error" treatment of `Read()`.
+- `clipboard_mac.c`: the real Scrap Manager (`ZeroScrap`/`PutScrap`/
+  `GetScrap`), type `'TEXT'` -- the same plain-text scrap type real Mac
+  software of this era reads/writes, so this interoperates with other
+  real apps, not just itself (same bar `clipboard_amiga.c`'s IFF
+  `FORM FTXT` met for Amiga). **`Scrap.h` does not exist anywhere in
+  Retro68's header set** (unlike `Files.h`/`Processes.h`, which exist as
+  thin wrappers) -- `Memory.h` resolves to the same master
+  `Multiverse.h` header and already declares everything needed, so it
+  alone is enough.
+- `timer_mac.c`: `TickCount()` (~60.15/sec, a fixed Toolbox-guaranteed
+  rate, no runtime detection needed) for a relative clock, plus a real
+  yielding `Delay()`, unlike Atari's busy-wait (only ever justified by
+  plain TOS having no yield primitive).
+- `draw_mac.c`: only `plat_utf8_to_native`/`plat_native_to_utf8` for
+  now, pulled forward from Phase 2 because the clipboard and file seams
+  need them to link (same reasoning `draw_amiga.c` gives for the
+  identical pull-forward). Unlike Amiga's ISO-8859-1 (a genuine 1:1
+  identity map for 0x80-0xFF), Mac OS Roman has no simple arithmetic
+  relationship to Unicode -- a real mapping table is Phase 2/3 work, not
+  assumed here. Follows Atari's own precedent instead: ASCII passes
+  through unchanged, everything else becomes `'?'`, counted in
+  `*unmapped_count` -- a documented gap, not a silent one.
+
+**Verified on-target, not just cross-compiled**:
+`wp_mac_file_clipboard_selfcheck()` (mirrors
+`wp_atari_file_clipboard_selfcheck()`/`wp_amiga_file_clipboard_selfcheck()`
+exactly) runs from `host/tools/mac/smoke.c` under BasiliskII against the
+real fixture -- `file_clipboard: PASS`, reproduced across multiple clean
+runs on both ROM images via `host/tools/ci_mac.sh`. `make mac-engine-check`
+(new: a link-free strict-C89 portability check mirroring
+`atari-engine-check`/`amiga-engine-check` exactly, added now that
+`platform/mac/` exists to check) and `make test` (371/371) both stay
+green throughout, confirming zero `engine/`/`services/` changes.
 
 ## Status
 
@@ -389,10 +447,12 @@ way, one of which was a 100%-reproducible boot crash); classic Mac
 `Startup Items` plus a tiny permanent `LaunchApplication`-based stub
 gives fully hands-free, non-flaky CI automation with **zero** Finder
 interaction and **zero** per-run disk-image surgery; `host/tools/ci_mac.sh`
-passes repeatedly against both ROM images.
+passes repeatedly against both ROM images; `platform/mac/`'s non-UI
+seams (memory, file I/O, clipboard, timer, ASCII-scoped charset
+conversion) are real, on-target-verified implementations, not stubs.
 
-**Next**: Phase 1 -- the real `platform/mac/` Toolbox shell (event loop,
-menus/dialogs), which is what finally earns the top-level Makefile's own
-`mac-engine-check`/`mac-app` targets and lets `mac_smoke.c` grow real
-`wp_mac_*_selfcheck()` coverage instead of the placeholder pipeline probe
-it is today.
+**Next**: Phase 2 -- the real Toolbox shell (`InitGraf`/`InitWindows`/
+`InitMenus`, a real window via `NewCWindow`/`GetNewWindow`, a menu bar
+via a `.r` Rez resource file, a `WaitNextEvent` loop, clean quit), the
+same way `platform/amiga/app_shell.c` grew from its own T9.1a bare
+selfcheck into the full MUI shell in T9.1b.
