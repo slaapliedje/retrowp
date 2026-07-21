@@ -172,6 +172,9 @@ int main(void)
     check(wp_atari_help_selfcheck(),
           "help content parses with every link resolving; word-wrap against real VDI font metrics");
 
+    check(wp_atari_config_selfcheck(),
+          "wp_config_load resolves all five real keymap= values through real Atari file I/O");
+
     {
         long free_before = 0, free_after_load = 0, free_after_free = 0;
         wp_bool budget_ok = wp_atari_memory_budget_selfcheck(&free_before, &free_after_load, &free_after_free);

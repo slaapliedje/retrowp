@@ -910,3 +910,48 @@ than Atari's own `.HYP` research spike was.
   menu-Trigger -> `MUIM_Application_ReturnID` -> `invoke_backend_action`
   path already proven end-to-end by File Open/Save, Quit, and (as of
   Phase 6) Help, so this is a reasoned, not a blind, gap.
+
+## Switchable keybinding layouts (M10)
+
+Full account: `docs/keymaps.md`. This backend's own share of that
+milestone:
+
+- **Config file**: `PROGDIR:RetroWP.cfg` -- a standard, always-
+  available AmigaDOS assign (the directory the program launched from),
+  no dependency on a full `ENV:`/Preferences tree this fixture's own
+  WB install doesn't fully have working anyway (see this doc's own
+  Phase 0 notes). Read once at startup via `wp_config_load` before
+  `wp_app_ctx_init`, right in `app_shell_run`.
+- **`translate_rawkey` now also reads real `IEQUALIFIER_LALT`/
+  `IEQUALIFIER_RALT` bits** (T10.3): `imsg->Qualifier` was already
+  being captured every keystroke, but only to feed `MapRawKey`'s own
+  ASCII translation -- MapRawKey folds Ctrl into a C0 control code the
+  same way it always did, but does *not* do the same for Alt, so this
+  needed its own explicit read. Verified against the real NDK header
+  (`~/opt/amiga/m68k-amigaos/ndk-include/devices/inputevent.h`):
+  `IEQUALIFIER_CONTROL`/`LALT`/`RALT` are `0x0008`/`0x0010`/`0x0020`,
+  **not** the `0x0200`/`0x0400` pair some online references cite for
+  Alt -- checked against the real, local, authoritative source rather
+  than trusted from memory. New `wp_amiga_key_translate_selfcheck`
+  (wired into `AMISMOKE`) proves Alt is read correctly across
+  Escape/Up/F1 and that an unrelated qualifier bit (Control) doesn't
+  false-trigger it.
+- **`amiga_dispatch_key`'s own two-step vi-mode-then-shortcut-fallback
+  logic moved into `platform/common/keymap.c`** (T10.1), replaced here
+  by one `wp_keymap_feed_key` call -- see `docs/keymaps.md`'s own
+  architecture section. This backend's own pre-existing asymmetries
+  with the Atari backend (no `sync_format_check`-equivalent menu-
+  checkmark sync on the shortcut-fallback path; `set_document_from_text`
+  never called a `wp_vimode_free`-equivalent before re-init, unlike
+  Atari's own `replace_document`) were preserved exactly as real,
+  pre-existing behavior, not fixed as part of this refactor -- out of
+  scope for a keybinding-layout milestone.
+- **`wp_amiga_config_selfcheck`** (T10.1, wired into `AMISMOKE`):
+  mirrors `wp_atari_config_selfcheck` exactly -- writes a real config
+  file at the real path for each of the five `keymap=` values in turn
+  and confirms `wp_config_load` resolves every one correctly through
+  real AmigaDOS file I/O, leaving the fixture exactly as clean as it
+  found it.
+
+The full 3-image `ci_amiga_matrix.sh` stayed green through every phase
+that touched this file directly (T10.1, T10.3).

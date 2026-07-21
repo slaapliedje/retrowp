@@ -377,4 +377,10 @@ wp_bool wp_atari_key_translate_selfcheck(void);
    docs/help.md. */
 wp_bool wp_atari_help_selfcheck(void);
 
+/* M10 Phase 6: proves wp_config_load resolves all five real keymap=
+   values against a real file at WP_ATARI_CONFIG_PATH -- see
+   app_shell.c's own comment on wp_atari_config_selfcheck for what it
+   checks and why. */
+wp_bool wp_atari_config_selfcheck(void);
+
 #endif /* WP_ATARI_APP_SHELL_INTERNAL_H */

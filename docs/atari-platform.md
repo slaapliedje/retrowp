@@ -1766,3 +1766,39 @@ Verification: the new `wp_atari_help_selfcheck` (parses the real
 compiled-in content, confirms every link resolves, and runs the pager's
 word-wrap algorithm against real Atari VDI font metrics) passes on both
 single-image `ci_atari.sh` and the full 6-image `ci_atari_matrix.sh`.
+
+## Switchable keybinding layouts (M10)
+
+Full account: `docs/keymaps.md`. This backend's own share of that
+milestone:
+
+- **Config file**: `C:\RETROWP.CFG`, read once at startup via
+  `wp_config_load` before `wp_app_ctx_init`, right in `app_shell_run`.
+  Missing/malformed both quietly default to vi-mode -- an existing
+  zero-config install keeps behaving exactly as it always has.
+- **`wp_dispatch_key`/`atari_translate_key` gained a real `kstate`
+  parameter** (T10.3): `evnt_multi`'s own kstate output was already
+  being captured every frame and silently discarded before this --
+  its bit 3 (Alt, per the Atari Compendium) is now threaded through
+  and applied uniformly at `atari_translate_key`'s single exit point,
+  regardless of which branch (a special key, a Ctrl-chord, or a plain
+  codepoint) produced the event. `wp_atari_key_translate_selfcheck`
+  gained Alt/Alt+Ctrl/Alt+special rows plus a negative case (an
+  unrelated kstate bit set, Alt clear) proving every pre-existing case
+  kept its exact expected value.
+- **`wp_dispatch_key`'s own two-step vi-mode-then-shortcut-fallback
+  logic moved into `platform/common/keymap.c`** (T10.1), replaced here
+  by one `wp_keymap_feed_key` call -- see `docs/keymaps.md`'s own
+  architecture section. Zero observable behavior change for vi-mode
+  itself was the explicit regression-safety bar this refactor had to
+  clear, proven by `test_vimode.c` needing no changes at all.
+- **`wp_atari_config_selfcheck`** (T10.1, wired into `SMOKE.PRG`):
+  writes a real config file at the real path for each of the five
+  `keymap=` values in turn and confirms `wp_config_load` resolves
+  every one correctly through real Atari file I/O, leaving the fixture
+  exactly as clean as it found it.
+
+The full 6-image `ci_atari_matrix.sh` stayed green through every phase
+that touched this file directly (T10.1, T10.3), the same class of
+change (dispatch/key-translation restructuring) this project's own
+history has twice regressed on before -- this time without incident.

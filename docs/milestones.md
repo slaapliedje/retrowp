@@ -1078,11 +1078,127 @@ change and Atari's own `paint_help` ascent fix).
 
 ---
 
-## M10+ — Mac Classic / DOS / Typography Polish
-- [ ] T10.1 `platform/mac` (Toolbox + QuickDraw metrics/render).
-- [ ] T10.2 `platform/dos` (text-mode shell; character-cell metrics).
-- [ ] T10.3 Typography polish: kerning/justification options where supported.
-- [ ] T10.4 PDF polish: font embedding tiers, image support.
+## M10 — Switchable Keybinding Layouts
+Goal: let a user pick their own muscle memory (WordStar, WordPerfect,
+Emacs, classic Microsoft Word) instead of always getting vi-mode,
+selected once at startup from a config file (a restart is required to
+change it -- no live switching), staying 100% keyboard-usable
+throughout. Full account: `docs/keymaps.md`.
+
+- [x] T10.1 Config file + generic keymap dispatch scaffolding.
+      AC: A small `platform/common/config.h`/`.c` (line-based
+      `key=value`, lenient, defaults to `vim`) plus
+      `platform/common/keymap.h`/`.c` replacing `wp_app_ctx`'s
+      hardcoded `wp_vimode_state` field with a tagged union
+      (`wp_keymap_state`), with zero observable behavior change for
+      vi-mode -- the explicit regression-safety proof this whole
+      milestone is built on. **Met.** `make test` grew from 219 to 236
+      with **zero** changes needed to `test_vimode.c` itself. Real
+      on-target config-file round trip proven on both backends
+      (`wp_atari_config_selfcheck`/`wp_amiga_config_selfcheck`, added
+      once all five `keymap=` values existed to check against, Phase 6).
+- [x] T10.2 WordStar keybinding layout.
+      AC: The real diamond cursor cluster, five real prefix keys (only
+      `^K`/`^Q`/`^P` with implemented subcommands), and WordStar's own
+      real block **marker-pair** model (not an anchor+extend
+      selection) -- verified against the WordStar 3.0 Quick Reference
+      Card and wordstar.org's own docs, not recalled from memory.
+      **Met.** `make test` grew to 254. Promoted vi-mode's own
+      file-local paste helper into a shared engine primitive,
+      `wp_edit_paste_text` (`editing.h`/`undo.c`), once WordStar's
+      block copy/move needed the identical "insert text, splitting a
+      paragraph at each embedded newline" logic. Two real bugs found
+      and fixed: a classic C string-escape footgun in the test
+      harness, and an overly broad refusal guard in Block Move that
+      wrongly refused every single-paragraph move -- see
+      `docs/keymaps.md`'s own account of both.
+- [x] T10.3 Real `WP_MOD_ALT` plumbing, both backends.
+      AC: Atari's `atari_translate_key` and Amiga's `translate_rawkey`
+      both actually set `WP_MOD_ALT` (defined since M8.5, never set by
+      either backend before this task) -- needed before Emacs's Meta
+      or WordPerfect's Alt-Fn chords could exist at all. **Met.** New
+      selfcheck coverage on both backends proves every pre-existing
+      case kept its exact expected value (the regression proof) plus
+      new Alt/Alt+Ctrl/Alt+special rows; a new host-side vi-mode test
+      proves the existing `mods != 0` shortcut guard (previously only
+      exercised via Ctrl) rejects an Alt-chord the same way.
+- [x] T10.4 Emacs keybinding layout.
+      AC: Char/word/line motion, Meta via real Alt or the historical
+      `ESC`-then-key fallback, kill/yank, mark+point region
+      operations, the `C-x`/`C-c` prefix families -- verified against
+      the current GNU Emacs Reference Card. **Met.** `make test` grew
+      to 275. Promoted vi-mode's own file-local `clamp_cursor` into a
+      shared engine primitive, `wp_pos_clamp_to_document`
+      (`editing.h`/`cursor.c`), once Emacs's own `C-x u` (undo) needed
+      the identical post-undo cursor-validity check. Two real,
+      honestly-flagged deviations from stock Emacs, both structural
+      backend limitations rather than choices: undo binds to `C-x u`
+      instead of `C-/` (a `Ctrl+<non-letter>` chord doesn't survive
+      this project's own key translation intact), and `C-SPC`
+      (set-mark) is implemented and fully host-tested but not
+      currently reachable from a real keypress on either shipped
+      backend for the same reason. One real bug found and fixed: `M-f`/
+      `M-d` initially reused vim's own word-forward motion instead of
+      Emacs's real word-*end* landing, eating an extra trailing space
+      on kill -- see `docs/keymaps.md`'s own account.
+- [x] T10.5 WordPerfect keybinding layout (flattened MVP).
+      AC: Real F-key/modifier bindings for WP 5.1's own most-used
+      commands, with the authentic nested numbered-menu UI itself
+      explicitly out of scope this pass (a real, documented follow-up
+      spike, not silently dropped) -- verified against the real 1990
+      IBM WP5.1 keyboard template. **Met.** `make test` grew to 293.
+      Block mode is a real anchor+extend selection activated as an
+      explicit **toggle** (Alt-F4 on, Alt-F4 again cancels) -- a third,
+      distinct selection-activation pattern alongside vi's modal
+      enter/exit and Emacs's set-and-persist, with its own test
+      coverage proving extend-by-motion. Real WP's own Copy/Move/Delete
+      3-way block menu flattens to one action, Move (Ctrl-F4 cut +
+      Shift-F10 retrieve) -- documented, not silently narrowed. F12
+      (real WP's alternate block-toggle key) is structurally
+      unbindable: `wp_special_key` only goes up to F10.
+- [x] T10.6 Microsoft Word (classic) keybinding layout.
+      AC: The lowest-novelty scheme -- direct pass-through for
+      Ctrl-B/I/U/S/O/C/X/V (already `g_wp_actions[]`'s own real
+      shortcut bytes), Shift+motion selection, real Ctrl-Z/Ctrl-Y
+      undo/redo. **Met.** `make test` grew to 309, closing concrete
+      per-scheme work as the plan's own suggested ordering predicted.
+      The only scheme in the milestone where Shift-selection has a
+      real consumer beyond an explicit kill/copy keystroke (typing
+      over a selection replaces it, matching familiar modern-editor
+      behavior) and the only one with real redo (every other scheme's
+      undo story is either absent, narrower, or redo-less by real
+      historical design). Deliberately has no in-app quit keystroke at
+      all, matching real classic Word's own lack of one -- every
+      backend's window-close handling already covers it regardless of
+      the active scheme.
+
+Artifact: five fully switchable keybinding layouts, each verified
+against a real primary source, each with its own honestly-documented
+gaps rather than invented workarounds. `docs/keymaps.md` has the full
+per-scheme command reference, the shared dispatch architecture, and
+every real bug the test suite caught along the way.
+
+**Verification across the whole milestone**: `make test` grew from 219
+(session start) to 309 (T10.6's end), strictly monotonically --- every
+phase's own regression-safety AC held, most visibly T10.1's own "zero
+`test_vimode.c` changes" requirement. `atari-engine-check`/
+`amiga-engine-check` and the full 6-image Atari TOS matrix / 3-image
+Amiga Kickstart matrix all stayed green through every phase, including
+the two (T10.1, T10.3) that touched real per-backend dispatch/
+translation code directly -- the exact class of change this project's
+own history has twice regressed on before. `engine/` and `services/`
+needed no changes outside new scheme modules and the two shared-
+primitive promotions (`wp_edit_paste_text`, `wp_pos_clamp_to_document`)
+-- both real, load-bearing generalizations of code vi-mode already had,
+not new engine surface invented for this milestone.
+
+---
+
+## M11+ — Mac Classic / DOS / Typography Polish
+- [ ] T11.1 `platform/mac` (Toolbox + QuickDraw metrics/render).
+- [ ] T11.2 `platform/dos` (text-mode shell; character-cell metrics).
+- [ ] T11.3 Typography polish: kerning/justification options where supported.
+- [ ] T11.4 PDF polish: font embedding tiers, image support.
 
 ---
 

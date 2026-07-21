@@ -36,4 +36,10 @@ wp_bool wp_amiga_help_selfcheck(void);
    wp_amiga_key_translate_selfcheck for what it checks and why. */
 wp_bool wp_amiga_key_translate_selfcheck(void);
 
+/* M10 Phase 6: proves wp_config_load resolves all five real keymap=
+   values against a real file at WP_AMIGA_CONFIG_PATH -- see
+   app_shell.c's own comment on wp_amiga_config_selfcheck for what it
+   checks and why. */
+wp_bool wp_amiga_config_selfcheck(void);
+
 #endif /* WP_AMIGA_APP_SHELL_INTERNAL_H */

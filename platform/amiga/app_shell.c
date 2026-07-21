@@ -1861,3 +1861,38 @@ wp_bool wp_amiga_key_translate_selfcheck(void)
     }
     return WP_TRUE;
 }
+
+/* M10 Phase 6: proves wp_config_load resolves all five real keymap=
+   values against a REAL file at WP_AMIGA_CONFIG_PATH, written and read
+   through real AmigaDOS file I/O -- mirrors platform/atari/app_shell.c's
+   own wp_atari_config_selfcheck exactly, see its own comment for the
+   full reasoning (host/tests/test_config.c already proves the string-
+   matching logic itself; this proves the real on-target file round
+   trip). Leaves the fixture exactly as clean as it found it. */
+wp_bool wp_amiga_config_selfcheck(void)
+{
+    static const struct { const char *content; u8 expected; } cases[] = {
+        { "keymap=vim\n", (u8)WP_KEYMAP_VI },
+        { "keymap=wordstar\n", (u8)WP_KEYMAP_WORDSTAR },
+        { "keymap=emacs\n", (u8)WP_KEYMAP_EMACS },
+        { "keymap=wordperfect\n", (u8)WP_KEYMAP_WORDPERFECT },
+        { "keymap=msword\n", (u8)WP_KEYMAP_MSWORD }
+    };
+    wp_bool ok = WP_TRUE;
+    u32 i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        plat_file *f;
+        wp_config cfg;
+
+        if (plat_file_open(WP_AMIGA_CONFIG_PATH, PLAT_FILE_WRITE, &f) != WP_OK) { ok = WP_FALSE; continue; }
+        if (plat_file_write(f, (const u8 *)cases[i].content, (u32)strlen(cases[i].content)) != WP_OK) ok = WP_FALSE;
+        plat_file_close(f);
+
+        wp_config_load(WP_AMIGA_CONFIG_PATH, &cfg);
+        if (cfg.keymap_id != cases[i].expected) ok = WP_FALSE;
+    }
+
+    plat_file_delete(WP_AMIGA_CONFIG_PATH);
+    return ok;
+}

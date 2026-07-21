@@ -58,5 +58,9 @@ int main(void)
     report(ok ? "key_translate: PASS\n" : "key_translate: FAIL\n");
     if (!ok) all_ok = WP_FALSE;
 
+    ok = wp_amiga_config_selfcheck();
+    report(ok ? "config: PASS\n" : "config: FAIL\n");
+    if (!ok) all_ok = WP_FALSE;
+
     return all_ok ? 0 : 20;
 }

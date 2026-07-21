@@ -2795,6 +2795,45 @@ wp_bool wp_atari_help_selfcheck(void)
     return WP_TRUE;
 }
 
+/* M10 Phase 6: proves wp_config_load resolves all five real keymap=
+   values against a REAL file at WP_ATARI_CONFIG_PATH, written and read
+   through real Atari file I/O -- host/tests/test_config.c already
+   proves wp_config_parse's own string-matching logic exhaustively
+   against hand-fed byte arrays, so this selfcheck deliberately doesn't
+   re-prove that; it proves the one thing only real target hardware
+   can: that a real plat_file_write/plat_file_open/plat_file_read round
+   trip at the real configured path resolves every value correctly.
+   Leaves the fixture exactly as clean as it found it (plat_file_delete
+   at the end, unconditionally) -- a real user's own first run must see
+   a config-file-free system, not a stray leftover from this check. */
+wp_bool wp_atari_config_selfcheck(void)
+{
+    static const struct { const char *content; u8 expected; } cases[] = {
+        { "keymap=vim\n", (u8)WP_KEYMAP_VI },
+        { "keymap=wordstar\n", (u8)WP_KEYMAP_WORDSTAR },
+        { "keymap=emacs\n", (u8)WP_KEYMAP_EMACS },
+        { "keymap=wordperfect\n", (u8)WP_KEYMAP_WORDPERFECT },
+        { "keymap=msword\n", (u8)WP_KEYMAP_MSWORD }
+    };
+    wp_bool ok = WP_TRUE;
+    u32 i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        plat_file *f;
+        wp_config cfg;
+
+        if (plat_file_open(WP_ATARI_CONFIG_PATH, PLAT_FILE_WRITE, &f) != WP_OK) { ok = WP_FALSE; continue; }
+        if (plat_file_write(f, (const u8 *)cases[i].content, (u32)strlen(cases[i].content)) != WP_OK) ok = WP_FALSE;
+        plat_file_close(f);
+
+        wp_config_load(WP_ATARI_CONFIG_PATH, &cfg);
+        if (cfg.keymap_id != cases[i].expected) ok = WP_FALSE;
+    }
+
+    plat_file_delete(WP_ATARI_CONFIG_PATH);
+    return ok;
+}
+
 /* Reflects a Bold/Italic/Underline toggle's new state onto its menu
    item's checkmark, regardless of whether it was triggered by a menu
    click or a Ctrl+<letter> keyboard shortcut (both now call the exact
