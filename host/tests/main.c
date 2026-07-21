@@ -155,6 +155,23 @@ void test_wordperfect_ctrl_f4_without_block_beeps(void);
 void test_wordperfect_shift_f10_with_empty_register_beeps(void);
 void test_wordperfect_no_leaks(void);
 
+/* test_msword.c */
+void test_msword_arrow_char_motion(void);
+void test_msword_shift_arrow_extends_selection(void);
+void test_msword_ctrl_arrow_word_motion_and_shift_ctrl_extends_by_word(void);
+void test_msword_home_end_and_ctrl_home_end(void);
+void test_msword_plain_typing_is_non_modal(void);
+void test_msword_typing_over_selection_replaces_it(void);
+void test_msword_delete_and_backspace_without_selection(void);
+void test_msword_delete_with_active_selection_deletes_the_selection(void);
+void test_msword_ctrl_delete_and_backspace_delete_whole_words(void);
+void test_msword_enter_with_selection_deletes_it_first(void);
+void test_msword_ctrl_a_selects_all(void);
+void test_msword_ctrl_z_undo_and_ctrl_y_redo(void);
+void test_msword_ctrl_letter_action_bindings(void);
+void test_msword_unbound_ctrl_letter_beeps(void);
+void test_msword_no_leaks(void);
+
 /* test_actions.c */
 void test_actions_find_by_id(void);
 void test_actions_find_by_shortcut(void);
@@ -173,6 +190,7 @@ void test_config_parses_keymap_vim(void);
 void test_config_parses_keymap_wordstar(void);
 void test_config_parses_keymap_emacs(void);
 void test_config_parses_keymap_wordperfect(void);
+void test_config_parses_keymap_msword(void);
 void test_config_key_and_value_are_case_insensitive(void);
 void test_config_tolerates_surrounding_whitespace(void);
 void test_config_skips_comment_and_blank_lines(void);
@@ -500,6 +518,22 @@ static const test_case g_cases[] = {
     { "wordperfect_shift_f10_with_empty_register_beeps", test_wordperfect_shift_f10_with_empty_register_beeps },
     { "wordperfect_no_leaks", test_wordperfect_no_leaks },
 
+    { "msword_arrow_char_motion", test_msword_arrow_char_motion },
+    { "msword_shift_arrow_extends_selection", test_msword_shift_arrow_extends_selection },
+    { "msword_ctrl_arrow_word_motion_and_shift_ctrl_extends_by_word", test_msword_ctrl_arrow_word_motion_and_shift_ctrl_extends_by_word },
+    { "msword_home_end_and_ctrl_home_end", test_msword_home_end_and_ctrl_home_end },
+    { "msword_plain_typing_is_non_modal", test_msword_plain_typing_is_non_modal },
+    { "msword_typing_over_selection_replaces_it", test_msword_typing_over_selection_replaces_it },
+    { "msword_delete_and_backspace_without_selection", test_msword_delete_and_backspace_without_selection },
+    { "msword_delete_with_active_selection_deletes_the_selection", test_msword_delete_with_active_selection_deletes_the_selection },
+    { "msword_ctrl_delete_and_backspace_delete_whole_words", test_msword_ctrl_delete_and_backspace_delete_whole_words },
+    { "msword_enter_with_selection_deletes_it_first", test_msword_enter_with_selection_deletes_it_first },
+    { "msword_ctrl_a_selects_all", test_msword_ctrl_a_selects_all },
+    { "msword_ctrl_z_undo_and_ctrl_y_redo", test_msword_ctrl_z_undo_and_ctrl_y_redo },
+    { "msword_ctrl_letter_action_bindings", test_msword_ctrl_letter_action_bindings },
+    { "msword_unbound_ctrl_letter_beeps", test_msword_unbound_ctrl_letter_beeps },
+    { "msword_no_leaks", test_msword_no_leaks },
+
     { "actions_find_by_id", test_actions_find_by_id },
     { "actions_find_by_shortcut", test_actions_find_by_shortcut },
     { "actions_every_shortcut_is_unique", test_actions_every_shortcut_is_unique },
@@ -515,6 +549,7 @@ static const test_case g_cases[] = {
     { "config_parses_keymap_wordstar", test_config_parses_keymap_wordstar },
     { "config_parses_keymap_emacs", test_config_parses_keymap_emacs },
     { "config_parses_keymap_wordperfect", test_config_parses_keymap_wordperfect },
+    { "config_parses_keymap_msword", test_config_parses_keymap_msword },
     { "config_key_and_value_are_case_insensitive", test_config_key_and_value_are_case_insensitive },
     { "config_tolerates_surrounding_whitespace", test_config_tolerates_surrounding_whitespace },
     { "config_skips_comment_and_blank_lines", test_config_skips_comment_and_blank_lines },

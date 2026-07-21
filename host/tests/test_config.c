@@ -54,11 +54,18 @@ void test_config_parses_keymap_wordperfect(void)
     ASSERT_EQ_U32((u32)parse("keymap=WordPerfect\n"), (u32)WP_KEYMAP_WORDPERFECT);
 }
 
+void test_config_parses_keymap_msword(void)
+{
+    ASSERT_EQ_U32((u32)parse("keymap=MSWord\n"), (u32)WP_KEYMAP_MSWORD);
+    ASSERT_EQ_U32((u32)parse("keymap=Word\n"), (u32)WP_KEYMAP_MSWORD);
+}
+
 void test_config_unrecognized_value_falls_back_to_default(void)
 {
-    /* Not yet an implemented scheme -- must not produce an invalid/
-       unclamped id, see wp_config_parse's own leniency contract. */
-    ASSERT_EQ_U32((u32)parse("keymap=msword\n"), (u32)WP_KEYMAP_VI);
+    /* No scheme this project implements or plans to is named this --
+       must not produce an invalid/unclamped id, see wp_config_parse's
+       own leniency contract. */
+    ASSERT_EQ_U32((u32)parse("keymap=nonexistentscheme\n"), (u32)WP_KEYMAP_VI);
 }
 
 void test_config_unrecognized_key_is_ignored(void)

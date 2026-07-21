@@ -22,6 +22,9 @@ void wp_keymap_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
     case WP_KEYMAP_WORDPERFECT:
         wp_wordperfect_init(&ctx->km.wp5, doc, journal);
         break;
+    case WP_KEYMAP_MSWORD:
+        wp_msword_init(&ctx->km.mw, doc, journal);
+        break;
     case WP_KEYMAP_VI:
     default: /* an unrecognized id (should not happen -- wp_config_load
                 already clamps to a real value) falls back to vi-mode
@@ -44,6 +47,10 @@ void wp_keymap_free(wp_app_ctx *ctx)
         break;
     case WP_KEYMAP_WORDPERFECT:
         wp_wordperfect_free(&ctx->km.wp5);
+        break;
+    case WP_KEYMAP_MSWORD:
+        /* Owns no heap memory -- see msword.h's own comment on why no
+           wp_msword_free exists. */
         break;
     case WP_KEYMAP_VI:
     default:
@@ -296,6 +303,76 @@ static wp_keymap_outcome feed_key_wp5(wp_app_ctx *ctx, wp_key_event ev)
     return outcome;
 }
 
+/* Same "no free pass" reasoning as every other non-vi scheme's own
+   feed_key_* (see e.g. feed_key_ws's own comment) -- raw_shortcut_byte
+   is unused here too: this scheme is fully responsible for every
+   wp_action_id it wants to expose (Ctrl-B/I/U/S/O/C/X/V), and its own
+   bare printable-key dispatch already claims the entire non-modified
+   keyboard for typing. */
+static wp_keymap_outcome feed_key_mw(wp_app_ctx *ctx, wp_key_event ev)
+{
+    wp_msword_action_kind action;
+    wp_keymap_outcome outcome;
+    wp_bool will_insert;
+
+    /* Matches wp_msword_feed_key's own exact condition for "this
+       keystroke will insert a plain character" -- computed BEFORE the
+       call, same reasoning every other scheme's own comment gives. No
+       prefix/pending-mode state to check here either, like WordPerfect
+       -- this scheme has none. */
+    will_insert = (wp_bool)(ev.special == (u16)WP_KEY_NONE &&
+                             ev.mods == 0 && ev.codepoint >= 0x20);
+
+    action = wp_msword_feed_key(&ctx->km.mw, ev);
+
+    outcome.kind = (u8)WP_KEYMAP_RESULT_NONE;
+    outcome.action_id = 0;
+    outcome.inserted_char = will_insert;
+
+    switch (action) {
+    case WP_MSACTION_SAVE:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FILE_SAVE;
+        break;
+    case WP_MSACTION_OPEN:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FILE_OPEN;
+        break;
+    case WP_MSACTION_CUT:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_EDIT_CUT;
+        break;
+    case WP_MSACTION_COPY:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_EDIT_COPY;
+        break;
+    case WP_MSACTION_PASTE:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_EDIT_PASTE;
+        break;
+    case WP_MSACTION_FORMAT_BOLD:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FORMAT_BOLD;
+        break;
+    case WP_MSACTION_FORMAT_ITALIC:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FORMAT_ITALIC;
+        break;
+    case WP_MSACTION_FORMAT_UNDERLINE:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FORMAT_UNDERLINE;
+        break;
+    case WP_MSACTION_BEEP:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_BEEP;
+        break;
+    case WP_MSACTION_NONE:
+    default:
+        break;
+    }
+
+    return outcome;
+}
+
 wp_keymap_outcome wp_keymap_feed_key(wp_app_ctx *ctx, wp_key_event ev, u8 raw_shortcut_byte)
 {
     switch ((wp_keymap_id)ctx->keymap_id) {
@@ -305,6 +382,8 @@ wp_keymap_outcome wp_keymap_feed_key(wp_app_ctx *ctx, wp_key_event ev, u8 raw_sh
         return feed_key_em(ctx, ev);
     case WP_KEYMAP_WORDPERFECT:
         return feed_key_wp5(ctx, ev);
+    case WP_KEYMAP_MSWORD:
+        return feed_key_mw(ctx, ev);
     case WP_KEYMAP_VI:
     default:
         return feed_key_vi(ctx, ev, raw_shortcut_byte);
@@ -320,6 +399,8 @@ wp_pos *wp_keymap_cursor(wp_app_ctx *ctx)
         return &ctx->km.em.cursor;
     case WP_KEYMAP_WORDPERFECT:
         return &ctx->km.wp5.cursor;
+    case WP_KEYMAP_MSWORD:
+        return &ctx->km.mw.cursor;
     case WP_KEYMAP_VI:
     default:
         return &ctx->km.vi.cursor;
@@ -357,6 +438,15 @@ void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,
         /* Same reasoning as WordStar/Emacs's own fixed label. */
         if (buf_cap > 0) {
             const char *label = "WORDPERFECT";
+            u32 n = 0;
+            while (label[n] != '\0' && n + 1 < buf_cap) { buf[n] = label[n]; n++; }
+            buf[n] = '\0';
+        }
+        break;
+    case WP_KEYMAP_MSWORD:
+        /* Same reasoning as every other non-vi scheme's own fixed label. */
+        if (buf_cap > 0) {
+            const char *label = "WORD";
             u32 n = 0;
             while (label[n] != '\0' && n + 1 < buf_cap) { buf[n] = label[n]; n++; }
             buf[n] = '\0';

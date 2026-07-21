@@ -1,0 +1,425 @@
+#include <string.h>
+#include "test.h"
+#include "msword.h"
+#include "mem_host.h"
+
+static void build_doc_two_paras(wp_document *doc, const char *p0, const char *p1)
+{
+    u32 sec_idx, para_idx;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_span span;
+    u16 run_idx;
+
+    ASSERT_TRUE(wp_document_init(doc) == WP_OK);
+    ASSERT_TRUE(wp_document_section_add(doc, &sec_idx) == WP_OK);
+    sec = wp_document_section_get(doc, sec_idx);
+
+    ASSERT_TRUE(wp_section_paragraph_add(sec, &para_idx) == WP_OK);
+    para = wp_section_paragraph_get(sec, para_idx);
+    ASSERT_TRUE(wp_strpool_append(&doc->strings, (const u8 *)p0, (u32)strlen(p0), &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, doc->default_cstyle, &run_idx) == WP_OK);
+
+    ASSERT_TRUE(wp_section_paragraph_add(sec, &para_idx) == WP_OK);
+    para = wp_section_paragraph_get(sec, para_idx);
+    ASSERT_TRUE(wp_strpool_append(&doc->strings, (const u8 *)p1, (u32)strlen(p1), &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, doc->default_cstyle, &run_idx) == WP_OK);
+}
+
+static void dump_para_text(wp_document *doc, u32 index, char *out)
+{
+    wp_section *sec = wp_document_section_get(doc, 0);
+    wp_paragraph *para = wp_section_paragraph_get(sec, index);
+    u16 i;
+    u32 pos = 0;
+
+    for (i = 0; i < para->run_count; i++) {
+        const u8 *b = wp_strpool_get(&doc->strings, para->runs[i].text);
+        memcpy(out + pos, b, para->runs[i].text.length);
+        pos += para->runs[i].text.length;
+    }
+    out[pos] = '\0';
+}
+
+/* No prefix-key mechanism at all (see msword.h's own header comment),
+   so like test_wordperfect.c there's no Ctrl-then-plain-letter
+   sequence to encode and no C string hex-escape hazard to worry about. */
+static void feed_keys(wp_msword_state *vs, const char *text)
+{
+    for (; *text; text++) {
+        wp_key_event key;
+        key.codepoint = (u32)(unsigned char)*text;
+        key.special = (u16)WP_KEY_NONE;
+        key.mods = 0;
+        key._pad = 0;
+        wp_msword_feed_key(vs, key);
+    }
+}
+
+static wp_msword_action_kind feed_special(wp_msword_state *vs, wp_special_key special, u8 mods)
+{
+    wp_key_event key;
+    key.codepoint = 0;
+    key.special = (u16)special;
+    key.mods = mods;
+    key._pad = 0;
+    return wp_msword_feed_key(vs, key);
+}
+
+static wp_msword_action_kind feed_full(wp_msword_state *vs, u32 codepoint, u8 mods)
+{
+    wp_key_event key;
+    key.codepoint = codepoint;
+    key.special = (u16)WP_KEY_NONE;
+    key.mods = mods;
+    key._pad = 0;
+    return wp_msword_feed_key(vs, key);
+}
+
+void test_msword_arrow_char_motion(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    build_doc_two_paras(&doc, "Hello", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_RIGHT, 0);
+    feed_special(&vs, WP_KEY_RIGHT, 0);
+    ASSERT_EQ_U32(vs.cursor.offset, 2);
+    feed_special(&vs, WP_KEY_LEFT, 0);
+    ASSERT_EQ_U32(vs.cursor.offset, 1);
+    ASSERT_TRUE(vs.selecting == WP_FALSE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_shift_arrow_extends_selection(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_RIGHT, (u8)WP_MOD_SHIFT);
+    ASSERT_TRUE(vs.selecting == WP_TRUE);
+    ASSERT_EQ_U32(vs.anchor.offset, 0);
+    ASSERT_EQ_U32(vs.cursor.offset, 1);
+
+    feed_special(&vs, WP_KEY_RIGHT, (u8)WP_MOD_SHIFT);
+    ASSERT_EQ_U32(vs.anchor.offset, 0); /* anchor stays fixed while extending */
+    ASSERT_EQ_U32(vs.cursor.offset, 2);
+
+    feed_special(&vs, WP_KEY_RIGHT, 0); /* motion without Shift drops the selection */
+    ASSERT_TRUE(vs.selecting == WP_FALSE);
+    ASSERT_EQ_U32(vs.cursor.offset, 3);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_ctrl_arrow_word_motion_and_shift_ctrl_extends_by_word(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    /* Three words, all in one paragraph -- wp_pos_word_forward crosses
+       INTO the next paragraph once it runs out of words in this one
+       (the same cross-paragraph behavior wp_pos_next/prev document for
+       themselves), so a two-word fixture with an empty second
+       paragraph right after would make the second Ctrl-Right's landing
+       ambiguous for this test's actual purpose (proving Shift extends
+       by word, not pinning down that unrelated cross-paragraph edge). */
+    build_doc_two_paras(&doc, "Hello World Foo", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_RIGHT, (u8)WP_MOD_CTRL);
+    ASSERT_EQ_U32(vs.cursor.offset, 6);
+    ASSERT_TRUE(vs.selecting == WP_FALSE);
+
+    feed_special(&vs, WP_KEY_RIGHT, (u8)(WP_MOD_CTRL | WP_MOD_SHIFT));
+    ASSERT_TRUE(vs.selecting == WP_TRUE);
+    ASSERT_EQ_U32(vs.anchor.offset, 6);
+    ASSERT_EQ_U32(vs.cursor.offset, 12);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_home_end_and_ctrl_home_end(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    build_doc_two_paras(&doc, "First", "Second");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_END, 0);
+    ASSERT_EQ_U32(vs.cursor.offset, 5);
+    feed_special(&vs, WP_KEY_HOME, 0);
+    ASSERT_EQ_U32(vs.cursor.offset, 0);
+
+    feed_special(&vs, WP_KEY_END, (u8)WP_MOD_CTRL);
+    ASSERT_EQ_U32(vs.cursor.paragraph, 1);
+    feed_special(&vs, WP_KEY_HOME, (u8)WP_MOD_CTRL);
+    ASSERT_EQ_U32(vs.cursor.paragraph, 0);
+    ASSERT_EQ_U32(vs.cursor.offset, 0);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_plain_typing_is_non_modal(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "Hello");
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "Hello");
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_typing_over_selection_replaces_it(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_RIGHT, (u8)(WP_MOD_CTRL | WP_MOD_SHIFT)); /* select "Hello " */
+    ASSERT_TRUE(vs.selecting == WP_TRUE);
+
+    feed_full(&vs, 'X', 0); /* typing a plain char replaces the selection */
+    ASSERT_TRUE(vs.selecting == WP_FALSE);
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "XWorld");
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_delete_and_backspace_without_selection(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "Hello", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_DELETE, 0);
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "ello");
+
+    feed_special(&vs, WP_KEY_RIGHT, 0);
+    feed_special(&vs, WP_KEY_BACKSPACE, 0);
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "llo");
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_delete_with_active_selection_deletes_the_selection(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_RIGHT, (u8)(WP_MOD_CTRL | WP_MOD_SHIFT)); /* select "Hello " */
+    ASSERT_TRUE(feed_special(&vs, WP_KEY_DELETE, 0) == WP_MSACTION_NONE);
+    ASSERT_TRUE(vs.selecting == WP_FALSE);
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "World");
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_ctrl_delete_and_backspace_delete_whole_words(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_DELETE, (u8)WP_MOD_CTRL); /* deletes "Hello " (word_forward eats trailing space) */
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "World");
+
+    feed_special(&vs, WP_KEY_END, 0);
+    feed_special(&vs, WP_KEY_BACKSPACE, (u8)WP_MOD_CTRL);
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "");
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_enter_with_selection_deletes_it_first(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_RIGHT, (u8)(WP_MOD_CTRL | WP_MOD_SHIFT)); /* select "Hello " */
+    feed_special(&vs, WP_KEY_ENTER, 0);
+    ASSERT_TRUE(vs.selecting == WP_FALSE);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 3); /* the empty split + the pre-existing second paragraph */
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "");
+    dump_para_text(&doc, 1, buf);
+    ASSERT_EQ_STR(buf, "World");
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_ctrl_a_selects_all(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    build_doc_two_paras(&doc, "First", "Second");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_RIGHT, 0);
+    ASSERT_TRUE(feed_full(&vs, 'a', (u8)WP_MOD_CTRL) == WP_MSACTION_NONE);
+    ASSERT_TRUE(vs.selecting == WP_TRUE);
+    ASSERT_EQ_U32(vs.anchor.paragraph, 0);
+    ASSERT_EQ_U32(vs.anchor.offset, 0);
+    ASSERT_EQ_U32(vs.cursor.paragraph, 1);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_ctrl_z_undo_and_ctrl_y_redo(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "Hi");
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "Hi");
+
+    ASSERT_TRUE(feed_full(&vs, 'z', (u8)WP_MOD_CTRL) == WP_MSACTION_NONE); /* Ctrl-Z: undo */
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "H");
+
+    ASSERT_TRUE(feed_full(&vs, 'y', (u8)WP_MOD_CTRL) == WP_MSACTION_NONE); /* Ctrl-Y: redo */
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "Hi");
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_ctrl_letter_action_bindings(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    build_doc_two_paras(&doc, "", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    ASSERT_TRUE(feed_full(&vs, 'b', (u8)WP_MOD_CTRL) == WP_MSACTION_FORMAT_BOLD);
+    ASSERT_TRUE(feed_full(&vs, 'i', (u8)WP_MOD_CTRL) == WP_MSACTION_FORMAT_ITALIC);
+    ASSERT_TRUE(feed_full(&vs, 'u', (u8)WP_MOD_CTRL) == WP_MSACTION_FORMAT_UNDERLINE);
+    ASSERT_TRUE(feed_full(&vs, 's', (u8)WP_MOD_CTRL) == WP_MSACTION_SAVE);
+    ASSERT_TRUE(feed_full(&vs, 'o', (u8)WP_MOD_CTRL) == WP_MSACTION_OPEN);
+    ASSERT_TRUE(feed_full(&vs, 'c', (u8)WP_MOD_CTRL) == WP_MSACTION_COPY);
+    ASSERT_TRUE(feed_full(&vs, 'x', (u8)WP_MOD_CTRL) == WP_MSACTION_CUT);
+    ASSERT_TRUE(feed_full(&vs, 'v', (u8)WP_MOD_CTRL) == WP_MSACTION_PASTE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_unbound_ctrl_letter_beeps(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    build_doc_two_paras(&doc, "", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    ASSERT_TRUE(feed_full(&vs, 'q', (u8)WP_MOD_CTRL) == WP_MSACTION_BEEP);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_no_leaks(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    mem_host_reset_counters();
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_special(&vs, WP_KEY_RIGHT, (u8)(WP_MOD_CTRL | WP_MOD_SHIFT));
+    feed_special(&vs, WP_KEY_DELETE, 0);
+    feed_full(&vs, 'z', (u8)WP_MOD_CTRL);
+    feed_full(&vs, 'y', (u8)WP_MOD_CTRL);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+
+    ASSERT_EQ_U32(mem_host_live_count(), 0);
+}
