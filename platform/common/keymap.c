@@ -332,8 +332,11 @@ static wp_keymap_outcome feed_key_mw(wp_app_ctx *ctx, wp_key_event ev)
        keystroke will insert a plain character" -- computed BEFORE the
        call, same reasoning every other scheme's own comment gives. No
        prefix/pending-mode state to check here either, like WordPerfect
-       -- this scheme has none. */
-    will_insert = (wp_bool)(ev.special == (u16)WP_KEY_NONE &&
+       -- this scheme has none, beyond M11's own Find/Replace prompt
+       (prompt_stage != NONE), the same exclusion every other scheme's
+       own prompt needed. */
+    will_insert = (wp_bool)(ctx->km.mw.prompt_stage == (u8)WP_MS_PROMPT_NONE &&
+                             ev.special == (u16)WP_KEY_NONE &&
                              ev.mods == 0 && ev.codepoint >= 0x20);
 
     action = wp_msword_feed_key(&ctx->km.mw, ev);
@@ -447,13 +450,11 @@ void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,
         wp_wordperfect_get_status_text(&ctx->km.wp5, buf, buf_cap);
         break;
     case WP_KEYMAP_MSWORD:
-        /* Same reasoning as every other non-vi scheme's own fixed label. */
-        if (buf_cap > 0) {
-            const char *label = "WORD";
-            u32 n = 0;
-            while (label[n] != '\0' && n + 1 < buf_cap) { buf[n] = label[n]; n++; }
-            buf[n] = '\0';
-        }
+        /* M11: real, dynamic prompt text once a Find/Replace prompt is
+           active ("Find:"/"Replace with:"/"Replace (r/a/n)?"); the
+           fixed "WORD" label otherwise, same reasoning WordStar's own
+           status text gives. */
+        wp_msword_get_status_text(&ctx->km.mw, buf, buf_cap);
         break;
     case WP_KEYMAP_VI:
     default:

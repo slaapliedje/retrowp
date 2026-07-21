@@ -401,6 +401,226 @@ void test_msword_unbound_ctrl_letter_beeps(void)
     wp_document_free(&doc);
 }
 
+void test_msword_find_jumps_to_match(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "Goodbye Moon");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_full(&vs, 'f', (u8)WP_MOD_CTRL); /* Ctrl+F */
+    feed_keys(&vs, "Moon");
+    feed_special(&vs, WP_KEY_ENTER, 0);
+
+    ASSERT_EQ_U32(vs.cursor.paragraph, 1);
+    ASSERT_EQ_U32(vs.cursor.offset, 8);
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_MS_PROMPT_NONE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_find_wraps_around_document(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "Goodbye Moon");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+    vs.cursor.paragraph = 1; vs.cursor.offset = 12; /* end of doc -- "Hello" is only reachable by wrapping */
+
+    feed_full(&vs, 'f', (u8)WP_MOD_CTRL);
+    feed_keys(&vs, "Hello");
+    feed_special(&vs, WP_KEY_ENTER, 0);
+
+    ASSERT_EQ_U32(vs.cursor.paragraph, 0);
+    ASSERT_EQ_U32(vs.cursor.offset, 0);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_find_not_found_beeps(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+    wp_msword_action_kind action;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_full(&vs, 'f', (u8)WP_MOD_CTRL);
+    feed_keys(&vs, "xyz");
+    action = feed_special(&vs, WP_KEY_ENTER, 0);
+
+    ASSERT_TRUE(action == WP_MSACTION_BEEP);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_find_escape_cancels_prompt(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_full(&vs, 'f', (u8)WP_MOD_CTRL);
+    feed_keys(&vs, "Wor");
+    feed_special(&vs, WP_KEY_ESCAPE, 0);
+
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_MS_PROMPT_NONE);
+    ASSERT_EQ_U32(vs.cursor.offset, 0);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_shift_f4_repeats_last_find(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    /* "z" prefix keeps the doc-start cursor from coinciding with the
+       first 'a' -- wp_document_find_text searches STRICTLY AFTER
+       `from`, same reasoning test_wordstar.c's own analogous fixtures
+       document. */
+    build_doc_two_paras(&doc, "zaXaXaX", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_full(&vs, 'f', (u8)WP_MOD_CTRL);
+    feed_keys(&vs, "a");
+    feed_special(&vs, WP_KEY_ENTER, 0);
+    ASSERT_EQ_U32(vs.cursor.offset, 1);
+
+    feed_special(&vs, WP_KEY_F4, (u8)WP_MOD_SHIFT);
+    ASSERT_EQ_U32(vs.cursor.offset, 3);
+
+    feed_special(&vs, WP_KEY_F4, (u8)WP_MOD_SHIFT);
+    ASSERT_EQ_U32(vs.cursor.offset, 5);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_shift_f4_without_prior_find_beeps(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+    wp_msword_action_kind action;
+
+    build_doc_two_paras(&doc, "Hello", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    action = feed_special(&vs, WP_KEY_F4, (u8)WP_MOD_SHIFT);
+    ASSERT_TRUE(action == WP_MSACTION_BEEP);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_replace_r_and_n(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "zzz foo foo foo", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_full(&vs, 'h', (u8)WP_MOD_CTRL); /* Ctrl+H */
+    feed_keys(&vs, "foo");
+    feed_special(&vs, WP_KEY_ENTER, 0); /* -> replace text field */
+    feed_keys(&vs, "bar");
+    feed_special(&vs, WP_KEY_ENTER, 0); /* begins search, pauses at match 1 (offset 4) */
+
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_MS_PROMPT_REPLACE_CONFIRM);
+
+    feed_keys(&vs, "r"); /* replace match 1, advance to match 2 (offset 8) */
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar foo foo");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_MS_PROMPT_REPLACE_CONFIRM);
+
+    feed_keys(&vs, "n"); /* skip match 2, advance to match 3 (offset 12) */
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar foo foo");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_MS_PROMPT_REPLACE_CONFIRM);
+
+    feed_keys(&vs, "r"); /* replace match 3, nothing left */
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar foo bar");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_MS_PROMPT_NONE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_replace_all_replaces_silently(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "zzz foo foo foo", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_full(&vs, 'h', (u8)WP_MOD_CTRL);
+    feed_keys(&vs, "foo");
+    feed_special(&vs, WP_KEY_ENTER, 0);
+    feed_keys(&vs, "bar");
+    feed_special(&vs, WP_KEY_ENTER, 0);
+
+    feed_keys(&vs, "a"); /* Replace All */
+
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar bar bar");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_MS_PROMPT_NONE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_msword_replace_confirm_escape_closes(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "zzz foo foo", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    feed_full(&vs, 'h', (u8)WP_MOD_CTRL);
+    feed_keys(&vs, "foo");
+    feed_special(&vs, WP_KEY_ENTER, 0);
+    feed_keys(&vs, "bar");
+    feed_special(&vs, WP_KEY_ENTER, 0);
+
+    feed_special(&vs, WP_KEY_ESCAPE, 0);
+
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz foo foo");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_MS_PROMPT_NONE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
 void test_msword_no_leaks(void)
 {
     wp_document doc;
@@ -417,6 +637,13 @@ void test_msword_no_leaks(void)
     feed_special(&vs, WP_KEY_DELETE, 0);
     feed_full(&vs, 'z', (u8)WP_MOD_CTRL);
     feed_full(&vs, 'y', (u8)WP_MOD_CTRL);
+
+    feed_full(&vs, 'h', (u8)WP_MOD_CTRL);
+    feed_keys(&vs, "World");
+    feed_special(&vs, WP_KEY_ENTER, 0);
+    feed_keys(&vs, "Moon");
+    feed_special(&vs, WP_KEY_ENTER, 0);
+    feed_keys(&vs, "a");
 
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);

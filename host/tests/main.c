@@ -211,6 +211,15 @@ void test_msword_ctrl_a_selects_all(void);
 void test_msword_ctrl_z_undo_and_ctrl_y_redo(void);
 void test_msword_ctrl_letter_action_bindings(void);
 void test_msword_unbound_ctrl_letter_beeps(void);
+void test_msword_find_jumps_to_match(void);
+void test_msword_find_wraps_around_document(void);
+void test_msword_find_not_found_beeps(void);
+void test_msword_find_escape_cancels_prompt(void);
+void test_msword_shift_f4_repeats_last_find(void);
+void test_msword_shift_f4_without_prior_find_beeps(void);
+void test_msword_replace_r_and_n(void);
+void test_msword_replace_all_replaces_silently(void);
+void test_msword_replace_confirm_escape_closes(void);
 void test_msword_no_leaks(void);
 
 /* test_actions.c */
@@ -628,6 +637,15 @@ static const test_case g_cases[] = {
     { "msword_ctrl_z_undo_and_ctrl_y_redo", test_msword_ctrl_z_undo_and_ctrl_y_redo },
     { "msword_ctrl_letter_action_bindings", test_msword_ctrl_letter_action_bindings },
     { "msword_unbound_ctrl_letter_beeps", test_msword_unbound_ctrl_letter_beeps },
+    { "msword_find_jumps_to_match", test_msword_find_jumps_to_match },
+    { "msword_find_wraps_around_document", test_msword_find_wraps_around_document },
+    { "msword_find_not_found_beeps", test_msword_find_not_found_beeps },
+    { "msword_find_escape_cancels_prompt", test_msword_find_escape_cancels_prompt },
+    { "msword_shift_f4_repeats_last_find", test_msword_shift_f4_repeats_last_find },
+    { "msword_shift_f4_without_prior_find_beeps", test_msword_shift_f4_without_prior_find_beeps },
+    { "msword_replace_r_and_n", test_msword_replace_r_and_n },
+    { "msword_replace_all_replaces_silently", test_msword_replace_all_replaces_silently },
+    { "msword_replace_confirm_escape_closes", test_msword_replace_confirm_escape_closes },
     { "msword_no_leaks", test_msword_no_leaks },
 
     { "actions_find_by_id", test_actions_find_by_id },

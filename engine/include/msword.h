@@ -58,8 +58,39 @@
    scoped clipboard yet", platform/common/actions.c's own comment on
    act_edit_copy) -- this scheme's own Shift-selection doesn't feed into
    them, matching vi-mode's identical pre-existing behavior for the same
-   three shortcuts today. Find (Ctrl-F) is deferred, matching every
-   other scheme's own Find deferral. */
+   three shortcuts today.
+   Find/Replace (M11): Ctrl+F Find (single jump, natural document-
+   wraparound, matching vi's own `/`), Ctrl+H Replace, Shift+F4 repeats
+   the last executed Find verbatim (real Word's own "repeat last Find or
+   Go To action" binding -- F3 is deliberately NOT used for this despite
+   being a common assumption from other apps/browsers: real classic
+   Word's own F3 is AutoText/glossary expansion, a wholly different
+   feature). Both fields are Enter-terminated (real Word's own dialog
+   convention, unlike WordPerfect's F2-terminated fields) and always
+   start EMPTY on each Ctrl+F/Ctrl+H press -- WordStar's own "always
+   fresh prompt" choice, not real Word's actual dialog-remembers-last-
+   value behavior, a deliberate simplification since Shift+F4 already
+   covers "repeat the last search" on its own. Replace, once both fields
+   are submitted, immediately jumps to the first match and pauses,
+   standing in for real Word's own persistent Find-and-Replace dialog
+   with its Replace/Replace All/Find Next/Close buttons: 'r' replaces
+   this match and advances (real "Replace"), 'a' replaces this and every
+   remaining match silently (real "Replace All"), 'n' skips and advances
+   (real "Find Next"), Escape closes (real "Close/Cancel") -- a keyboard-
+   only adaptation of a real 4-button dialog this app has no modal-
+   dialog primitive for, the same honest simplification every other
+   scheme's own confirm-loop already makes. Forward-only, cursor to end
+   of document, no G-equivalent restart-from-top (matching WordPerfect's/
+   Emacs's own narrower scope, not WordStar's). */
+
+typedef enum {
+    WP_MS_PROMPT_NONE = 0,
+    WP_MS_PROMPT_FIND_TEXT,     /* Ctrl+F, or Ctrl+H's own first field */
+    WP_MS_PROMPT_REPLACE_TEXT,  /* Ctrl+H's second field */
+    WP_MS_PROMPT_REPLACE_CONFIRM /* r/a/n/Escape standing in for the real dialog's buttons */
+} wp_msword_prompt_stage;
+
+#define WP_MSWORD_PROMPT_MAX 128
 
 typedef struct {
     wp_document     *doc;      /* borrowed */
@@ -70,6 +101,20 @@ typedef struct {
                            same anchor+cursor shape wp_selection/every
                            other scheme's own region concept already uses */
     wp_pos  anchor;
+
+    /* M11: Find/Replace prompt state. */
+    u8      prompt_stage;      /* wp_msword_prompt_stage */
+    wp_bool prompt_is_replace; /* WP_TRUE for Ctrl+H, WP_FALSE for plain Ctrl+F */
+    u8      find_buf[WP_MSWORD_PROMPT_MAX];
+    u32     find_len;
+    u8      replace_buf[WP_MSWORD_PROMPT_MAX];
+    u32     replace_len;
+    u8      last_find[WP_MSWORD_PROMPT_MAX]; /* snapshot taken whenever a search actually
+                                                 runs -- Shift+F4's own repeat target */
+    u32     last_find_len;
+    wp_pos  scope_start;   /* fixed for the life of one Replace run (Ctrl+F's own single
+                               jump has no scope -- it wraps naturally, like vi's `/`) */
+    wp_pos  pending_match; /* awaiting a confirm keystroke, WP_MS_PROMPT_REPLACE_CONFIRM only */
 } wp_msword_state;
 
 typedef enum {
@@ -102,5 +147,13 @@ void wp_msword_init(wp_msword_state *vs, wp_document *doc, wp_undo_journal *jour
    keymap.c's WP_KEYMAP_MSWORD arm of wp_keymap_free is a deliberate
    no-op case, matching WordStar's own precedent, not an oversight. */
 wp_msword_action_kind wp_msword_feed_key(wp_msword_state *vs, wp_key_event key);
+
+/* Writes a NUL-terminated status string into out, truncating to fit
+   out_cap -- mirrors every other scheme's own get_status_text shape
+   (M11). Outside a Find/Replace prompt this is the fixed "WORD" label
+   platform/common/keymap.c used to hardcode directly; inside one, it's
+   the real Word-style prompt text ("Find:"/"Find what:"/"Replace
+   with:"/"Replace (r/a/n)?") followed by whatever's been typed so far. */
+void wp_msword_get_status_text(const wp_msword_state *vs, char *out, u32 out_cap);
 
 #endif /* WP_MSWORD_H */
