@@ -451,8 +451,128 @@ passes repeatedly against both ROM images; `platform/mac/`'s non-UI
 seams (memory, file I/O, clipboard, timer, ASCII-scoped charset
 conversion) are real, on-target-verified implementations, not stubs.
 
-**Next**: Phase 2 -- the real Toolbox shell (`InitGraf`/`InitWindows`/
-`InitMenus`, a real window via `NewCWindow`/`GetNewWindow`, a menu bar
-via a `.r` Rez resource file, a `WaitNextEvent` loop, clean quit), the
-same way `platform/amiga/app_shell.c` grew from its own T9.1a bare
-selfcheck into the full MUI shell in T9.1b.
+## Phase 2: the real Toolbox shell
+
+`platform/mac/app_shell.c` grows from Phase 1's bare selfcheck into a
+real window, a menu bar built from `platform/common/actions.c`'s
+`g_wp_actions[]`, a `WaitNextEvent` loop with vi-mode key dispatch,
+File Open/Save via the Standard File Package, Cut/Copy/Paste, and
+clean quit -- mirroring `platform/amiga/app_shell.c`'s own T9.1b
+exactly in spirit, translated to Menu Manager/Window Manager calls.
+
+**Deliberately no `.r` resource file.** The window is a plain
+`NewWindow` call (no resource, matching Retro68's own
+`Samples/WDEF/wdefshell.c`, which builds a real document window the
+identical resource-free way); the menu bar is built at runtime via
+`NewMenu`/`InsertMenuItem`/`InsertMenu`, folding `g_wp_actions[]`
+grouped by `.group` into one menu per group -- avoiding a second,
+hand-authored copy of every action's label that could drift out of
+sync with `actions.c`. `plat_dialog_choice` (needed by the Format
+menu's Size/Alignment handlers in `actions.c`) is a real implementation
+too, not a stub: a temporary popup menu shown via `PopUpMenuSelect`,
+the same real classic-Mac pattern early word processors used for font
+size pickers -- `InsertMenu(menu, -1)` makes it known to the Menu
+Manager without adding it to the visible menu bar, exactly how
+hierarchical submenus work.
+
+**The link set had to grow substantially.** Once `app_shell.c` became
+the real shell, it needed `actions.c`/`app_ctx.c`/`keymap.c` and,
+transitively, the whole portable engine (`keymap.c`'s dispatch
+references every keybinding scheme's own module unconditionally, even
+though only `WP_KEYMAP_VI` is used here) -- `mac_smoke` and `RETROWP`
+now share the same broad object set (everything under `engine/src/`
+except `offload_client.c`, which needs Phase 4's transport), the exact
+broadening `amiga_smoke.c`'s own history describes ("AMISMOKE, now
+linking the same broader object set as RETROWP since both live in the
+same grown app_shell.c"). `metrics_mac.c` supplies real-but-
+unreachable-today `plat_font_*`/`plat_measure_text` stubs (returning
+`WP_UNSUPPORTED`) so `linebreak.o` links without Phase 3's real
+QuickDraw metrics -- mirrors `metrics_amiga.c`'s own Phase 2-era stub
+exactly. `plat_dialog_message`/`plat_window_create`/
+`plat_window_destroy`/`plat_window_get_gc` are deliberately not
+implemented -- neither Atari nor Amiga implements any of the four
+either, and nothing in the current engine/platform/common code calls
+them.
+
+Document rendering deliberately bypasses `plat_draw_text`/
+`plat_measure_text` entirely via direct QuickDraw calls (one raw line
+per paragraph, no word wrap) -- Phase 2's real AC is "menu, a document
+window, vi-mode Normal-mode movement, clean quit," not wrapped layout
+(Phase 3's job), the identical scope `platform/amiga/app_shell.c`'s own
+`editor_draw` had before T9.2 added real metrics.
+
+### Real gotchas found
+
+- **`GetVInfo`/`GetVol`/`GetVRefNum` are declared in Retro68's headers
+  but have no linkable glue implementation at all** -- the linker
+  rejected `GETVINFO` as undefined, a real gap found by building, not
+  guessed. `PBHGetVInfoSync` (the raw HFS parameter-block call these
+  would otherwise wrap) works directly: `ioVolIndex 0` + `ioVRefNum`
+  selects a volume by reference number, and `ioNamePtr` (given a
+  buffer) receives its name. Needed to turn a Standard File Package
+  `SFReply` (a vRefNum + a `Str63` filename, not a ready path) into the
+  fully-qualified `"VolName:FileName"` string `file_mac.c`'s
+  `plat_file_open` needs (it always passes vRefNum 0 to `FSOpen`/
+  `Create`, relying on the volume name in the path itself -- the exact
+  mechanism `"Unix:name"` already proved throughout Phase 0/1).
+- **A real, reproducible input bug, found by testing actual keystrokes
+  under BasiliskII, not by inspection**: `translate_mac_key` originally
+  set `WP_MOD_SHIFT` whenever the Toolbox's own `shiftKey` modifier bit
+  was set. `engine/src/vimode.c` requires `key.mods == 0` for its whole
+  printable-command dispatch path -- and shift is already baked into
+  the Toolbox's own charCode (`':'` vs `';'`, `'A'` vs `'a'`), the same
+  way it is on every other backend. Setting `WP_MOD_SHIFT` on top of
+  that caused every shifted character (`:`, capital letters) to be
+  silently rejected by vi-mode's normal-mode dispatch -- `:q<Return>`
+  never quit, and typed capital letters never inserted, until this was
+  found and fixed. `platform/amiga/app_shell.c`'s own `translate_rawkey`
+  never sets `WP_MOD_SHIFT` either, for the identical reason; this
+  should have been mirrored from the start rather than added
+  independently.
+- **No window manager under bare Xvfb means X11 input focus doesn't
+  follow mouse clicks** -- the same gotcha `docs/amiga-platform.md`
+  already documents for amiberry (`xdotool windowactivate` fails,
+  `_NET_ACTIVE_WINDOW` unsupported). `xdotool windowfocus <id>` (direct
+  `XSetInputFocus`, no WM needed) reliably works and should be called
+  once after the window appears, before any keyboard automation.
+
+### Verified end-to-end under BasiliskII
+
+A real screenshot shows the "RetroWP" window with a working menu bar
+and the sample document rendered via direct QuickDraw `DrawText` calls,
+cursor marker at the first line. From there, in one continuous
+session: `j` pressed five times moved the cursor marker down exactly
+five paragraphs (real vi-mode Normal-mode movement, engine-verified
+paragraph-by-paragraph); clicking the File menu title dropped down a
+real "Open / Save / Quit" menu built dynamically from `g_wp_actions[]`;
+`i` + typing `hello` + `Escape` inserted real text at the cursor
+(`"helloRetroWP on Mac Classic..."` -- Insert mode genuinely works,
+beyond Phase 2's own stated AC); `:q<Return>` quit cleanly back to a
+real Finder desktop. `host/tools/ci_mac.sh` (Phase 1's
+`file_clipboard: PASS` smoke test) stays green throughout, confirming
+Phase 2 didn't regress Phase 1. Host `make test` (371/371) and
+`atari-engine-check`/`amiga-engine-check` unaffected.
+
+## Status
+
+**Proven**: the Retro68 + BasiliskII + headless-Xvfb pipeline builds and
+runs real m68k classic Mac code, no Docker/podman required; a
+from-scratch HFS catalog B-tree writer can correctly and safely inject a
+file into `Startup Items` (three real bugs found and fixed along the
+way, one of which was a 100%-reproducible boot crash); classic Mac
+`Startup Items` plus a tiny permanent `LaunchApplication`-based stub
+gives fully hands-free, non-flaky CI automation with **zero** Finder
+interaction and **zero** per-run disk-image surgery; `host/tools/ci_mac.sh`
+passes repeatedly against both ROM images; `platform/mac/`'s non-UI
+seams (memory, file I/O, clipboard, timer, ASCII-scoped charset
+conversion) are real, on-target-verified implementations; `RETROWP.APPL`
+is a real, running Toolbox application -- window, menu, vi-mode
+movement and insertion, clean quit all verified on-target via
+screenshots, not just cross-compiled.
+
+**Next**: Phase 3 -- real QuickDraw font metrics/text rendering
+(`CharWidth`/`TextWidth`/`FontInfo` for `plat_measure_text`/
+`plat_font_metrics_get`, `DrawText`/`PaintRect` wired through the real
+seam instead of `app_shell.c`'s own direct-QuickDraw bypass), plus a
+`wp_mac_layout_selfcheck` mirroring `wp_amiga_layout_selfcheck` --
+matching the scope `platform/amiga/app_shell.c`'s own T9.2 covered.

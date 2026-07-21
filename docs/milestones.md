@@ -1292,33 +1292,46 @@ architecturally different platform yet -- a real Toolbox/QuickDraw
 event loop instead of GEM's or MUI's own, and a boot volume that (unlike
 Amiga's) must be a genuine HFS disk image, not a plain host directory.
 
-- [~] T12.1 `platform/mac`: Toolbox shell, event loop, menus/dialogs.
-      AC: App runs under BasiliskII; clean quit. **In progress -- Phases
-      0-1 closed, Phase 2 (the real Toolbox shell) not yet started.**
-      Real `m68k-apple-macos-gcc` (Retro68) toolchain and a disposable
-      BasiliskII System 7.5.3 fixture; a from-scratch HFS catalog B-tree
-      injector (`host/tools/mac_hfs/`) that places a tiny permanent
-      launcher app into `Startup Items` -- BasiliskII has no equivalent
-      to amiberry's host-directory-mountable boot volume, so Amiga's own
-      CI-signal trick (`amiga_ci_lib.sh`) doesn't transfer directly and
-      this was built new. Three real bugs found and fixed along the way,
-      including one 100%-reproducible boot-time crash (a missing B-tree
-      node free-space sentinel). The launcher hands off execution via a
-      real `LaunchApplication` call to whatever the CI harness has just
-      copied onto the ExtFS share as a plain file -- no per-run disk
-      surgery, no Finder interaction at all (Phase 0). Real
-      memory/file/clipboard/timer `platform.h` seams (Phase 1):
-      `file_mac.c`'s File Manager calls and `clipboard_mac.c`'s Scrap
-      Manager calls, verified on-target via
-      `wp_mac_file_clipboard_selfcheck()` -- `file_clipboard: PASS`
-      across both ROM images. `host/tools/ci_mac.sh` and the new
-      `make mac-engine-check` (link-free strict-C89 portability check,
-      mirroring `atari-engine-check`/`amiga-engine-check`) both green;
-      `make test` unaffected (371/371). Full account, including every
-      byte offset, the dead-end Finder-alias attempt that led to the
-      working launcher design, and every Phase 1 gotcha (missing
-      `Scrap.h`, `FSRead`'s `eofErr`-as-clean-EOF semantics):
-      `docs/mac-platform.md`.
+- [x] T12.1 `platform/mac`: Toolbox shell, event loop, menus/dialogs.
+      AC: App runs under BasiliskII; clean quit. **Met.** Real
+      `m68k-apple-macos-gcc` (Retro68) toolchain and a disposable
+      BasiliskII System 7.5.3 fixture, plus a from-scratch HFS catalog
+      B-tree injector (`host/tools/mac_hfs/`) that places a tiny
+      permanent launcher app into `Startup Items` -- BasiliskII has no
+      equivalent to amiberry's host-directory-mountable boot volume, so
+      Amiga's own CI-signal trick (`amiga_ci_lib.sh`) doesn't transfer
+      directly and this was built new, with three real bugs found and
+      fixed along the way (one a 100%-reproducible boot-time crash).
+      The launcher hands off execution via a real `LaunchApplication`
+      call to whatever the CI harness has just copied onto the ExtFS
+      share as a plain file -- no per-run disk surgery, no Finder
+      interaction at all (Phase 0). Real memory/file/clipboard/timer
+      `platform.h` seams (Phase 1), verified on-target via
+      `wp_mac_file_clipboard_selfcheck()`. A real Toolbox shell
+      (Phase 2): a window, a menu bar built dynamically from
+      `platform/common/actions.c`'s `g_wp_actions[]` (no `.r` resource
+      file at all), a `WaitNextEvent` loop, and clean quit -- verified
+      end-to-end via real screenshots under BasiliskII: the "RetroWP"
+      window with a working "File/Edit/Format/Tools/Help" menu bar
+      (a real dropdown proven by opening File -> Open/Save/Quit), vi-mode
+      `j`/`k` Normal-mode cursor movement, `i`/typed-text/`Escape` Insert
+      mode (beyond this task's own stated AC), and `:q<Return>` quitting
+      cleanly back to a real Finder desktop. A real, reproducible input
+      bug was found and fixed this phase: `WP_MOD_SHIFT` was being set
+      whenever the Toolbox's own shift bit was set, but shift is already
+      baked into the charCode itself (`:` vs `;`), and
+      `engine/src/vimode.c` requires `mods == 0` for its printable-
+      command dispatch -- every shifted keystroke was silently rejected
+      until this was found by testing real keystrokes, not by
+      inspection. `host/tools/ci_mac.sh`, `make mac-engine-check`
+      (link-free strict-C89 portability check, mirroring
+      `atari-engine-check`/`amiga-engine-check`), and `make test`
+      (371/371) all stay green throughout. Full account, including
+      every byte offset, the dead-end Finder-alias attempt that led to
+      the working launcher design, and every gotcha (missing `Scrap.h`,
+      `FSRead`'s `eofErr`-as-clean-EOF semantics, `GetVInfo` having no
+      linkable glue implementation, the shift/mods bug, no-window-
+      manager input focus under bare Xvfb): `docs/mac-platform.md`.
 - [ ] T12.2 QuickDraw metrics/render impl of `platform.h`.
       AC: On-screen wrap matches engine layout using real Mac fonts.
 - [ ] T12.3 Mac Serial Driver transport hook.
