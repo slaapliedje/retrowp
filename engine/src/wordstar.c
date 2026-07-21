@@ -14,6 +14,19 @@ void wp_wordstar_init(wp_wordstar_state *vs, wp_document *doc, wp_undo_journal *
     vs->pending_prefix = 0;
     vs->block_begin_set = WP_FALSE;
     vs->block_end_set = WP_FALSE;
+
+    vs->prompt_stage = (u8)WP_WS_PROMPT_NONE;
+    vs->prompt_is_replace = WP_FALSE;
+    vs->prompt_find_len = 0;
+    vs->prompt_replace_len = 0;
+    vs->opt_global = WP_FALSE;
+    vs->opt_no_confirm = WP_FALSE;
+    vs->opt_backward = WP_FALSE;
+    vs->opt_ignore_case = WP_FALSE;
+    vs->opt_whole_word = WP_FALSE;
+    vs->have_last = WP_FALSE;
+    vs->scope_start = vs->cursor;
+    vs->pending_match = vs->cursor;
 }
 
 static wp_selection sel_of(wp_pos a, wp_pos b)
@@ -252,6 +265,221 @@ static void move_block(wp_wordstar_state *vs)
     mem_free(buf);
 }
 
+/* ------------------------------------------------------------------ */
+/* Find / Replace (^QF, ^QA, ^L) -- M11                                 */
+/* ------------------------------------------------------------------ */
+
+/* Finds the next match scanning from `from_pos`, honoring opt_backward
+   and the current opt_ignore_case/opt_whole_word flags, without ever
+   crossing back past vs->scope_start -- WordStar's own G option means
+   "restart from the top of the document," not "wrap around forever";
+   without G, a Replace only ever covers cursor-to-end (or, backward,
+   cursor-to-start), never doubling back over ground already covered.
+   wp_document_find_text's own single-wrap-then-stop contract is reused
+   for the underlying scan; this just rejects a match that lands on the
+   wrapped-around side of scope_start. */
+static wp_bool ws_find_next_in_scope(wp_wordstar_state *vs, wp_pos from_pos, wp_pos *out)
+{
+    wp_pos found;
+    wp_bool forward = (wp_bool)!vs->opt_backward;
+
+    if (wp_document_find_text(vs->doc, from_pos, vs->prompt_find, vs->prompt_find_len,
+                               forward, vs->opt_ignore_case, vs->opt_whole_word, &found) != WP_OK) {
+        return WP_FALSE;
+    }
+    if (forward && wp_pos_compare(found, vs->scope_start) < 0) return WP_FALSE;
+    if (!forward && wp_pos_compare(found, vs->scope_start) > 0) return WP_FALSE;
+    *out = found;
+    return WP_TRUE;
+}
+
+/* ^QA without the N option: replaces first_match and every remaining
+   match in scope silently, as ONE undo group. Continuation position
+   differs by direction -- see the comment above move_block for the same
+   "which side stays valid" reasoning applied here: forward continues
+   from AFTER the freshly-inserted replacement (out), so it can never
+   re-match inside/adjacent to what was just written; backward continues
+   from BEFORE it (the delete's own returned collapse position, valid by
+   wp_edit_delete_selection's own contract), so it never re-enters the
+   region it just touched either. Both guard against an infinite loop
+   when the replacement text itself contains the search pattern (e.g.
+   replacing "a" with "aa"). */
+static void ws_replace_all_remaining(wp_wordstar_state *vs, wp_pos first_match)
+{
+    wp_pos match = first_match;
+    wp_bool forward = (wp_bool)!vs->opt_backward;
+
+    wp_undo_group_begin(vs->journal);
+    for (;;) {
+        wp_selection sel = wp_document_match_selection(vs->doc, match, vs->prompt_find_len);
+        wp_pos before_insert, out, next, continue_from;
+
+        wp_edit_delete_selection(vs->doc, vs->journal, sel, &before_insert);
+        wp_edit_paste_text(vs->doc, vs->journal, before_insert, vs->prompt_replace,
+                            vs->prompt_replace_len, &out);
+        vs->cursor = out;
+
+        continue_from = forward ? out : before_insert;
+        if (!ws_find_next_in_scope(vs, continue_from, &next)) break;
+        match = next;
+    }
+    wp_undo_group_end(vs->journal);
+}
+
+/* Runs the search/replace this scheme's Find/Replace prompt (or ^L) just
+   collected: computes scope_start from opt_global/opt_backward, finds
+   the first match, and either jumps there (plain Find), silently
+   batch-replaces the rest of scope (Replace with N given), or pauses in
+   WP_WS_PROMPT_CONFIRM awaiting a per-match Y/N (Replace without N). */
+static wp_wordstar_action_kind ws_begin_search(wp_wordstar_state *vs)
+{
+    wp_pos found;
+
+    vs->scope_start = vs->opt_global
+        ? (vs->opt_backward ? wp_pos_doc_end(vs->doc) : wp_pos_doc_start(vs->doc))
+        : vs->cursor;
+
+    if (!ws_find_next_in_scope(vs, vs->scope_start, &found)) return WP_WSACTION_BEEP;
+
+    vs->cursor = found;
+
+    if (!vs->prompt_is_replace) return WP_WSACTION_NONE; /* ^QF: one jump, done */
+
+    if (vs->opt_no_confirm) {
+        ws_replace_all_remaining(vs, found);
+        return WP_WSACTION_NONE;
+    }
+
+    vs->pending_match = found;
+    vs->prompt_stage = (u8)WP_WS_PROMPT_CONFIRM;
+    return WP_WSACTION_NONE;
+}
+
+/* FIND_TEXT and REPLACE_TEXT stages share this shape -- collect
+   printable characters into the caller's buf/len pair, Backspace/
+   Escape/Enter handled uniformly, mirroring vi-mode's own cmdline_buf
+   Command-line mode. */
+static wp_wordstar_action_kind feed_prompt_text(wp_wordstar_state *vs, wp_key_event key,
+                                                 u8 *buf, u32 *len, wp_bool is_find_stage)
+{
+    if (key.special == (u16)WP_KEY_ESCAPE) {
+        vs->prompt_stage = (u8)WP_WS_PROMPT_NONE;
+        return WP_WSACTION_NONE;
+    }
+    if (key.special == (u16)WP_KEY_BACKSPACE) {
+        if (*len > 0) (*len)--;
+        else vs->prompt_stage = (u8)WP_WS_PROMPT_NONE;
+        return WP_WSACTION_NONE;
+    }
+    if (key.special == (u16)WP_KEY_ENTER) {
+        if (is_find_stage && *len == 0) {
+            vs->prompt_stage = (u8)WP_WS_PROMPT_NONE;
+            return WP_WSACTION_BEEP;
+        }
+        if (is_find_stage && vs->prompt_is_replace) {
+            vs->prompt_stage = (u8)WP_WS_PROMPT_REPLACE_TEXT;
+        } else {
+            vs->opt_global = WP_FALSE;
+            vs->opt_no_confirm = WP_FALSE;
+            vs->opt_backward = WP_FALSE;
+            vs->opt_ignore_case = WP_FALSE;
+            vs->opt_whole_word = WP_FALSE;
+            vs->prompt_stage = (u8)WP_WS_PROMPT_OPTIONS;
+        }
+        return WP_WSACTION_NONE;
+    }
+    if (key.special == (u16)WP_KEY_NONE && key.codepoint >= 0x20 && key.codepoint < 0x7F) {
+        if (*len < WP_WORDSTAR_PROMPT_MAX - 1) buf[(*len)++] = (u8)key.codepoint;
+    }
+    return WP_WSACTION_NONE;
+}
+
+static wp_wordstar_action_kind feed_prompt_options(wp_wordstar_state *vs, wp_key_event key)
+{
+    if (key.special == (u16)WP_KEY_ESCAPE || key.special == (u16)WP_KEY_BACKSPACE) {
+        vs->prompt_stage = (u8)WP_WS_PROMPT_NONE;
+        return WP_WSACTION_NONE;
+    }
+    if (key.special == (u16)WP_KEY_ENTER) {
+        vs->prompt_stage = (u8)WP_WS_PROMPT_NONE;
+        vs->have_last = WP_TRUE;
+        return ws_begin_search(vs);
+    }
+    if (key.special == (u16)WP_KEY_NONE) {
+        u32 c = key.codepoint;
+        if (c >= 'a' && c <= 'z') c = c - 'a' + 'A';
+        switch (c) {
+        case 'G': vs->opt_global = WP_TRUE; break;
+        case 'N': vs->opt_no_confirm = WP_TRUE; break;
+        case 'B': vs->opt_backward = WP_TRUE; break;
+        case 'U': vs->opt_ignore_case = WP_TRUE; break;
+        case 'W': vs->opt_whole_word = WP_TRUE; break;
+        default: break; /* silently ignored -- real WordStar's own OPTIONS?
+                            prompt has a numeric repeat-count and a '?' help
+                            request this scheme doesn't implement (see
+                            wordstar.h); anything else typed here is just
+                            not a recognized option letter. */
+        }
+    }
+    return WP_WSACTION_NONE;
+}
+
+static wp_wordstar_action_kind feed_prompt_confirm(wp_wordstar_state *vs, wp_key_event key)
+{
+    wp_bool forward;
+    wp_pos continue_from, next;
+    u32 c;
+
+    if (key.special == (u16)WP_KEY_ESCAPE) {
+        vs->prompt_stage = (u8)WP_WS_PROMPT_NONE;
+        return WP_WSACTION_NONE;
+    }
+    if (key.special != (u16)WP_KEY_NONE) return WP_WSACTION_NONE;
+
+    c = key.codepoint;
+    forward = (wp_bool)!vs->opt_backward;
+
+    if (c == 'y' || c == 'Y') {
+        wp_selection sel = wp_document_match_selection(vs->doc, vs->pending_match, vs->prompt_find_len);
+        wp_pos before_insert, out;
+
+        wp_edit_delete_selection(vs->doc, vs->journal, sel, &before_insert);
+        wp_edit_paste_text(vs->doc, vs->journal, before_insert, vs->prompt_replace,
+                            vs->prompt_replace_len, &out);
+        vs->cursor = out;
+        continue_from = forward ? out : before_insert;
+    } else if (c == 'n' || c == 'N') {
+        continue_from = vs->pending_match; /* skip: leave it untouched, just move past it */
+    } else {
+        return WP_WSACTION_NONE; /* not y/n -- stay paused, matching real WordStar's own prompt */
+    }
+
+    vs->prompt_stage = (u8)WP_WS_PROMPT_NONE;
+    if (!ws_find_next_in_scope(vs, continue_from, &next)) return WP_WSACTION_NONE;
+
+    vs->cursor = next;
+    vs->pending_match = next;
+    vs->prompt_stage = (u8)WP_WS_PROMPT_CONFIRM;
+    return WP_WSACTION_NONE;
+}
+
+static wp_wordstar_action_kind feed_prompt(wp_wordstar_state *vs, wp_key_event key)
+{
+    switch ((wp_wordstar_prompt_stage)vs->prompt_stage) {
+    case WP_WS_PROMPT_FIND_TEXT:
+        return feed_prompt_text(vs, key, vs->prompt_find, &vs->prompt_find_len, WP_TRUE);
+    case WP_WS_PROMPT_REPLACE_TEXT:
+        return feed_prompt_text(vs, key, vs->prompt_replace, &vs->prompt_replace_len, WP_FALSE);
+    case WP_WS_PROMPT_OPTIONS:
+        return feed_prompt_options(vs, key);
+    case WP_WS_PROMPT_CONFIRM:
+        return feed_prompt_confirm(vs, key);
+    default:
+        vs->prompt_stage = (u8)WP_WS_PROMPT_NONE;
+        return WP_WSACTION_NONE;
+    }
+}
+
 static wp_wordstar_action_kind handle_prefix_key(wp_wordstar_state *vs, wp_key_event key)
 {
     u8 prefix = vs->pending_prefix;
@@ -286,6 +514,17 @@ static wp_wordstar_action_kind handle_prefix_key(wp_wordstar_state *vs, wp_key_e
         case 'r': vs->cursor = wp_pos_doc_start(vs->doc); return WP_WSACTION_NONE;
         case 'c': vs->cursor = wp_pos_doc_end(vs->doc); return WP_WSACTION_NONE;
         case 'y': delete_to_line_end(vs); return WP_WSACTION_NONE;
+        case 'f':
+            vs->prompt_is_replace = WP_FALSE;
+            vs->prompt_find_len = 0;
+            vs->prompt_stage = (u8)WP_WS_PROMPT_FIND_TEXT;
+            return WP_WSACTION_NONE;
+        case 'a':
+            vs->prompt_is_replace = WP_TRUE;
+            vs->prompt_find_len = 0;
+            vs->prompt_replace_len = 0;
+            vs->prompt_stage = (u8)WP_WS_PROMPT_FIND_TEXT;
+            return WP_WSACTION_NONE;
         default: return WP_WSACTION_BEEP;
         }
     case 'p':
@@ -316,6 +555,9 @@ static wp_wordstar_action_kind handle_ctrl_letter(wp_wordstar_state *vs, wp_key_
     case 'g': delete_chars_forward(vs, 1); return WP_WSACTION_NONE;
     case 't': delete_word_forward(vs); return WP_WSACTION_NONE;
     case 'y': delete_current_paragraph(vs); return WP_WSACTION_NONE;
+    case 'l': /* find/replace again -- see wordstar.h's own file comment */
+        if (!vs->have_last) return WP_WSACTION_BEEP;
+        return ws_begin_search(vs);
     case 'k': case 'q': case 'p': case 'o': case 'j':
         vs->pending_prefix = (u8)key.codepoint;
         return WP_WSACTION_NONE;
@@ -326,6 +568,7 @@ static wp_wordstar_action_kind handle_ctrl_letter(wp_wordstar_state *vs, wp_key_
 
 wp_wordstar_action_kind wp_wordstar_feed_key(wp_wordstar_state *vs, wp_key_event key)
 {
+    if (vs->prompt_stage != (u8)WP_WS_PROMPT_NONE) return feed_prompt(vs, key);
     if (vs->pending_prefix != 0) return handle_prefix_key(vs, key);
 
     switch (key.special) {
@@ -378,4 +621,36 @@ wp_wordstar_action_kind wp_wordstar_feed_key(wp_wordstar_state *vs, wp_key_event
     }
 
     return WP_WSACTION_NONE;
+}
+
+void wp_wordstar_get_status_text(const wp_wordstar_state *vs, char *out, u32 out_cap)
+{
+    const char *label;
+    const u8 *buf = NULL;
+    u32 buf_len = 0;
+    u32 len = 0;
+
+    if (out_cap == 0) return;
+
+    switch ((wp_wordstar_prompt_stage)vs->prompt_stage) {
+    case WP_WS_PROMPT_FIND_TEXT:
+        label = "FIND?"; buf = vs->prompt_find; buf_len = vs->prompt_find_len; break;
+    case WP_WS_PROMPT_REPLACE_TEXT:
+        label = "REPLACE WITH?"; buf = vs->prompt_replace; buf_len = vs->prompt_replace_len; break;
+    case WP_WS_PROMPT_OPTIONS:
+        label = "OPTIONS?"; break;
+    case WP_WS_PROMPT_CONFIRM:
+        label = "REPLACE (Y/N)?"; break;
+    case WP_WS_PROMPT_NONE:
+    default:
+        label = "WORDSTAR"; break;
+    }
+
+    while (label[len] != '\0' && len < out_cap - 1) { out[len] = label[len]; len++; }
+    if (buf != NULL) {
+        u32 i;
+        if (len < out_cap - 1) out[len++] = ' ';
+        for (i = 0; i < buf_len && len < out_cap - 1; i++) out[len++] = (char)buf[i];
+    }
+    out[len] = '\0';
 }

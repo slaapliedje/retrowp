@@ -40,11 +40,33 @@
      separate clipboard concept).
    - No undo binding at all -- classic WordStar (3.x/4.x) never had one;
      inventing one would misrepresent the scheme being emulated.
-   - Find/Replace (^QF/^QA) are explicitly deferred: implementing them
-     needs their own interactive text-collection sub-state (mirroring
-     vi-mode's own Command-line mode), a real chunk of additional work
-     out of scope for this phase -- not silently dropped, a documented
-     gap like WordPerfect's own menu-UI deferral (Phase 4). */
+   - Find/Replace (^QF/^QA), find-again (^L) -- real WordStar's own
+     FIND?/REPLACE WITH?/OPTIONS? prompt sequence (M11): OPTIONS? accepts
+     any combination of G(lobal, restart from doc start/end)/N(o confirm,
+     auto-replace)/B(ackward)/U(pper-lower ignored)/W(hole word); a
+     numeric repeat-count option is real WordStar too but deliberately
+     not implemented (this scheme has no use for it, matching the
+     project's habit of narrowing unused 5.x/3.x numeric extras). ^QF is
+     a single jump (mirrors real WordStar: it finds ONE occurrence and
+     stops); ^QA iterates every match in scope, confirming each with a
+     real REPLACE (Y/N)? prompt unless N was given, in which case it
+     replaces every remaining match silently. ^L repeats whichever of
+     ^QF/^QA ran last with identical find/replace text and options,
+     continuing from the cursor's current (already-advanced) position --
+     no separate "last search" state needed since the live prompt_find/
+     prompt_replace/opt_* fields simply aren't cleared between
+     invocations. See wordstar.c's own file comments for the exact
+     scope-boundary and continuation-position reasoning. */
+
+typedef enum {
+    WP_WS_PROMPT_NONE = 0,
+    WP_WS_PROMPT_FIND_TEXT,     /* "FIND?" */
+    WP_WS_PROMPT_REPLACE_TEXT,  /* "REPLACE WITH?" -- ^QA only */
+    WP_WS_PROMPT_OPTIONS,       /* "OPTIONS?" */
+    WP_WS_PROMPT_CONFIRM        /* "REPLACE (Y/N)?" -- ^QA without the N option */
+} wp_wordstar_prompt_stage;
+
+#define WP_WORDSTAR_PROMPT_MAX 128
 
 typedef struct {
     wp_document     *doc;      /* borrowed */
@@ -66,6 +88,22 @@ typedef struct {
     wp_pos  block_begin;
     wp_bool block_end_set;
     wp_pos  block_end;
+
+    /* M11: Find/Replace prompt state. */
+    u8      prompt_stage;       /* wp_wordstar_prompt_stage */
+    wp_bool prompt_is_replace;  /* WP_TRUE for ^QA, WP_FALSE for plain ^QF */
+    u8      prompt_find[WP_WORDSTAR_PROMPT_MAX];
+    u32     prompt_find_len;
+    u8      prompt_replace[WP_WORDSTAR_PROMPT_MAX];
+    u32     prompt_replace_len;
+    wp_bool opt_global;
+    wp_bool opt_no_confirm;
+    wp_bool opt_backward;
+    wp_bool opt_ignore_case;
+    wp_bool opt_whole_word;
+    wp_bool have_last;    /* WP_TRUE once a Find/Replace has run at least once -- gates ^L */
+    wp_pos  scope_start;  /* fixed for the life of one ^QF/^QA/^L run -- see wordstar.c */
+    wp_pos  pending_match; /* awaiting a Y/N keystroke, WP_WS_PROMPT_CONFIRM only */
 } wp_wordstar_state;
 
 typedef enum {
@@ -103,5 +141,14 @@ void wp_wordstar_init(wp_wordstar_state *vs, wp_document *doc, wp_undo_journal *
    yank register) -- platform/common/keymap.c's WP_KEYMAP_WORDSTAR arm
    of wp_keymap_free is a deliberate no-op case, not an oversight. */
 wp_wordstar_action_kind wp_wordstar_feed_key(wp_wordstar_state *vs, wp_key_event key);
+
+/* Writes a NUL-terminated status string into out, truncating to fit
+   out_cap -- mirrors wp_vimode_get_status_text's exact signature and
+   role (M11). Outside a Find/Replace prompt this is the fixed "WORDSTAR"
+   label platform/common/keymap.c used to hardcode directly; inside one,
+   it's the real WordStar prompt text ("FIND?", "REPLACE WITH?",
+   "OPTIONS?", "REPLACE (Y/N)?") followed by whatever's been typed so
+   far, so a real status/mode line can show the live prompt. */
+void wp_wordstar_get_status_text(const wp_wordstar_state *vs, char *out, u32 out_cap);
 
 #endif /* WP_WORDSTAR_H */

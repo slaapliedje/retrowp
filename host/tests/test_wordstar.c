@@ -456,6 +456,285 @@ void test_wordstar_format_prefix_returns_correct_kinds(void)
     wp_document_free(&doc);
 }
 
+void test_wordstar_find_jumps_to_match(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordstar_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "Goodbye Moon");
+    wp_undo_journal_init(&journal);
+    wp_wordstar_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "\x11" "f"); /* ^QF */
+    feed_keys(&vs, "Moon");
+    feed_key_special(&vs, WP_KEY_ENTER); /* submit FIND?, enter OPTIONS? */
+    feed_key_special(&vs, WP_KEY_ENTER); /* submit empty OPTIONS?, execute */
+
+    ASSERT_EQ_U32(vs.cursor.paragraph, 1);
+    ASSERT_EQ_U32(vs.cursor.offset, 8);
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WS_PROMPT_NONE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordstar_find_not_found_beeps(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordstar_state vs;
+    wp_wordstar_action_kind action;
+
+    build_doc_two_paras(&doc, "Hello World", "Goodbye Moon");
+    wp_undo_journal_init(&journal);
+    wp_wordstar_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "\x11" "f" "xyz");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    action = feed_key_special(&vs, WP_KEY_ENTER);
+
+    ASSERT_TRUE(action == WP_WSACTION_BEEP);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordstar_find_empty_text_beeps(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordstar_state vs;
+    wp_wordstar_action_kind action;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_wordstar_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "\x11" "f");
+    action = feed_key_special(&vs, WP_KEY_ENTER);
+
+    ASSERT_TRUE(action == WP_WSACTION_BEEP);
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WS_PROMPT_NONE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordstar_find_escape_cancels_prompt(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordstar_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_wordstar_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "\x11" "f" "Wor");
+    feed_key_special(&vs, WP_KEY_ESCAPE);
+
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WS_PROMPT_NONE);
+    ASSERT_EQ_U32(vs.cursor.offset, 0); /* cursor never moved */
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordstar_find_backward_option(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordstar_state vs;
+
+    build_doc_two_paras(&doc, "aXaXaX", "");
+    wp_undo_journal_init(&journal);
+    wp_wordstar_init(&vs, &doc, &journal);
+    vs.cursor.offset = 5;
+
+    feed_keys(&vs, "\x11" "f" "a");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    feed_keys(&vs, "B");
+    feed_key_special(&vs, WP_KEY_ENTER);
+
+    ASSERT_EQ_U32(vs.cursor.offset, 4); /* nearest preceding 'a' */
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordstar_find_ignore_case_and_whole_word_options(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordstar_state vs;
+
+    build_doc_two_paras(&doc, "cat catalog CAT", "");
+    wp_undo_journal_init(&journal);
+    wp_wordstar_init(&vs, &doc, &journal);
+
+    /* whole_word (W) + ignore_case (U): must skip "catalog" and land on
+       the standalone "CAT" (case-insensitively matching "cat"), not the
+       leading substring inside "catalog". */
+    feed_keys(&vs, "\x11" "f" "cat");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    feed_keys(&vs, "WU");
+    feed_key_special(&vs, WP_KEY_ENTER);
+
+    ASSERT_EQ_U32(vs.cursor.offset, 12);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordstar_replace_confirm_y_and_n(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordstar_state vs;
+    char buf[64];
+
+    /* "zzz" prefix keeps the doc-start cursor from coinciding with the
+       first match's own start byte -- wp_document_find_text searches
+       STRICTLY AFTER `from`, so a cursor sitting exactly on a match
+       would skip it, same real vim '/' semantics this scheme's Find
+       inherits via the shared primitive. */
+    build_doc_two_paras(&doc, "zzz foo foo foo", "");
+    wp_undo_journal_init(&journal);
+    wp_wordstar_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "\x11" "a" "foo"); /* ^QA */
+    feed_key_special(&vs, WP_KEY_ENTER); /* FIND? -> REPLACE WITH? */
+    feed_keys(&vs, "bar");
+    feed_key_special(&vs, WP_KEY_ENTER); /* REPLACE WITH? -> OPTIONS? */
+    feed_key_special(&vs, WP_KEY_ENTER); /* empty OPTIONS? -> executes, pauses at match 1 (offset 4) */
+
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WS_PROMPT_CONFIRM);
+
+    feed_keys(&vs, "y"); /* replace match 1, pause at match 2 (offset 8) */
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar foo foo");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WS_PROMPT_CONFIRM);
+
+    feed_keys(&vs, "n"); /* skip match 2, pause at match 3 (offset 12) */
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar foo foo");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WS_PROMPT_CONFIRM);
+
+    feed_keys(&vs, "y"); /* replace match 3, nothing left */
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar foo bar");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WS_PROMPT_NONE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordstar_replace_no_confirm_option_replaces_silently(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordstar_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "zzz foo foo foo", "");
+    wp_undo_journal_init(&journal);
+    wp_wordstar_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "\x11" "a" "foo");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    feed_keys(&vs, "bar");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    feed_keys(&vs, "N"); /* no-confirm option */
+    feed_key_special(&vs, WP_KEY_ENTER);
+
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar bar bar");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_WS_PROMPT_NONE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordstar_replace_global_option_restarts_from_document_start(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordstar_state vs;
+    char buf[64];
+
+    /* "zzz" prefix also sidesteps a real, documented, separate MVP gap:
+       a match sitting at the EXACT document start isn't found under G
+       either, since G's own "restart from the top" is itself a
+       strictly-after-doc-start search -- see ws_begin_search's own
+       comment. This test's actual point is G restarting from the top
+       at all, not that specific byte-zero edge case. */
+    build_doc_two_paras(&doc, "zzz foo foo", "");
+    wp_undo_journal_init(&journal);
+    wp_wordstar_init(&vs, &doc, &journal);
+    vs.cursor.offset = 11; /* end of the paragraph -- no match ahead of the cursor at all */
+
+    feed_keys(&vs, "\x11" "a" "foo");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    feed_keys(&vs, "bar");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    feed_keys(&vs, "GN"); /* Global + No-confirm */
+    feed_key_special(&vs, WP_KEY_ENTER);
+
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar bar");
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordstar_ctrl_l_repeats_last_find(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordstar_state vs;
+
+    /* "z" prefix keeps the doc-start cursor from coinciding with the
+       first 'a' (see test_wordstar_replace_confirm_y_and_n's own
+       comment on why). */
+    build_doc_two_paras(&doc, "zaXaXaX", "");
+    wp_undo_journal_init(&journal);
+    wp_wordstar_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "\x11" "f" "a");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    feed_key_special(&vs, WP_KEY_ENTER); /* first find -> offset 1 */
+    ASSERT_EQ_U32(vs.cursor.offset, 1);
+
+    feed_keys(&vs, "\x0c"); /* ^L -- find again */
+    ASSERT_EQ_U32(vs.cursor.offset, 3);
+
+    feed_keys(&vs, "\x0c");
+    ASSERT_EQ_U32(vs.cursor.offset, 5);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_wordstar_ctrl_l_without_prior_search_beeps(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_wordstar_state vs;
+    wp_wordstar_action_kind action;
+    wp_key_event key;
+
+    build_doc_two_paras(&doc, "Hello", "");
+    wp_undo_journal_init(&journal);
+    wp_wordstar_init(&vs, &doc, &journal);
+
+    key.codepoint = 'l';
+    key.special = (u16)WP_KEY_NONE;
+    key.mods = (u8)WP_MOD_CTRL;
+    key._pad = 0;
+    action = wp_wordstar_feed_key(&vs, key);
+
+    ASSERT_TRUE(action == WP_WSACTION_BEEP);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
 void test_wordstar_no_leaks(void)
 {
     wp_document doc;

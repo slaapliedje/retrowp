@@ -143,8 +143,12 @@ static wp_keymap_outcome feed_key_ws(wp_app_ctx *ctx, wp_key_event ev)
     /* Matches wp_wordstar_feed_key's own exact condition for "this
        keystroke will insert a plain character" -- computed BEFORE the
        call (unlike vi-mode, WordStar has no separate mode to inspect
-       afterward; see wp_keymap_outcome's own comment on inserted_char). */
-    will_insert = (wp_bool)(ctx->km.ws.pending_prefix == 0 &&
+       afterward; see wp_keymap_outcome's own comment on inserted_char).
+       M11: a keystroke typed into the Find/Replace prompt (prompt_stage
+       != NONE) edits that prompt's own text buffer, never the document --
+       must not be reported as a document character insertion. */
+    will_insert = (wp_bool)(ctx->km.ws.prompt_stage == (u8)WP_WS_PROMPT_NONE &&
+                             ctx->km.ws.pending_prefix == 0 &&
                              ev.special == (u16)WP_KEY_NONE &&
                              ev.mods == 0 && ev.codepoint >= 0x20);
 
@@ -412,15 +416,11 @@ void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,
 {
     switch ((wp_keymap_id)ctx->keymap_id) {
     case WP_KEYMAP_WORDSTAR:
-        /* WordStar has no real notion of a "mode" the way vi does (it's
-           non-modal for typing) -- a fixed label is honest, not a
-           simplification of something that would otherwise vary. */
-        if (buf_cap > 0) {
-            const char *label = "WORDSTAR";
-            u32 n = 0;
-            while (label[n] != '\0' && n + 1 < buf_cap) { buf[n] = label[n]; n++; }
-            buf[n] = '\0';
-        }
+        /* M11: real, dynamic prompt text once a Find/Replace prompt is
+           active (FIND?/REPLACE WITH?/OPTIONS?/REPLACE (Y/N)?); the
+           fixed "WORDSTAR" label otherwise -- WordStar has no other
+           notion of "mode" the way vi does. */
+        wp_wordstar_get_status_text(&ctx->km.ws, buf, buf_cap);
         break;
     case WP_KEYMAP_EMACS:
         /* Same reasoning as WordStar's own fixed label -- Emacs is

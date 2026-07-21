@@ -125,6 +125,17 @@ void test_wordstar_block_delete(void);
 void test_wordstar_kx_returns_save_quit_and_kq_returns_quit(void);
 void test_wordstar_unbound_prefix_subkey_beeps(void);
 void test_wordstar_format_prefix_returns_correct_kinds(void);
+void test_wordstar_find_jumps_to_match(void);
+void test_wordstar_find_not_found_beeps(void);
+void test_wordstar_find_empty_text_beeps(void);
+void test_wordstar_find_escape_cancels_prompt(void);
+void test_wordstar_find_backward_option(void);
+void test_wordstar_find_ignore_case_and_whole_word_options(void);
+void test_wordstar_replace_confirm_y_and_n(void);
+void test_wordstar_replace_no_confirm_option_replaces_silently(void);
+void test_wordstar_replace_global_option_restarts_from_document_start(void);
+void test_wordstar_ctrl_l_repeats_last_find(void);
+void test_wordstar_ctrl_l_without_prior_search_beeps(void);
 void test_wordstar_no_leaks(void);
 
 /* test_emacs.c */
@@ -516,6 +527,17 @@ static const test_case g_cases[] = {
     { "wordstar_kx_returns_save_quit_and_kq_returns_quit", test_wordstar_kx_returns_save_quit_and_kq_returns_quit },
     { "wordstar_unbound_prefix_subkey_beeps", test_wordstar_unbound_prefix_subkey_beeps },
     { "wordstar_format_prefix_returns_correct_kinds", test_wordstar_format_prefix_returns_correct_kinds },
+    { "wordstar_find_jumps_to_match", test_wordstar_find_jumps_to_match },
+    { "wordstar_find_not_found_beeps", test_wordstar_find_not_found_beeps },
+    { "wordstar_find_empty_text_beeps", test_wordstar_find_empty_text_beeps },
+    { "wordstar_find_escape_cancels_prompt", test_wordstar_find_escape_cancels_prompt },
+    { "wordstar_find_backward_option", test_wordstar_find_backward_option },
+    { "wordstar_find_ignore_case_and_whole_word_options", test_wordstar_find_ignore_case_and_whole_word_options },
+    { "wordstar_replace_confirm_y_and_n", test_wordstar_replace_confirm_y_and_n },
+    { "wordstar_replace_no_confirm_option_replaces_silently", test_wordstar_replace_no_confirm_option_replaces_silently },
+    { "wordstar_replace_global_option_restarts_from_document_start", test_wordstar_replace_global_option_restarts_from_document_start },
+    { "wordstar_ctrl_l_repeats_last_find", test_wordstar_ctrl_l_repeats_last_find },
+    { "wordstar_ctrl_l_without_prior_search_beeps", test_wordstar_ctrl_l_without_prior_search_beeps },
     { "wordstar_no_leaks", test_wordstar_no_leaks },
 
     { "emacs_basic_char_and_line_motion", test_emacs_basic_char_and_line_motion },
