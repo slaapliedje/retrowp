@@ -1194,11 +1194,103 @@ not new engine surface invented for this milestone.
 
 ---
 
-## M11+ — Mac Classic / DOS / Typography Polish
-- [ ] T11.1 `platform/mac` (Toolbox + QuickDraw metrics/render).
-- [ ] T11.2 `platform/dos` (text-mode shell; character-cell metrics).
-- [ ] T11.3 Typography polish: kerning/justification options where supported.
-- [ ] T11.4 PDF polish: font embedding tiers, image support.
+## M11 — Find & Replace, All Five Keybinding Schemes
+Goal: close the one gap M10 explicitly deferred in every scheme --
+Find and Replace, each with its own real, historically-verified prompt
+flow (WordStar's `OPTIONS?` letters, WordPerfect's F2-terminated
+fields, Emacs's genuinely live isearch, MS Word's keyboard-adapted
+dialog, vim's own `?`/`N`/`:s`), not one generic mechanism reskinned
+five times. Full account: `docs/keymaps.md`, `docs/vimode.md`'s own
+"Substitute" section.
+
+- [x] T11.1 Shared find/replace primitive + vim's own `?`/`N`/`:s`
+      completion.
+      AC: `wp_document_find_text` (`editing.h`, new `engine/src/
+      search.c`) promotes `wp_vimode_search` into a real, generalized
+      primitive -- backward search actually implemented (previously
+      accepted but ignored), plus `ignore_case`/`whole_word`, both
+      needed by more than one scheme. `wp_vimode_search` becomes a
+      thin wrapper -- zero changes needed to `test_vimode.c`'s
+      pre-existing cases, the same regression-safety discipline M10's
+      own shared-primitive promotions used. **Met.** `make test` grew
+      from 309 to 333. vim itself gained `?` (backward search), `N`
+      (repeat, reversed), and `:s/old/new/flags`/`:%s/old/new/flags`
+      substitute (`g`/`c`/`i` flags; `c` pauses in a new
+      `WP_VIMODE_SUBSTITUTE_CONFIRM` mode with a scoped `y`/`n`/`a`/`q`
+      vocabulary). A real gotcha found and documented, not a source
+      bug: growing `wp_vimode_state`'s size silently corrupted an
+      incrementally-rebuilt binary (this Makefile doesn't track header
+      dependencies) -- `make clean` before trusting any test run after
+      a struct-layout change is now a documented discipline.
+- [x] T11.2 WordStar Find/Replace (`^QF`/`^QA`/`^L`).
+      AC: real `FIND?`/`REPLACE WITH?`/`OPTIONS?` prompt sequence,
+      verified against the WordStar 3.0 Quick Reference Card and
+      Reference Manual; real `G`/`N`/`B`/`U`/`W` option letters. **Met.**
+      `make test` grew to 344. `^QF` is a single jump (real WordStar
+      finds one occurrence and stops); `^QA` iterates every match in
+      scope (cursor-to-end, or doc-start/end under `G`), confirming
+      each unless `N` was given. `^L` repeats the last find/replace by
+      simply not clearing the live prompt state between invocations --
+      no separate "last search" copy needed.
+- [x] T11.3 WordPerfect Find/Replace (`F2`/`Shift-F2`/`Alt-F2`).
+      AC: real `-> Srch:`/`<- Srch:`/`w/Confirm? (Y/N)` prompts,
+      verified against the real WordPerfect Workbook for IBM PC; F2
+      terminates each field (not Enter) and the real "press +Search
+      twice" repeat-with-empty-field behavior. **Met.** `make test`
+      grew to 352. Search/replace text buffers are deliberately never
+      cleared on entry -- that persistence IS the repeat mechanism.
+      No G-equivalent restart-from-top exists in this scheme (a real,
+      narrower design than WordStar's own).
+- [x] T11.4 Emacs Find/Replace (`C-s`/`C-r` isearch, `M-%`
+      query-replace).
+      AC: genuinely live incremental search (every keystroke
+      re-searches, no Enter), forward lands at match end / backward at
+      match start (a real, verified asymmetry); `M-%` with the real
+      `y`/`SPC`/`n`/`DEL`/`!`/`.`/`q` vocabulary, verified against the
+      current GNU Emacs Manual. **Met.** `make test` grew to 362.
+      `C-g` aborts to the search anchor (real Emacs binding); a
+      failing isearch leaves the cursor at the last successful match
+      rather than resetting, real "Failing I-search" leniency.
+- [x] T11.5 Microsoft Word (classic) Find/Replace (`Ctrl+F`/`Ctrl+H`/
+      `Shift+F4`).
+      AC: `Ctrl+F` single jump with natural wraparound; `Shift+F4`
+      repeats the last executed Find (real Word binding -- confirmed
+      `F3` is AutoText/glossary expansion in real classic Word, not
+      Find Next, a common cross-app assumption avoided); `Ctrl+H`'s
+      confirm state (`r`/`a`/`n`/Escape) stands in for the real
+      persistent dialog's Replace/Replace All/Find Next/Close buttons.
+      **Met.** `make test` grew to 371, closing concrete per-scheme
+      work -- the lowest-novelty phase, no test-fixture surprises.
+
+Artifact: all five keybinding schemes have real, historically-verified
+Find/Replace, each with its own honestly-documented narrower scope
+(no regex anywhere; no case-fold/whole-word toggle outside WordStar's
+own `U`/`W`; no G-equivalent restart-from-top outside WordStar's own
+`G`; Emacs's fuller query-replace vocabulary and WordPerfect's
+authentic menu UI both remain out of scope, as before).
+
+**Verification across the whole milestone**: `make test` grew from 309
+(session start) to 371 (T11.5's end), strictly monotonically.
+`atari-engine-check`/`amiga-engine-check` and the full 6-image Atari
+TOS matrix / 3-image Amiga Kickstart matrix all stayed green through
+every phase -- **a pure regression gate throughout**, unlike M10: this
+milestone needed zero `platform/atari`/`platform/amiga` changes and no
+new `platform.h` primitive or modifier bit, since every scheme's prompt
+renders through the same non-blocking status-line mechanism vi's own
+`:`/`/` already proved out in M10. The amiberry matrix's `kick-3.1-a500`
+image hit a real, reproducible-as-flaky boot-time crash (before
+`AMISMOKE.exe` ever runs) twice across the milestone, both times cleared
+by an immediate rerun (3/3 clean) -- confirmed as pre-existing
+environmental flakiness in this specific Kickstart+amiberry combination,
+independent of source changes, not a regression.
+
+---
+
+## M12+ — Mac Classic / DOS / Typography Polish
+- [ ] T12.1 `platform/mac` (Toolbox + QuickDraw metrics/render).
+- [ ] T12.2 `platform/dos` (text-mode shell; character-cell metrics).
+- [ ] T12.3 Typography polish: kerning/justification options where supported.
+- [ ] T12.4 PDF polish: font embedding tiers, image support.
 
 ---
 

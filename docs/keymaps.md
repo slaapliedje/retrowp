@@ -1,4 +1,4 @@
-# Switchable Keybinding Layouts (M10)
+# Switchable Keybinding Layouts (M10) + Find & Replace (M11)
 
 ## Overview
 
@@ -9,14 +9,31 @@ startup from a small config file and fixed for the process lifetime --
 no live switching, matching the plan's own explicit scope. Every scheme
 stays 100% keyboard-usable; nothing added here needs a mouse.
 
+M11 closes the one gap M10 explicitly deferred in all five schemes:
+Find and Replace, each with its own real, historically-verified prompt
+flow rather than one generic mechanism bolted on everywhere -- WordStar's
+`OPTIONS?` letters, WordPerfect's F2-terminated fields, Emacs's genuinely
+live isearch, and MS Word's keyboard-adapted dialog are each a different,
+real shape, not the same UI reskinned five times. The shared plumbing all
+five build on is a single promoted engine primitive,
+`wp_document_find_text` (`engine/include/editing.h`, `engine/src/
+search.c`) -- forward/backward, optional case-fold, optional whole-word,
+wraps the document boundary at most once -- plus `wp_document_
+match_selection` for turning a found match into something
+`wp_edit_delete_selection`/`wp_edit_paste_text` can act on. vi-mode
+itself gained the pieces its own `/` search was still missing: `?`
+(backward), `N` (repeat, reversed), and `:s/old/new/flags` substitute.
+
 Each scheme is verified against real primary sources, not recalled from
-memory: the WordStar 3.0 Quick Reference Card and wordstar.org's own
-command documentation, the real WordPerfect 5.1 IBM keyboard template,
-and the current GNU Emacs Reference Card. Every deliberate
-simplification is documented in the relevant engine header's own file
-comment (`engine/include/wordstar.h`, `emacs.h`, `wordperfect.h`,
-`msword.h`) and summarized again below -- this file is the narrative
-account; those headers are the source of truth for exact bindings.
+memory: the WordStar 3.0 Quick Reference Card and Reference Manual, the
+real WordPerfect Workbook for IBM PC, the current GNU Emacs Manual, and
+(for M11's own MS Word research) the Word 1.0-for-DOS manual alongside
+modern Word's own documented Ctrl+F/Ctrl+H/Shift+F4 convention. Every
+deliberate simplification is documented in the relevant engine header's
+own file comment (`engine/include/wordstar.h`, `emacs.h`,
+`wordperfect.h`, `msword.h`, `vimode.h`) and summarized again below --
+this file is the narrative account; those headers are the source of
+truth for exact bindings.
 
 ## The config file
 
@@ -135,6 +152,9 @@ The "diamond" cursor cluster (`^S`/`^D` char, `^E`/`^X` line/paragraph,
 | Save & exit | `^KX` |
 | Abandon (no save) | `^KQ` |
 | Bold / Italic / Underline | `^PB` / `^PY` / `^PS` |
+| Find | `^QF` |
+| Find and Replace | `^QA` |
+| Find/Replace again | `^L` |
 
 Block marking is a real **marker pair** (`^KB` begin, `^KK` end), not
 an anchor+extend selection -- copy/move/delete act on the region
@@ -150,11 +170,24 @@ destination landing in the exact paragraph a *multi-paragraph* block's
 own end boundary sits in.
 
 **No undo binding exists at all** -- classic WordStar (3.x/4.x) never
-had one. Find/Replace (`^QF`/`^QA`) are deferred (their own
-interactive text-collection sub-state is real, separate work). `^O`
-(onscreen) and `^J` (help) are registered as real prefix letters so
-pressing them doesn't fall through as a bare insert, but no
+had one. `^O` (onscreen) and `^J` (help) are registered as real prefix
+letters so pressing them doesn't fall through as a bare insert, but no
 subcommands exist under either.
+
+**Find/Replace (M11)**: `^QF` prompts `FIND?` then `OPTIONS?`; `^QA`
+prompts `FIND?` then `REPLACE WITH?` then `OPTIONS?`. Real `OPTIONS?`
+letters implemented: `G` (global -- restart the scan at document
+start/end instead of the cursor), `N` (no confirm -- replace every
+remaining match silently), `B` (backward), `U` (ignore case), `W`
+(whole word). `^QF` is a single jump (real WordStar finds one
+occurrence and stops); `^QA` iterates every match in scope, asking a
+real `REPLACE (Y/N)?` at each one unless `N` was given. `^L` repeats
+whichever ran last with identical find/replace text and options --
+no separate "last search" copy exists; the live prompt state simply
+isn't cleared between invocations, so `^L` continues from the cursor's
+own current, already-advanced position. A real numeric repeat-count
+option (`OPTIONS?` also accepts a leading count) exists in real
+WordStar but is deliberately not implemented here.
 
 ## Real `WP_MOD_ALT` plumbing (Phase 2)
 
@@ -193,6 +226,8 @@ each also be Alt-held.
 | Save / Open / Quit | `C-x C-s` / `C-x C-f` / `C-x C-c` |
 | Undo | `C-x u` |
 | Bold / Italic / Underline | `C-c b` / `C-c i` / `C-c u` |
+| Incremental search forward / backward | `C-s` / `C-r` |
+| Query-replace | `M-%` |
 
 Meta is real Alt (Phase 2) **or** the historical `ESC`-then-key
 fallback -- a deliberate departure from every other scheme's own
@@ -219,6 +254,28 @@ scope, so a ring of N slots would behave identically to one slot --
 `wp_emacs_state.kill_bytes` is a single `mem_alloc`'d slot, matching
 `wp_vimode_state.register_bytes`'s own precedent.
 
+**Find/Replace (M11)**: `C-s`/`C-r` are genuinely incremental -- every
+keystroke re-searches live, no Enter needed, the one scheme in this
+milestone whose Find isn't a collect-then-submit prompt. Forward
+isearch lands point at the END of the match, backward at its START --
+a real, verified Emacs asymmetry. Typing extends the pattern and
+always re-searches from the anchor (where `C-s`/`C-r` was first
+pressed); pressing `C-s`/`C-r` again with no new typing instead
+advances past the last match, and pressing the *other* key mid-search
+flips direction, both matching real Emacs. A failing search leaves
+the cursor at the last successful match rather than resetting --
+real "Failing I-search" leniency, still live and typeable. `C-g`
+aborts back to the anchor; `RET`/`Escape` accept the current position.
+`M-%` always pauses at the first match (unlike WordStar's own upfront
+"confirm every match, or none" choice) with the real `y`/`SPC`
+(replace+advance), `n`/`DEL` (skip+advance), `!` (replace all
+remaining), `.` (replace+stop), `q`/`RET` (quit) vocabulary -- the
+fuller real set (`,`/`^`/`C-r`/`C-w`/`C-l`/`C-h`: replace-then-ask,
+back up, recursive edit, redisplay, help) is deliberately out of
+scope, the same narrower-subset treatment the kill-ring already got.
+Forward-only from point to the end of the document -- real stock `M-%`
+has no reverse variant or G-equivalent restart-from-top.
+
 ## WordPerfect (Phase 4)
 
 Real WP 5.1 is a function-key scheme that's *also* authentically
@@ -242,6 +299,8 @@ much a UI-shape problem as a keybinding one).
 | Block toggle | Alt-F4 |
 | Move block (cut to register) | Ctrl-F4 |
 | Retrieve (paste register) | Shift-F10 |
+| Search forward / backward | F2 / Shift-F2 |
+| Replace | Alt-F2 |
 
 Block mode is a real anchor+extend selection (same `wp_selection`
 shape Emacs's own mark+point uses) but activated as an explicit
@@ -264,6 +323,24 @@ prompt presentation itself, mirroring the AmigaGuide/`.HYP` spike
 precedent -- remains explicitly out of this milestone's Definition of
 Done.
 
+**Find/Replace (M11)**: `F2` prompts `-> Srch:`; `Shift-F2` prompts
+`<- Srch:`; `Alt-F2` prompts `w/Confirm? (Y/N)` then `-> Srch:` then a
+"Replace with:" field, each field terminated by pressing `F2` itself
+rather than Enter -- real WP's own Search key is heavily overloaded
+(start a search, submit a field, AND repeat the last search verbatim).
+That overload is exactly why the search/replace text buffers are
+deliberately **never cleared** on entering their own field, unlike
+every other scheme's always-fresh prompt: an untouched `F2` press right
+after entering the field submits whatever was there from the previous
+search, the real "press +Search twice to find the second occurrence"
+behavior. Replace iterates every match from the cursor to the end of
+the document (no G-equivalent restart-from-top exists in this scheme --
+no source checked this pass documents one), confirming each with a real
+`Replace? (Y/N)` unless `w/Confirm?` was answered `N`, which replaces
+every remaining match silently. No case-fold/whole-word toggle exists
+in this scheme's own Search prompt either, unlike WordStar's real
+`OPTIONS?` letters.
+
 ## Microsoft Word, classic (Phase 5)
 
 By far the lowest-novelty scheme: closest to a modern, familiar,
@@ -281,6 +358,9 @@ bytes, so this scheme's job for those is direct pass-through.
 | Select All | Ctrl-A |
 | Undo / Redo | Ctrl-Z / Ctrl-Y |
 | Bold / Italic / Underline | Ctrl-B / Ctrl-I / Ctrl-U |
+| Find | Ctrl-F |
+| Replace | Ctrl-H |
+| Repeat last Find | Shift-F4 |
 
 Shift+motion is a real anchor+extend selection that Delete/Backspace/
 Enter/plain typing all consult and consume -- typing over an active
@@ -304,6 +384,23 @@ PASTE` actions unchanged -- this project's own pre-existing "no
 selection-scoped clipboard yet" limitation (`act_edit_copy`'s own
 comment in `actions.c`), matching vi-mode's identical existing
 behavior for the same three shortcuts today.
+
+**Find/Replace (M11)**: `Ctrl+F` is a single jump with natural document
+wraparound (matching vi's own `/`); `Shift+F4` repeats the last
+executed Find verbatim -- the real Word binding for "repeat last Find
+or Go To action." `F3` is deliberately **not** used for this despite
+being a common assumption carried over from other apps/browsers: real
+classic Word's own `F3` is AutoText/glossary expansion, an unrelated
+feature. `Ctrl+H` collects both fields (Enter-terminated, real Word's
+own dialog convention, unlike WordPerfect's F2-terminated fields, and
+always starts empty rather than real Word's actual field-remembers-
+last-value behavior -- `Shift+F4` already covers repeat on its own),
+then jumps to the first match and pauses, standing in for real Word's
+persistent Find-and-Replace dialog: `r` replaces and advances (real
+"Replace"), `a` replaces this and every remaining match silently (real
+"Replace All"), `n` skips and advances (real "Find Next"), `Escape`
+closes. Forward-only, cursor to end of document, no G-equivalent
+restart-from-top, matching WordPerfect's/Emacs's own narrower scope.
 
 ## Real bugs found by the test suite (worth not re-deriving)
 
@@ -333,13 +430,30 @@ behavior for the same three shortcuts today.
   `wp_pos_word_end` fixed it to the real Emacs result, " World". `M-b`/
   `M-DEL` were unaffected (Emacs's own backward-word already lands
   where vim's 'b' does).
+- **A stale-incremental-build gotcha, not a source bug** (M11 Phase 0):
+  this project's Makefile doesn't track header dependencies. Growing
+  `wp_vimode_state` (the new substitute fields) changed `wp_app_ctx`'s
+  own size -- which every file embedding it by value (through the
+  `wp_keymap_state` union) needs to agree on -- but an incremental
+  rebuild didn't recompile every one of those, producing a genuine
+  `__stack_chk_fail` crash in a completely unrelated test. `make clean`
+  before trusting any test run after a struct-layout change is the
+  discipline; a clean rebuild reproduced nothing. Worth remembering for
+  any future change to a struct this widely embedded.
+- **`wp_document_find_text`'s "strictly after `from`" contract bit
+  test fixtures repeatedly, not the implementation** (M11, hit in
+  vim's/WordStar's/WordPerfect's/MS Word's own test drafts -- Emacs's
+  own tests avoided it proactively once the pattern was recognized): a
+  cursor sitting exactly on a match's own start byte is skipped by
+  design (the same real vim `/` semantic the shared primitive
+  inherits) -- a "foo foo foo" fixture with the default doc-start
+  cursor was silently testing the SECOND occurrence, not the first.
+  Fixed by adding a short distractor prefix (`"zzz foo foo foo"`) to
+  the affected fixtures rather than changing the primitive's own
+  well-established, intentional behavior.
 
 ## Explicitly deferred (documented gaps, not oversights)
 
-- Find/Replace, in any scheme -- each would need its own interactive
-  text-collection sub-state (mirroring vi-mode's own Command-line
-  mode), real separate work out of scope for a keybinding-layout
-  milestone.
 - WordPerfect's authentic nested numbered-menu/prompt UI (see its own
   section above) -- an optional future spike, not required.
 - Emacs's `M-y` (cycle to an older kill) and the kill-ring it would
@@ -351,3 +465,13 @@ behavior for the same three shortcuts today.
   (Emacs's own `C-x 4 f`, `M-g g`; WordPerfect's real menu chains) --
   each scheme's own state machine is single-level by design, per its
   own header comment.
+- **M11's own real, narrower-scope Find/Replace gaps**: no regex in any
+  scheme (`wp_document_find_text` is byte-literal by design); WordStar's
+  own numeric repeat-count `OPTIONS?` extra; Emacs's fuller
+  query-replace vocabulary (`,`/`^`/`C-r`/`C-w`/`C-l`/`C-h` --
+  replace-then-ask, back up, recursive edit, redisplay, help); no
+  case-fold/whole-word toggle in WordPerfect's or MS Word's own Search/
+  Find prompts (WordStar's `U`/`W` options don't carry over); no
+  G-equivalent "restart from document top" in WordPerfect/Emacs/MS
+  Word's own Replace (WordStar's `G` option doesn't carry over either --
+  each scheme's own real historical scope, not homogenized).

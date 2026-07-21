@@ -955,3 +955,20 @@ milestone:
 
 The full 3-image `ci_amiga_matrix.sh` stayed green through every phase
 that touched this file directly (T10.1, T10.3).
+
+## Find & Replace (M11)
+
+Full account: `docs/keymaps.md`. Unlike M10, this milestone needed
+**zero changes to any file in this directory**: every scheme's
+Find/Replace prompt renders through the same status-line mechanism
+vi-mode's own `:`/`/` already used, and no new `platform.h` primitive
+or modifier bit was needed. The 3-image Kickstart matrix stayed green
+throughout as a pure regression gate. The one real finding this
+milestone surfaced on this backend: `kick-3.1-a500` hit a reproducible-
+as-flaky boot-time "Illegal instruction"/"Exception 3" crash (before
+`AMISMOKE.exe` ever runs) on two separate occasions across the
+milestone's phases, both times cleared by an immediate rerun (3/3
+clean) -- environmental amiberry boot flakiness specific to this one
+Kickstart image under this fixture, not a regression from any source
+change (confirmed by the crash happening at Kickstart's own filesystem-
+install stage, before any of this project's own code executes).

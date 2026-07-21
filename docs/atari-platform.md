@@ -1802,3 +1802,14 @@ The full 6-image `ci_atari_matrix.sh` stayed green through every phase
 that touched this file directly (T10.1, T10.3), the same class of
 change (dispatch/key-translation restructuring) this project's own
 history has twice regressed on before -- this time without incident.
+
+## Find & Replace (M11)
+
+Full account: `docs/keymaps.md`. Unlike M10, this milestone needed
+**zero changes to any file in this directory**: every scheme's
+Find/Replace prompt renders through the same status-line mechanism
+vi-mode's own `:`/`/` already used, and no new `platform.h` primitive
+or modifier bit was needed. The full 6-image TOS matrix stayed green
+throughout as a pure regression gate, confirmed via
+`wp_atari_key_translate_selfcheck` and the existing config selfcheck
+both continuing to pass unchanged.

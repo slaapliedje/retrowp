@@ -152,8 +152,11 @@ these (`3w`, `5j`); `d`/`c`/`y` operators compose with any motion above
 (`dw`, `cj`, `y$`, `2d3w`) and double for whole-line linewise action
 (`dd`/`cc`/`yy`, `3dd`); `x` (delete char forward); `i`/`a`/`I`/`A`/`o`/
 `O` (enter Insert mode); `p`/`P` (put); `u`/Ctrl+R (undo/redo); `v`/`V`
-(enter Visual/Visual-Line); `:` (ex-command); `/` (search forward);
-`n` (repeat last search).
+(enter Visual/Visual-Line); `:` (ex-command); `/`/`?` (search forward/
+backward, M11 added `?`); `n`/`N` (repeat last search same/opposite
+direction -- `N` is an M11 addition; `n` itself now correctly respects
+the direction the last search actually used instead of always
+searching forward).
 
 **Insert mode** -- any printable codepoint inserts; Enter splits a real
 paragraph (closing the M8.5 gap that made Enter a hard no-op before this
@@ -166,12 +169,34 @@ closes the undo group.
 selection (Visual-Line always linewise regardless of the motions used
 to build it); Escape cancels.
 
-**Command-line mode** (`:` or `/`) -- printable chars append; Backspace
-deletes a char or exits on an empty buffer; Enter executes; Escape
-cancels. Ex-commands: `:w` (`WP_VIACTION_SAVE`), `:q`
-(`WP_VIACTION_QUIT`), `:wq`/`:x` (`WP_VIACTION_SAVE_QUIT`), anything
+**Command-line mode** (`:`, `/`, or `?`) -- printable chars append;
+Backspace deletes a char or exits on an empty buffer; Enter executes;
+Escape cancels. Ex-commands: `:w` (`WP_VIACTION_SAVE`), `:q`
+(`WP_VIACTION_QUIT`), `:wq`/`:x` (`WP_VIACTION_SAVE_QUIT`),
+`:s/old/new/flags` / `:%s/old/new/flags` (M11 -- see below), anything
 else beeps. No ex-command arguments (`:w filename`) yet --
 `wp_vimode_action.arg` is reserved for that.
+
+### Substitute (`:s`, `:%s`) -- M11
+
+Literal-only (byte-for-byte, no regex -- inherits `wp_document_
+find_text`'s own "no regex" scope), single `/` delimiter (real vim
+allows any punctuation as the delimiter; not implemented). An optional
+leading `%` scopes the command to the whole current *section* (matching
+`wp_document_extract_text`/`wp_edit_delete_selection`'s own existing
+single-section boundary) instead of just the current paragraph. Real
+flag letters: `g` (every match per paragraph, not just the first --
+matching real vim's own per-line semantics, faithfully reproduced at
+paragraph granularity), `c` (confirm each match interactively), `i`
+(ignore case). Without `c`, the whole command runs as one undo group
+(`wp_undo_group_begin`/`end`), matching real vim's own one-undo-per-
+`:s` behavior. With `c`, a new mode, `WP_VIMODE_SUBSTITUTE_CONFIRM`,
+pauses at each match with a scoped-down `y`/`n`/`a`/`q` vocabulary (`a`
+replaces this and every remaining match without further confirmation,
+matching real vim's own `a` flag inside `:s///c`'s confirm loop; the
+fuller real set -- `l`/`^`/`Ctrl-E`/`Ctrl-Y` -- is out of scope, the
+same narrower-subset treatment every other M11 keybinding scheme's own
+confirm loop already got).
 
 ### The `:w`/`:q`/`:wq` action hand-off seam
 
@@ -352,11 +377,14 @@ Dot-repeat (`.`) -- needs keystroke-log replay against a new cursor/
 context, a different mechanism from undo-stack replay; deferred
 regardless of the undo-grouping work done here. Macros (`q`/`@`), named
 registers (`"a` through `"z` -- only one unnamed register exists),
-marks, jumplist (Ctrl-O/Ctrl-I). Regex/case-insensitive search, `:s///`
-substitute, ex-command arguments and ranges (`:1,5d`, `:w filename`).
-Backward search (`?`) and `N` (repeat search backward) -- `wp_vimode_search`
-takes a `forward` parameter for this future extension but currently
-ignores it. Visual-Block (Ctrl+V); Visual mode's `>`/`<`/`~`/`r`
+marks, jumplist (Ctrl-O/Ctrl-I). Ex-command arguments and ranges beyond
+`:s`'s own leading `%` (`:1,5d`, `:w filename`). Regex search/substitute
+and case-insensitive plain search were both closed by M11
+(`wp_document_find_text`'s `ignore_case` parameter; `/`/`?`/`:s` all
+byte-literal, no regex) -- **still** genuinely deferred: regex itself
+(`:s/old/new/` is literal-only, no pattern metacharacters), and `:s`'s
+own delimiter is hardcoded to `/` (real vim allows any punctuation).
+Visual-Block (Ctrl+V); Visual mode's `>`/`<`/`~`/`r`
 (indent, case-toggle, replace-selection) -- plain `d`/`y`/`c` on a
 selection are in scope, they're `wp_edit_delete_selection`'s direct
 payoff. Column-preserving `j`/`k` (virtual-column memory across ragged
