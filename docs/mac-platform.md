@@ -839,8 +839,63 @@ Driver transport hook, and the full `platform/common` retrofit
 (config-driven keymap selection, status line, help pager) are all
 on-target-verified via real screenshots and passing selfchecks.
 
-**Next**: Phase 6 -- CI matrix (`ci_mac_matrix.sh`, both ROMs, mirroring
-`ci_atari_matrix.sh`/`ci_amiga_matrix.sh`), docs, and milestone
-closeout: confirm `engine/`/`services/` show zero diff across the whole
-milestone (the same proof M9 used for Amiga), and promote M12 to a
-closed milestone in `docs/milestones.md`.
+## Phase 6: CI matrix, docs, milestone closeout
+
+`host/tools/ci_mac_matrix.sh` mirrors `ci_atari_matrix.sh`'s/
+`ci_amiga_matrix.sh`'s own shape exactly: build once, then boot
+`mac_smoke` under BasiliskII against every ROM in the fixture (both of
+them, here -- honestly narrower than the other two backends' matrices,
+since only two real ROM dumps exist locally, not a scope choice),
+printing a per-ROM PASS/FAIL line and exiting non-zero on any failure.
+Both ROMs pass all five selfchecks (`file_clipboard`/`layout`/
+`transport`/`config`/`help`), reproduced across multiple clean runs,
+leaving the fixture exactly as clean as it found it.
+
+**Portability thesis confirmed the same way M9 confirmed it for
+Amiga**: `git diff --stat <M12-start>..HEAD -- engine/ services/` is
+completely empty -- every single change across all six phases lives
+under `platform/mac/`, `host/tools/`, `docs/`, and the top-level
+`Makefile`. Not one line of the portable engine or services layer
+needed to change to add a third, architecturally distinct platform
+backend (a real Toolbox/QuickDraw event loop instead of GEM's or MUI's
+own, a boot volume that must be a genuine HFS disk image instead of a
+plain host directory, a from-scratch HFS injector needed nowhere else
+in this project).
+
+**Full regression sweep, all green**: `make test` (371/371, unchanged
+from M11's own close), `atari-engine-check`/`amiga-engine-check`, the
+full 6-image Hatari TOS matrix, and the full 3-image amiberry Kickstart
+matrix all stay green throughout -- a pure regression gate for the
+entire milestone, exactly as M9/M10/M11 each maintained for their own
+predecessors. `make mac-engine-check` and `ci_mac_matrix.sh` (both
+ROMs) close out the new backend's own side.
+
+## Milestone summary
+
+M12 is complete. Six phases, six commits, one architecturally distinct
+third platform: a real Toolbox/QuickDraw application (window, menu bar
+built from the shared action registry, vi-mode editing with all the
+same engine-level correctness the other two backends get for free,
+real font metrics and wrapped-line rendering, a Serial Driver offload
+transport, config-driven keymap selection, a status line, and a real
+help pager) running under BasiliskII against two real ROM images, built
+from a toolchain and CI fixture that didn't exist on this machine at
+the start of the milestone.
+
+Three genuinely hard, novel problems got solved along the way, none of
+which existed in this project's Atari/Amiga precedent: a from-scratch
+HFS (Mac OS Standard) reader/writer capable of safely splicing a file
+into a live catalog B-tree (three real bugs found and fixed, one a
+100%-reproducible boot crash); a fully hands-free CI automation
+mechanism for an emulator with no Native-Features-style exit trap and
+no host-directory-mountable boot volume (a permanent `LaunchApplication`
+launcher stub, injected once); and two real Retro68 header/glue gaps
+(`GetVInfo`, `KillIO`) found only by attempting to link against them,
+each worked around via the lower-level parameter-block call it would
+otherwise have wrapped. A real BasiliskII emulator limitation (its
+serial read thread can't honor `KillIO` against a genuinely idle line)
+was found, root-caused by reading the emulator's own source, and
+designed around rather than silently assumed away. A real on-target
+rendering bug (`plat_fill_rect` ignoring its own requested color) was
+found by testing the help pager, not by inspection, and fixed at the
+seam it belonged to.

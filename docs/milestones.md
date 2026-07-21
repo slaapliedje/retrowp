@@ -1388,9 +1388,28 @@ visually via real screenshots (status line showing `NORMAL`, the help
 pager showing real linked content and its hint bar, both closing/
 quitting cleanly). Full account: `docs/mac-platform.md`.
 
-Artifact target (not yet reached): Mac build "indistinguishable by
-function," `engine/`/`services/` unchanged -- the same bar M9 met for
-Amiga.
+Also delivered (Phase 6): `host/tools/ci_mac_matrix.sh`, mirroring
+`ci_atari_matrix.sh`'s/`ci_amiga_matrix.sh`'s own shape -- both ROM
+images pass all five selfchecks, reproduced across multiple clean runs.
+
+Artifact: Mac build "indistinguishable by function." Engine/services
+reused unchanged -- confirmed by diff: `engine/` and `services/` show
+zero changes across the entire milestone (`git diff --stat
+0295f9a..HEAD -- engine/ services/` is empty); every change lives under
+`platform/mac/`, `host/tools/`, `docs/`, and `Makefile`. Three genuinely
+novel problems (none present in the Atari/Amiga precedent) were solved
+along the way: a from-scratch HFS reader/writer safely splicing a file
+into a live catalog B-tree; a fully hands-free CI automation mechanism
+for an emulator with neither a Native-Features-style exit trap nor a
+host-directory-mountable boot volume; and two real Retro68 header/glue
+gaps (`GetVInfo`, `KillIO`) found only by attempting to link against
+them. Confirmed: `make test` stayed at 371/371 throughout M12 (no
+engine/services test count regressions); `atari-engine-check`/
+`amiga-engine-check` and the full 6-image Atari TOS matrix/3-image
+Amiga Kickstart matrix all stayed green through every phase, a pure
+regression gate for the whole milestone, matching M9/M10/M11's own
+standing discipline. Full account, every real bug found and fixed,
+every honestly-documented gap: `docs/mac-platform.md`.
 
 ---
 
