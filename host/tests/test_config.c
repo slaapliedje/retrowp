@@ -44,11 +44,21 @@ void test_config_parses_keymap_wordstar(void)
     ASSERT_EQ_U32((u32)parse("keymap=WordStar\n"), (u32)WP_KEYMAP_WORDSTAR);
 }
 
+void test_config_parses_keymap_emacs(void)
+{
+    ASSERT_EQ_U32((u32)parse("keymap=Emacs\n"), (u32)WP_KEYMAP_EMACS);
+}
+
+void test_config_parses_keymap_wordperfect(void)
+{
+    ASSERT_EQ_U32((u32)parse("keymap=WordPerfect\n"), (u32)WP_KEYMAP_WORDPERFECT);
+}
+
 void test_config_unrecognized_value_falls_back_to_default(void)
 {
     /* Not yet an implemented scheme -- must not produce an invalid/
        unclamped id, see wp_config_parse's own leniency contract. */
-    ASSERT_EQ_U32((u32)parse("keymap=wordperfect\n"), (u32)WP_KEYMAP_VI);
+    ASSERT_EQ_U32((u32)parse("keymap=msword\n"), (u32)WP_KEYMAP_VI);
 }
 
 void test_config_unrecognized_key_is_ignored(void)

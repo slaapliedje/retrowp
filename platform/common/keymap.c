@@ -19,6 +19,9 @@ void wp_keymap_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
     case WP_KEYMAP_EMACS:
         wp_emacs_init(&ctx->km.em, doc, journal);
         break;
+    case WP_KEYMAP_WORDPERFECT:
+        wp_wordperfect_init(&ctx->km.wp5, doc, journal);
+        break;
     case WP_KEYMAP_VI:
     default: /* an unrecognized id (should not happen -- wp_config_load
                 already clamps to a real value) falls back to vi-mode
@@ -38,6 +41,9 @@ void wp_keymap_free(wp_app_ctx *ctx)
         break;
     case WP_KEYMAP_EMACS:
         wp_emacs_free(&ctx->km.em);
+        break;
+    case WP_KEYMAP_WORDPERFECT:
+        wp_wordperfect_free(&ctx->km.wp5);
         break;
     case WP_KEYMAP_VI:
     default:
@@ -236,6 +242,60 @@ static wp_keymap_outcome feed_key_em(wp_app_ctx *ctx, wp_key_event ev)
     return outcome;
 }
 
+/* Same "no free pass" reasoning as WordStar/Emacs's own feed_key_ws/
+   feed_key_em (see either's own comment) -- raw_shortcut_byte is
+   unused here too: this scheme is fully responsible for every
+   wp_action_id it wants to expose (F10/F7/F6/F8), and its own bare
+   printable-key dispatch already claims the entire non-modified
+   keyboard for typing, the same way every other non-vi scheme does. */
+static wp_keymap_outcome feed_key_wp5(wp_app_ctx *ctx, wp_key_event ev)
+{
+    wp_wordperfect_action_kind action;
+    wp_keymap_outcome outcome;
+    wp_bool will_insert;
+
+    /* Matches wp_wordperfect_feed_key's own exact condition for "this
+       keystroke will insert a plain character" -- computed BEFORE the
+       call, same reasoning feed_key_ws/feed_key_em's own comments give.
+       No prefix-state check needed here (unlike those two): this
+       scheme has no prefix-key mechanism at all -- see
+       wp_wordperfect_feed_key's own header comment in wordperfect.h. */
+    will_insert = (wp_bool)(ev.special == (u16)WP_KEY_NONE &&
+                             ev.mods == 0 && ev.codepoint >= 0x20);
+
+    action = wp_wordperfect_feed_key(&ctx->km.wp5, ev);
+
+    outcome.kind = (u8)WP_KEYMAP_RESULT_NONE;
+    outcome.action_id = 0;
+    outcome.inserted_char = will_insert;
+
+    switch (action) {
+    case WP_WPACTION_QUIT:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_QUIT;
+        break;
+    case WP_WPACTION_SAVE:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FILE_SAVE;
+        break;
+    case WP_WPACTION_FORMAT_BOLD:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FORMAT_BOLD;
+        break;
+    case WP_WPACTION_FORMAT_UNDERLINE:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FORMAT_UNDERLINE;
+        break;
+    case WP_WPACTION_BEEP:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_BEEP;
+        break;
+    case WP_WPACTION_NONE:
+    default:
+        break;
+    }
+
+    return outcome;
+}
+
 wp_keymap_outcome wp_keymap_feed_key(wp_app_ctx *ctx, wp_key_event ev, u8 raw_shortcut_byte)
 {
     switch ((wp_keymap_id)ctx->keymap_id) {
@@ -243,6 +303,8 @@ wp_keymap_outcome wp_keymap_feed_key(wp_app_ctx *ctx, wp_key_event ev, u8 raw_sh
         return feed_key_ws(ctx, ev);
     case WP_KEYMAP_EMACS:
         return feed_key_em(ctx, ev);
+    case WP_KEYMAP_WORDPERFECT:
+        return feed_key_wp5(ctx, ev);
     case WP_KEYMAP_VI:
     default:
         return feed_key_vi(ctx, ev, raw_shortcut_byte);
@@ -256,6 +318,8 @@ wp_pos *wp_keymap_cursor(wp_app_ctx *ctx)
         return &ctx->km.ws.cursor;
     case WP_KEYMAP_EMACS:
         return &ctx->km.em.cursor;
+    case WP_KEYMAP_WORDPERFECT:
+        return &ctx->km.wp5.cursor;
     case WP_KEYMAP_VI:
     default:
         return &ctx->km.vi.cursor;
@@ -284,6 +348,15 @@ void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,
            scheme's own pending_count/pending_cmd gap noted below. */
         if (buf_cap > 0) {
             const char *label = "EMACS";
+            u32 n = 0;
+            while (label[n] != '\0' && n + 1 < buf_cap) { buf[n] = label[n]; n++; }
+            buf[n] = '\0';
+        }
+        break;
+    case WP_KEYMAP_WORDPERFECT:
+        /* Same reasoning as WordStar/Emacs's own fixed label. */
+        if (buf_cap > 0) {
+            const char *label = "WORDPERFECT";
             u32 n = 0;
             while (label[n] != '\0' && n + 1 < buf_cap) { buf[n] = label[n]; n++; }
             buf[n] = '\0';

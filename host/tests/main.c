@@ -137,6 +137,24 @@ void test_emacs_ctrl_g_cancels_pending_prefix(void);
 void test_emacs_unbound_chord_beeps(void);
 void test_emacs_no_leaks(void);
 
+/* test_wordperfect.c */
+void test_wordperfect_arrow_char_motion(void);
+void test_wordperfect_ctrl_arrow_word_motion(void);
+void test_wordperfect_up_down_paragraph_motion(void);
+void test_wordperfect_home_end(void);
+void test_wordperfect_ctrl_home_goes_to_doc_start(void);
+void test_wordperfect_plain_typing_is_non_modal(void);
+void test_wordperfect_delete_forward_and_backward(void);
+void test_wordperfect_ctrl_backspace_deletes_word_backward(void);
+void test_wordperfect_ctrl_end_deletes_to_line_end(void);
+void test_wordperfect_f1_undelete_is_single_level_undo(void);
+void test_wordperfect_f6_f8_f7_f10_return_correct_kinds(void);
+void test_wordperfect_block_toggle_extends_by_motion(void);
+void test_wordperfect_move_block_then_retrieve(void);
+void test_wordperfect_ctrl_f4_without_block_beeps(void);
+void test_wordperfect_shift_f10_with_empty_register_beeps(void);
+void test_wordperfect_no_leaks(void);
+
 /* test_actions.c */
 void test_actions_find_by_id(void);
 void test_actions_find_by_shortcut(void);
@@ -153,6 +171,8 @@ void test_statusline_paint_does_not_crash_with_various_views(void);
 void test_config_defaults_to_vi_on_empty_input(void);
 void test_config_parses_keymap_vim(void);
 void test_config_parses_keymap_wordstar(void);
+void test_config_parses_keymap_emacs(void);
+void test_config_parses_keymap_wordperfect(void);
 void test_config_key_and_value_are_case_insensitive(void);
 void test_config_tolerates_surrounding_whitespace(void);
 void test_config_skips_comment_and_blank_lines(void);
@@ -463,6 +483,23 @@ static const test_case g_cases[] = {
     { "emacs_unbound_chord_beeps", test_emacs_unbound_chord_beeps },
     { "emacs_no_leaks", test_emacs_no_leaks },
 
+    { "wordperfect_arrow_char_motion", test_wordperfect_arrow_char_motion },
+    { "wordperfect_ctrl_arrow_word_motion", test_wordperfect_ctrl_arrow_word_motion },
+    { "wordperfect_up_down_paragraph_motion", test_wordperfect_up_down_paragraph_motion },
+    { "wordperfect_home_end", test_wordperfect_home_end },
+    { "wordperfect_ctrl_home_goes_to_doc_start", test_wordperfect_ctrl_home_goes_to_doc_start },
+    { "wordperfect_plain_typing_is_non_modal", test_wordperfect_plain_typing_is_non_modal },
+    { "wordperfect_delete_forward_and_backward", test_wordperfect_delete_forward_and_backward },
+    { "wordperfect_ctrl_backspace_deletes_word_backward", test_wordperfect_ctrl_backspace_deletes_word_backward },
+    { "wordperfect_ctrl_end_deletes_to_line_end", test_wordperfect_ctrl_end_deletes_to_line_end },
+    { "wordperfect_f1_undelete_is_single_level_undo", test_wordperfect_f1_undelete_is_single_level_undo },
+    { "wordperfect_f6_f8_f7_f10_return_correct_kinds", test_wordperfect_f6_f8_f7_f10_return_correct_kinds },
+    { "wordperfect_block_toggle_extends_by_motion", test_wordperfect_block_toggle_extends_by_motion },
+    { "wordperfect_move_block_then_retrieve", test_wordperfect_move_block_then_retrieve },
+    { "wordperfect_ctrl_f4_without_block_beeps", test_wordperfect_ctrl_f4_without_block_beeps },
+    { "wordperfect_shift_f10_with_empty_register_beeps", test_wordperfect_shift_f10_with_empty_register_beeps },
+    { "wordperfect_no_leaks", test_wordperfect_no_leaks },
+
     { "actions_find_by_id", test_actions_find_by_id },
     { "actions_find_by_shortcut", test_actions_find_by_shortcut },
     { "actions_every_shortcut_is_unique", test_actions_every_shortcut_is_unique },
@@ -476,6 +513,8 @@ static const test_case g_cases[] = {
     { "config_defaults_to_vi_on_empty_input", test_config_defaults_to_vi_on_empty_input },
     { "config_parses_keymap_vim", test_config_parses_keymap_vim },
     { "config_parses_keymap_wordstar", test_config_parses_keymap_wordstar },
+    { "config_parses_keymap_emacs", test_config_parses_keymap_emacs },
+    { "config_parses_keymap_wordperfect", test_config_parses_keymap_wordperfect },
     { "config_key_and_value_are_case_insensitive", test_config_key_and_value_are_case_insensitive },
     { "config_tolerates_surrounding_whitespace", test_config_tolerates_surrounding_whitespace },
     { "config_skips_comment_and_blank_lines", test_config_skips_comment_and_blank_lines },

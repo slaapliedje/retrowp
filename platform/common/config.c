@@ -61,6 +61,8 @@ static void parse_line(const u8 *bytes, u32 len, wp_config *out)
         out->keymap_id = (u8)WP_KEYMAP_WORDSTAR;
     } else if (ascii_ieq(bytes + val_start, val_len, "emacs")) {
         out->keymap_id = (u8)WP_KEYMAP_EMACS;
+    } else if (ascii_ieq(bytes + val_start, val_len, "wordperfect")) {
+        out->keymap_id = (u8)WP_KEYMAP_WORDPERFECT;
     }
     /* Any other value (unrecognized, or a scheme not implemented yet)
        is silently left at whatever out->keymap_id already was -- see
