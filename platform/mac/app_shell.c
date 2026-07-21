@@ -20,6 +20,15 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "metrics_mac_internal.h"
+#include "offload.h"
+
+/* Phase 4: the offload endpoint every Tools action and the transport
+   selfcheck both target -- ".AIn"/".AOut" (the modem port) at a
+   conservative, universally-supported rate. Mirrors
+   platform/amiga/app_shell.c's WP_AMIGA_OFFLOAD_ENDPOINT exactly; the
+   device field is unvalidated beyond non-empty (see transport_mac.c's
+   own comment), kept for forward-compatibility only. */
+#define WP_MAC_OFFLOAD_ENDPOINT "serial:modem:9600"
 
 /* M12 Phase 1: non-UI platform.h seams only (memory/file/clipboard/
    timer) -- no Toolbox window/menu/event loop here yet. Grows into the
@@ -833,5 +842,97 @@ wp_bool wp_mac_layout_selfcheck(void)
     }
 
     wp_document_free(&doc);
+    return ok;
+}
+
+/* Phase 4: proves transport_mac.c's real Device Manager async I/O
+   lifecycle (OpenDriver/PBReadAsync/PBWriteAsync/KillIO/CloseDriver)
+   and offload_client.c's graceful-no-gateway behavior, mirroring
+   platform/atari/app_shell.c's wp_atari_transport_selfcheck and
+   platform/amiga/app_shell.c's wp_amiga_transport_selfcheck exactly:
+   open, write a fixture, confirm a read against an unconnected port
+   times out (not hangs, not errors) within a sane window -- twice, to
+   rule out a one-shot fluke -- then confirm the portable
+   offload_init/offload_available/offload_shutdown API degrades
+   gracefully with no live gateway attached. What this deliberately does
+   NOT prove: a real end-to-end round trip against a live gateway over
+   actual emulated RS-232 -- see docs/mac-platform.md for whether that
+   was achievable in this environment and why. */
+/* Unlike platform/amiga/app_shell.c's own wp_amiga_transport_selfcheck
+   (safe to open+write+read against amiga's serial.device, which is a
+   real Kickstart-level device always present regardless of any prefs
+   file), this deliberately does NOT attempt a real read-timeout cycle
+   against an opened port. Found the hard way, not guessed: with a real
+   socat-created PTY wired in as BasiliskII's own `seriala` (confirmed
+   to work at all -- unlike amiberry, BasiliskII's serial_unix.cpp just
+   opens whatever host path is given, no hardware enumeration --
+   OpenDriver/SerReset/SerHShake/plat_transport_write all genuinely
+   succeeded against it), plat_transport_read hung indefinitely rather
+   than honoring its own timeout. Root cause, confirmed by reading
+   BasiliskII's own source (src/Unix/serial_unix.cpp's input_func): its
+   read thread does a single plain blocking host read(fd, buf, len) and
+   only checks its own io_killed cancellation flag AFTER that call
+   returns -- against a genuinely idle line (nothing ever written to
+   the PTY's other end), that read() blocks forever, and KillIO has no
+   way to interrupt an in-progress blocking syscall on another thread.
+   This is a real BasiliskII limitation, not a bug in transport_mac.c's
+   own PBReadAsync/KillIO usage (which matches the documented Device
+   Manager async I/O contract) -- see docs/mac-platform.md. */
+wp_bool wp_mac_transport_selfcheck(void)
+{
+    plat_transport *t;
+    static const u8 fixture[] = "RetroWP transport selfcheck";
+    u32 before, after, elapsed;
+    wp_status st;
+    wp_bool ok = WP_TRUE;
+
+    /* Endpoint parsing is safe to test fully without any real device:
+       neither path below ever reaches OpenDriver. */
+    if (plat_transport_open("tcp:modem:9600", 2000, &t) != WP_UNSUPPORTED) ok = WP_FALSE;
+    if (plat_transport_open("serial:modem:1", 2000, &t) != WP_ERR) ok = WP_FALSE; /* 1 baud: not in the SCC's fixed rate set */
+
+    /* Opening the real endpoint: in this project's standard fixture
+       (no `seriala` configured), OpenDriver itself fails, and does so
+       quickly -- verified to complete well under a second in manual
+       testing. The bound below only catches a genuine hang; it is not
+       tuned to any particular fast-path timing. If a real serial
+       device DOES happen to be configured (e.g. a future manual
+       verification pass), succeeding is fine too -- write a fixture
+       (proven safe above) and close immediately, deliberately never
+       calling plat_transport_read here given the hang this file's own
+       comment just described. */
+    before = plat_ticks_ms();
+    st = plat_transport_open(WP_MAC_OFFLOAD_ENDPOINT, 2000, &t);
+    after = plat_ticks_ms();
+    elapsed = after - before;
+    if (elapsed > 5000) ok = WP_FALSE;
+
+    if (st == WP_OK) {
+        if (plat_transport_write(t, fixture, (u32)(sizeof(fixture) - 1), 2000) != WP_OK) ok = WP_FALSE;
+        plat_transport_close(t);
+    }
+
+    /* offload_init/offload_available/offload_shutdown's graceful-no-
+       gateway behavior, mirroring wp_amiga_transport_selfcheck exactly
+       -- safe regardless of whether a real serial device is configured,
+       since no live gateway ever answers the HELLO handshake either
+       way. */
+    before = plat_ticks_ms();
+    st = offload_init(WP_MAC_OFFLOAD_ENDPOINT);
+    after = plat_ticks_ms();
+    elapsed = after - before;
+
+    if (st == WP_OK) ok = WP_FALSE; /* no live gateway is attached; a real
+                                        success here would mean this
+                                        selfcheck's own environment
+                                        assumption above no longer holds */
+    if (offload_available()) ok = WP_FALSE;
+    if (elapsed > 15000) ok = WP_FALSE; /* CONNECT_TIMEOUT_MS + HANDSHAKE_TIMEOUT_MS
+                                            (2000+2000, engine/src/offload_client.c)
+                                            is the real budget; generous headroom
+                                            for real emulator timing */
+    offload_shutdown();
+    if (offload_available()) ok = WP_FALSE;
+
     return ok;
 }

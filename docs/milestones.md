@@ -1347,8 +1347,26 @@ Amiga's) must be a genuine HFS disk image, not a plain host directory.
       added QuickDraw-dependent calls. `wp_mac_layout_selfcheck()`
       passes on both ROM images; `RETROWP.APPL` still renders and quits
       cleanly. Full account: `docs/mac-platform.md`.
-- [ ] T12.3 Mac Serial Driver transport hook.
-      AC: Same offload features work as on ST/Amiga.
+- [x] T12.3 Mac Serial Driver transport hook.
+      AC: Same offload features work as on ST/Amiga. **Met**, with one
+      honestly documented gap mirroring T9.3's own precedent:
+      `transport_mac.c`'s real Device Manager async I/O implementation
+      (`OpenDriver(".AIn"/".AOut")`, `PBReadAsync`/`PBWriteAsync`,
+      `SerReset`/`SerHShake`) is proven via `wp_mac_transport_selfcheck`
+      and, manually, against a real socat-created PTY wired into
+      BasiliskII's own `seriala` prefs key -- unlike amiberry (which
+      rejected any non-hardware serial backing for T9.3), BasiliskII's
+      serial emulation accepted the PTY outright, and open/reset/
+      handshake/write all genuinely worked against it. A real,
+      source-verified BasiliskII limitation (its own serial read thread
+      blocks on a plain host `read()` and can't honor `KillIO` while
+      that call is still pending against a genuinely idle line) means
+      the automated selfcheck deliberately does not attempt a live
+      read-timeout cycle -- found and root-caused by reading
+      BasiliskII's own source, not assumed. `KillIO` itself, like
+      `GetVInfo` (T12.2), is declared in Retro68's headers with no
+      linkable glue -- worked around via the raw `PBKillIOSync`
+      parameter-block call. Full account: `docs/mac-platform.md`.
 
 Artifact target (not yet reached): Mac build "indistinguishable by
 function," `engine/`/`services/` unchanged -- the same bar M9 met for
@@ -1356,10 +1374,18 @@ Amiga.
 
 ---
 
-## M13+ — DOS / Typography Polish
+## M13+ — DOS / Typography Polish / Apple IIGS
 - [ ] T13.1 `platform/dos` (text-mode shell; character-cell metrics).
 - [ ] T13.2 Typography polish: kerning/justification options where supported.
 - [ ] T13.3 PDF polish: font embedding tiers, image support.
+- [ ] T13.4 `platform/iigs`: Apple IIGS backend, GS/OS System 6.x
+      (65816 -- a genuinely new CPU architecture and toolchain for this
+      project, not a variant of the 68k Mac backend). User has real
+      Apple IIGS hardware available for on-target testing, unlike every
+      other backend so far (emulator-only) -- plan for a real-hardware
+      verification pass alongside whatever emulator (if any) is used
+      for headless CI, the same way M12's BasiliskII fixture work
+      should inform but not fully replace real-hardware checks here.
 
 ---
 

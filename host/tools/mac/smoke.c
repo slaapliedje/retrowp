@@ -58,6 +58,11 @@ int main(void)
     strcpy(buf + pos, line);
     pos += (u32)strlen(line);
 
+    ok = wp_mac_transport_selfcheck();
+    line = ok ? "transport: PASS\n" : "transport: FAIL\n";
+    strcpy(buf + pos, line);
+    pos += (u32)strlen(line);
+
     report(buf);
 
     ExitToShell();

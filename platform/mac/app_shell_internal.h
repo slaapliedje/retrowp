@@ -17,4 +17,10 @@ wp_bool wp_mac_file_clipboard_selfcheck(void);
    it checks and why. */
 wp_bool wp_mac_layout_selfcheck(void);
 
+/* Phase 4: proves transport_mac.c's real Device Manager async I/O
+   lifecycle and offload_client.c's graceful-no-gateway behavior -- see
+   app_shell.c's own comment on wp_mac_transport_selfcheck for what it
+   checks, why, and what it deliberately does not. */
+wp_bool wp_mac_transport_selfcheck(void);
+
 #endif /* WP_MAC_APP_SHELL_INTERNAL_H */

@@ -22,18 +22,16 @@ add_application(rwpci_launcher launcher.c)
 file(GLOB RETROWP_MAC_PLATFORM_SRC ${RETROWP_ROOT}/platform/mac/*.c)
 list(FILTER RETROWP_MAC_PLATFORM_SRC EXCLUDE REGEX ".*/main\\.c$")
 
-# The portable engine, minus offload_client.c (pulls in plat_transport_*,
-# which platform/mac doesn't implement until Phase 4) -- same reasoning
-# amiga_smoke.c's own Phase 1 Makefile rule gives, now grown to the full
-# engine object set now that app_shell.c itself is the real Phase 2
-# shell (actions.c/app_ctx.c/keymap.c below need the whole thing: the
-# document model, every format, every keymap scheme keymap.c's dispatch
-# references unconditionally, etc.) -- exactly the same broadening
-# amiga_smoke.c's own history describes ("AMISMOKE, now linking the same
-# broader object set as RETROWP since both live in the same grown
-# app_shell.c").
+# The whole portable engine, including offload_client.c now that
+# transport_mac.c (Phase 4) implements plat_transport_* -- excluded up
+# through Phase 3, same reasoning amiga_smoke.c's own Phase 1 Makefile
+# rule gives for the identical exclusion, re-included once Amiga's own
+# T9.3 landed transport_amiga.c. offload_client.c itself needs
+# offload/transport's wire.c/caps_codec.c (framing/CRC and capability
+# encoding), matching ATARI_TRANSPORT_OBJ/AMIGA_TRANSPORT_OBJ in the
+# top-level Makefile.
 file(GLOB RETROWP_ENGINE_SRC ${RETROWP_ROOT}/engine/src/*.c)
-list(FILTER RETROWP_ENGINE_SRC EXCLUDE REGEX ".*/offload_client\\.c$")
+file(GLOB RETROWP_TRANSPORT_SRC ${RETROWP_ROOT}/offload/transport/*.c)
 
 set(RETROWP_COMMON_SRC
     ${RETROWP_ROOT}/platform/common/actions.c
@@ -45,6 +43,7 @@ set(RETROWP_INCLUDES
     ${RETROWP_ROOT}/engine/include
     ${RETROWP_ROOT}/platform/mac
     ${RETROWP_ROOT}/platform/common
+    ${RETROWP_ROOT}/offload/transport
 )
 
 # mac_smoke: rebuilt every CI run, copied fresh onto the ExtFS share as
@@ -54,6 +53,7 @@ add_application(mac_smoke
     ${RETROWP_MAC_PLATFORM_SRC}
     ${RETROWP_COMMON_SRC}
     ${RETROWP_ENGINE_SRC}
+    ${RETROWP_TRANSPORT_SRC}
 )
 target_include_directories(mac_smoke PRIVATE ${RETROWP_INCLUDES})
 
@@ -63,5 +63,6 @@ add_application(RETROWP
     ${RETROWP_MAC_PLATFORM_SRC}
     ${RETROWP_COMMON_SRC}
     ${RETROWP_ENGINE_SRC}
+    ${RETROWP_TRANSPORT_SRC}
 )
 target_include_directories(RETROWP PRIVATE ${RETROWP_INCLUDES})

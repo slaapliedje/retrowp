@@ -645,9 +645,109 @@ on-target-verified; real QuickDraw font metrics and wrapped-line
 rendering replace every stub, verified both quantitatively
 (`wp_mac_layout_selfcheck`) and visually (screenshots of wrapped text).
 
-**Next**: Phase 4 -- the Mac Serial Driver transport hook
-(`transport_mac.c`, opened via `OpenDriver` against `.AIn`/`.AOut`),
-matching Atari's own "serial only, no networking stack" precedent for
-offload transport. Zero changes expected to `offload/transport`,
-`offload_client.c`, or `offload.h` -- the same drop-in-fifth-
-implementation property T6.3 already proved for Atari.
+## Phase 4: Mac Serial Driver transport hook
+
+`transport_mac.c` implements the offload transport seam over the
+classic Mac Device Manager's Serial Driver (`.AIn`/`.AOut`, the modem
+port), mirroring `transport_atari.c`'s/`transport_amiga.c`'s role and
+`"serial:<device>:<baud>"` endpoint convention exactly. Zero changes to
+`offload/transport`, `offload_client.c`, or `offload.h` -- the same
+drop-in-fifth-implementation property T6.3 already proved for Atari.
+
+**A real architectural difference from both other backends**: the
+classic Mac Device Manager opens INPUT and OUTPUT as two *separate*
+driver references (`OpenDriver(".AIn", &inRef)`,
+`OpenDriver(".AOut", &outRef)`) -- both name the same physical port;
+unlike serial.device's one `IOExtSer` handle or GEMDOS's polled
+byte-at-a-time calls, the Device Manager's read/write model is
+per-direction, not per-device. Async I/O uses `PBReadAsync`/
+`PBWriteAsync` against a `ParamBlockRec`, polling `ioResult` for
+completion (pinned at `1`, "in progress," until overwritten with the
+real completion code -- Inside Macintosh: Devices' own documented
+convention, not declared as a named constant in Retro68's headers).
+Baud rate, unlike serial.device's arbitrary numeric `io_Baud`, packs
+into `SerReset`'s config word from a fixed, enumerated set the SCC
+hardware actually supports (300 through 57600) -- a real hardware
+limitation, not a narrower API choice.
+
+**Another `GetVInfo`-shaped gap**: `KillIO` is declared in Retro68's
+headers but, like `GetVInfo` (Phase 2), has no linkable glue
+implementation -- the linker rejected `KILLIO` as undefined. The raw
+parameter-block call `PBKillIOSync` works directly, same fix shape as
+`PBHGetVInfoSync` was for `GetVInfo`.
+
+### A real, source-verified BasiliskII limitation, not a bug in this code
+
+Unlike amiberry (which rejected both a host FIFO and a real socat PTY
+outright for M9 T9.3, accepting only enumerated real hardware),
+BasiliskII's own serial emulation (`src/Unix/serial_unix.cpp`) places
+no such restriction -- it just calls plain `open()`/`tcgetattr`/
+`tcsetattr` on whatever host path `seriala` names. Wiring a real
+socat-created PTY pair (`socat -d -d pty,raw,echo=0,link=... pty,raw,echo=0,link=...`)
+in as `seriala` and booting against it confirmed, in order:
+`OpenDriver` on both `.AIn`/`.AOut`, `SerReset`, `SerHShake`, and
+`plat_transport_write` all genuinely succeed against a real emulated
+serial line.
+
+`plat_transport_read`, however, hung indefinitely rather than honoring
+its own timeout -- confirmed not a bug in this code by reading
+BasiliskII's own source directly: `serial_unix.cpp`'s `input_func`
+thread does one plain blocking host `read(fd, buf, len)` call and only
+checks its own `io_killed` cancellation flag *after* that call
+returns. Against a genuinely idle line (nothing ever written to the
+PTY's other end -- exactly this project's own selfcheck scenario, which
+expects a timeout because no gateway is attached), that `read()` blocks
+forever, and `KillIO`/`PBKillIOSync` has no way to interrupt an
+in-progress blocking syscall running on a different host thread. This
+is a real BasiliskII implementation limitation, not a flaw in
+`transport_mac.c`'s `PBReadAsync`/`KillIO` usage, which matches the
+documented Device Manager async I/O contract.
+
+Because of this, `wp_mac_transport_selfcheck` deliberately does **not**
+attempt a live read-timeout cycle against an opened port (unlike
+`wp_amiga_transport_selfcheck`, safe on Amiga only because
+`serial.device` is a real Kickstart-level device always present
+regardless of any prefs file -- BasiliskII's driver has no such
+always-on equivalent; it only exists when `seriala` names a real host
+path). What it does verify, all safe in the standard fixture (no
+`seriala` configured, matching every other CI run): endpoint parsing
+(`"tcp:..."` correctly `WP_UNSUPPORTED`; an out-of-range baud correctly
+`WP_ERR`) without ever reaching `OpenDriver`; that opening the real
+endpoint fails (or, if a device happens to be configured, succeeds and
+is closed immediately after a bounded-time write, deliberately never
+reading) within a bounded time, catching a genuine hang without being
+tuned to any fast-path timing; and `offload_init`/`offload_available`/
+`offload_shutdown`'s graceful-no-gateway behavior, mirroring
+`wp_amiga_transport_selfcheck` exactly.
+
+### Verified
+
+`wp_mac_transport_selfcheck()` passes reliably in the standard fixture
+via `host/tools/ci_mac.sh` (`transport: PASS`, multiple clean runs).
+Manually, against a real socat PTY wired in as `seriala`: `OpenDriver`/
+`SerReset`/`SerHShake`/`plat_transport_write` all confirmed working
+end-to-end (the read-timeout hang above is the one documented,
+unresolved gap). `RETROWP.APPL` still renders, edits, and quits
+cleanly with `transport_mac.c`/`offload_client.c` linked in. `make
+mac-engine-check` and `make test` (371/371) both stay green.
+
+## Status
+
+**Proven**: Phases 0-4 all closed. The Retro68 + BasiliskII +
+headless-Xvfb pipeline builds and runs real m68k classic Mac code; a
+from-scratch HFS catalog B-tree writer safely injects a permanent
+`Startup Items` launcher; `host/tools/ci_mac.sh` passes repeatedly
+against both ROM images with zero Finder interaction and zero per-run
+disk surgery; `platform/mac/`'s non-UI seams (memory, file I/O,
+clipboard, timer), its real Toolbox shell (window, menu bar built from
+the action registry, vi-mode editing, clean quit), real QuickDraw font
+metrics/wrapped-line rendering, and a real Serial Driver transport hook
+are all on-target-verified or (for the one documented BasiliskII
+read-timeout limitation) verified as far as this environment honestly
+allows.
+
+**Next**: Phase 5 -- `platform/common` retrofit (real `keyDown`/
+`autoKey` translation already exists from Phase 2; this phase is about
+wiring the *shared* keymap-scheme-selection, action-registry status
+line, and help viewer machinery every other backend already has),
+followed by Phase 6 (CI matrix + docs + milestone closeout).
