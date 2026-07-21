@@ -90,6 +90,18 @@ void test_vimode_visual_mode_delete(void);
 void test_vimode_visual_line_mode_delete_spans_paragraphs(void);
 void test_vimode_ex_command_save_quit(void);
 void test_vimode_search_forward(void);
+void test_vimode_search_backward(void);
+void test_vimode_n_and_capital_n_respect_search_direction(void);
+void test_vimode_substitute_current_paragraph_replaces_first_match_only(void);
+void test_vimode_substitute_global_flag_replaces_every_match_in_paragraph(void);
+void test_vimode_substitute_percent_scopes_to_whole_section(void);
+void test_vimode_substitute_percent_and_global_replaces_everywhere(void);
+void test_vimode_substitute_ignore_case_flag(void);
+void test_vimode_substitute_confirm_y_replaces_n_skips(void);
+void test_vimode_substitute_confirm_a_replaces_all_remaining(void);
+void test_vimode_substitute_confirm_q_stops_without_replacing(void);
+void test_vimode_substitute_malformed_command_falls_through_to_beep(void);
+void test_vimode_substitute_global_undoes_as_one_step(void);
 void test_vimode_o_opens_line_below(void);
 void test_vimode_x_deletes_char_forward(void);
 void test_vimode_ctrl_chord_is_not_bare_letter(void);
@@ -208,6 +220,20 @@ void test_keymap_feed_key_moves_cursor_through_vi_arm(void);
 void test_keymap_feed_key_insert_reports_inserted_char(void);
 void test_keymap_feed_key_quit_reports_quit_kind(void);
 void test_keymap_get_status_view_reports_vi_mode_label(void);
+
+/* test_search.c (M11) */
+void test_search_find_forward_basic(void);
+void test_search_find_forward_not_found(void);
+void test_search_find_forward_wraps_around_document(void);
+void test_search_find_backward_basic(void);
+void test_search_find_backward_wraps_around_document(void);
+void test_search_find_backward_picks_nearest_preceding_match(void);
+void test_search_ignore_case_matches_different_case(void);
+void test_search_whole_word_rejects_substring_match(void);
+void test_search_whole_word_false_matches_substring(void);
+void test_search_match_crosses_run_boundary(void);
+void test_search_match_selection_within_single_run(void);
+void test_search_empty_needle_is_error(void);
 
 /* test_help_doc.c */
 void test_help_doc_parses_single_node(void);
@@ -456,6 +482,18 @@ static const test_case g_cases[] = {
     { "vimode_visual_line_mode_delete_spans_paragraphs", test_vimode_visual_line_mode_delete_spans_paragraphs },
     { "vimode_ex_command_save_quit", test_vimode_ex_command_save_quit },
     { "vimode_search_forward", test_vimode_search_forward },
+    { "vimode_search_backward", test_vimode_search_backward },
+    { "vimode_n_and_capital_n_respect_search_direction", test_vimode_n_and_capital_n_respect_search_direction },
+    { "vimode_substitute_current_paragraph_replaces_first_match_only", test_vimode_substitute_current_paragraph_replaces_first_match_only },
+    { "vimode_substitute_global_flag_replaces_every_match_in_paragraph", test_vimode_substitute_global_flag_replaces_every_match_in_paragraph },
+    { "vimode_substitute_percent_scopes_to_whole_section", test_vimode_substitute_percent_scopes_to_whole_section },
+    { "vimode_substitute_percent_and_global_replaces_everywhere", test_vimode_substitute_percent_and_global_replaces_everywhere },
+    { "vimode_substitute_ignore_case_flag", test_vimode_substitute_ignore_case_flag },
+    { "vimode_substitute_confirm_y_replaces_n_skips", test_vimode_substitute_confirm_y_replaces_n_skips },
+    { "vimode_substitute_confirm_a_replaces_all_remaining", test_vimode_substitute_confirm_a_replaces_all_remaining },
+    { "vimode_substitute_confirm_q_stops_without_replacing", test_vimode_substitute_confirm_q_stops_without_replacing },
+    { "vimode_substitute_malformed_command_falls_through_to_beep", test_vimode_substitute_malformed_command_falls_through_to_beep },
+    { "vimode_substitute_global_undoes_as_one_step", test_vimode_substitute_global_undoes_as_one_step },
     { "vimode_o_opens_line_below", test_vimode_o_opens_line_below },
     { "vimode_x_deletes_char_forward", test_vimode_x_deletes_char_forward },
     { "vimode_ctrl_chord_is_not_bare_letter", test_vimode_ctrl_chord_is_not_bare_letter },
@@ -712,7 +750,20 @@ static const test_case g_cases[] = {
     { "grammar_clean_text_reports_no_issues", test_grammar_clean_text_reports_no_issues },
     { "grammar_empty_text_reports_no_issues", test_grammar_empty_text_reports_no_issues },
     { "grammar_max_issues_cap_is_respected", test_grammar_max_issues_cap_is_respected },
-    { "grammar_realistic_paragraph_finds_every_planted_issue", test_grammar_realistic_paragraph_finds_every_planted_issue }
+    { "grammar_realistic_paragraph_finds_every_planted_issue", test_grammar_realistic_paragraph_finds_every_planted_issue },
+
+    { "search_find_forward_basic", test_search_find_forward_basic },
+    { "search_find_forward_not_found", test_search_find_forward_not_found },
+    { "search_find_forward_wraps_around_document", test_search_find_forward_wraps_around_document },
+    { "search_find_backward_basic", test_search_find_backward_basic },
+    { "search_find_backward_wraps_around_document", test_search_find_backward_wraps_around_document },
+    { "search_find_backward_picks_nearest_preceding_match", test_search_find_backward_picks_nearest_preceding_match },
+    { "search_ignore_case_matches_different_case", test_search_ignore_case_matches_different_case },
+    { "search_whole_word_rejects_substring_match", test_search_whole_word_rejects_substring_match },
+    { "search_whole_word_false_matches_substring", test_search_whole_word_false_matches_substring },
+    { "search_match_crosses_run_boundary", test_search_match_crosses_run_boundary },
+    { "search_match_selection_within_single_run", test_search_match_selection_within_single_run },
+    { "search_empty_needle_is_error", test_search_empty_needle_is_error }
 };
 
 int main(void)

@@ -25,7 +25,10 @@ typedef enum {
     WP_VIMODE_INSERT,
     WP_VIMODE_VISUAL,
     WP_VIMODE_VISUAL_LINE,
-    WP_VIMODE_COMMAND      /* ':' ex-command or '/' search entry, distinguished by cmdline_prefix */
+    WP_VIMODE_COMMAND,          /* ':' ex-command, '/' forward search, or '?' backward
+                                    search entry, distinguished by cmdline_prefix */
+    WP_VIMODE_SUBSTITUTE_CONFIRM /* M11: ':s///c' paused at a match awaiting
+                                     y/n/a/q -- see execute_substitute in vimode.c */
 } wp_vimode_mode;
 
 typedef enum {
@@ -69,8 +72,27 @@ typedef struct {
 
     u8      last_search[WP_VIMODE_SEARCH_MAX];
     u32     last_search_len;
-    wp_bool last_search_forward; /* reserved for a future backward ('?') search -- only forward is
-                                     implemented this pass, see docs/vimode.md */
+    wp_bool last_search_forward; /* the direction '/' (WP_TRUE) or '?' (WP_FALSE) last searched --
+                                     'n' repeats this direction, 'N' repeats the opposite (M11) */
+
+    /* M11: ':s/old/new/flags' and ':%s/old/new/flags' substitute state.
+       old/new are copied out of cmdline_buf once the command is parsed
+       (cmdline_buf itself is cleared on leaving COMMAND mode) -- same
+       "own copy, not a borrowed slice" precedent as last_search above.
+       The subst_paragraph/scan_offset/match fields are live ONLY while
+       mode == WP_VIMODE_SUBSTITUTE_CONFIRM (the 'c' flag's per-match
+       y/n/a/q pause); a plain ':s///' with no 'c' runs to completion
+       synchronously inside execute_ex_command and never touches them. */
+    u8      subst_old[WP_VIMODE_SEARCH_MAX];
+    u32     subst_old_len;
+    u8      subst_new[WP_VIMODE_SEARCH_MAX];
+    u32     subst_new_len;
+    wp_bool subst_global;         /* 'g' flag: every match per paragraph, not just the first */
+    wp_bool subst_ignore_case;    /* 'i' flag */
+    u32     subst_paragraph;      /* paragraph currently being scanned (confirm mode only) */
+    u32     subst_last_paragraph; /* inclusive upper bound paragraph index for this command's scope */
+    u32     subst_scan_offset;    /* byte offset within subst_paragraph to resume scanning from */
+    wp_pos  subst_match;          /* pending match start, awaiting a confirm keystroke */
 
     wp_status last_error;
 
@@ -112,16 +134,14 @@ wp_vimode_mode wp_vimode_get_mode(const wp_vimode_state *vs);
    pure data, no drawing. */
 void wp_vimode_get_status_text(const wp_vimode_state *vs, char *out, u32 out_cap);
 
-/* Byte-literal substring search (no regex, no case-folding) starting
-   strictly after `from`, scanning forward and wrapping around the
-   document boundary exactly once. WP_ERR if not found. Each paragraph's
-   text is matched via a bounded internal scratch buffer -- a single
-   paragraph longer than that buffer has its tail unsearchable; a
-   documented MVP limitation, not a silent truncation of the document
-   itself. Pure query, no mutation -- independently reusable by a future
-   non-modal Find dialog, not vimode-specific. Backward search ('?') is
-   not implemented this pass (see docs/vimode.md); `forward` exists in
-   the signature for that future extension but is currently ignored. */
+/* Byte-literal substring search (no regex, no case-folding), forward or
+   backward per `forward`, wrapping around the document boundary exactly
+   once. WP_ERR if not found. A thin wrapper over the shared
+   wp_document_find_text (editing.h, M11) -- see that function's own doc
+   comment for the exact search/wrap/scratch-buffer semantics this
+   inherits unchanged. Kept as a public vimode.h entry point (rather than
+   having every vimode.c call site call wp_document_find_text directly)
+   purely for call-site brevity and API stability. */
 wp_status wp_vimode_search(const wp_document *doc, wp_pos from,
                             const u8 *needle, u32 needle_len,
                             wp_bool forward, wp_pos *out_pos);

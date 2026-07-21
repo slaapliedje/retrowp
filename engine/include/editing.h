@@ -112,6 +112,40 @@ wp_pos wp_pos_para_block_backward(const wp_document *doc, wp_pos pos); /* { */
 
 
 /* ------------------------------------------------------------------ */
+/* Find & Replace (M11) -- the shared primitive every keybinding        */
+/* scheme's own Find/Replace is built on. Promoted from vi-mode's own   */
+/* wp_vimode_search (vimode.h), which becomes a thin forward-only,      */
+/* case-sensitive, whole-word-insensitive wrapper over this.            */
+/* ------------------------------------------------------------------ */
+
+/* Byte-literal substring search (no regex) starting strictly after
+   `from` if forward is WP_TRUE, or strictly before `from` if WP_FALSE,
+   wrapping around the document boundary exactly once. ignore_case folds
+   ASCII letters only -- the same ASCII-only simplification this project
+   already applies elsewhere (e.g. Atari's UTF-8-to-native conversion);
+   non-ASCII bytes always compare literally. whole_word additionally
+   requires a non-word byte (per wp_wordclass_of) or a paragraph boundary
+   on both sides of the match. Each paragraph's text is matched via a
+   bounded internal scratch buffer -- a single paragraph longer than that
+   buffer has its tail unsearchable, the same documented MVP limitation
+   wp_vimode_search always had. WP_ERR if not found. Pure query, no
+   mutation. Matches never cross a paragraph boundary. */
+wp_status wp_document_find_text(const wp_document *doc, wp_pos from,
+                                 const u8 *needle, u32 needle_len,
+                                 wp_bool forward, wp_bool ignore_case,
+                                 wp_bool whole_word, wp_pos *out_pos);
+
+/* Builds the wp_selection covering exactly needle_len bytes starting at
+   start (a match position as returned by wp_document_find_text) -- the
+   missing piece between "found a match" and "can now call
+   wp_edit_delete_selection on it" that every scheme's Replace needs.
+   Single-paragraph only, matching wp_document_find_text's own "matches
+   never cross a paragraph boundary" guarantee. */
+wp_selection wp_document_match_selection(const wp_document *doc, wp_pos start,
+                                          u32 needle_len);
+
+
+/* ------------------------------------------------------------------ */
 /* Raw insert/delete (T2.2) -- structural only, no undo journal        */
 /* ------------------------------------------------------------------ */
 

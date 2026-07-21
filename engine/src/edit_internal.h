@@ -54,4 +54,16 @@ void      paragraph_remove_at(wp_section *sec, u32 index);
    content end" as a plain (run, offset) pair rather than a full wp_pos. */
 void paragraph_end_run_offset(const wp_paragraph *para, u32 *out_run, u32 *out_offset);
 
+/* The (section, paragraph, run, offset) position exactly byte_offset
+   bytes into a paragraph's flattened text (the inverse of summing run
+   lengths) -- clamps to paragraph_end_run_offset's own result if
+   byte_offset runs past the paragraph's content. Promoted (M11) from
+   vimode.c's own file-local helper of the same name/shape, once
+   search.c's wp_document_find_text/wp_document_match_selection needed
+   the exact same "convert a byte offset found via a flattened-text scan
+   back into a real wp_pos" conversion wp_vimode_search's paragraph scan
+   already did. */
+wp_pos pos_from_byte_in_paragraph(u32 section, u32 paragraph, const wp_paragraph *para,
+                                   u32 byte_offset);
+
 #endif /* WP_EDIT_INTERNAL_H */

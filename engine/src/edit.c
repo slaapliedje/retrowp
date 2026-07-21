@@ -296,6 +296,47 @@ void paragraph_end_run_offset(const wp_paragraph *para, u32 *out_run, u32 *out_o
     }
 }
 
+wp_pos pos_from_byte_in_paragraph(u32 section, u32 paragraph, const wp_paragraph *para,
+                                   u32 byte_offset)
+{
+    wp_pos pos;
+    u32 consumed = 0;
+    u32 r;
+
+    pos.section = section;
+    pos.paragraph = paragraph;
+
+    if (para->run_count == 0) {
+        pos.run = 0;
+        pos.offset = 0;
+        return pos;
+    }
+
+    for (r = 0; r < para->run_count; r++) {
+        u32 len = para->runs[r].text.length;
+
+        if (byte_offset < consumed + len) {
+            pos.run = r;
+            pos.offset = byte_offset - consumed;
+            return pos;
+        }
+        if (byte_offset == consumed + len) {
+            if ((u32)(r + 1) < para->run_count) {
+                pos.run = r + 1;
+                pos.offset = 0;
+            } else {
+                pos.run = r;
+                pos.offset = len;
+            }
+            return pos;
+        }
+        consumed += len;
+    }
+
+    paragraph_end_run_offset(para, &pos.run, &pos.offset);
+    return pos;
+}
+
 /* Length in bytes of [run_a,off_a .. run_b,off_b) within a SINGLE
    paragraph -- callers guarantee run_a/off_a precedes-or-equals
    run_b/off_b and both are valid positions in this exact paragraph.

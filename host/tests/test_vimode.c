@@ -457,6 +457,294 @@ void test_vimode_search_forward(void)
     wp_document_free(&doc);
 }
 
+void test_vimode_search_backward(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "Goodbye Moon");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+    vs.cursor.paragraph = 1; vs.cursor.offset = 12; /* end of "Goodbye Moon" */
+
+    feed_keys(&vs, "?Hello");
+    feed_key_special(&vs, WP_KEY_ENTER);
+
+    ASSERT_EQ_U32(vs.cursor.paragraph, 0);
+    ASSERT_EQ_U32(vs.cursor.offset, 0);
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_n_and_capital_n_respect_search_direction(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+
+    build_doc_two_paras(&doc, "aXaXaX", "unused");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    /* cursor starts at doc start (offset 0); search is strictly-after
+       `from`, so "/a" lands on the SECOND 'a' (offset 2), not the one
+       already under the cursor. */
+    feed_keys(&vs, "/a");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    ASSERT_EQ_U32(vs.cursor.offset, 2);
+
+    feed_keys(&vs, "n");
+    ASSERT_EQ_U32(vs.cursor.offset, 4); /* 'n' repeats forward */
+
+    feed_keys(&vs, "N");
+    ASSERT_EQ_U32(vs.cursor.offset, 2); /* 'N' reverses to backward */
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_substitute_current_paragraph_replaces_first_match_only(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "foo foo foo", "foo");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, ":s/foo/bar/");
+    feed_key_special(&vs, WP_KEY_ENTER);
+
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "bar foo foo");
+    dump_para_text(&doc, 1, buf); ASSERT_EQ_STR(buf, "foo");
+    ASSERT_TRUE(vs.mode == (u8)WP_VIMODE_NORMAL);
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_substitute_global_flag_replaces_every_match_in_paragraph(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "foo foo foo", "foo");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, ":s/foo/bar/g");
+    feed_key_special(&vs, WP_KEY_ENTER);
+
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "bar bar bar");
+    dump_para_text(&doc, 1, buf); ASSERT_EQ_STR(buf, "foo");
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_substitute_percent_scopes_to_whole_section(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "foo", "foo foo");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, ":%s/foo/bar/");
+    feed_key_special(&vs, WP_KEY_ENTER);
+
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "bar");
+    dump_para_text(&doc, 1, buf); ASSERT_EQ_STR(buf, "bar foo"); /* first match per paragraph only */
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_substitute_percent_and_global_replaces_everywhere(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "foo", "foo foo");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, ":%s/foo/bar/g");
+    feed_key_special(&vs, WP_KEY_ENTER);
+
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "bar");
+    dump_para_text(&doc, 1, buf); ASSERT_EQ_STR(buf, "bar bar");
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_substitute_ignore_case_flag(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "Foo FOO", "unused");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, ":s/foo/bar/gi");
+    feed_key_special(&vs, WP_KEY_ENTER);
+
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "bar bar");
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_substitute_confirm_y_replaces_n_skips(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "foo foo foo", "unused");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, ":s/foo/bar/gc");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    ASSERT_TRUE(vs.mode == (u8)WP_VIMODE_SUBSTITUTE_CONFIRM);
+    ASSERT_EQ_U32(vs.subst_match.offset, 0);
+
+    feed_keys(&vs, "y"); /* replace match 1, pause at match 2 */
+    ASSERT_TRUE(vs.mode == (u8)WP_VIMODE_SUBSTITUTE_CONFIRM);
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "bar foo foo");
+    /* subst_match.offset is no longer checked here -- replacing match 1
+       splits the paragraph into multiple runs (insert never coalesces,
+       see editing.h), so wp_pos.offset is now relative to whichever run
+       subst_match.run names, not the flattened paragraph byte offset
+       the pre-edit offset-0 check above relied on. */
+
+    feed_keys(&vs, "n"); /* skip match 2, pause at match 3 */
+    ASSERT_TRUE(vs.mode == (u8)WP_VIMODE_SUBSTITUTE_CONFIRM);
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "bar foo foo");
+
+    feed_keys(&vs, "y"); /* replace match 3, nothing left */
+    ASSERT_TRUE(vs.mode == (u8)WP_VIMODE_NORMAL);
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "bar foo bar");
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_substitute_confirm_a_replaces_all_remaining(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "foo foo foo", "unused");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, ":s/foo/bar/gc");
+    feed_key_special(&vs, WP_KEY_ENTER);
+
+    feed_keys(&vs, "y"); /* replace match 1 */
+    feed_keys(&vs, "a"); /* replace matches 2 and 3 without further confirmation */
+    ASSERT_TRUE(vs.mode == (u8)WP_VIMODE_NORMAL);
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "bar bar bar");
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_substitute_confirm_q_stops_without_replacing(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "foo foo foo", "unused");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, ":s/foo/bar/gc");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    feed_keys(&vs, "q");
+
+    ASSERT_TRUE(vs.mode == (u8)WP_VIMODE_NORMAL);
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "foo foo foo");
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_substitute_malformed_command_falls_through_to_beep(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    wp_vimode_action action;
+
+    build_doc_two_paras(&doc, "foo", "unused");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, ":ssomething");
+    action = feed_key_special(&vs, WP_KEY_ENTER);
+    ASSERT_TRUE(action.kind == (u8)WP_VIACTION_BEEP);
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_substitute_global_undoes_as_one_step(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "foo foo foo", "unused");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, ":s/foo/bar/g");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "bar bar bar");
+
+    feed_keys(&vs, "u");
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "foo foo foo");
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
 void test_vimode_o_opens_line_below(void)
 {
     wp_document doc;

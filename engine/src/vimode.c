@@ -567,11 +567,25 @@ static wp_vimode_action feed_normal(wp_vimode_state *vs, wp_key_event key)
             vs->cmdline_prefix = '/';
             vs->cmdline_len = 0;
             break;
+        case '?':
+            vs->mode = (u8)WP_VIMODE_COMMAND;
+            vs->cmdline_prefix = '?';
+            vs->cmdline_len = 0;
+            break;
         case 'n':
             if (vs->last_search_len > 0) {
                 wp_pos found;
                 if (wp_vimode_search(vs->doc, vs->cursor, vs->last_search, vs->last_search_len,
-                                      WP_TRUE, &found) == WP_OK) {
+                                      vs->last_search_forward, &found) == WP_OK) {
+                    vs->cursor = found;
+                }
+            }
+            break;
+        case 'N':
+            if (vs->last_search_len > 0) {
+                wp_pos found;
+                if (wp_vimode_search(vs->doc, vs->cursor, vs->last_search, vs->last_search_len,
+                                      (wp_bool)!vs->last_search_forward, &found) == WP_OK) {
                     vs->cursor = found;
                 }
             }
@@ -684,19 +698,254 @@ static wp_vimode_action execute_ex_command(wp_vimode_state *vs)
 static void execute_search(wp_vimode_state *vs)
 {
     wp_pos found;
+    wp_bool forward;
 
     if (vs->cmdline_len == 0 || vs->cmdline_len > WP_VIMODE_SEARCH_MAX) return;
 
     memcpy(vs->last_search, vs->cmdline_buf, vs->cmdline_len);
     vs->last_search_len = vs->cmdline_len;
-    vs->last_search_forward = WP_TRUE;
+    forward = (wp_bool)(vs->cmdline_prefix != '?');
+    vs->last_search_forward = forward;
 
-    if (wp_vimode_search(vs->doc, vs->cursor, vs->cmdline_buf, vs->cmdline_len, WP_TRUE, &found) == WP_OK) {
+    if (wp_vimode_search(vs->doc, vs->cursor, vs->cmdline_buf, vs->cmdline_len, forward, &found) == WP_OK) {
         vs->cursor = found;
         vs->last_error = WP_OK;
     } else {
         vs->last_error = WP_ERR;
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* Substitute (':s/old/new/flags', ':%s/old/new/flags') -- M11          */
+/* ------------------------------------------------------------------ */
+
+/* Literal-only grammar (real vim's regex/arbitrary-delimiter support is
+   deliberately not implemented -- see docs/keymaps.md's own "no regex"
+   scope note for wp_document_find_text, which this inherits): an
+   optional leading '%' (whole section, real vim's own single-section
+   scope narrowing -- matches wp_document_extract_text/
+   wp_edit_delete_selection's own existing boundary), then 's', then
+   '/old/new/' with '/' as the only recognized delimiter, then any
+   combination of the 'g'/'c'/'i' flag letters. Any other trailing
+   character makes the whole command unrecognized (falls through to
+   execute_ex_command's own BEEP). */
+static wp_bool parse_substitute(const u8 *buf, u32 len, wp_bool *whole_section,
+                                 u32 *old_off, u32 *old_len,
+                                 u32 *new_off, u32 *new_len,
+                                 wp_bool *g, wp_bool *c, wp_bool *i)
+{
+    u32 pos = 0;
+    const u8 *slash;
+
+    *whole_section = WP_FALSE;
+    if (pos < len && buf[pos] == '%') { *whole_section = WP_TRUE; pos++; }
+    if (pos >= len || buf[pos] != 's') return WP_FALSE;
+    pos++;
+    if (pos >= len || buf[pos] != '/') return WP_FALSE;
+    pos++;
+
+    *old_off = pos;
+    slash = (const u8 *)memchr(buf + pos, '/', len - pos);
+    if (!slash) return WP_FALSE;
+    *old_len = (u32)(slash - (buf + pos));
+    pos = (u32)(slash - buf) + 1;
+
+    *new_off = pos;
+    slash = (const u8 *)memchr(buf + pos, '/', len - pos);
+    if (!slash) return WP_FALSE;
+    *new_len = (u32)(slash - (buf + pos));
+    pos = (u32)(slash - buf) + 1;
+
+    *g = WP_FALSE; *c = WP_FALSE; *i = WP_FALSE;
+    for (; pos < len; pos++) {
+        if (buf[pos] == 'g') *g = WP_TRUE;
+        else if (buf[pos] == 'c') *c = WP_TRUE;
+        else if (buf[pos] == 'i') *i = WP_TRUE;
+        else return WP_FALSE;
+    }
+    return WP_TRUE;
+}
+
+/* Bounded, non-wrapping, INCLUSIVE-of-from_byte scan within a single
+   paragraph -- deliberately NOT wp_document_find_text (editing.h),
+   whose "strictly after `from`, wraps around the whole document"
+   contract fits interactive cursor-relative search, not this function's
+   own "resume this bounded paragraph range exactly where the last
+   match/replace left off" job. Small, self-contained, honest duplication
+   of wp_document_find_text's own per-paragraph scratch-buffer scan
+   rather than forcing a mismatched API to fit. */
+static wp_bool find_match_in_paragraph_from(const wp_vimode_state *vs, u32 pi, u32 from_byte,
+                                             u32 *out_start_byte)
+{
+    const wp_section *sec = &vs->doc->sections[vs->cursor.section];
+    const wp_paragraph *para;
+    wp_selection sel;
+    u8 scratch[512];
+    u32 total_len, len, s;
+
+    if (pi >= sec->para_count) return WP_FALSE;
+    para = &sec->paras[pi];
+
+    sel.anchor.section = vs->cursor.section; sel.anchor.paragraph = pi;
+    sel.anchor.run = 0; sel.anchor.offset = 0;
+    sel.caret.section = vs->cursor.section; sel.caret.paragraph = pi;
+    paragraph_end_run_offset(para, &sel.caret.run, &sel.caret.offset);
+    wp_document_extract_text(vs->doc, sel, scratch, (u32)sizeof(scratch), &total_len);
+    len = (total_len < (u32)sizeof(scratch)) ? total_len : (u32)sizeof(scratch);
+
+    if (len < vs->subst_old_len || from_byte > len - vs->subst_old_len) return WP_FALSE;
+
+    for (s = from_byte; s <= len - vs->subst_old_len; s++) {
+        wp_bool eq;
+        if (!vs->subst_ignore_case) {
+            eq = (wp_bool)(memcmp(scratch + s, vs->subst_old, vs->subst_old_len) == 0);
+        } else {
+            u32 k;
+            eq = WP_TRUE;
+            for (k = 0; k < vs->subst_old_len; k++) {
+                u8 a = scratch[s + k], b = vs->subst_old[k];
+                if (a >= 'A' && a <= 'Z') a = (u8)(a - 'A' + 'a');
+                if (b >= 'A' && b <= 'Z') b = (u8)(b - 'A' + 'a');
+                if (a != b) { eq = WP_FALSE; break; }
+            }
+        }
+        if (eq) { *out_start_byte = s; return WP_TRUE; }
+    }
+    return WP_FALSE;
+}
+
+/* The byte offset of vs->subst_match within vs->subst_paragraph -- the
+   inverse of pos_from_byte_in_paragraph, needed to resume scanning past
+   a confirm-mode match the caller just handled (y/n/a). */
+static u32 subst_match_byte_offset(const wp_vimode_state *vs)
+{
+    const wp_section *sec = &vs->doc->sections[vs->cursor.section];
+    const wp_paragraph *para = &sec->paras[vs->subst_paragraph];
+    u32 byte = 0, r;
+
+    for (r = 0; r < vs->subst_match.run; r++) byte += para->runs[r].text.length;
+    byte += vs->subst_match.offset;
+    return byte;
+}
+
+/* Scans forward from (subst_paragraph, subst_scan_offset) through
+   subst_last_paragraph for the next match. Pauses in
+   WP_VIMODE_SUBSTITUTE_CONFIRM with subst_match/vs->cursor set to it if
+   found; leaves mode at WP_VIMODE_NORMAL (nothing left to confirm) once
+   the whole scope is exhausted. */
+static void advance_to_next_match(wp_vimode_state *vs)
+{
+    for (;;) {
+        u32 start_byte;
+
+        if (vs->subst_paragraph > vs->subst_last_paragraph) {
+            vs->mode = (u8)WP_VIMODE_NORMAL;
+            return;
+        }
+        if (find_match_in_paragraph_from(vs, vs->subst_paragraph, vs->subst_scan_offset, &start_byte)) {
+            const wp_section *sec = &vs->doc->sections[vs->cursor.section];
+            const wp_paragraph *para = &sec->paras[vs->subst_paragraph];
+
+            vs->subst_match = pos_from_byte_in_paragraph(vs->cursor.section, vs->subst_paragraph,
+                                                           para, start_byte);
+            vs->cursor = vs->subst_match;
+            vs->mode = (u8)WP_VIMODE_SUBSTITUTE_CONFIRM;
+            return;
+        }
+        vs->subst_paragraph++;
+        vs->subst_scan_offset = 0;
+    }
+}
+
+/* Replaces every match in [start_para, end_para] starting no earlier
+   than start_byte within start_para -- honoring subst_global (every
+   match per paragraph vs. just the first) -- as ONE undo group (real
+   vim's own ":s" is a single undo step regardless of how many matches
+   it touched). Used both by the non-confirm top-level path and by
+   confirm mode's 'a' ("replace this and all remaining"). Returns the
+   number of replacements made. */
+static u32 substitute_range(wp_vimode_state *vs, u32 start_para, u32 start_byte, u32 end_para)
+{
+    u32 pi = start_para;
+    u32 from_byte = start_byte;
+    u32 count = 0;
+    wp_pos last_pos = vs->cursor;
+
+    wp_undo_group_begin(vs->journal);
+    for (; pi <= end_para; pi++, from_byte = 0) {
+        for (;;) {
+            u32 start;
+            wp_pos match_pos, out_pos;
+            wp_selection sel;
+            const wp_section *sec;
+            const wp_paragraph *para;
+
+            if (!find_match_in_paragraph_from(vs, pi, from_byte, &start)) break;
+
+            sec = &vs->doc->sections[vs->cursor.section];
+            para = &sec->paras[pi];
+            match_pos = pos_from_byte_in_paragraph(vs->cursor.section, pi, para, start);
+            sel = wp_document_match_selection(vs->doc, match_pos, vs->subst_old_len);
+            wp_edit_delete_selection(vs->doc, vs->journal, sel, &out_pos);
+            wp_edit_paste_text(vs->doc, vs->journal, out_pos, vs->subst_new, vs->subst_new_len, &out_pos);
+            last_pos = out_pos;
+            count++;
+
+            if (!vs->subst_global) break;
+            from_byte = start + vs->subst_new_len;
+        }
+    }
+    wp_undo_group_end(vs->journal);
+
+    vs->cursor = wp_pos_clamp_to_document(vs->doc, last_pos);
+    return count;
+}
+
+/* Recognizes and runs a ':s'/'%s' command out of vs->cmdline_buf.
+   Returns WP_FALSE if the buffer isn't a substitute command at all (the
+   caller falls through to execute_ex_command's own w/q/x/wq/BEEP
+   handling); WP_TRUE otherwise, whether or not any match was found --
+   matching execute_search's own "recognized command, use last_error for
+   the miss case" precedent rather than BEEP. */
+static wp_bool execute_substitute(wp_vimode_state *vs)
+{
+    wp_bool whole_section, g, c, i;
+    u32 old_off, old_len, new_off, new_len;
+    u32 start_para, end_para;
+
+    if (!parse_substitute(vs->cmdline_buf, vs->cmdline_len, &whole_section,
+                           &old_off, &old_len, &new_off, &new_len, &g, &c, &i)) {
+        return WP_FALSE;
+    }
+    if (old_len == 0) {
+        vs->last_error = WP_ERR;
+        return WP_TRUE;
+    }
+
+    memcpy(vs->subst_old, vs->cmdline_buf + old_off, old_len);
+    vs->subst_old_len = old_len;
+    memcpy(vs->subst_new, vs->cmdline_buf + new_off, new_len);
+    vs->subst_new_len = new_len;
+    vs->subst_global = g;
+    vs->subst_ignore_case = i;
+
+    {
+        const wp_section *sec = &vs->doc->sections[vs->cursor.section];
+        start_para = whole_section ? 0 : vs->cursor.paragraph;
+        end_para = whole_section ? (sec->para_count > 0 ? sec->para_count - 1 : 0) : vs->cursor.paragraph;
+    }
+    vs->subst_paragraph = start_para;
+    vs->subst_last_paragraph = end_para;
+    vs->subst_scan_offset = 0;
+
+    if (c) {
+        advance_to_next_match(vs);
+        vs->last_error = (vs->mode == (u8)WP_VIMODE_SUBSTITUTE_CONFIRM) ? WP_OK : WP_ERR;
+    } else {
+        u32 count = substitute_range(vs, start_para, 0, end_para);
+        vs->last_error = (count > 0) ? WP_OK : WP_ERR;
+    }
+    return WP_TRUE;
 }
 
 static wp_vimode_action feed_command(wp_vimode_state *vs, wp_key_event key)
@@ -722,11 +971,17 @@ static wp_vimode_action feed_command(wp_vimode_state *vs, wp_key_event key)
         return action;
     }
     if (key.special == (u16)WP_KEY_ENTER) {
-        if (vs->cmdline_prefix == ':') action = execute_ex_command(vs);
-        else if (vs->cmdline_prefix == '/') execute_search(vs);
-        vs->mode = (u8)WP_VIMODE_NORMAL;
+        if (vs->cmdline_prefix == ':') {
+            if (!execute_substitute(vs)) action = execute_ex_command(vs);
+        } else if (vs->cmdline_prefix == '/' || vs->cmdline_prefix == '?') {
+            execute_search(vs);
+        }
         vs->cmdline_len = 0;
         vs->cmdline_prefix = 0;
+        /* execute_substitute may have already moved to SUBSTITUTE_CONFIRM
+           (the 'c' flag paused at a match) -- don't stomp that back to
+           NORMAL. */
+        if (vs->mode != (u8)WP_VIMODE_SUBSTITUTE_CONFIRM) vs->mode = (u8)WP_VIMODE_NORMAL;
         return action;
     }
     if (key.special == (u16)WP_KEY_NONE && key.codepoint >= 0x20 && key.codepoint < 0x7F) {
@@ -737,111 +992,87 @@ static wp_vimode_action feed_command(wp_vimode_state *vs, wp_key_event key)
     return action;
 }
 
+/* ':s///c' paused at a match -- y (replace, next), n (skip, next), a
+   (replace this and every remaining match, no further confirmation),
+   q/Escape (stop). Real vim's fuller vocabulary (l/^/C-e/C-y/recursive
+   edit) is deliberately not implemented, matching this milestone's
+   already-established "scoped subset, documented not faked" precedent
+   for Emacs's own query-replace. */
+static wp_vimode_action feed_substitute_confirm(wp_vimode_state *vs, wp_key_event key)
+{
+    wp_vimode_action action;
+
+    action.kind = (u8)WP_VIACTION_NONE;
+    action.arg_len = 0;
+
+    if (key.special == (u16)WP_KEY_ESCAPE) {
+        vs->mode = (u8)WP_VIMODE_NORMAL;
+        return action;
+    }
+    if (key.special != (u16)WP_KEY_NONE) return action;
+
+    switch (key.codepoint) {
+    case 'y': {
+        wp_selection sel = wp_document_match_selection(vs->doc, vs->subst_match, vs->subst_old_len);
+        u32 match_byte = subst_match_byte_offset(vs);
+        wp_pos out_pos;
+
+        wp_edit_delete_selection(vs->doc, vs->journal, sel, &out_pos);
+        wp_edit_paste_text(vs->doc, vs->journal, out_pos, vs->subst_new, vs->subst_new_len, &out_pos);
+        vs->cursor = out_pos;
+
+        if (vs->subst_global) {
+            vs->subst_scan_offset = match_byte + vs->subst_new_len;
+        } else {
+            vs->subst_paragraph++;
+            vs->subst_scan_offset = 0;
+        }
+        advance_to_next_match(vs);
+        break;
+    }
+    case 'n': {
+        u32 match_byte = subst_match_byte_offset(vs);
+
+        if (vs->subst_global) {
+            vs->subst_scan_offset = match_byte + vs->subst_old_len;
+        } else {
+            vs->subst_paragraph++;
+            vs->subst_scan_offset = 0;
+        }
+        advance_to_next_match(vs);
+        break;
+    }
+    case 'a': {
+        u32 match_byte = subst_match_byte_offset(vs);
+
+        vs->mode = (u8)WP_VIMODE_NORMAL;
+        substitute_range(vs, vs->subst_paragraph, match_byte, vs->subst_last_paragraph);
+        break;
+    }
+    case 'q':
+        vs->mode = (u8)WP_VIMODE_NORMAL;
+        break;
+    default:
+        break;
+    }
+    return action;
+}
+
 /* ------------------------------------------------------------------ */
 /* Search                                                                */
 /* ------------------------------------------------------------------ */
 
-static wp_pos pos_from_byte_in_paragraph(u32 section, u32 paragraph, const wp_paragraph *para, u32 byte_offset)
-{
-    wp_pos pos;
-    u32 consumed = 0;
-    u32 r;
-
-    pos.section = section;
-    pos.paragraph = paragraph;
-
-    if (para->run_count == 0) {
-        pos.run = 0;
-        pos.offset = 0;
-        return pos;
-    }
-
-    for (r = 0; r < para->run_count; r++) {
-        u32 len = para->runs[r].text.length;
-
-        if (byte_offset < consumed + len) {
-            pos.run = r;
-            pos.offset = byte_offset - consumed;
-            return pos;
-        }
-        if (byte_offset == consumed + len) {
-            if ((u32)(r + 1) < para->run_count) {
-                pos.run = r + 1;
-                pos.offset = 0;
-            } else {
-                pos.run = r;
-                pos.offset = len;
-            }
-            return pos;
-        }
-        consumed += len;
-    }
-
-    paragraph_end_run_offset(para, &pos.run, &pos.offset);
-    return pos;
-}
-
+/* Thin wrapper over the shared wp_document_find_text (search.c, M11) --
+   forward-or-backward, case-sensitive, whole-word-insensitive, exactly
+   vi's own historical `/`/`?`/`n`/`N` semantics. Promoted (M11) once a
+   second scheme needed the identical byte-literal document search this
+   function's own doc comment already predicted. */
 wp_status wp_vimode_search(const wp_document *doc, wp_pos from,
                             const u8 *needle, u32 needle_len,
                             wp_bool forward, wp_pos *out_pos)
 {
-    u32 si = from.section, pi = from.paragraph;
-    wp_bool first = WP_TRUE;
-
-    WP_UNUSED(forward); /* forward-only this pass -- see docs/vimode.md */
-
-    if (needle_len == 0 || si >= doc->section_count) return WP_ERR;
-
-    for (;;) {
-        const wp_section *sec = &doc->sections[si];
-
-        if (pi < sec->para_count) {
-            const wp_paragraph *para = &sec->paras[pi];
-            u8 scratch[512];
-            u32 total_len, len, min_start;
-
-            {
-                wp_selection sel;
-                sel.anchor.section = si; sel.anchor.paragraph = pi; sel.anchor.run = 0; sel.anchor.offset = 0;
-                sel.caret.section = si; sel.caret.paragraph = pi;
-                paragraph_end_run_offset(para, &sel.caret.run, &sel.caret.offset);
-                wp_document_extract_text(doc, sel, scratch, (u32)sizeof(scratch), &total_len);
-            }
-            len = (total_len < (u32)sizeof(scratch)) ? total_len : (u32)sizeof(scratch);
-
-            min_start = 0;
-            if (first && si == from.section && pi == from.paragraph) {
-                u32 rr;
-                for (rr = 0; rr < from.run; rr++) min_start += para->runs[rr].text.length;
-                min_start += from.offset + 1;
-            }
-
-            if (len >= needle_len && min_start <= len - needle_len) {
-                u32 s;
-                for (s = min_start; s <= len - needle_len; s++) {
-                    if (memcmp(scratch + s, needle, needle_len) == 0) {
-                        *out_pos = pos_from_byte_in_paragraph(si, pi, para, s);
-                        return WP_OK;
-                    }
-                }
-            }
-        }
-        first = WP_FALSE;
-
-        if (pi + 1 < sec->para_count) {
-            pi++;
-        } else if (si + 1 < doc->section_count) {
-            si++;
-            pi = 0;
-        } else {
-            si = 0;
-            pi = 0;
-        }
-
-        if (si == from.section && pi == from.paragraph) break;
-    }
-
-    return WP_ERR;
+    return wp_document_find_text(doc, from, needle, needle_len, forward,
+                                  WP_FALSE, WP_FALSE, out_pos);
 }
 
 /* ------------------------------------------------------------------ */
@@ -868,6 +1099,14 @@ void wp_vimode_init(wp_vimode_state *vs, wp_document *doc, wp_undo_journal *jour
     vs->cmdline_prefix = 0;
     vs->last_search_len = 0;
     vs->last_search_forward = WP_TRUE;
+    vs->subst_old_len = 0;
+    vs->subst_new_len = 0;
+    vs->subst_global = WP_FALSE;
+    vs->subst_ignore_case = WP_FALSE;
+    vs->subst_paragraph = 0;
+    vs->subst_last_paragraph = 0;
+    vs->subst_scan_offset = 0;
+    vs->subst_match = vs->cursor;
     vs->last_error = WP_OK;
     vs->insert_group_open = WP_FALSE;
 }
@@ -892,6 +1131,8 @@ wp_vimode_action wp_vimode_feed_key(wp_vimode_state *vs, wp_key_event key)
         return feed_visual(vs, key);
     case WP_VIMODE_COMMAND:
         return feed_command(vs, key);
+    case WP_VIMODE_SUBSTITUTE_CONFIRM:
+        return feed_substitute_confirm(vs, key);
     default: {
         wp_vimode_action a;
         a.kind = (u8)WP_VIACTION_NONE;
@@ -918,7 +1159,10 @@ void wp_vimode_get_status_text(const wp_vimode_state *vs, char *out, u32 out_cap
     case WP_VIMODE_INSERT: mode_name = "INSERT"; break;
     case WP_VIMODE_VISUAL: mode_name = "VISUAL"; break;
     case WP_VIMODE_VISUAL_LINE: mode_name = "VISUAL LINE"; break;
-    case WP_VIMODE_COMMAND: mode_name = (vs->cmdline_prefix == '/') ? "SEARCH" : "COMMAND"; break;
+    case WP_VIMODE_COMMAND:
+        mode_name = (vs->cmdline_prefix == '/' || vs->cmdline_prefix == '?') ? "SEARCH" : "COMMAND";
+        break;
+    case WP_VIMODE_SUBSTITUTE_CONFIRM: mode_name = "SUBSTITUTE (y/n/a/q)"; break;
     default: mode_name = ""; break;
     }
 
