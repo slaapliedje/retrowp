@@ -1332,8 +1332,21 @@ Amiga's) must be a genuine HFS disk image, not a plain host directory.
       `FSRead`'s `eofErr`-as-clean-EOF semantics, `GetVInfo` having no
       linkable glue implementation, the shift/mods bug, no-window-
       manager input focus under bare Xvfb): `docs/mac-platform.md`.
-- [ ] T12.2 QuickDraw metrics/render impl of `platform.h`.
+- [x] T12.2 QuickDraw metrics/render impl of `platform.h`.
       AC: On-screen wrap matches engine layout using real Mac fonts.
+      **Met.** Real `GetFNum`/`TextFont`/`TextSize`/`TextFace`/
+      `GetFontInfo`/`TextWidth` metrics, a dedicated always-valid
+      16x16 bitmap-backed measuring `GrafPort` (avoiding the same class
+      of bitmap-less-port memory corruption `metrics_amiga.c` found on
+      Amiga), and an exact `/20`/`*20` twips<->pixel conversion (no DPI
+      query needed -- classic Mac OS's whole QuickDraw coordinate
+      system is built on a 72-DPI convention by design). `draw_document`
+      now paints real `wp_paragraph_relayout` output. A real,
+      100%-reproducible `SIGSEGV` was found and fixed: the smoke test's
+      `main()` never called `InitGraf`/`InitFonts` before this phase
+      added QuickDraw-dependent calls. `wp_mac_layout_selfcheck()`
+      passes on both ROM images; `RETROWP.APPL` still renders and quits
+      cleanly. Full account: `docs/mac-platform.md`.
 - [ ] T12.3 Mac Serial Driver transport hook.
       AC: Same offload features work as on ST/Amiga.
 

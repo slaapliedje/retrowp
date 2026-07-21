@@ -11,4 +11,10 @@
 
 wp_bool wp_mac_file_clipboard_selfcheck(void);
 
+/* Phase 3: proves wp_paragraph_relayout/plat_measure_text/plat_font_open
+   work correctly against real QuickDraw metrics on real target hardware
+   -- see app_shell.c's own comment on wp_mac_layout_selfcheck for what
+   it checks and why. */
+wp_bool wp_mac_layout_selfcheck(void);
+
 #endif /* WP_MAC_APP_SHELL_INTERNAL_H */

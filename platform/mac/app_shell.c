@@ -12,12 +12,14 @@
 #include "app_shell_internal.h"
 #include "docmodel.h"
 #include "strpool.h"
+#include "layout.h"
 #include "format_txt.h"
 #include "editing.h"
 #include "keyevent.h"
 #include "keymap.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "metrics_mac_internal.h"
 
 /* M12 Phase 1: non-UI platform.h seams only (memory/file/clipboard/
    timer) -- no Toolbox window/menu/event loop here yet. Grows into the
@@ -94,6 +96,21 @@ static wp_bool           g_quit;
    parameter). */
 static u8 g_last_ascii = 0;
 
+/* Phase 3: the width (in twips) every paragraph's real
+   wp_paragraph_layout was last built against, plus a "the document
+   itself just changed" flag -- together these tell draw_document below
+   when it must call relayout_document again. Unlike platform/amiga/
+   app_shell.c (whose MUI Area object has no real size until MUI's own
+   layout pass runs), a Mac window's portRect is already known the
+   moment NewWindow returns, so relayout could happen eagerly right
+   after loading a document the way platform/atari/app_shell.c's
+   replace_document does -- this still checks on every draw too, cheap
+   insurance against a real resize (this phase doesn't wire up the
+   window's own grow box, a documented gap, but the check costs
+   nothing and stays correct if that's ever added). */
+static i32 g_content_width_twips = 0;
+static wp_bool g_needs_relayout = WP_TRUE;
+
 static const char g_sample_text[] =
     "RetroWP on Mac Classic (M12 Phase 2)\n"
     "\n"
@@ -103,6 +120,27 @@ static const char g_sample_text[] =
     "\n"
     "Press j/k to move the cursor down/up, i to enter Insert mode,\n"
     "Esc to return to Normal mode, :q Enter to quit.\n";
+
+/* Relayouts every paragraph at content_width_twips, mirroring platform/
+   amiga/app_shell.c's relayout_document exactly -- see docs/layout.md.
+   Records the width used so draw_document can tell a real resize
+   (width changed) apart from "nothing to do" without re-relayouting
+   every single redraw. */
+static void relayout_document(i32 content_width_twips)
+{
+    u32 si, pi;
+
+    g_content_width_twips = content_width_twips;
+    for (si = 0; si < g_mac_doc.section_count; si++) {
+        wp_section *sec = wp_document_section_get(&g_mac_doc, si);
+        u32 pc = (sec != NULL) ? sec->para_count : 0;
+
+        for (pi = 0; pi < pc; pi++) {
+            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            wp_paragraph_relayout(&g_mac_doc, para, content_width_twips);
+        }
+    }
+}
 
 static void set_document_from_text(const u8 *utf8, u32 len)
 {
@@ -121,6 +159,7 @@ static void set_document_from_text(const u8 *utf8, u32 len)
     wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id, &g_mac_doc, &g_mac_journal);
     (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_start(&g_mac_doc);
     g_ctx.doc_loaded = WP_TRUE;
+    g_needs_relayout = WP_TRUE; /* new paragraphs -- see this flag's own comment */
 }
 
 static void load_sample_document(void)
@@ -483,21 +522,60 @@ static wp_bool mac_dispatch_key(wp_key_event ev)
     return g_ctx.quit_requested;
 }
 
-/* -- Document rendering: deliberately bypasses plat_draw_text/
-   plat_measure_text entirely (metrics_mac.c's stubs return
-   WP_UNSUPPORTED, unreachable today) via direct QuickDraw calls, same
-   reasoning platform/amiga/app_shell.c's editor_draw gives -- Phase
-   2's real AC is "menu, a document window, vi-mode Normal-mode
-   movement, clean quit," not wrapped layout (Phase 3's job). One raw
-   line per paragraph (its first run(s), truncated), no word wrap. */
+/* -- Document rendering (Phase 3): real wp_paragraph_relayout output,
+   painted through the real plat_draw_text/plat_measure_text seam
+   (metrics_mac.c/draw_mac.c) instead of Phase 2's direct-QuickDraw,
+   one-raw-line-per-paragraph bypass -- mirrors platform/amiga/
+   app_shell.c's own editor_draw rewrite in M9 T9.2. */
 
-#define WP_MAC_LINE_HEIGHT_PX 14
+#define WP_DOC_LEFT_MARGIN_PX  6
+#define WP_DOC_RIGHT_MARGIN_PX 4
+#define WP_DOC_TOP_MARGIN_PX   8
+#define WP_DOC_MIN_CONTENT_PX  20
+
+/* Pure arithmetic behind a line's per-alignment horizontal offset,
+   pulled out of the paint loop exactly the way platform/atari/
+   app_shell.c's atari_align_offset_twips and platform/amiga/
+   app_shell.c's amiga_align_offset_twips both are -- same three-way
+   LEFT/CENTER/RIGHT behavior (JUSTIFY isn't implemented, a documented
+   gap shared with both other backends). Returns a twips offset;
+   callers convert to pixels themselves since the twips<->px ratio is a
+   metrics concern, not an alignment one. */
+static i32 mac_align_offset_twips(u8 align, i32 content_width_twips, i32 line_width_twips)
+{
+    i32 extra_twips = content_width_twips - line_width_twips;
+
+    if (extra_twips <= 0) return 0;
+    if (align == WP_ALIGN_CENTER) return extra_twips / 2;
+    if (align == WP_ALIGN_RIGHT) return extra_twips;
+    return 0;
+}
+
+/* WP_TRUE if (run, offset) falls within [line->start_run,start_offset)
+   .. [line->end_run,end_offset] -- used to find which of a paragraph's
+   real wrapped lines the vi-mode cursor is currently sitting on, now
+   that a paragraph can genuinely be more than one line. Mirrors
+   platform/amiga/app_shell.c's line_contains_pos exactly. */
+static wp_bool line_contains_pos(const wp_line *line, u32 run, u32 offset)
+{
+    if (run < line->start_run || run > line->end_run) return WP_FALSE;
+    if (run == line->start_run && offset < line->start_offset) return WP_FALSE;
+    if (run == line->end_run && offset > line->end_offset) return WP_FALSE;
+    return WP_TRUE;
+}
 
 static void draw_document(WindowPtr w)
 {
+    mac_gc gc;
     Rect r;
     short y;
-    u32 si, pi;
+    i32 content_width_px;
+    i32 content_width_twips;
+    u32 si, pi, li;
+    plat_font *font = NULL;
+    wp_cstyle cached_style = 0;
+    wp_bool have_font = WP_FALSE;
+    i32 ascent_px = 0;
 
     SetPort(w);
     BeginUpdate(w);
@@ -505,46 +583,112 @@ static void draw_document(WindowPtr w)
     r = w->portRect;
     EraseRect(&r);
 
-    if (g_ctx.doc_loaded) {
-        y = (short)(r.top + 16);
-        for (si = 0; si < g_mac_doc.section_count && y <= r.bottom; si++) {
-            wp_section *sec = wp_document_section_get(&g_mac_doc, si);
-            u32 pc = (sec != NULL) ? sec->para_count : 0;
+    if (!g_ctx.doc_loaded) {
+        EndUpdate(w);
+        return;
+    }
 
-            for (pi = 0; pi < pc && y <= r.bottom; pi++) {
-                wp_paragraph *para = wp_section_paragraph_get(sec, pi);
-                char linebuf[256];
-                u32 len = 0;
-                u16 ri;
-                wp_bool is_cursor_line =
-                    (wp_keymap_cursor(&g_ctx)->section == si &&
-                     wp_keymap_cursor(&g_ctx)->paragraph == pi) ? WP_TRUE : WP_FALSE;
+    /* Real per-window pixel width, converted through the SAME twips<->px
+       ratio metrics_mac.c uses for measurement -- Phase 3's real point,
+       "on-screen wrap matches engine layout," only holds if layout and
+       paint agree on this number. Relayout only when it actually
+       changes (a real resize) or the document itself just changed. */
+    content_width_px = (i32)(r.right - r.left) - WP_DOC_LEFT_MARGIN_PX - WP_DOC_RIGHT_MARGIN_PX;
+    if (content_width_px < WP_DOC_MIN_CONTENT_PX) content_width_px = WP_DOC_MIN_CONTENT_PX;
+    content_width_twips = mac_px_to_twips(content_width_px);
 
-                for (ri = 0; ri < para->run_count; ri++) {
-                    wp_run *run = wp_paragraph_run_get(para, ri);
+    if (g_needs_relayout || content_width_twips != g_content_width_twips) {
+        relayout_document(content_width_twips);
+        g_needs_relayout = WP_FALSE;
+    }
+
+    gc.window = w;
+
+    y = (short)(r.top + WP_DOC_TOP_MARGIN_PX);
+    for (si = 0; si < g_mac_doc.section_count && y <= r.bottom; si++) {
+        wp_section *sec = wp_document_section_get(&g_mac_doc, si);
+        u32 pc = (sec != NULL) ? sec->para_count : 0;
+
+        for (pi = 0; pi < pc && y <= r.bottom; pi++) {
+            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            wp_paragraph_layout *layout = (wp_paragraph_layout *)para->layout;
+            const wp_para_style *pstyle = wp_document_pstyle_get(&g_mac_doc, para->style);
+            u8 align = (pstyle != NULL) ? pstyle->align : WP_ALIGN_LEFT;
+            wp_bool is_cursor_para =
+                (wp_keymap_cursor(&g_ctx)->section == si &&
+                 wp_keymap_cursor(&g_ctx)->paragraph == pi) ? WP_TRUE : WP_FALSE;
+            u32 cursor_line_index = 0;
+
+            if (layout == NULL) continue;
+
+            if (is_cursor_para && layout->line_count > 0) {
+                cursor_line_index = layout->line_count - 1; /* fallback: last line */
+                for (li = 0; li < layout->line_count; li++) {
+                    if (line_contains_pos(&layout->lines[li], wp_keymap_cursor(&g_ctx)->run,
+                                           wp_keymap_cursor(&g_ctx)->offset)) {
+                        cursor_line_index = li;
+                        break;
+                    }
+                }
+            }
+
+            for (li = 0; li < layout->line_count && y <= r.bottom; li++) {
+                wp_line *line = &layout->lines[li];
+                char buf[256];
+                u32 buf_len = 0;
+                u32 run_i;
+                i32 x_px = r.left + WP_DOC_LEFT_MARGIN_PX;
+                i32 line_height_px;
+                wp_cstyle line_style = g_mac_doc.default_cstyle;
+
+                x_px += mac_twips_to_px(
+                    mac_align_offset_twips(align, content_width_twips, line->width_twips));
+
+                for (run_i = line->start_run; run_i <= line->end_run && run_i < para->run_count; run_i++) {
+                    wp_run *run = wp_paragraph_run_get(para, (u16)run_i);
                     const u8 *bytes = wp_strpool_get(&g_mac_doc.strings, run->text);
-                    u32 n = run->text.length;
+                    u32 seg_start = (run_i == line->start_run) ? line->start_offset : 0;
+                    u32 seg_end = (run_i == line->end_run) ? line->end_offset : run->text.length;
+                    u32 k;
 
-                    if (len + n > sizeof(linebuf) - 1) n = (u32)sizeof(linebuf) - 1 - len;
-                    memcpy(linebuf + len, bytes, n);
-                    len += n;
+                    line_style = run->style;
+                    for (k = seg_start; k < seg_end && buf_len < sizeof(buf) - 1; k++) {
+                        buf[buf_len++] = (char)bytes[k];
+                    }
                 }
 
-                if (is_cursor_line) {
+                if (!have_font || line_style != cached_style) {
+                    const wp_char_style *cs = wp_document_cstyle_get(&g_mac_doc, line_style);
+                    plat_font_metrics fm;
+
+                    if (cs != NULL) {
+                        if (font != NULL) plat_font_close(font);
+                        plat_font_open((const u8 *)"", 0, cs->size_twips, cs->flags, &font);
+                        plat_font_metrics_get(font, &fm);
+                        ascent_px = mac_twips_to_px(fm.ascent);
+                        cached_style = line_style;
+                        have_font = WP_TRUE;
+                    }
+                }
+
+                if (is_cursor_para && li == cursor_line_index) {
                     Rect mark;
-                    SetRect(&mark, (short)(r.left + 2), (short)(y - 9),
+                    SetRect(&mark, (short)(r.left + 2), (short)(y - ascent_px),
                                     (short)(r.left + 5), (short)(y + 2));
                     PaintRect(&mark);
                 }
 
-                MoveTo((short)(r.left + 10), y);
-                DrawText(linebuf, 0, (short)len);
-
-                y = (short)(y + WP_MAC_LINE_HEIGHT_PX);
+                line_height_px = mac_twips_to_px(line->height_twips);
+                if (buf_len > 0 && font != NULL) {
+                    plat_draw_text((plat_gc *)&gc, font, x_px, y + ascent_px,
+                                    (const u8 *)buf, buf_len, 0, 0, 0);
+                }
+                y = (short)(y + line_height_px);
             }
         }
     }
 
+    if (font != NULL) plat_font_close(font);
     EndUpdate(w);
 }
 
@@ -646,4 +790,48 @@ void app_shell_run(void)
         wp_document_free(&g_mac_doc);
     }
     DisposeWindow(g_win);
+}
+
+/* Phase 3: imports a short multi-word paragraph, relayouts it at a
+   column width deliberately narrow enough to force wrapping, and
+   checks two properties quantitatively through the REAL QuickDraw
+   metrics seam (metrics_mac.c) rather than by eyeballing a screenshot:
+   more than one line results, and every line's measured width stays
+   within the requested column -- the exact mirror of platform/atari/
+   app_shell.c's wp_atari_layout_selfcheck and platform/amiga/
+   app_shell.c's wp_amiga_layout_selfcheck (same fixture text, same
+   900-twip column, same two assertions), proving the same engine code
+   (linebreak.c) behaves correctly against a third, independent
+   plat_font_open/plat_measure_text implementation. */
+wp_bool wp_mac_layout_selfcheck(void)
+{
+    wp_document doc;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_paragraph_layout *layout;
+    static const char text[] = "The quick brown fox jumps over the lazy dog\n";
+    const i32 content_width_twips = 900; /* narrow enough to force >1 line */
+    wp_bool ok = WP_TRUE;
+    u32 i;
+
+    if (format_txt_import((const u8 *)text, (u32)strlen(text), &doc) != WP_OK) return WP_FALSE;
+
+    sec = wp_document_section_get(&doc, 0);
+    para = wp_section_paragraph_get(sec, 0);
+
+    if (wp_paragraph_relayout(&doc, para, content_width_twips) != WP_OK) {
+        wp_document_free(&doc);
+        return WP_FALSE;
+    }
+
+    layout = (wp_paragraph_layout *)para->layout;
+    if (layout == NULL || layout->line_count < 2) ok = WP_FALSE;
+
+    for (i = 0; ok && i < layout->line_count; i++) {
+        if (layout->lines[i].width_twips <= 0) ok = WP_FALSE;
+        if (layout->lines[i].width_twips > content_width_twips) ok = WP_FALSE;
+    }
+
+    wp_document_free(&doc);
+    return ok;
 }

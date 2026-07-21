@@ -570,9 +570,84 @@ is a real, running Toolbox application -- window, menu, vi-mode
 movement and insertion, clean quit all verified on-target via
 screenshots, not just cross-compiled.
 
-**Next**: Phase 3 -- real QuickDraw font metrics/text rendering
-(`CharWidth`/`TextWidth`/`FontInfo` for `plat_measure_text`/
-`plat_font_metrics_get`, `DrawText`/`PaintRect` wired through the real
-seam instead of `app_shell.c`'s own direct-QuickDraw bypass), plus a
-`wp_mac_layout_selfcheck` mirroring `wp_amiga_layout_selfcheck` --
-matching the scope `platform/amiga/app_shell.c`'s own T9.2 covered.
+## Phase 3: real QuickDraw font metrics + wrapped-line rendering
+
+Replaces Phase 2's `plat_font_*` stubs with real QuickDraw metrics
+(`GetFNum`/`TextFont`/`TextSize`/`TextFace`/`GetFontInfo`/`TextWidth`)
+and rewrites `draw_document` to paint real `wp_paragraph_relayout`
+output instead of raw unwrapped paragraph text -- mirrors
+`platform/amiga/app_shell.c`'s own T9.2 exactly.
+
+**Twips-to-pixel conversion needs no DPI query at all**, unlike Atari
+(real per-monitor DPI from `v_opnvwk`) or Amiga (a per-mode tick ratio
+queried from `DisplayInfo`, no physical-DPI primitive existing below
+AmigaOS 3.9): classic Mac OS's whole QuickDraw coordinate system is
+built on a 72-DPI convention by design -- the original 1984 Macintosh's
+9" screen was exactly 72 pixels per inch, deliberately chosen so one
+point (the same unit printer output uses) equals exactly one screen
+pixel. This is architectural, not approximate, and holds across every
+model in this project's target range regardless of a given monitor's
+real physical dot pitch -- so the conversion is an exact `/20`/`*20`
+(twips are 1/20 point), no rounding surprises and no runtime query
+needed.
+
+**A dedicated, always-valid measuring port, never reused for drawing**
+-- `metrics_mac.c` lazily allocates a real, minimally-sized (16x16,
+depth 1) bitmap-backed `GrafPort` via `NewPtr` + `OpenPort` +
+`SetPortBits`, used only for `GetFontInfo`/`TextWidth`. This mirrors
+`metrics_amiga.c`'s own real fix for a genuine on-target memory-
+corruption bug (a bitmap-less measuring `RastPort` corrupting live
+document bytes on that target) -- rather than risk the analogous class
+of bug on Mac by measuring against whatever port happens to be current
+(or none at all, before `app_shell.c`'s own window exists), a real,
+owned, always-valid surface removes the risk by construction. Real
+drawing (`plat_draw_text`/`plat_fill_rect` in `draw_mac.c`) uses the
+actual window's own port instead, via `mac_gc`.
+
+### A real, reproducible SIGSEGV, found by testing, not by inspection
+
+`host/tools/ci_mac.sh` crashed with a 100%-reproducible `SIGSEGV` (same
+faulting instruction both times) the moment `mac_smoke`'s new layout
+selfcheck started exercising real QuickDraw calls. Root cause: `smoke.c`'s
+`main()` never called `InitGraf`/`InitFonts` at all -- Phase 1's smoke
+test only needed File Manager/Scrap Manager calls, neither of which
+needs QuickDraw or the Font Manager initialized, so this had never
+mattered before. `TextFont`/`GetFontInfo`/`TextWidth` (and, per the
+crash, quite possibly `OpenPort` itself) are not safe to call before
+`InitGraf`+`InitFonts` set up their global state -- `app_shell_run()`
+always calls these before anything else, but the smoke test, which
+never opens a real window, had no equivalent minimum until this was
+found and fixed.
+
+### Verified on-target
+
+`wp_mac_layout_selfcheck()` (mirrors `wp_atari_layout_selfcheck`/
+`wp_amiga_layout_selfcheck` exactly: import a short paragraph, relayout
+it at a 900-twip column narrow enough to force wrapping, assert more
+than one line results and every line's measured width stays within the
+column) runs from `host/tools/mac/smoke.c` under BasiliskII --
+`layout: PASS`, reproduced across multiple clean runs on both ROM
+images. `RETROWP.APPL` still renders and quits cleanly with the new
+real-metrics rendering path (verified via screenshot). `host/tools/ci_mac.sh`,
+`make mac-engine-check`, and `make test` (371/371) all stay green.
+
+## Status
+
+**Proven**: Phases 0-3 all closed. The Retro68 + BasiliskII +
+headless-Xvfb pipeline builds and runs real m68k classic Mac code; a
+from-scratch HFS catalog B-tree writer safely injects a permanent
+`Startup Items` launcher; `host/tools/ci_mac.sh` passes repeatedly
+against both ROM images with zero Finder interaction and zero per-run
+disk surgery; `platform/mac/`'s non-UI seams (memory, file I/O,
+clipboard, timer) and its real Toolbox shell (window, menu bar built
+from the action registry, vi-mode editing, clean quit) are all
+on-target-verified; real QuickDraw font metrics and wrapped-line
+rendering replace every stub, verified both quantitatively
+(`wp_mac_layout_selfcheck`) and visually (screenshots of wrapped text).
+
+**Next**: Phase 4 -- the Mac Serial Driver transport hook
+(`transport_mac.c`, opened via `OpenDriver` against `.AIn`/`.AOut`),
+matching Atari's own "serial only, no networking stack" precedent for
+offload transport. Zero changes expected to `offload/transport`,
+`offload_client.c`, or `offload.h` -- the same drop-in-fifth-
+implementation property T6.3 already proved for Atari.
