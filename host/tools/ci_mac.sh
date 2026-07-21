@@ -19,6 +19,13 @@ cd "$(dirname "$0")/../.."
 MAC_RETRO68_TOOLCHAIN="${MAC_RETRO68_TOOLCHAIN:-$HOME/opt/Retro68-build/toolchain/m68k-apple-macos/cmake/retro68.toolchain.cmake}"
 ROM="$MAC_FIXTURE/rom/PERFORMA.ROM"
 
+# build/generated/help_retrowp.h (Phase 5) is a host-cc-generated header
+# shared verbatim with every other backend (gen_help_header.c, driven by
+# the top-level Makefile's own rule) -- built here via plain `make`
+# rather than duplicating that rule in host/tools/mac/CMakeLists.txt,
+# which only ever consumes the result.
+make build/generated/help_retrowp.h >/dev/null
+
 cmake -S host/tools/mac -B build/mac -DCMAKE_TOOLCHAIN_FILE="$MAC_RETRO68_TOOLCHAIN" -G "Unix Makefiles" >/dev/null
 cmake --build build/mac >/dev/null
 

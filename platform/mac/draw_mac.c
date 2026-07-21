@@ -105,21 +105,50 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
     return WP_OK;
 }
 
+/* r,g,b -> nearest 1-bit QuickDraw pattern. PaintRect always fills with
+   the port's CURRENT pen pattern (default black, set once by InitGraf
+   and never otherwise touched by this file) -- a real bug, not a
+   theoretical one, found by testing the help pager on-target: it asks
+   for a WHITE background (0xFF,0xFF,0xFF, platform/common/help_view.c)
+   to clear its viewport, which this function previously painted BLACK
+   regardless, since it ignored r/g/b entirely and always used
+   whatever pattern was already current. The main document body never
+   surfaced this, since it clears its own background via a direct
+   EraseRect call (always white, by QuickDraw's own contract) rather
+   than through this seam -- draw_atari.c's own rgb_to_vdi_color makes
+   the identical luminance-threshold simplification for its 2-tone ST
+   palette; this extends it to a third tier (qd.ltGray) so the status
+   line's/help pager's own gray highlight bars (0xC0,0xC0,0xC0) render
+   distinctly from both pure black and pure white. The pen is always
+   restored to black afterward, since draw_document's own cursor-marker
+   PaintRect call (and any future direct PaintRect caller) assumes that
+   default. */
+static void select_fill_pattern(u8 r, u8 g, u8 b)
+{
+    u32 luminance = (u32)r + (u32)g + (u32)b;
+
+    if (luminance >= 224u * 3u) {
+        PenPat(&qd.white);
+    } else if (luminance >= 96u * 3u) {
+        PenPat(&qd.ltGray);
+    } else {
+        PenPat(&qd.black);
+    }
+}
+
 wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
                           u8 r, u8 g, u8 b)
 {
     mac_gc *mgc = (mac_gc *)gc;
     Rect rect;
 
-    WP_UNUSED(r);
-    WP_UNUSED(g);
-    WP_UNUSED(b);
-
     if (mgc == NULL) return WP_ERR;
 
     SetPort(mgc->window);
     SetRect(&rect, (short)x, (short)y, (short)(x + w), (short)(y + h));
+    select_fill_pattern(r, g, b);
     PaintRect(&rect);
+    PenPat(&qd.black);
     return WP_OK;
 }
 

@@ -21,6 +21,11 @@
 #include "actions.h"
 #include "metrics_mac_internal.h"
 #include "offload.h"
+#include "config.h"
+#include "help_doc.h"
+#include "help_view.h"
+#include "statusline.h"
+#include "help_retrowp.h"
 
 /* Phase 4: the offload endpoint every Tools action and the transport
    selfcheck both target -- ".AIn"/".AOut" (the modem port) at a
@@ -104,6 +109,39 @@ static wp_bool           g_quit;
    keymap.h's own comment on wp_keymap_feed_key's raw_shortcut_byte
    parameter). */
 static u8 g_last_ascii = 0;
+
+/* Phase 5: the help system, reusing platform/common/help_doc.h/
+   help_view.h unchanged -- mirrors platform/amiga/app_shell.c's own
+   g_help_doc/g_help_doc_loaded/g_help_view/g_help_active exactly.
+   g_help_active is a whole separate UI mode: while set,
+   mac_dispatch_key routes every key to wp_help_view_feed_key instead
+   of vi-mode, and draw_document paints the pager instead of the
+   document -- see paint_help_mac() and the g_help_active checks in
+   both. Reachable via F1 (mac_dispatch_key) or the real Help menu
+   action (do_help_contents, below). */
+static wp_help_doc        g_help_doc;
+static wp_bool            g_help_doc_loaded = WP_FALSE;
+static wp_help_view_state g_help_view;
+static wp_bool            g_help_active = WP_FALSE;
+
+/* Phase 5: a small, fixed-size font used ONLY for the status line's own
+   height/drawing -- deliberately independent of the document's current
+   cstyle (which changes per run, per toggle) so the reserved strip's
+   height never shifts underneath the document as the user types.
+   Matches platform/atari/app_shell.c's/platform/amiga/app_shell.c's own
+   WP_ATARI_STATUSLINE_SIZE_TWIPS/WP_AMIGA_HINT_BAR_SIZE_TWIPS choice of
+   160 (8pt) exactly, same reasoning. */
+#define WP_MAC_STATUSLINE_SIZE_TWIPS 160
+#define WP_MAC_HELP_BODY_SIZE_TWIPS  200
+
+/* Phase 5: the config file path -- a bare filename (no volume prefix)
+   resolves via vRefNum 0 to whatever the app's own current/default
+   directory is (the classic Mac equivalent of Amiga's "PROGDIR:", and
+   of a kind with Atari's own fixed boot-volume-root path) -- when
+   launched from the ExtFS share (this project's own CI fixture), that's
+   "Unix:"; for a real double-clicked app on real media, it's wherever
+   the app itself lives. */
+#define WP_MAC_CONFIG_PATH "RetroWP.cfg"
 
 /* Phase 3: the width (in twips) every paragraph's real
    wp_paragraph_layout was last built against, plus a "the document
@@ -327,21 +365,43 @@ static void do_edit_paste(void)
     set_document_from_text(buf, out_len);
 }
 
+/* Phase 5: opens the real help pager at the named node (falling back to
+   node 0 if the name doesn't resolve), mirroring platform/amiga/
+   app_shell.c's own open_help_node exactly. The caller (invoke_backend_
+   action's menu dispatch, or mac_dispatch_key's F1 handling) already
+   triggers an InvalRect afterward -- see both call sites -- so this
+   doesn't force a redraw itself. */
+static void open_help_node(const char *node_name, u32 node_name_len)
+{
+    if (!g_help_doc_loaded) return;
+    {
+        u32 node = wp_help_doc_find_node(&g_help_doc, (const u8 *)node_name, node_name_len);
+        wp_help_view_init(&g_help_view, &g_help_doc, (node != WP_HELP_NODE_NONE) ? node : 0);
+    }
+    g_help_active = WP_TRUE;
+}
+
+static void do_help_contents(void)
+{
+    open_help_node("Main", 4);
+}
+
 static void invoke_backend_action(wp_action_id id)
 {
     switch (id) {
-    case WP_ACT_FILE_OPEN:  do_file_open(); break;
-    case WP_ACT_FILE_SAVE:  do_file_save(); break;
-    case WP_ACT_EDIT_CUT:   do_edit_cut(); break;
-    case WP_ACT_EDIT_PASTE: do_edit_paste(); break;
+    case WP_ACT_FILE_OPEN:     do_file_open(); break;
+    case WP_ACT_FILE_SAVE:     do_file_save(); break;
+    case WP_ACT_EDIT_CUT:      do_edit_cut(); break;
+    case WP_ACT_EDIT_PASTE:    do_edit_paste(); break;
+    case WP_ACT_HELP_CONTENTS: do_help_contents(); break;
     default:
-        /* Tools (Spellcheck/Thesaurus/Grammar/Chat) are out of scope
-           for Phase 2 -- offload-dependent features land with Phase 4
-           (serial transport); a real help viewer is Phase 5
-           (platform/common retrofit), matching how
-           platform/amiga/app_shell.c deferred the identical set of
-           actions in its own T9.1b. A no-op here is an honest, flagged
-           gap, not a crash. */
+        /* Tools (Spellcheck/Thesaurus/Grammar/Chat) remain out of
+           scope -- offload-dependent features beyond the transport
+           seam itself (Phase 4) aren't wired to any UI yet, matching
+           how platform/amiga/app_shell.c's own T9.3 also left
+           Spellcheck as a no-op (a local-dictionary feature, no
+           offload dependency). A no-op here is an honest, flagged gap,
+           not a crash. */
         break;
     }
 }
@@ -511,6 +571,23 @@ static wp_bool mac_dispatch_key(wp_key_event ev)
 {
     wp_keymap_outcome outcome;
 
+    /* Help is a whole separate UI mode (Phase 5): while active, every
+       key goes to wp_help_view_feed_key instead of vi-mode, full stop,
+       until the viewer itself reports a close request (Escape or 'q')
+       -- mirrors platform/atari/app_shell.c's/platform/amiga/
+       app_shell.c's own wp_dispatch_key/amiga_dispatch_key exactly. F1
+       opens it from any mode/state; pressing F1 again while already
+       showing help is a harmless no-op rather than resetting the
+       user's position. */
+    if (g_help_active) {
+        if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
+        return WP_FALSE;
+    }
+    if (ev.special == (u16)WP_KEY_F1) {
+        do_help_contents();
+        return WP_FALSE;
+    }
+
     if (!g_ctx.doc_loaded) return WP_FALSE;
 
     outcome = wp_keymap_feed_key(&g_ctx, ev, g_last_ascii);
@@ -573,11 +650,131 @@ static wp_bool line_contains_pos(const wp_line *line, u32 run, u32 offset)
     return WP_TRUE;
 }
 
+/* Phase 5: shared by the status bar and the help hint bar/body text
+   below -- both need "how tall is one line of some font, in pixels"
+   from real plat_font_metrics_get, never a hardcoded guess. Mirrors
+   platform/atari/app_shell.c's/platform/amiga/app_shell.c's own
+   font_line_height_px/amiga_font_line_height_px exactly. */
+static i32 mac_font_line_height_px(i32 size_twips)
+{
+    plat_font *font;
+    plat_font_metrics fm;
+    i32 h_px;
+
+    if (plat_font_open((const u8 *)"", 0, size_twips, 0, &font) != WP_OK) return 0;
+    plat_font_metrics_get(font, &fm);
+    h_px = mac_twips_to_px(fm.ascent + fm.descent + fm.leading);
+    plat_font_close(font);
+    return h_px;
+}
+
+static i32 statusline_height_px(void)
+{
+    return mac_font_line_height_px(WP_MAC_STATUSLINE_SIZE_TWIPS);
+}
+
+/* Paints the reserved bottom strip showing the active keymap scheme's
+   current mode (and, in Command-line mode, the pending buffer being
+   typed) -- see platform/common/statusline.h. Mirrors platform/atari/
+   app_shell.c's paint_status_line/platform/amiga/app_shell.c's own
+   equivalent exactly: always repaints in full, a no-op if no document
+   is loaded or the window is too short to fit the bar. */
+static void paint_status_line_mac(WindowPtr w, Rect full_rect, i32 bar_h_px)
+{
+    mac_gc gc;
+    plat_font *font;
+    wp_vi_status_view view;
+    char mode_buf[40];
+    Rect bar;
+
+    if (!g_ctx.doc_loaded || bar_h_px <= 0 || bar_h_px > (i32)(full_rect.bottom - full_rect.top)) return;
+
+    gc.window = w;
+
+    SetRect(&bar, full_rect.left, (short)(full_rect.bottom - bar_h_px),
+                  full_rect.right, full_rect.bottom);
+
+    if (plat_font_open((const u8 *)"", 0, WP_MAC_STATUSLINE_SIZE_TWIPS, 0, &font) == WP_OK) {
+        /* wp_keymap_get_status_view already folds the Command-line
+           buffer into its one composed mode string and leaves
+           pending_count/pending_cmd at 0/NULL -- see its own header
+           comment for why (no per-mode accessor exists yet that
+           wouldn't be more confusing shown alone; a documented, minor
+           gap shared with every other backend, not fixed here). */
+        wp_keymap_get_status_view(&g_ctx, mode_buf, (u32)sizeof(mode_buf), &view);
+
+        wp_statusline_paint((plat_gc *)&gc, font, (i32)bar.left, (i32)bar.top,
+                             (i32)(bar.right - bar.left), bar_h_px, &view);
+        plat_font_close(font);
+    }
+}
+
+/* Paints the help pager full-window (replacing the document body
+   entirely while g_help_active is set) plus a small fixed hint bar
+   along the bottom, reusing wp_statusline_paint for that hint exactly
+   the way platform/atari/app_shell.c's/platform/amiga/app_shell.c's own
+   paint_help does. */
+static void paint_help_mac(WindowPtr w, Rect full_rect)
+{
+    mac_gc gc;
+    plat_font *body_font;
+    i32 hint_bar_h_px, body_h_px, total_h_px;
+    i32 x_px, y_px, w_px;
+
+    gc.window = w;
+
+    x_px = full_rect.left;
+    y_px = full_rect.top;
+    w_px = (i32)(full_rect.right - full_rect.left);
+    total_h_px = (i32)(full_rect.bottom - full_rect.top);
+
+    hint_bar_h_px = statusline_height_px();
+    if (hint_bar_h_px > total_h_px) hint_bar_h_px = 0;
+    body_h_px = total_h_px - hint_bar_h_px;
+    if (body_h_px < 0) body_h_px = 0;
+
+    if (plat_font_open((const u8 *)"", 0, WP_MAC_HELP_BODY_SIZE_TWIPS, 0, &body_font) == WP_OK) {
+        /* wp_help_view_paint positions text by BASELINE (plat_draw_text's
+           own convention) -- ascent_px tells it where row 0's baseline
+           sits below the viewport's own top edge (see help_view.h's own
+           comment for the real bug this fixes if omitted). */
+        plat_font_metrics body_fm;
+        i32 body_ascent_px = 0;
+        i32 body_line_h_px = mac_font_line_height_px(WP_MAC_HELP_BODY_SIZE_TWIPS);
+
+        if (plat_font_metrics_get(body_font, &body_fm) == WP_OK) {
+            body_ascent_px = mac_twips_to_px(body_fm.ascent);
+        }
+        wp_help_view_paint((plat_gc *)&gc, body_font, x_px, y_px, w_px, body_h_px,
+                            mac_px_to_twips(w_px), body_line_h_px, body_ascent_px, &g_help_view);
+        plat_font_close(body_font);
+    }
+
+    if (hint_bar_h_px > 0) {
+        plat_font *hint_font;
+        wp_vi_status_view view;
+        static const u8 hint[] = "HELP -- j/k select, Enter follow, Backspace back, Esc/q close";
+
+        if (plat_font_open((const u8 *)"", 0, WP_MAC_STATUSLINE_SIZE_TWIPS, 0, &hint_font) == WP_OK) {
+            view.mode_label_utf8 = hint;
+            view.mode_label_len = (u32)(sizeof(hint) - 1);
+            view.pending_count = 0;
+            view.pending_cmd_utf8 = NULL;
+            view.pending_cmd_len = 0;
+            wp_statusline_paint((plat_gc *)&gc, hint_font, x_px, y_px + total_h_px - hint_bar_h_px,
+                                 w_px, hint_bar_h_px, &view);
+            plat_font_close(hint_font);
+        }
+    }
+}
+
 static void draw_document(WindowPtr w)
 {
     mac_gc gc;
     Rect r;
     short y;
+    short doc_bottom;
+    i32 bar_h_px;
     i32 content_width_px;
     i32 content_width_twips;
     u32 si, pi, li;
@@ -592,10 +789,25 @@ static void draw_document(WindowPtr w)
     r = w->portRect;
     EraseRect(&r);
 
+    if (g_help_active) {
+        paint_help_mac(w, r);
+        EndUpdate(w);
+        return;
+    }
+
     if (!g_ctx.doc_loaded) {
         EndUpdate(w);
         return;
     }
+
+    /* Reserve a bottom strip for the status line (Phase 5), the same
+       way platform/atari/app_shell.c's/platform/amiga/app_shell.c's own
+       redraw_window does -- the document body lays out and paints only
+       within the reduced area; the strip itself is painted separately,
+       below, against the FULL window rect. */
+    bar_h_px = statusline_height_px();
+    if (bar_h_px > (i32)(r.bottom - r.top)) bar_h_px = 0;
+    doc_bottom = (short)(r.bottom - bar_h_px);
 
     /* Real per-window pixel width, converted through the SAME twips<->px
        ratio metrics_mac.c uses for measurement -- Phase 3's real point,
@@ -614,11 +826,11 @@ static void draw_document(WindowPtr w)
     gc.window = w;
 
     y = (short)(r.top + WP_DOC_TOP_MARGIN_PX);
-    for (si = 0; si < g_mac_doc.section_count && y <= r.bottom; si++) {
+    for (si = 0; si < g_mac_doc.section_count && y <= doc_bottom; si++) {
         wp_section *sec = wp_document_section_get(&g_mac_doc, si);
         u32 pc = (sec != NULL) ? sec->para_count : 0;
 
-        for (pi = 0; pi < pc && y <= r.bottom; pi++) {
+        for (pi = 0; pi < pc && y <= doc_bottom; pi++) {
             wp_paragraph *para = wp_section_paragraph_get(sec, pi);
             wp_paragraph_layout *layout = (wp_paragraph_layout *)para->layout;
             const wp_para_style *pstyle = wp_document_pstyle_get(&g_mac_doc, para->style);
@@ -641,7 +853,7 @@ static void draw_document(WindowPtr w)
                 }
             }
 
-            for (li = 0; li < layout->line_count && y <= r.bottom; li++) {
+            for (li = 0; li < layout->line_count && y <= doc_bottom; li++) {
                 wp_line *line = &layout->lines[li];
                 char buf[256];
                 u32 buf_len = 0;
@@ -698,6 +910,9 @@ static void draw_document(WindowPtr w)
     }
 
     if (font != NULL) plat_font_close(font);
+
+    paint_status_line_mac(w, r, bar_h_px);
+
     EndUpdate(w);
 }
 
@@ -712,6 +927,7 @@ void app_shell_run(void)
     Rect winRect;
     MenuHandle appleMenu;
     EventRecord e;
+    wp_config cfg;
 
     InitGraf(&qd.thePort);
     InitFonts();
@@ -722,8 +938,24 @@ void app_shell_run(void)
     InitCursor();
     FlushEvents(everyEvent, 0);
 
-    wp_app_ctx_init(&g_ctx, (wp_keymap_id)WP_KEYMAP_VI, &g_mac_doc, &g_mac_journal);
+    /* Phase 5: config-driven keymap selection (docs/keymaps.md) --
+       WP_MAC_CONFIG_PATH missing or unreadable leaves cfg.keymap_id at
+       its documented default (WP_KEYMAP_VI), matching every other
+       backend's own zero-config behavior exactly. */
+    wp_config_load(WP_MAC_CONFIG_PATH, &cfg);
+    wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_mac_doc, &g_mac_journal);
     load_sample_document();
+
+    /* Phase 5: parsed ONCE at startup from the generated
+       g_help_source_retrowp array (build/generated/help_retrowp.h,
+       shared verbatim with every other backend -- produced from
+       docs/help/retrowp.help by host/tools/gen_help_header.c, see
+       docs/help.md). If parsing ever fails, g_help_doc_loaded stays
+       WP_FALSE and F1/Help are a silent no-op rather than a crash
+       (open_help_node's own guard). */
+    g_help_doc_loaded = (wp_bool)(wp_help_doc_parse(g_help_source_retrowp,
+                                                     (u32)g_help_source_retrowp_len,
+                                                     &g_help_doc) == WP_OK);
 
     /* "\024" is the Apple-logo character (0x14) -- the Menu Manager's
        own documented convention for recognizing the Apple menu. */
@@ -798,6 +1030,7 @@ void app_shell_run(void)
         wp_keymap_free(&g_ctx);
         wp_document_free(&g_mac_doc);
     }
+    if (g_help_doc_loaded) wp_help_doc_free(&g_help_doc);
     DisposeWindow(g_win);
 }
 
@@ -935,4 +1168,94 @@ wp_bool wp_mac_transport_selfcheck(void)
     if (offload_available()) ok = WP_FALSE;
 
     return ok;
+}
+
+/* Phase 5: proves wp_config_load resolves all five real keymap= values
+   against a REAL file at WP_MAC_CONFIG_PATH, written and read through
+   real File Manager I/O -- mirrors platform/atari/app_shell.c's/
+   platform/amiga/app_shell.c's own wp_atari_config_selfcheck/
+   wp_amiga_config_selfcheck exactly (host/tests/test_config.c already
+   proves the string-matching logic itself; this proves the real
+   on-target file round trip). Leaves the fixture exactly as clean as
+   it found it. */
+wp_bool wp_mac_config_selfcheck(void)
+{
+    static const struct { const char *content; u8 expected; } cases[] = {
+        { "keymap=vim\n", (u8)WP_KEYMAP_VI },
+        { "keymap=wordstar\n", (u8)WP_KEYMAP_WORDSTAR },
+        { "keymap=emacs\n", (u8)WP_KEYMAP_EMACS },
+        { "keymap=wordperfect\n", (u8)WP_KEYMAP_WORDPERFECT },
+        { "keymap=msword\n", (u8)WP_KEYMAP_MSWORD }
+    };
+    wp_bool ok = WP_TRUE;
+    u32 i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        plat_file *f;
+        wp_config cfg;
+
+        if (plat_file_open(WP_MAC_CONFIG_PATH, PLAT_FILE_WRITE, &f) != WP_OK) { ok = WP_FALSE; continue; }
+        if (plat_file_write(f, (const u8 *)cases[i].content, (u32)strlen(cases[i].content)) != WP_OK) ok = WP_FALSE;
+        plat_file_close(f);
+
+        wp_config_load(WP_MAC_CONFIG_PATH, &cfg);
+        if (cfg.keymap_id != cases[i].expected) ok = WP_FALSE;
+    }
+
+    plat_file_delete(WP_MAC_CONFIG_PATH);
+    return ok;
+}
+
+/* Phase 5: proves the help system's non-blocking pieces against the
+   REAL compiled-in help content and REAL QuickDraw font metrics,
+   mirroring platform/atari/app_shell.c's/platform/amiga/app_shell.c's
+   own wp_atari_help_selfcheck/wp_amiga_help_selfcheck exactly (same
+   fixture text, same two assertions). Deliberately does NOT call
+   wp_help_view_paint or actually open the pager (F1) -- same no-real-
+   window/no-blocking-call boundary every other selfcheck in this file
+   respects. What IS real and worth proving here: the parser accepts
+   the shipped content and the "Main" node resolves, and
+   wp_help_wrap_line -- the greedy word-wrap algorithm the pager relies
+   on -- runs correctly against a REAL QuickDraw-measured font rather
+   than host's simplified fake-monospace one. */
+#define WP_MAC_HELP_SELFCHECK_MAX_ROWS 8
+
+wp_bool wp_mac_help_selfcheck(void)
+{
+    wp_help_doc doc;
+    plat_font *font;
+    u32 starts[WP_MAC_HELP_SELFCHECK_MAX_ROWS];
+    u32 lens[WP_MAC_HELP_SELFCHECK_MAX_ROWS];
+    u32 row_count;
+    static const char sample[] =
+        "RetroWP wraps this sentence across more than one real Mac QuickDraw-measured row.";
+
+    if (wp_help_doc_parse(g_help_source_retrowp, (u32)g_help_source_retrowp_len, &doc) != WP_OK) {
+        return WP_FALSE;
+    }
+    if (doc.node_count == 0 ||
+        wp_help_doc_find_node(&doc, (const u8 *)"Main", 4) == WP_HELP_NODE_NONE) {
+        wp_help_doc_free(&doc);
+        return WP_FALSE;
+    }
+    wp_help_doc_free(&doc);
+
+    if (plat_font_open((const u8 *)"", 0, WP_MAC_HELP_BODY_SIZE_TWIPS, 0, &font) != WP_OK) {
+        return WP_FALSE;
+    }
+    /* A narrow column forces real wrapping (not just a single row) --
+       proves more than "it returned something" against real
+       measurement. */
+    row_count = wp_help_wrap_line(font, (const u8 *)sample, (u32)strlen(sample), 3000,
+                                   starts, lens, WP_MAC_HELP_SELFCHECK_MAX_ROWS);
+    plat_font_close(font);
+
+    if (row_count < 2 || row_count > WP_MAC_HELP_SELFCHECK_MAX_ROWS) return WP_FALSE;
+    {
+        u32 i;
+        for (i = 0; i < row_count; i++) {
+            if (lens[i] == 0) return WP_FALSE; /* every row must carry real content */
+        }
+    }
+    return WP_TRUE;
 }

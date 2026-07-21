@@ -23,4 +23,15 @@ wp_bool wp_mac_layout_selfcheck(void);
    checks, why, and what it deliberately does not. */
 wp_bool wp_mac_transport_selfcheck(void);
 
+/* Phase 5: proves wp_config_load resolves all five real keymap= values
+   against a real on-target file -- see app_shell.c's own comment on
+   wp_mac_config_selfcheck for what it checks and why. */
+wp_bool wp_mac_config_selfcheck(void);
+
+/* Phase 5: proves the help system's non-blocking pieces against the
+   real compiled-in help content and real QuickDraw font metrics -- see
+   app_shell.c's own comment on wp_mac_help_selfcheck for what it checks
+   and why. */
+wp_bool wp_mac_help_selfcheck(void);
+
 #endif /* WP_MAC_APP_SHELL_INTERNAL_H */

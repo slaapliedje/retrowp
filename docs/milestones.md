@@ -1368,6 +1368,26 @@ Amiga's) must be a genuine HFS disk image, not a plain host directory.
       linkable glue -- worked around via the raw `PBKillIOSync`
       parameter-block call. Full account: `docs/mac-platform.md`.
 
+Beyond the plan's original three tasks, this milestone also delivered a
+`platform/common` retrofit (Phase 5): config-driven keymap-scheme
+selection (`WP_MAC_CONFIG_PATH`, a bare filename resolving via vRefNum 0
+-- the real Mac equivalent of Amiga's `PROGDIR:` convention), a
+persistent status line (`wp_statusline_paint`, reserved off the bottom
+of the document view exactly like both other backends), and the real
+help pager (F1 or the Help menu, over the same compiled-in
+`docs/help/retrowp.help` content every backend ships). A real on-target
+rendering bug was found and fixed along the way: `draw_mac.c`'s
+`plat_fill_rect` ignored its requested color entirely and always filled
+with the port's current (black) pen pattern -- invisible on the
+document body (which clears via a direct `EraseRect` instead) but a
+real, solid-black, no-visible-text help pager until fixed via a real
+luminance-threshold pattern selection extending `draw_atari.c`'s own
+2-tone approach to a third (gray) tier. `wp_mac_config_selfcheck`/
+`wp_mac_help_selfcheck` both pass via `host/tools/ci_mac.sh`; verified
+visually via real screenshots (status line showing `NORMAL`, the help
+pager showing real linked content and its hint bar, both closing/
+quitting cleanly). Full account: `docs/mac-platform.md`.
+
 Artifact target (not yet reached): Mac build "indistinguishable by
 function," `engine/`/`services/` unchanged -- the same bar M9 met for
 Amiga.

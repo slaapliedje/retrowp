@@ -63,6 +63,16 @@ int main(void)
     strcpy(buf + pos, line);
     pos += (u32)strlen(line);
 
+    ok = wp_mac_config_selfcheck();
+    line = ok ? "config: PASS\n" : "config: FAIL\n";
+    strcpy(buf + pos, line);
+    pos += (u32)strlen(line);
+
+    ok = wp_mac_help_selfcheck();
+    line = ok ? "help: PASS\n" : "help: FAIL\n";
+    strcpy(buf + pos, line);
+    pos += (u32)strlen(line);
+
     report(buf);
 
     ExitToShell();

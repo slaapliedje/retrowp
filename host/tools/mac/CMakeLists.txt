@@ -33,17 +33,33 @@ list(FILTER RETROWP_MAC_PLATFORM_SRC EXCLUDE REGEX ".*/main\\.c$")
 file(GLOB RETROWP_ENGINE_SRC ${RETROWP_ROOT}/engine/src/*.c)
 file(GLOB RETROWP_TRANSPORT_SRC ${RETROWP_ROOT}/offload/transport/*.c)
 
+# config.c/help_doc.c/help_view.c/statusline.c (Phase 5): the retrofit
+# that wires config-driven keymap selection, the help pager, and the
+# status line into app_shell.c -- matching ATARI_COMMON_OBJ/
+# AMIGA_COMMON_OBJ's own membership in the top-level Makefile.
 set(RETROWP_COMMON_SRC
     ${RETROWP_ROOT}/platform/common/actions.c
     ${RETROWP_ROOT}/platform/common/app_ctx.c
     ${RETROWP_ROOT}/platform/common/keymap.c
+    ${RETROWP_ROOT}/platform/common/config.c
+    ${RETROWP_ROOT}/platform/common/help_doc.c
+    ${RETROWP_ROOT}/platform/common/help_view.c
+    ${RETROWP_ROOT}/platform/common/statusline.c
 )
 
+# build/generated/help_retrowp.h (Phase 5) is produced by the top-level
+# Makefile's own gen_help_header rule from docs/help/retrowp.help --
+# `make build/generated/help_retrowp.h` (run by host/tools/ci_mac.sh
+# before invoking cmake) must have already generated it once; this
+# CMake project only ever consumes it as an ordinary generated header,
+# the same relationship ATARI_INCLUDES/AMIGA_INCLUDES's own -I$(GENERATED)
+# has to it in the top-level Makefile.
 set(RETROWP_INCLUDES
     ${RETROWP_ROOT}/engine/include
     ${RETROWP_ROOT}/platform/mac
     ${RETROWP_ROOT}/platform/common
     ${RETROWP_ROOT}/offload/transport
+    ${RETROWP_ROOT}/build/generated
 )
 
 # mac_smoke: rebuilt every CI run, copied fresh onto the ExtFS share as
