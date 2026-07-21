@@ -94,6 +94,17 @@ wp_pos wp_pos_doc_end(const wp_document *doc)
     }
 }
 
+wp_pos wp_pos_clamp_to_document(const wp_document *doc, wp_pos pos)
+{
+    if (doc->section_count == 0) return wp_pos_doc_start(doc);
+    if (pos.section >= doc->section_count) return wp_pos_doc_end(doc);
+    {
+        const wp_section *sec = &doc->sections[pos.section];
+        if (sec->para_count == 0 || pos.paragraph >= sec->para_count) return wp_pos_doc_end(doc);
+    }
+    return pos;
+}
+
 wp_pos wp_pos_next(const wp_document *doc, wp_pos pos)
 {
     const wp_section *sec;

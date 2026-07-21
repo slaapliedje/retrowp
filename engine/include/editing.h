@@ -17,6 +17,18 @@
 wp_pos wp_pos_doc_start(const wp_document *doc);
 wp_pos wp_pos_doc_end(const wp_document *doc);
 
+/* Returns pos unchanged if it still names a valid (section, paragraph)
+   pair in doc, or wp_pos_doc_end(doc)/wp_pos_doc_start(doc) otherwise
+   (doc_end if pos.section is itself out of range or pos.paragraph is
+   out of range within a still-valid section; doc_start only if doc has
+   no sections at all). Does NOT validate run/offset within an otherwise
+   valid paragraph -- same scope vimode.c's own pre-M10 clamp_cursor
+   always had, promoted here verbatim (not tightened) once a second
+   scheme (Emacs, M10 Phase 3) needed the exact same "is the cursor
+   still inside the document after an edit that may have shrunk it
+   (e.g. undo)" check. */
+wp_pos wp_pos_clamp_to_document(const wp_document *doc, wp_pos pos);
+
 /* Steps pos forward/backward by exactly one codepoint, crossing run,
    paragraph, and section boundaries as needed. Clamps at the start/end
    of the document -- repeated calls at a boundary keep returning the

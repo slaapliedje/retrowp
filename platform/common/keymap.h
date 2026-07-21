@@ -6,6 +6,7 @@
 #include "keyevent.h"
 #include "vimode.h"
 #include "wordstar.h"
+#include "emacs.h"
 #include "statusline.h"
 
 /* M10: switchable keybinding layouts (WordStar/WordPerfect/Emacs/MS Word
@@ -26,18 +27,20 @@ struct wp_app_ctx;
 typedef enum {
     WP_KEYMAP_VI = 0,
     WP_KEYMAP_WORDSTAR,
+    WP_KEYMAP_EMACS,
     WP_KEYMAP_COUNT
-    /* WordPerfect/Emacs/MS Word arms are added one at a time, each in
-       its own milestone phase (docs/keymaps.md) -- see wp_keymap_state's
-       own comment for why this and the union grow together, one arm per
+    /* WordPerfect/MS Word arms are added one at a time, each in its own
+       milestone phase (docs/keymaps.md) -- see wp_keymap_state's own
+       comment for why this and the union grow together, one arm per
        phase, not all four up front. */
 } wp_keymap_id;
 
 typedef union {
     wp_vimode_state vi;
     wp_wordstar_state ws;
-    /* Future arms (wordperfect/emacs/msword) are added here as each
-       scheme's own phase lands -- see wp_keymap_id's own comment. Every
+    wp_emacs_state em;
+    /* Future arms (wordperfect/msword) are added here as each scheme's
+       own phase lands -- see wp_keymap_id's own comment. Every
        arm must keep its OWN cursor/doc/journal fields (mirroring
        wp_vimode_state's shape exactly, not hoisted out to wp_app_ctx),
        so each stays independently host-testable with no wp_app_ctx in

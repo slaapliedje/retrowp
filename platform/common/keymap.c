@@ -16,6 +16,9 @@ void wp_keymap_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
     case WP_KEYMAP_WORDSTAR:
         wp_wordstar_init(&ctx->km.ws, doc, journal);
         break;
+    case WP_KEYMAP_EMACS:
+        wp_emacs_init(&ctx->km.em, doc, journal);
+        break;
     case WP_KEYMAP_VI:
     default: /* an unrecognized id (should not happen -- wp_config_load
                 already clamps to a real value) falls back to vi-mode
@@ -32,6 +35,9 @@ void wp_keymap_free(wp_app_ctx *ctx)
     case WP_KEYMAP_WORDSTAR:
         /* Owns no heap memory (no register/kill-ring) -- see
            wordstar.h's own comment on why no wp_wordstar_free exists. */
+        break;
+    case WP_KEYMAP_EMACS:
+        wp_emacs_free(&ctx->km.em);
         break;
     case WP_KEYMAP_VI:
     default:
@@ -169,11 +175,74 @@ static wp_keymap_outcome feed_key_ws(wp_app_ctx *ctx, wp_key_event ev)
     return outcome;
 }
 
+/* Same "no free pass" reasoning as WordStar's own feed_key_ws (see its
+   comment) -- raw_shortcut_byte is unused here too, deliberately: this
+   scheme is fully responsible for every wp_action_id it wants to
+   expose (C-x C-s/C-f/C-c, C-c b/i/u), and real Emacs itself defines
+   meanings for much of the Ctrl-key space this app's own shortcut
+   table also uses (C-b/C-p/C-n/C-a/C-e/... are all real Emacs motion
+   commands, not free for an app shortcut to claim). */
+static wp_keymap_outcome feed_key_em(wp_app_ctx *ctx, wp_key_event ev)
+{
+    wp_emacs_action_kind action;
+    wp_keymap_outcome outcome;
+    wp_bool will_insert;
+
+    /* Matches wp_emacs_feed_key's own exact condition for "this
+       keystroke will insert a plain character" -- computed BEFORE the
+       call, same reasoning feed_key_ws's own comment gives. */
+    will_insert = (wp_bool)(ctx->km.em.pending_prefix == 0 && !ctx->km.em.pending_meta &&
+                             ev.special == (u16)WP_KEY_NONE &&
+                             ev.mods == 0 && ev.codepoint >= 0x20);
+
+    action = wp_emacs_feed_key(&ctx->km.em, ev);
+
+    outcome.kind = (u8)WP_KEYMAP_RESULT_NONE;
+    outcome.action_id = 0;
+    outcome.inserted_char = will_insert;
+
+    switch (action) {
+    case WP_EMACSACTION_QUIT:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_QUIT;
+        break;
+    case WP_EMACSACTION_SAVE:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FILE_SAVE;
+        break;
+    case WP_EMACSACTION_OPEN:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FILE_OPEN;
+        break;
+    case WP_EMACSACTION_FORMAT_BOLD:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FORMAT_BOLD;
+        break;
+    case WP_EMACSACTION_FORMAT_ITALIC:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FORMAT_ITALIC;
+        break;
+    case WP_EMACSACTION_FORMAT_UNDERLINE:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FORMAT_UNDERLINE;
+        break;
+    case WP_EMACSACTION_BEEP:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_BEEP;
+        break;
+    case WP_EMACSACTION_NONE:
+    default:
+        break;
+    }
+
+    return outcome;
+}
+
 wp_keymap_outcome wp_keymap_feed_key(wp_app_ctx *ctx, wp_key_event ev, u8 raw_shortcut_byte)
 {
     switch ((wp_keymap_id)ctx->keymap_id) {
     case WP_KEYMAP_WORDSTAR:
         return feed_key_ws(ctx, ev);
+    case WP_KEYMAP_EMACS:
+        return feed_key_em(ctx, ev);
     case WP_KEYMAP_VI:
     default:
         return feed_key_vi(ctx, ev, raw_shortcut_byte);
@@ -185,6 +254,8 @@ wp_pos *wp_keymap_cursor(wp_app_ctx *ctx)
     switch ((wp_keymap_id)ctx->keymap_id) {
     case WP_KEYMAP_WORDSTAR:
         return &ctx->km.ws.cursor;
+    case WP_KEYMAP_EMACS:
+        return &ctx->km.em.cursor;
     case WP_KEYMAP_VI:
     default:
         return &ctx->km.vi.cursor;
@@ -201,6 +272,18 @@ void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,
            simplification of something that would otherwise vary. */
         if (buf_cap > 0) {
             const char *label = "WORDSTAR";
+            u32 n = 0;
+            while (label[n] != '\0' && n + 1 < buf_cap) { buf[n] = label[n]; n++; }
+            buf[n] = '\0';
+        }
+        break;
+    case WP_KEYMAP_EMACS:
+        /* Same reasoning as WordStar's own fixed label -- Emacs is
+           non-modal too, and its "state" (pending prefix/meta) has no
+           accessor exposed separately yet, matching every other
+           scheme's own pending_count/pending_cmd gap noted below. */
+        if (buf_cap > 0) {
+            const char *label = "EMACS";
             u32 n = 0;
             while (label[n] != '\0' && n + 1 < buf_cap) { buf[n] = label[n]; n++; }
             buf[n] = '\0';

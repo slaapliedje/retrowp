@@ -115,6 +115,28 @@ void test_wordstar_unbound_prefix_subkey_beeps(void);
 void test_wordstar_format_prefix_returns_correct_kinds(void);
 void test_wordstar_no_leaks(void);
 
+/* test_emacs.c */
+void test_emacs_basic_char_and_line_motion(void);
+void test_emacs_line_start_and_end(void);
+void test_emacs_meta_word_motion_via_alt_bit(void);
+void test_emacs_meta_via_escape_prefix_fallback(void);
+void test_emacs_meta_doc_start_and_end(void);
+void test_emacs_plain_typing_is_non_modal(void);
+void test_emacs_ctrl_d_and_backspace_delete(void);
+void test_emacs_meta_d_kills_word_forward_and_ctrl_y_yanks(void);
+void test_emacs_meta_backspace_kills_word_backward(void);
+void test_emacs_ctrl_k_kills_to_line_end_then_merges_paragraph(void);
+void test_emacs_mark_and_kill_region(void);
+void test_emacs_kill_region_without_mark_beeps(void);
+void test_emacs_meta_w_copies_region_without_moving_cursor(void);
+void test_emacs_exchange_point_and_mark(void);
+void test_emacs_ctrl_x_prefix_save_open_quit(void);
+void test_emacs_ctrl_x_u_undoes(void);
+void test_emacs_ctrl_c_prefix_format_bindings(void);
+void test_emacs_ctrl_g_cancels_pending_prefix(void);
+void test_emacs_unbound_chord_beeps(void);
+void test_emacs_no_leaks(void);
+
 /* test_actions.c */
 void test_actions_find_by_id(void);
 void test_actions_find_by_shortcut(void);
@@ -419,6 +441,27 @@ static const test_case g_cases[] = {
     { "wordstar_unbound_prefix_subkey_beeps", test_wordstar_unbound_prefix_subkey_beeps },
     { "wordstar_format_prefix_returns_correct_kinds", test_wordstar_format_prefix_returns_correct_kinds },
     { "wordstar_no_leaks", test_wordstar_no_leaks },
+
+    { "emacs_basic_char_and_line_motion", test_emacs_basic_char_and_line_motion },
+    { "emacs_line_start_and_end", test_emacs_line_start_and_end },
+    { "emacs_meta_word_motion_via_alt_bit", test_emacs_meta_word_motion_via_alt_bit },
+    { "emacs_meta_via_escape_prefix_fallback", test_emacs_meta_via_escape_prefix_fallback },
+    { "emacs_meta_doc_start_and_end", test_emacs_meta_doc_start_and_end },
+    { "emacs_plain_typing_is_non_modal", test_emacs_plain_typing_is_non_modal },
+    { "emacs_ctrl_d_and_backspace_delete", test_emacs_ctrl_d_and_backspace_delete },
+    { "emacs_meta_d_kills_word_forward_and_ctrl_y_yanks", test_emacs_meta_d_kills_word_forward_and_ctrl_y_yanks },
+    { "emacs_meta_backspace_kills_word_backward", test_emacs_meta_backspace_kills_word_backward },
+    { "emacs_ctrl_k_kills_to_line_end_then_merges_paragraph", test_emacs_ctrl_k_kills_to_line_end_then_merges_paragraph },
+    { "emacs_mark_and_kill_region", test_emacs_mark_and_kill_region },
+    { "emacs_kill_region_without_mark_beeps", test_emacs_kill_region_without_mark_beeps },
+    { "emacs_meta_w_copies_region_without_moving_cursor", test_emacs_meta_w_copies_region_without_moving_cursor },
+    { "emacs_exchange_point_and_mark", test_emacs_exchange_point_and_mark },
+    { "emacs_ctrl_x_prefix_save_open_quit", test_emacs_ctrl_x_prefix_save_open_quit },
+    { "emacs_ctrl_x_u_undoes", test_emacs_ctrl_x_u_undoes },
+    { "emacs_ctrl_c_prefix_format_bindings", test_emacs_ctrl_c_prefix_format_bindings },
+    { "emacs_ctrl_g_cancels_pending_prefix", test_emacs_ctrl_g_cancels_pending_prefix },
+    { "emacs_unbound_chord_beeps", test_emacs_unbound_chord_beeps },
+    { "emacs_no_leaks", test_emacs_no_leaks },
 
     { "actions_find_by_id", test_actions_find_by_id },
     { "actions_find_by_shortcut", test_actions_find_by_shortcut },

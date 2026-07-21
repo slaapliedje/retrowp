@@ -26,16 +26,15 @@ static void reset_pending(wp_vimode_state *vs)
     vs->pending_prefix = 0;
 }
 
+/* wp_pos_clamp_to_document (editing.h) is the shared, engine-level
+   version of what used to be this function's own body -- promoted in
+   M10 Phase 3 once Emacs's own C-x u (undo) needed the exact same
+   check. Thin wrapper purely for call-site brevity (every caller below
+   already has a wp_vimode_state * in hand, mirroring paste_text_at's
+   own M10 Phase 1 refactor). */
 static void clamp_cursor(wp_vimode_state *vs)
 {
-    const wp_section *sec;
-
-    if (vs->doc->section_count == 0) { vs->cursor = wp_pos_doc_start(vs->doc); return; }
-    if (vs->cursor.section >= vs->doc->section_count) { vs->cursor = wp_pos_doc_end(vs->doc); return; }
-    sec = &vs->doc->sections[vs->cursor.section];
-    if (sec->para_count == 0 || vs->cursor.paragraph >= sec->para_count) {
-        vs->cursor = wp_pos_doc_end(vs->doc);
-    }
+    vs->cursor = wp_pos_clamp_to_document(vs->doc, vs->cursor);
 }
 
 static wp_selection make_selection(wp_pos a, wp_pos b)
