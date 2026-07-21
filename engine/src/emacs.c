@@ -17,6 +17,18 @@ void wp_emacs_init(wp_emacs_state *vs, wp_document *doc, wp_undo_journal *journa
     vs->kill_bytes = NULL;
     vs->kill_len = 0;
     vs->kill_cap = 0;
+
+    vs->isearch_mode = 0;
+    vs->isearch_len = 0;
+    vs->isearch_anchor = vs->cursor;
+    vs->isearch_have_match = WP_FALSE;
+    vs->isearch_last_match = vs->cursor;
+
+    vs->prompt_stage = (u8)WP_EMACS_PROMPT_NONE;
+    vs->qr_find_len = 0;
+    vs->qr_replace_len = 0;
+    vs->scope_start = vs->cursor;
+    vs->pending_match = vs->cursor;
 }
 
 void wp_emacs_free(wp_emacs_state *vs)
@@ -229,6 +241,11 @@ static wp_emacs_action_kind handle_meta_key(wp_emacs_state *vs, wp_key_event key
         if (!vs->mark_set) return WP_EMACSACTION_BEEP;
         copy_region(vs);
         return WP_EMACSACTION_NONE;
+    case '%': /* M-% -- query-replace, see emacs.h's own file comment */
+        vs->prompt_stage = (u8)WP_EMACS_PROMPT_FIND_TEXT;
+        vs->qr_find_len = 0;
+        vs->qr_replace_len = 0;
+        return WP_EMACSACTION_NONE;
     default:
         return WP_EMACSACTION_BEEP;
     }
@@ -305,13 +322,273 @@ static wp_emacs_action_kind handle_ctrl_letter(wp_emacs_state *vs, wp_key_event 
         return WP_EMACSACTION_NONE;
     case 'x': vs->pending_prefix = 'x'; return WP_EMACSACTION_NONE;
     case 'c': vs->pending_prefix = 'c'; return WP_EMACSACTION_NONE;
+    case 's': /* C-s -- isearch-forward, see emacs.h's own file comment */
+        vs->isearch_mode = (u8)'f';
+        vs->isearch_anchor = vs->cursor;
+        vs->isearch_len = 0;
+        vs->isearch_have_match = WP_FALSE;
+        return WP_EMACSACTION_NONE;
+    case 'r': /* C-r -- isearch-backward */
+        vs->isearch_mode = (u8)'r';
+        vs->isearch_anchor = vs->cursor;
+        vs->isearch_len = 0;
+        vs->isearch_have_match = WP_FALSE;
+        return WP_EMACSACTION_NONE;
     default:
         return WP_EMACSACTION_BEEP;
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* Incremental search (C-s / C-r) -- M11                                */
+/* ------------------------------------------------------------------ */
+
+/* Re-searches from from_pos with the current isearch_buf/len/direction.
+   On success, moves point to the real Emacs landing spot -- the END of
+   the match for forward isearch, the START for backward (a real,
+   verified asymmetry, not an inconsistency) -- and records the match
+   for a later repeat. On failure, deliberately leaves cursor/
+   isearch_have_match/isearch_last_match untouched: real Emacs's own
+   "Failing I-search" stays live and still-typeable rather than
+   snapping back or exiting. */
+static void isearch_run(wp_emacs_state *vs, wp_pos from_pos)
+{
+    wp_pos found;
+    wp_bool forward = (wp_bool)(vs->isearch_mode == (u8)'f');
+
+    if (vs->isearch_len == 0) return;
+
+    if (wp_document_find_text(vs->doc, from_pos, vs->isearch_buf, vs->isearch_len,
+                               forward, WP_FALSE, WP_FALSE, &found) != WP_OK) {
+        return;
+    }
+
+    vs->isearch_have_match = WP_TRUE;
+    vs->isearch_last_match = found;
+    vs->cursor = forward ? wp_document_match_selection(vs->doc, found, vs->isearch_len).caret
+                          : found;
+}
+
+static wp_emacs_action_kind feed_isearch(wp_emacs_state *vs, wp_key_event key)
+{
+    if (key.special == (u16)WP_KEY_ESCAPE || key.special == (u16)WP_KEY_ENTER) {
+        vs->isearch_mode = 0; /* accept the current position */
+        return WP_EMACSACTION_NONE;
+    }
+    if (key.special == (u16)WP_KEY_BACKSPACE) {
+        if (vs->isearch_len > 0) {
+            vs->isearch_len--;
+            vs->isearch_have_match = WP_FALSE;
+            vs->cursor = vs->isearch_anchor;
+            isearch_run(vs, vs->isearch_anchor);
+        } else {
+            vs->isearch_mode = 0;
+            vs->cursor = vs->isearch_anchor;
+        }
+        return WP_EMACSACTION_NONE;
+    }
+    if (key.special != (u16)WP_KEY_NONE) return WP_EMACSACTION_NONE; /* stay active, ignore other specials */
+
+    if (key.mods & (u8)WP_MOD_CTRL) {
+        if (key.codepoint == 'g') { /* C-g: real Emacs abort -- restores the original position */
+            vs->isearch_mode = 0;
+            vs->cursor = vs->isearch_anchor;
+            return WP_EMACSACTION_NONE;
+        }
+        if (key.codepoint == 's' || key.codepoint == 'r') {
+            wp_pos from_pos;
+            vs->isearch_mode = (key.codepoint == 's') ? (u8)'f' : (u8)'r';
+            from_pos = vs->isearch_have_match ? vs->isearch_last_match : vs->isearch_anchor;
+            isearch_run(vs, from_pos);
+            return WP_EMACSACTION_NONE;
+        }
+        return WP_EMACSACTION_NONE; /* other Ctrl-chords: ignored, stay active */
+    }
+
+    if (key.codepoint >= 0x20 && key.codepoint < 0x7F) {
+        if (vs->isearch_len < WP_EMACS_ISEARCH_MAX - 1) {
+            vs->isearch_buf[vs->isearch_len++] = (u8)key.codepoint;
+        }
+        isearch_run(vs, vs->isearch_anchor);
+    }
+    return WP_EMACSACTION_NONE;
+}
+
+/* ------------------------------------------------------------------ */
+/* Query-replace (M-%) -- M11                                          */
+/* ------------------------------------------------------------------ */
+
+/* Forward-only, point to end of document -- real stock M-% has no
+   reverse variant and no G-equivalent restart-from-top (see emacs.h's
+   own file comment); never wraps back past scope_start (the position
+   M-% was invoked from), same "never re-cover ground already passed"
+   reasoning wordstar.c's own ws_find_next_in_scope documents. */
+static wp_bool qr_find_next_in_scope(wp_emacs_state *vs, wp_pos from_pos, wp_pos *out)
+{
+    wp_pos found;
+
+    if (wp_document_find_text(vs->doc, from_pos, vs->qr_find, vs->qr_find_len,
+                               WP_TRUE, WP_FALSE, WP_FALSE, &found) != WP_OK) {
+        return WP_FALSE;
+    }
+    if (wp_pos_compare(found, vs->scope_start) < 0) return WP_FALSE;
+    *out = found;
+    return WP_TRUE;
+}
+
+/* '!' -- replaces first_match and every remaining match in scope
+   silently, as ONE undo group. Continuation is always "after the
+   inserted text" (forward-only, unlike WordStar/WordPerfect's own
+   bidirectional version of this helper) -- still guards against an
+   infinite loop when the replacement text itself contains the search
+   pattern. */
+static void qr_replace_all_remaining(wp_emacs_state *vs, wp_pos first_match)
+{
+    wp_pos match = first_match;
+
+    wp_undo_group_begin(vs->journal);
+    for (;;) {
+        wp_selection sel = wp_document_match_selection(vs->doc, match, vs->qr_find_len);
+        wp_pos before_insert, out, next;
+
+        wp_edit_delete_selection(vs->doc, vs->journal, sel, &before_insert);
+        wp_edit_paste_text(vs->doc, vs->journal, before_insert, vs->qr_replace,
+                            vs->qr_replace_len, &out);
+        vs->cursor = out;
+
+        if (!qr_find_next_in_scope(vs, out, &next)) break;
+        match = next;
+    }
+    wp_undo_group_end(vs->journal);
+}
+
+/* M-% always pauses at the first match (or BEEPs if none) -- unlike
+   WordStar/WordPerfect's own upfront "confirm every match, or none at
+   all" choice, real query-replace always starts interactive; replacing
+   the rest silently is reached mid-loop via '!' instead (see
+   feed_qr_confirm). */
+static wp_emacs_action_kind qr_begin(wp_emacs_state *vs)
+{
+    wp_pos found;
+
+    vs->scope_start = vs->cursor;
+    if (!qr_find_next_in_scope(vs, vs->scope_start, &found)) {
+        vs->prompt_stage = (u8)WP_EMACS_PROMPT_NONE;
+        return WP_EMACSACTION_BEEP;
+    }
+
+    vs->cursor = found;
+    vs->pending_match = found;
+    vs->prompt_stage = (u8)WP_EMACS_PROMPT_CONFIRM_MATCH;
+    return WP_EMACSACTION_NONE;
+}
+
+/* FIND_TEXT and REPLACE_TEXT fields -- Enter-terminated (real Emacs's
+   own minibuffer convention, unlike WordPerfect's F2-terminated
+   fields), Backspace/Escape handled the same way every other scheme's
+   own text-collection prompt does. */
+static wp_emacs_action_kind feed_qr_text(wp_emacs_state *vs, wp_key_event key,
+                                          u8 *buf, u32 *len, wp_bool is_find_stage)
+{
+    if (key.special == (u16)WP_KEY_ESCAPE) {
+        vs->prompt_stage = (u8)WP_EMACS_PROMPT_NONE;
+        return WP_EMACSACTION_NONE;
+    }
+    if (key.special == (u16)WP_KEY_BACKSPACE) {
+        if (*len > 0) (*len)--;
+        else vs->prompt_stage = (u8)WP_EMACS_PROMPT_NONE;
+        return WP_EMACSACTION_NONE;
+    }
+    if (key.special == (u16)WP_KEY_ENTER) {
+        if (is_find_stage) {
+            if (*len == 0) {
+                vs->prompt_stage = (u8)WP_EMACS_PROMPT_NONE;
+                return WP_EMACSACTION_BEEP;
+            }
+            vs->prompt_stage = (u8)WP_EMACS_PROMPT_REPLACE_TEXT;
+            return WP_EMACSACTION_NONE;
+        }
+        vs->prompt_stage = (u8)WP_EMACS_PROMPT_NONE;
+        return qr_begin(vs);
+    }
+    if (key.special == (u16)WP_KEY_NONE && key.codepoint >= 0x20 && key.codepoint < 0x7F) {
+        if (*len < WP_EMACS_QR_MAX - 1) buf[(*len)++] = (u8)key.codepoint;
+    }
+    return WP_EMACSACTION_NONE;
+}
+
+/* Real query-replace vocabulary, scoped subset (see emacs.h's own file
+   comment for what's deliberately left out): y/SPC replace+advance,
+   n/DEL skip+advance, '!' replace all remaining silently, '.'
+   replace+stop, q/RET/Escape stop without replacing this one. */
+static wp_emacs_action_kind feed_qr_confirm(wp_emacs_state *vs, wp_key_event key)
+{
+    wp_pos continue_from, next;
+    wp_bool stop_after = WP_FALSE;
+
+    if (key.special == (u16)WP_KEY_ESCAPE || key.special == (u16)WP_KEY_ENTER) {
+        vs->prompt_stage = (u8)WP_EMACS_PROMPT_NONE;
+        return WP_EMACSACTION_NONE;
+    }
+    if (key.special == (u16)WP_KEY_BACKSPACE) { /* DEL: skip, a real query-replace binding */
+        continue_from = vs->pending_match;
+    } else if (key.special == (u16)WP_KEY_NONE) {
+        if (key.codepoint == ' ' || key.codepoint == 'y' || key.codepoint == 'Y' ||
+            key.codepoint == '.') {
+            wp_selection sel = wp_document_match_selection(vs->doc, vs->pending_match, vs->qr_find_len);
+            wp_pos before_insert, out;
+
+            wp_edit_delete_selection(vs->doc, vs->journal, sel, &before_insert);
+            wp_edit_paste_text(vs->doc, vs->journal, before_insert, vs->qr_replace,
+                                vs->qr_replace_len, &out);
+            vs->cursor = out;
+            continue_from = out;
+            if (key.codepoint == '.') stop_after = WP_TRUE;
+        } else if (key.codepoint == 'n' || key.codepoint == 'N') {
+            continue_from = vs->pending_match;
+        } else if (key.codepoint == '!') {
+            vs->prompt_stage = (u8)WP_EMACS_PROMPT_NONE;
+            qr_replace_all_remaining(vs, vs->pending_match);
+            return WP_EMACSACTION_NONE;
+        } else if (key.codepoint == 'q') {
+            vs->prompt_stage = (u8)WP_EMACS_PROMPT_NONE;
+            return WP_EMACSACTION_NONE;
+        } else {
+            return WP_EMACSACTION_NONE; /* unrecognized: stay paused */
+        }
+    } else {
+        return WP_EMACSACTION_NONE;
+    }
+
+    vs->prompt_stage = (u8)WP_EMACS_PROMPT_NONE;
+    if (stop_after) return WP_EMACSACTION_NONE;
+
+    if (!qr_find_next_in_scope(vs, continue_from, &next)) return WP_EMACSACTION_NONE;
+    vs->cursor = next;
+    vs->pending_match = next;
+    vs->prompt_stage = (u8)WP_EMACS_PROMPT_CONFIRM_MATCH;
+    return WP_EMACSACTION_NONE;
+}
+
+static wp_emacs_action_kind feed_qr_prompt(wp_emacs_state *vs, wp_key_event key)
+{
+    switch ((wp_emacs_prompt_stage)vs->prompt_stage) {
+    case WP_EMACS_PROMPT_FIND_TEXT:
+        return feed_qr_text(vs, key, vs->qr_find, &vs->qr_find_len, WP_TRUE);
+    case WP_EMACS_PROMPT_REPLACE_TEXT:
+        return feed_qr_text(vs, key, vs->qr_replace, &vs->qr_replace_len, WP_FALSE);
+    case WP_EMACS_PROMPT_CONFIRM_MATCH:
+        return feed_qr_confirm(vs, key);
+    default:
+        vs->prompt_stage = (u8)WP_EMACS_PROMPT_NONE;
+        return WP_EMACSACTION_NONE;
+    }
+}
+
 wp_emacs_action_kind wp_emacs_feed_key(wp_emacs_state *vs, wp_key_event key)
 {
+    if (vs->isearch_mode != 0) return feed_isearch(vs, key);
+    if (vs->prompt_stage != (u8)WP_EMACS_PROMPT_NONE) return feed_qr_prompt(vs, key);
     if (vs->pending_prefix != 0) return handle_prefix_key(vs, key);
     if (vs->pending_meta) {
         vs->pending_meta = WP_FALSE;
@@ -370,4 +647,39 @@ wp_emacs_action_kind wp_emacs_feed_key(wp_emacs_state *vs, wp_key_event key)
     }
 
     return WP_EMACSACTION_NONE;
+}
+
+void wp_emacs_get_status_text(const wp_emacs_state *vs, char *out, u32 out_cap)
+{
+    const char *label;
+    const u8 *buf = NULL;
+    u32 buf_len = 0;
+    u32 len = 0;
+
+    if (out_cap == 0) return;
+
+    if (vs->isearch_mode != 0) {
+        label = (vs->isearch_mode == (u8)'f') ? "I-search:" : "I-search backward:";
+        buf = vs->isearch_buf; buf_len = vs->isearch_len;
+    } else {
+        switch ((wp_emacs_prompt_stage)vs->prompt_stage) {
+        case WP_EMACS_PROMPT_FIND_TEXT:
+            label = "Query replace:"; buf = vs->qr_find; buf_len = vs->qr_find_len; break;
+        case WP_EMACS_PROMPT_REPLACE_TEXT:
+            label = "Query replace with:"; buf = vs->qr_replace; buf_len = vs->qr_replace_len; break;
+        case WP_EMACS_PROMPT_CONFIRM_MATCH:
+            label = "Query replacing (y/n/!/.)?"; break;
+        case WP_EMACS_PROMPT_NONE:
+        default:
+            label = "EMACS"; break;
+        }
+    }
+
+    while (label[len] != '\0' && len < out_cap - 1) { out[len] = label[len]; len++; }
+    if (buf != NULL) {
+        u32 i;
+        if (len < out_cap - 1) out[len++] = ' ';
+        for (i = 0; i < buf_len && len < out_cap - 1; i++) out[len++] = (char)buf[i];
+    }
+    out[len] = '\0';
 }

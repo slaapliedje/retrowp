@@ -207,8 +207,13 @@ static wp_keymap_outcome feed_key_em(wp_app_ctx *ctx, wp_key_event ev)
 
     /* Matches wp_emacs_feed_key's own exact condition for "this
        keystroke will insert a plain character" -- computed BEFORE the
-       call, same reasoning feed_key_ws's own comment gives. */
+       call, same reasoning feed_key_ws's own comment gives. M11: a
+       keystroke typed while isearch_mode is active or a query-replace
+       prompt_stage is set edits that prompt's own buffer, never the
+       document -- same fix WordStar/WordPerfect's own prompts needed. */
     will_insert = (wp_bool)(ctx->km.em.pending_prefix == 0 && !ctx->km.em.pending_meta &&
+                             ctx->km.em.isearch_mode == 0 &&
+                             ctx->km.em.prompt_stage == (u8)WP_EMACS_PROMPT_NONE &&
                              ev.special == (u16)WP_KEY_NONE &&
                              ev.mods == 0 && ev.codepoint >= 0x20);
 
@@ -427,16 +432,12 @@ void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,
         wp_wordstar_get_status_text(&ctx->km.ws, buf, buf_cap);
         break;
     case WP_KEYMAP_EMACS:
-        /* Same reasoning as WordStar's own fixed label -- Emacs is
-           non-modal too, and its "state" (pending prefix/meta) has no
-           accessor exposed separately yet, matching every other
-           scheme's own pending_count/pending_cmd gap noted below. */
-        if (buf_cap > 0) {
-            const char *label = "EMACS";
-            u32 n = 0;
-            while (label[n] != '\0' && n + 1 < buf_cap) { buf[n] = label[n]; n++; }
-            buf[n] = '\0';
-        }
+        /* M11: real, dynamic prompt text once isearch or query-replace
+           is active ("I-search:"/"I-search backward:"/"Query
+           replace:"/"Query replace with:"/"Query replacing
+           (y/n/!/.)?"); the fixed "EMACS" label otherwise, same
+           reasoning WordStar's own status text gives. */
+        wp_emacs_get_status_text(&ctx->km.em, buf, buf_cap);
         break;
     case WP_KEYMAP_WORDPERFECT:
         /* M11: real, dynamic prompt text once a Search/Replace prompt

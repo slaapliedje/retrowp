@@ -543,6 +543,257 @@ void test_emacs_unbound_chord_beeps(void)
     wp_document_free(&doc);
 }
 
+void test_emacs_isearch_forward_lands_at_match_end(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_emacs_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "Goodbye Moon");
+    wp_undo_journal_init(&journal);
+    wp_emacs_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "\x13"); /* C-s */
+    feed_keys(&vs, "Moon"); /* live, re-searches on every keystroke */
+
+    ASSERT_EQ_U32(vs.cursor.paragraph, 1);
+    ASSERT_EQ_U32(vs.cursor.offset, 12); /* real Emacs isearch-forward lands at the END of the match */
+
+    feed_key_special(&vs, WP_KEY_ENTER); /* accept */
+    ASSERT_EQ_U32(vs.isearch_mode, 0);
+
+    wp_emacs_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_emacs_isearch_backward_lands_at_match_start(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_emacs_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "Goodbye Moon");
+    wp_undo_journal_init(&journal);
+    wp_emacs_init(&vs, &doc, &journal);
+    vs.cursor.paragraph = 1; vs.cursor.offset = 12;
+
+    feed_keys(&vs, "\x12"); /* C-r */
+    feed_keys(&vs, "Hello");
+
+    ASSERT_EQ_U32(vs.cursor.paragraph, 0);
+    ASSERT_EQ_U32(vs.cursor.offset, 0); /* backward isearch lands at the START of the match */
+
+    wp_emacs_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_emacs_isearch_ctrl_s_repeats_forward(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_emacs_state vs;
+
+    /* "z" prefix keeps the doc-start cursor from coinciding with the
+       first 'a' -- same strictly-after-`from` reasoning
+       test_wordstar.c's own analogous fixtures document. */
+    build_doc_two_paras(&doc, "zaXaXaX", "");
+    wp_undo_journal_init(&journal);
+    wp_emacs_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "\x13" "a"); /* C-s then 'a' -- first match at offset 1, lands at end (2) */
+    ASSERT_EQ_U32(vs.cursor.offset, 2);
+
+    feed_keys(&vs, "\x13"); /* C-s again, no new typing -- repeats to next match */
+    ASSERT_EQ_U32(vs.cursor.offset, 4);
+
+    feed_keys(&vs, "\x13");
+    ASSERT_EQ_U32(vs.cursor.offset, 6);
+
+    wp_emacs_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_emacs_isearch_backspace_shrinks_pattern_and_researches(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_emacs_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_emacs_init(&vs, &doc, &journal);
+
+    /* "Wor" matches (lands at its end, offset 9); the extra 'x' then
+       fails to match anything -- real "Failing I-search" leniency
+       leaves the cursor at the last GOOD match rather than resetting
+       to the anchor (see isearch_run's own comment). */
+    feed_keys(&vs, "\x13" "Worx");
+    ASSERT_EQ_U32(vs.cursor.offset, 9);
+    ASSERT_EQ_U32(vs.isearch_len, 4);
+
+    feed_key_special(&vs, WP_KEY_BACKSPACE); /* shrink back to "Wor" -- matches again */
+    ASSERT_EQ_U32(vs.isearch_len, 3);
+    ASSERT_EQ_U32(vs.cursor.offset, 9);
+    ASSERT_EQ_U32(vs.cursor.offset, 9); /* end of "Wor" within "Hello World" */
+
+    wp_emacs_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_emacs_isearch_failing_search_does_not_move_cursor(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_emacs_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_emacs_init(&vs, &doc, &journal);
+    vs.cursor.offset = 3;
+
+    feed_keys(&vs, "\x13" "xyz"); /* never matches */
+
+    ASSERT_EQ_U32(vs.cursor.offset, 3); /* untouched, real "Failing I-search" leniency */
+
+    wp_emacs_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_emacs_isearch_ctrl_g_aborts_to_anchor(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_emacs_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_emacs_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "\x13" "World"); /* moves cursor to the match */
+    ASSERT_TRUE(vs.cursor.offset != 0);
+
+    feed_keys(&vs, "\x07"); /* C-g -- abort */
+    ASSERT_EQ_U32(vs.cursor.offset, 0);
+    ASSERT_EQ_U32(vs.isearch_mode, 0);
+
+    wp_emacs_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_emacs_query_replace_confirm_vocabulary(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_emacs_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "zzz foo foo foo foo", "");
+    wp_undo_journal_init(&journal);
+    wp_emacs_init(&vs, &doc, &journal);
+
+    feed_key_full(&vs, '%', (u16)WP_KEY_NONE, (u8)WP_MOD_ALT); /* M-% */
+    feed_keys(&vs, "foo");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    feed_keys(&vs, "bar");
+    feed_key_special(&vs, WP_KEY_ENTER); /* pauses at match 1 (offset 4) */
+
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_EMACS_PROMPT_CONFIRM_MATCH);
+
+    feed_keys(&vs, " "); /* SPC: replace, advance to match 2 (offset 8) */
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar foo foo foo");
+
+    feed_keys(&vs, "n"); /* skip, advance to match 3 (offset 12) */
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar foo foo foo");
+
+    feed_keys(&vs, "."); /* replace and stop -- match 4 never visited */
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar foo bar foo");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_EMACS_PROMPT_NONE);
+
+    wp_emacs_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_emacs_query_replace_bang_replaces_all_remaining(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_emacs_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "zzz foo foo foo", "");
+    wp_undo_journal_init(&journal);
+    wp_emacs_init(&vs, &doc, &journal);
+
+    feed_key_full(&vs, '%', (u16)WP_KEY_NONE, (u8)WP_MOD_ALT);
+    feed_keys(&vs, "foo");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    feed_keys(&vs, "bar");
+    feed_key_special(&vs, WP_KEY_ENTER);
+
+    feed_keys(&vs, "!"); /* replace all remaining silently */
+
+    dump_para_text(&doc, 0, buf); ASSERT_EQ_STR(buf, "zzz bar bar bar");
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_EMACS_PROMPT_NONE);
+
+    wp_emacs_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_emacs_query_replace_not_found_beeps(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_emacs_state vs;
+    wp_emacs_action_kind action;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_emacs_init(&vs, &doc, &journal);
+
+    feed_key_full(&vs, '%', (u16)WP_KEY_NONE, (u8)WP_MOD_ALT);
+    feed_keys(&vs, "xyz");
+    feed_key_special(&vs, WP_KEY_ENTER);
+    feed_keys(&vs, "bar");
+    action = feed_key_special(&vs, WP_KEY_ENTER);
+
+    ASSERT_TRUE(action == WP_EMACSACTION_BEEP);
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_EMACS_PROMPT_NONE);
+
+    wp_emacs_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_emacs_query_replace_escape_cancels_prompt(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_emacs_state vs;
+
+    build_doc_two_paras(&doc, "Hello World", "");
+    wp_undo_journal_init(&journal);
+    wp_emacs_init(&vs, &doc, &journal);
+
+    feed_key_full(&vs, '%', (u16)WP_KEY_NONE, (u8)WP_MOD_ALT);
+    feed_keys(&vs, "Wor");
+    feed_key_special(&vs, WP_KEY_ESCAPE);
+
+    ASSERT_TRUE(vs.prompt_stage == (u8)WP_EMACS_PROMPT_NONE);
+    ASSERT_EQ_U32(vs.cursor.offset, 0);
+
+    wp_emacs_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
 void test_emacs_no_leaks(void)
 {
     wp_document doc;

@@ -62,13 +62,36 @@
      Escape really are the same input in classic Emacs). C-g is the
      real Emacs cancel key instead, clearing any pending prefix/meta
      state.
-   - Deferred entirely, matching WordPerfect's own menu-UI deferral and
-     WordStar's own Find/Replace deferral: incremental search (C-s/
-     C-r), query-replace (M-%), numeric-argument commands (M-0 C-k
-     etc.), multi-buffer commands (C-x s, C-x i), page/screen motion
-     (C-v/M-v/C-x [/C-x ]) -- no "page" or "screen" concept is surfaced
-     to any keymap scheme, and M-g g (goto-line) -- no line-number
-     concept is surfaced either. */
+   - Numeric-argument commands (M-0 C-k etc.), multi-buffer commands
+     (C-x s, C-x i), page/screen motion (C-v/M-v/C-x [/C-x ]) -- no
+     "page" or "screen" concept is surfaced to any keymap scheme -- and
+     M-g g (goto-line) -- no line-number concept is surfaced either --
+     remain deferred, matching WordPerfect's own menu-UI deferral.
+   - Find/Replace (M11): C-s/C-r incremental search (isearch), genuinely
+     live -- every keystroke re-searches, no Enter needed, matching real
+     Emacs exactly (a structurally different UX from every other
+     scheme's own collect-then-submit prompt). Forward isearch lands
+     point at the END of the match, backward at its START, real Emacs's
+     own asymmetry. M-% query-replace with the real y/SPC (replace+
+     next), n/DEL (skip), ! (replace all remaining), . (replace+stop),
+     q/RET (quit) vocabulary -- the more advanced real keys (,/^/C-r/
+     C-w/C-l/C-h: replace-then-ask, back up, recursive edit, redisplay,
+     help) are deliberately not implemented, a narrower scoped subset,
+     documented not faked, the same treatment this scheme's own kill-
+     ring already got. Query-replace is forward-only from point to the
+     end of the document (real stock M-% has no reverse variant and no
+     G-equivalent restart-from-top, matching WordPerfect's own -- not
+     WordStar's -- narrower scope here). */
+
+typedef enum {
+    WP_EMACS_PROMPT_NONE = 0,
+    WP_EMACS_PROMPT_FIND_TEXT,     /* M-% first field: "Query replace:" */
+    WP_EMACS_PROMPT_REPLACE_TEXT,  /* M-% second field: "Query replace with:" */
+    WP_EMACS_PROMPT_CONFIRM_MATCH  /* per-match y/SPC/n/DEL/!/./q/RET */
+} wp_emacs_prompt_stage;
+
+#define WP_EMACS_ISEARCH_MAX 128
+#define WP_EMACS_QR_MAX      128
 
 typedef struct {
     wp_document     *doc;      /* borrowed */
@@ -93,6 +116,37 @@ typedef struct {
                          ring; see this file's own header comment on why */
     u32  kill_len;
     u32  kill_cap;
+
+    /* M11: C-s/C-r incremental search. isearch_mode is 0 (inactive),
+       'f' (C-s, forward), or 'r' (C-r, backward) -- pressing either key
+       again while active repeats in THAT key's direction, so C-r
+       mid-forward-search flips direction, matching real Emacs. Typing a
+       character (or Backspace) always re-searches from isearch_anchor
+       (where the search began) with the new pattern; an explicit C-s/
+       C-r repeat instead searches from isearch_last_match, advancing
+       past it -- two genuinely different "search from" points real
+       isearch also distinguishes. A failed search leaves the cursor/
+       last-match state untouched (real Emacs's own "Failing I-search"
+       leniency -- still-typeable, not auto-cancelled). */
+    u8      isearch_mode;
+    u8      isearch_buf[WP_EMACS_ISEARCH_MAX];
+    u32     isearch_len;
+    wp_pos  isearch_anchor;
+    wp_bool isearch_have_match;
+    wp_pos  isearch_last_match;
+
+    /* M11: M-% query-replace prompt state. Always pauses at the first
+       match (or BEEPs if none) -- unlike WordStar/WordPerfect's own
+       upfront "confirm every match, or none" choice, real query-replace
+       ALWAYS starts interactive; "replace the rest silently" is reached
+       mid-loop via '!' instead. */
+    u8      prompt_stage;   /* wp_emacs_prompt_stage */
+    u8      qr_find[WP_EMACS_QR_MAX];
+    u32     qr_find_len;
+    u8      qr_replace[WP_EMACS_QR_MAX];
+    u32     qr_replace_len;
+    wp_pos  scope_start;   /* fixed for the life of one M-% run: point when M-% began */
+    wp_pos  pending_match; /* awaiting a confirm keystroke, WP_EMACS_PROMPT_CONFIRM_MATCH only */
 } wp_emacs_state;
 
 typedef enum {
@@ -130,5 +184,14 @@ void wp_emacs_free(wp_emacs_state *vs);
    host/tests/test_emacs.c's synthetic-key-script testing approach
    possible. */
 wp_emacs_action_kind wp_emacs_feed_key(wp_emacs_state *vs, wp_key_event key);
+
+/* Writes a NUL-terminated status string into out, truncating to fit
+   out_cap -- mirrors every other scheme's own get_status_text shape
+   (M11). Outside isearch/query-replace this is the fixed "EMACS" label
+   platform/common/keymap.c used to hardcode directly; inside one, it's
+   the real Emacs minibuffer-style prompt ("I-search:"/"I-search
+   backward:"/"Query replace:"/"Query replace with:"/"Query replacing
+   (y/n/!/.)?" ) followed by whatever's been typed so far. */
+void wp_emacs_get_status_text(const wp_emacs_state *vs, char *out, u32 out_cap);
 
 #endif /* WP_EMACS_H */

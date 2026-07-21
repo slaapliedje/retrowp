@@ -158,6 +158,16 @@ void test_emacs_ctrl_x_u_undoes(void);
 void test_emacs_ctrl_c_prefix_format_bindings(void);
 void test_emacs_ctrl_g_cancels_pending_prefix(void);
 void test_emacs_unbound_chord_beeps(void);
+void test_emacs_isearch_forward_lands_at_match_end(void);
+void test_emacs_isearch_backward_lands_at_match_start(void);
+void test_emacs_isearch_ctrl_s_repeats_forward(void);
+void test_emacs_isearch_backspace_shrinks_pattern_and_researches(void);
+void test_emacs_isearch_failing_search_does_not_move_cursor(void);
+void test_emacs_isearch_ctrl_g_aborts_to_anchor(void);
+void test_emacs_query_replace_confirm_vocabulary(void);
+void test_emacs_query_replace_bang_replaces_all_remaining(void);
+void test_emacs_query_replace_not_found_beeps(void);
+void test_emacs_query_replace_escape_cancels_prompt(void);
 void test_emacs_no_leaks(void);
 
 /* test_wordperfect.c */
@@ -567,6 +577,16 @@ static const test_case g_cases[] = {
     { "emacs_ctrl_c_prefix_format_bindings", test_emacs_ctrl_c_prefix_format_bindings },
     { "emacs_ctrl_g_cancels_pending_prefix", test_emacs_ctrl_g_cancels_pending_prefix },
     { "emacs_unbound_chord_beeps", test_emacs_unbound_chord_beeps },
+    { "emacs_isearch_forward_lands_at_match_end", test_emacs_isearch_forward_lands_at_match_end },
+    { "emacs_isearch_backward_lands_at_match_start", test_emacs_isearch_backward_lands_at_match_start },
+    { "emacs_isearch_ctrl_s_repeats_forward", test_emacs_isearch_ctrl_s_repeats_forward },
+    { "emacs_isearch_backspace_shrinks_pattern_and_researches", test_emacs_isearch_backspace_shrinks_pattern_and_researches },
+    { "emacs_isearch_failing_search_does_not_move_cursor", test_emacs_isearch_failing_search_does_not_move_cursor },
+    { "emacs_isearch_ctrl_g_aborts_to_anchor", test_emacs_isearch_ctrl_g_aborts_to_anchor },
+    { "emacs_query_replace_confirm_vocabulary", test_emacs_query_replace_confirm_vocabulary },
+    { "emacs_query_replace_bang_replaces_all_remaining", test_emacs_query_replace_bang_replaces_all_remaining },
+    { "emacs_query_replace_not_found_beeps", test_emacs_query_replace_not_found_beeps },
+    { "emacs_query_replace_escape_cancels_prompt", test_emacs_query_replace_escape_cancels_prompt },
     { "emacs_no_leaks", test_emacs_no_leaks },
 
     { "wordperfect_arrow_char_motion", test_wordperfect_arrow_char_motion },
