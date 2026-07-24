@@ -34,6 +34,15 @@ i32 atari_twips_to_px_y(i32 twips);
 i32 atari_px_to_twips_x(i32 px);
 i32 atari_px_to_twips_y(i32 px);
 
+/* Real, runtime-queried total color count for the current VDI device
+   (2 mono/4 Medium/16 Low -- see docs/atari-platform.md's "Boot
+   resolution: Medium, not Low" -- never assumed, same reasoning this
+   header already gives for DPI not being hardcoded). M15: needed by
+   both do_insert_image (to size the real OFFLOAD_IMAGE request against
+   what this screen can actually show) and plat_draw_image (to know how
+   many VDI palette registers/bitplanes are real). */
+i32 atari_screen_max_colors(void);
+
 /* plat_gc for this backend: a real window's VDI handle plus the AES
    window handle it belongs to (needed for wind_get_grect-based clipping
    during redraw). Callers (app_shell.c) construct one directly -- there

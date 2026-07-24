@@ -435,5 +435,140 @@ $(MAC_BUILD)/services/%.o: services/grammar/%.c | $(MAC_BUILD)/services
 $(MAC_BUILD)/engine $(MAC_BUILD)/transport $(MAC_BUILD)/services:
 	mkdir -p $@
 
+# ---------------------------------------------------------------------
+# DOS (M14) -- Open Watcom v2 (AUR: openwatcom-v2), a real, actively
+# maintained cross-compiler producing genuine 16-bit real-mode DOS
+# .EXE files from Linux (-bt=dos), the same "modern cross-compiler,
+# real vintage target" shape m68k-amigaos-gcc/Retro68 already
+# established, not a from-scratch build (unlike Retro68) -- installed
+# here as a user-local prefix (DOS_TOOLROOT), matching AMIGA_TOOLROOT's
+# own convention, rather than a system pacman package. Unlike
+# gcc-family cross-compilers, Watcom's compile (wcc) and link (wcl)
+# steps are separate tools with their own flag dialect (-bt=dos target
+# OS, -za -zastd=c89 strict ISO C89, -we -wx warnings-as-errors at max
+# level, -0 8086 baseline matching this project's widest-compatibility
+# ethos); wcl additionally needs WATCOM set and wlink on PATH to locate
+# its own runtime libraries at link time -- confirmed directly, not
+# assumed (a clean-environment link fails with "cannot open clibs.lib"
+# otherwise). DOS_BUILD is deliberately its own tree, mirroring every
+# other cross-target's own *_BUILD separation.
+#
+# Memory model is -mm (medium: far/multi-segment code, near/single-
+# segment data), not -ms (small: both near/single-segment) -- found
+# directly, not assumed: linking the FULL engine (every format importer/
+# exporter, all five keybinding schemes) under -ms overflowed the
+# small model's one 64KB code segment by ~16KB at the very first real
+# link attempt. Medium model's per-function far calls/multiple code
+# segments solve that; the document model's own data isn't yet large
+# enough to need far data pointers too (that would be -ml, large model,
+# a real escalation this project would rather avoid unless something
+# concrete forces it).
+# ---------------------------------------------------------------------
+
+DOS_TOOLROOT ?= $(HOME)/opt/watcom
+DOSCC        ?= $(DOS_TOOLROOT)/binl64/wcc
+DOSLINK      ?= $(DOS_TOOLROOT)/binl64/wcl
+DOS_ENV       = WATCOM=$(DOS_TOOLROOT) PATH=$(DOS_TOOLROOT)/binl64:$$PATH
+
+DOS_STRICT_CFLAGS  = -0 -mm -bt=dos -za -zastd=c89 -we -wx
+DOS_RELAXED_CFLAGS = -0 -mm -bt=dos -wx
+# engine/include first, deliberately: Watcom's own h/ ships a same-
+# named endian.h (OS/2-oriented) that shadowed this project's real
+# engine/include/endian.h when searched first, producing bizarre
+# parse errors deep in Watcom's header, not this project's -- found
+# directly during Phase 0 bring-up, not assumed. Project headers must
+# win over Watcom's system headers on any name collision.
+DOS_INCLUDES       = -i=engine/include -i=platform/dos -i=platform/common -i=offload/transport -i=$(GENERATED) -i=$(DOS_TOOLROOT)/h
+
+DOS_BUILD = build/dos
+DOS_BIN   = bin/dos
+
+DOS_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(DOS_BUILD)/engine/%.o,$(ENGINE_SRC))
+DOS_TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(DOS_BUILD)/transport/%.o,$(TRANSPORT_SRC))
+DOS_SERVICES_OBJ  = $(patsubst services/spell/%.c,$(DOS_BUILD)/services/%.o,$(patsubst services/grammar/%.c,$(DOS_BUILD)/services/%.o,$(SERVICES_SRC)))
+# platform/common/ (T14.5): the action registry/keymap dispatch/status
+# line/help pager shared by every backend -- mirrors ATARI_COMMON_OBJ.
+DOS_COMMON_OBJ    = $(patsubst platform/common/%.c,$(DOS_BUILD)/common/%.o,$(PLATFORM_COMMON_SRC))
+
+# platform/dos's own sources, excluding main.c (its own main() vs.
+# dos_smoke.c's) -- mirrors ATARI_PLATFORM_SRC's identical filter-out.
+# Defined here, BEFORE the SMOKE.EXE/RETROWP.EXE rules below that both
+# reference it -- a real bug found directly, not a style choice: a
+# rule's prerequisite list is expanded at the point the rule itself is
+# PARSED, not lazily at build time, so a rule textually written before
+# a recursively-expanded variable's definition silently sees it as
+# empty forever, even though the variable gets a real value later in
+# the same file. SMOKE.EXE's own link line was missing every platform/
+# dos/*.o file this exact way on the first attempt (undefined mem_
+# alloc_/plat_font_open_/etc. at link time) until this was moved up.
+DOS_PLATFORM_SRC = $(filter-out platform/dos/main.c,$(wildcard platform/dos/*.c))
+DOS_PLATFORM_OBJ = $(patsubst platform/dos/%.c,$(DOS_BUILD)/app/%.o,$(DOS_PLATFORM_SRC))
+
+# dos-engine-check mirrors atari-engine-check/amiga-engine-check/
+# mac-engine-check exactly: a link-free portability check of the SAME
+# portable engine/ + offload/transport + services/ sources this project
+# already tests on host, now proven under a 16-bit real-mode target too.
+.PHONY: dos-engine-check
+dos-engine-check: $(DOS_ENGINE_OBJ) $(DOS_TRANSPORT_OBJ) $(DOS_SERVICES_OBJ)
+	@echo "engine + offload/transport + services cross-compile clean for Open Watcom DOS"
+
+$(DOS_BUILD)/engine/%.o: engine/src/%.c | $(DOS_BUILD)/engine
+	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+
+$(DOS_BUILD)/transport/%.o: offload/transport/%.c | $(DOS_BUILD)/transport
+	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+
+$(DOS_BUILD)/services/%.o: services/spell/%.c | $(DOS_BUILD)/services
+	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+
+$(DOS_BUILD)/services/%.o: services/grammar/%.c | $(DOS_BUILD)/services
+	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+
+$(DOS_BUILD)/common/%.o: platform/common/%.c | $(DOS_BUILD)/common
+	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+
+# Phase 0's own smoke test (M14 T14.6's go/no-go gate) was a
+# freestanding program with no engine/platform-dos linkage -- platform/
+# dos/ didn't exist yet. Phase 2 (T14.2) grew it into a real selfcheck
+# runner (host/tools/dos_smoke.c's own wp_dos_layout_selfcheck call),
+# so it now needs the full platform/dos + engine/transport/services
+# object set, same as SMOKE.PRG/AMISMOKE each needed from very early on.
+$(DOS_BUILD)/smoke/%.o: host/tools/%.c | $(DOS_BUILD)/smoke
+	env $(DOS_ENV) $(DOSCC) $(DOS_RELAXED_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+
+$(DOS_BIN)/SMOKE.EXE: $(DOS_PLATFORM_OBJ) $(DOS_BUILD)/smoke/dos_smoke.o $(DOS_ENGINE_OBJ) $(DOS_COMMON_OBJ) $(DOS_TRANSPORT_OBJ) $(DOS_SERVICES_OBJ) | $(DOS_BIN)
+	env $(DOS_ENV) $(DOSLINK) -0 -mm -bt=dos -k32768 $^ -fe=$@
+
+.PHONY: dos-smoke
+dos-smoke: $(DOS_BIN)/SMOKE.EXE
+
+# T14.2 (Phase 2) is the first phase that needs the engine linked in --
+# render_fixture_paragraph/wp_dos_layout_selfcheck call into docmodel/
+# layout/format_txt -- and since every backend links its ENGINE_OBJ as
+# one indivisible unit (not just the specific .c files a given feature
+# happens to touch), engine/src/offload_client.c's own references to
+# plat_transport_* must resolve too even though nothing calls
+# offload_init() yet -- see platform/dos/transport_dos.c's own comment
+# on why an honest "always fails to open" stub is correct here, not a
+# placeholder.
+# app_shell.c #includes the generated help_retrowp.h (see the Atari/
+# Amiga rules above for the same dependency) -- missing here until
+# M15 Phase 4 caught it via a clean `make dos`/`make dos-smoke` failing
+# when build/generated/ didn't exist yet; a real, narrow, pre-existing
+# Makefile gap, not new build logic.
+$(DOS_BUILD)/app/app_shell.o: $(GENERATED)/help_retrowp.h
+
+$(DOS_BUILD)/app/%.o: platform/dos/%.c | $(DOS_BUILD)/app
+	env $(DOS_ENV) $(DOSCC) $(DOS_RELAXED_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+
+$(DOS_BIN)/RETROWP.EXE: $(DOS_PLATFORM_OBJ) $(DOS_BUILD)/app/main.o $(DOS_ENGINE_OBJ) $(DOS_COMMON_OBJ) $(DOS_TRANSPORT_OBJ) $(DOS_SERVICES_OBJ) | $(DOS_BIN)
+	env $(DOS_ENV) $(DOSLINK) -0 -mm -bt=dos -k32768 $^ -fe=$@
+
+$(DOS_BUILD)/engine $(DOS_BUILD)/transport $(DOS_BUILD)/services $(DOS_BUILD)/common $(DOS_BUILD)/smoke $(DOS_BUILD)/app $(DOS_BIN):
+	mkdir -p $@
+
+.PHONY: dos
+dos: $(DOS_BIN)/RETROWP.EXE
+
 clean:
 	rm -rf $(BUILD) $(BIN)

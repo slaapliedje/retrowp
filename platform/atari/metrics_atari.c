@@ -26,6 +26,7 @@
 static VdiHdl g_metrics_vdi = 0;
 static i32 g_dpi_x = ATARI_ASSUMED_DPI;
 static i32 g_dpi_y = ATARI_ASSUMED_DPI;
+static i32 g_num_colors = 2; /* conservative (mono) until queried */
 
 static wp_status ensure_metrics_vdi(void)
 {
@@ -59,6 +60,13 @@ static wp_status ensure_metrics_vdi(void)
         if (dpi > 0) g_dpi_y = dpi;
     }
 
+    /* work_out[13]: number of colors this device supports (standard
+       v_opnvwk output; 2/4/16 for ST Mono/Medium/Low -- see
+       docs/atari-platform.md). Guarded the same way DPI is: a 0 or
+       negative report shouldn't happen on any real driver but must
+       never leave g_num_colors at something nonsensical. */
+    if (work_out[13] > 0) g_num_colors = (i32)work_out[13];
+
     /* Ask a resident scalable-font GDOS to load its fonts for this
        workstation. If none is resident, or the call fails, this is a
        no-op: vst_point() continues to snap to the nearest built-in
@@ -90,6 +98,12 @@ i32 atari_px_to_twips_y(i32 px)
 {
     ensure_metrics_vdi();
     return (px * 1440) / g_dpi_y;
+}
+
+i32 atari_screen_max_colors(void)
+{
+    ensure_metrics_vdi();
+    return g_num_colors;
 }
 
 typedef struct {

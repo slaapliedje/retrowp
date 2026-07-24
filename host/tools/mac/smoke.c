@@ -73,6 +73,11 @@ int main(void)
     strcpy(buf + pos, line);
     pos += (u32)strlen(line);
 
+    ok = wp_mac_image_selfcheck();
+    line = ok ? "image: PASS\n" : "image: FAIL\n";
+    strcpy(buf + pos, line);
+    pos += (u32)strlen(line);
+
     report(buf);
 
     ExitToShell();

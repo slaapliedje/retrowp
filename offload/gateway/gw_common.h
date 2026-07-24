@@ -57,4 +57,13 @@ u32 gw_encode_grammar_issues(const u16 *start_offsets, const u16 *span_lens,
                               const char *const *messages, const char *const *suggestions,
                               u32 count, u8 *out, u32 out_cap);
 
+/* Encodes an OFFLOAD_IMAGE response: width_px(2) height_px(2)
+   palette_count(1) palette(palette_count*3) packed_pixels(packed_len)
+   -- the wire shape docs/formats/offload-protocol.md's OFFLOAD_IMAGE
+   section documents. Returns bytes written, or 0 if it wouldn't fit. */
+u32 gw_encode_image_response(u16 width_px, u16 height_px,
+                              const u8 (*palette)[3], u8 palette_count,
+                              const u8 *packed_pixels, u32 packed_len,
+                              u8 *out, u32 out_cap);
+
 #endif /* WP_GATEWAY_GW_COMMON_H */

@@ -11,6 +11,7 @@
 
 typedef u16 wp_cstyle; /* index into wp_document.cstyles; 0 = none/invalid */
 typedef u16 wp_pstyle; /* index into wp_document.pstyles; 0 = none/invalid */
+typedef u16 wp_image;  /* index into wp_document.images; 0 = none/invalid */
 
 typedef enum {
     WP_STYLE_BOLD      = 1 << 0,
@@ -52,11 +53,61 @@ typedef struct {
     wp_cstyle style;
 } wp_run;
 
+/* M15: a paragraph-level, fixed-size placed image. Never holds pixel
+   bytes directly -- only this small, always-resident descriptor lives
+   in wp_document.images; the real pixel data is streamed from
+   blob_path on demand at render time (services/spell/spell.c's
+   "descriptor + plat_file_seek/read on demand, never load whole"
+   precedent), never wp_strpool_append'd wholesale. See
+   docs/document-model.md's Image section. */
+typedef struct {
+    i32    width_px;              /* stored bitmap's real pixel width */
+    i32    height_px;             /* stored bitmap's real pixel height */
+    i32    display_width_twips;   /* layout box size, computed by the
+                                      INSERTING backend from width_px via
+                                      its own twips<->px ratio -- the
+                                      engine never computes this itself,
+                                      the same division of labor
+                                      plat_font_metrics_get's callers
+                                      already have */
+    i32    display_height_twips;
+    u8     palette_count;         /* 1..16 */
+    u8     _pad[3];
+    u8     palette[16][3];        /* RGB; palette[N] is the color for a
+                                      pixel whose packed nibble value
+                                      equals N */
+    wp_span blob_path;              /* pool ref (offset+length, NOT a
+                                        bare wp_str -- the pool never
+                                        NUL-terminates, so a length is
+                                        the only way to recover this
+                                        string later): native path to
+                                        the pixel-cache file holding
+                                        this image's packed 4-bit pixel
+                                        data; offset 0/length 0 = none
+                                        (a DOS-only placeholder
+                                        paragraph never populates this) */
+    wp_span source_name;            /* pool ref, optional; original
+                                        filename/caption; offset 0/
+                                        length 0 = unset */
+} wp_image_desc;
+
+typedef enum {
+    WP_PARA_TEXT  = 0,  /* default -- every zero-initialized paragraph is
+                            text, so every pre-M15 consumer (linebreak,
+                            justify, paginate, every backend's paint
+                            loop, every format importer/exporter) stays
+                            unaffected without a code change */
+    WP_PARA_IMAGE = 1
+} wp_para_kind;
+
 typedef struct {
     wp_run   *runs;
     u16       run_count;
     u16       run_capacity;
     wp_pstyle style;
+    u8        kind;         /* wp_para_kind; runs[]/run_count stay 0 for
+                                an image paragraph */
+    wp_image  image;        /* meaningful only when kind == WP_PARA_IMAGE */
     void     *layout;       /* opaque layout cache, not serialized; unused before M3 */
     wp_bool   layout_dirty;
 } wp_paragraph;
@@ -83,6 +134,12 @@ typedef struct {
     wp_para_style *pstyles;
     u16            pstyle_count;
     u16            pstyle_capacity;
+
+    wp_image_desc *images;   /* M15; append-only, same as cstyles/pstyles --
+                                 never compacted, not even when the last
+                                 paragraph referencing an entry is undone */
+    u16            image_count;
+    u16            image_capacity;
 
     wp_section *sections;
     u32         section_count;
@@ -116,6 +173,18 @@ typedef struct {
 typedef enum {
     WP_OP_INSERT_TEXT, WP_OP_DELETE_TEXT, WP_OP_SET_CSTYLE, WP_OP_SET_PSTYLE,
     WP_OP_SPLIT_PARA,  WP_OP_MERGE_PARA,
+    /* M15: inserts a paragraph-level image at op->at, built from
+       wp_document_split_paragraph_raw + one extra paragraph insert (see
+       wp_edit_insert_image). op->at is the pre-insert position, exactly
+       like WP_OP_SPLIT_PARA's own convention; op->style_before carries
+       the wp_image handle (doc->images is append-only, so undo never
+       needs to remove the registered descriptor, only the paragraph
+       referencing it -- the same field-reuse trick WP_OP_SPLIT_PARA/
+       MERGE_PARA already use to stash a style handle). No separate
+       "delete image" op kind exists -- undoing an insert is a
+       self-contained inverse (remove the image paragraph, re-merge),
+       the same shape WP_OP_SPLIT_PARA's own undo already has. */
+    WP_OP_INSERT_IMAGE,
     /* M8.5: markers, not edits -- bracket a run of ops on the undo stack
        so wp_edit_undo/redo treats them as one user-facing step. Carry no
        payload (at/text/style_before/style_after all unused). See
@@ -168,6 +237,19 @@ wp_status wp_document_cstyle_find_or_add(wp_document *doc, const wp_char_style *
                                           wp_cstyle *out);
 wp_status wp_document_pstyle_find_or_add(wp_document *doc, const wp_para_style *style,
                                           wp_pstyle *out);
+
+/* -- Image table management (M15) --------------------------------------- */
+/* No find_or_add here -- unlike a style, two images with byte-identical
+   descriptor fields are still distinct content (e.g. the same photo
+   inserted twice deliberately), so deduplication isn't worth the
+   complexity. Otherwise mirrors the cstyle/pstyle shape exactly: the
+   table grows via the shared 1.5x policy, index 0 is always the
+   reserved sentinel. */
+wp_status wp_document_image_add(wp_document *doc, const wp_image_desc *desc,
+                                 wp_image *out);
+
+/* Returns NULL for handle 0 or any handle >= the table's count. */
+const wp_image_desc *wp_document_image_get(const wp_document *doc, wp_image handle);
 
 /* -- Structural mutation / iteration (T1.2) ---------------------------- */
 /* Each *_add function appends one element to an append-only array and

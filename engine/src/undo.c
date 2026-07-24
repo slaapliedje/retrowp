@@ -247,6 +247,56 @@ wp_status wp_edit_merge_paragraph(wp_document *doc, wp_undo_journal *journal,
     return WP_OK;
 }
 
+wp_status wp_edit_insert_image(wp_document *doc, wp_undo_journal *journal,
+                                wp_pos pos, const wp_image_desc *desc)
+{
+    wp_status st;
+    wp_image handle;
+    wp_pos split_out;
+    wp_section *sec;
+    wp_paragraph *image_para;
+    u32 image_idx;
+    wp_op *op;
+
+    st = wp_document_image_add(doc, desc, &handle);
+    if (st != WP_OK) return st;
+
+    st = wp_document_split_paragraph_raw(doc, pos, &split_out);
+    if (st != WP_OK) return st;
+
+    /* split_out is (section, pos.paragraph + 1, 0, 0) -- the "after"
+       paragraph split created. Insert the image paragraph immediately
+       before it, at that same index (the after-paragraph shifts one
+       further); split_out.paragraph is exactly the index paragraph_
+       insert_at needs. */
+    sec = wp_document_section_get(doc, pos.section);
+    st = paragraph_insert_at(sec, split_out.paragraph, &image_idx);
+    if (st != WP_OK) return st;
+
+    image_para = wp_section_paragraph_get(sec, image_idx);
+    image_para->kind = (u8)WP_PARA_IMAGE;
+    image_para->image = handle;
+    image_para->style = doc->default_pstyle;
+    image_para->layout_dirty = WP_TRUE;
+
+    op = (wp_op *)mem_alloc((u32)sizeof(wp_op));
+    if (op == NULL) return WP_NOMEM;
+
+    op->kind = (u8)WP_OP_INSERT_IMAGE;
+    op->at = pos;              /* the pre-insert position, same convention
+                                   WP_OP_SPLIT_PARA uses */
+    op->text.offset = 0;       /* unused for this kind */
+    op->text.length = 0;
+    op->style_before = (u16)handle;  /* the registered image handle */
+    op->style_after = 0;
+
+    clear_redo(journal);
+    op->next = journal->undo_top;
+    journal->undo_top = op;
+
+    return WP_OK;
+}
+
 /* Finds the (run, offset) position exactly byte_offset bytes into
    para's concatenated text, using the same canonical convention as
    everything else in this file (a boundary between two runs always
@@ -522,6 +572,16 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
            recover it after the fact. */
         resurrected = wp_section_paragraph_get(sec, op->at.paragraph + 1);
         wp_paragraph_pstyle_set(resurrected, (wp_pstyle)op->style_before);
+    } else if (op->kind == (u8)WP_OP_INSERT_IMAGE) {
+        /* Inverse of insert: remove the image paragraph this created (at
+           at.paragraph + 1) and merge the split-off tail paragraph back
+           into the original -- insert-image is built from split_
+           paragraph_raw + one extra paragraph insert, so its inverse is
+           the same two-step shape WP_OP_SPLIT_PARA's own undo already
+           uses. The registered wp_image_desc stays in doc->images --
+           side tables are append-only, same as cstyles/pstyles. */
+        paragraph_remove_at(sec, op->at.paragraph + 1);
+        wp_document_merge_paragraph_raw(doc, op->at.section, op->at.paragraph, NULL);
     }
 }
 
@@ -549,6 +609,27 @@ static wp_status apply_single_redo_op(wp_document *doc, wp_op *op)
         st = wp_document_split_paragraph_raw(doc, op->at, NULL);
     } else if (op->kind == (u8)WP_OP_MERGE_PARA) {
         st = wp_document_merge_paragraph_raw(doc, op->at.section, op->at.paragraph, NULL);
+    } else if (op->kind == (u8)WP_OP_INSERT_IMAGE) {
+        /* Redo replays the exact same two-step sequence wp_edit_insert_
+           image itself performs, reusing the ALREADY-registered image
+           handle from style_before rather than calling wp_document_
+           image_add again (which would append a duplicate descriptor). */
+        wp_pos split_out;
+
+        st = wp_document_split_paragraph_raw(doc, op->at, &split_out);
+        if (st == WP_OK) {
+            u32 image_idx;
+
+            st = paragraph_insert_at(sec, split_out.paragraph, &image_idx);
+            if (st == WP_OK) {
+                wp_paragraph *image_para = wp_section_paragraph_get(sec, image_idx);
+
+                image_para->kind = (u8)WP_PARA_IMAGE;
+                image_para->image = (wp_image)op->style_before;
+                image_para->style = doc->default_pstyle;
+                image_para->layout_dirty = WP_TRUE;
+            }
+        }
     }
 
     return st;

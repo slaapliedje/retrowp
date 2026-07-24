@@ -16,7 +16,11 @@ typedef enum {
     OFFLOAD_CONVERT_IMPORT,  /* ODT/other bytes -> internal model */
     OFFLOAD_CONVERT_EXPORT,  /* internal model -> ODT/PDF bytes */
     OFFLOAD_CHAT,            /* freeform assist (optional) */
-    OFFLOAD_IMAGE            /* art generation (optional) */
+    OFFLOAD_IMAGE            /* source image bytes -> a small palette-
+                                 indexed bitmap matched to the requesting
+                                 target's own color ceiling (M15); see
+                                 docs/formats/offload-protocol.md's
+                                 OFFLOAD_IMAGE section for the wire shape */
 } offload_op;
 
 typedef enum {

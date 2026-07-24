@@ -165,7 +165,8 @@ int main(int argc, char **argv)
         memset(&caps, 0, sizeof(caps));
         caps.protocol_version = WIRE_VERSION;
         caps.ops_supported = (1uL << OFFLOAD_SPELL_CHECK) | (1uL << OFFLOAD_THESAURUS) |
-                             (1uL << OFFLOAD_GRAMMAR_CHECK) | (1uL << OFFLOAD_CHAT);
+                             (1uL << OFFLOAD_GRAMMAR_CHECK) | (1uL << OFFLOAD_CHAT) |
+                             (1uL << OFFLOAD_IMAGE);
         caps.max_payload_bytes = 4096;
         strncpy((char *)caps.gateway_name, "mock-gateway", sizeof(caps.gateway_name) - 1);
 
@@ -266,6 +267,14 @@ int main(int argc, char **argv)
                     resp_len = reply_len;
                     status = (u8)OFFLOAD_OK;
                 }
+            } else if (req_hdr.op == OFFLOAD_IMAGE) {
+                const fixtures_image *img = fixtures_image_get();
+
+                resp_len = gw_encode_image_response(img->width_px, img->height_px,
+                                                      img->palette, img->palette_count,
+                                                      img->packed_pixels, img->packed_len,
+                                                      resp_payload, sizeof(resp_payload));
+                status = (u8)OFFLOAD_OK;
             }
 
             gw_send_frame(ctx.write_fd, WIRE_MSG_RESPONSE, req_hdr.op, status, req_hdr.seq,

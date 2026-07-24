@@ -166,3 +166,49 @@ paginates again, and asserts the measure-call count is far smaller than
 a full from-scratch pagination of the same document -- a direct,
 quantitative proof that editing paragraph K does not re-measure every
 other paragraph's text.
+
+## Paragraph Kind: Image Paragraphs (M15)
+
+`wp_paragraph_relayout` opens with an early branch on `para->kind`
+(`docs/document-model.md`'s Image section): a `WP_PARA_IMAGE` paragraph
+skips `tokenize()`/word-wrap entirely and calls the same `emit_line()`
+every text paragraph's line-packing loop already uses, exactly once,
+sized straight from the registered `wp_image_desc`'s own
+`display_width_twips`/`display_height_twips` -- a fixed-size,
+non-flowing block, not something that participates in word wrap.
+`content_width_twips` is accepted but unused on this path (no
+text-wrap-around-image in this milestone); a missing/invalid image
+handle degrades to a zero-size line rather than failing relayout
+outright.
+
+This is the *only* change `linebreak.c` needed. Two more call sites
+outside it have to be paragraph-kind-aware, both in `justify.c`, since
+every backend's paint loop and the shared fragment-walk primitives
+unconditionally call into a line's run range:
+
+- `wp_line_next_fragment` returns `WP_FALSE` immediately for an image
+  paragraph -- there are no run bytes to fragment (`runs`/`run_count`
+  stay zero-init by construction), so the iterator is degenerate and
+  correctly reports "nothing here" without dereferencing anything.
+- `wp_justify_space_extra_twips` returns `0` immediately for the same
+  reason -- there are no inter-word gaps to distribute justification
+  space across.
+
+Both guards live in the shared primitive itself rather than in each of
+the four backends' own paint loops -- the same "guard it once, don't
+trust every call site to remember it" reasoning as everywhere else
+guard logic could otherwise be duplicated four ways. A backend's paint
+loop still needs its *own* `kind` branch before walking fragments at
+all (to actually paint the image's real pixels, or DOS's bracketed
+text marker, instead of nothing) -- see `platform/*/app_shell.c`'s own
+`para->kind == (u8)WP_PARA_IMAGE` branches -- but if one were ever
+forgotten, these two guards mean the fallback behavior is "paint
+nothing for this line," never a crash or garbage read.
+
+`engine/src/paginate.c` needed **zero changes**: it only ever reads a
+line's already-computed `height_twips` when deciding page breaks, and
+an image paragraph's one line has a real `height_twips` like any
+other line, computed by the branch above. This is a deliberate proof
+point, not an oversight -- pagination's page-break arithmetic is
+already fully decoupled from *what kind of content* produced a line's
+height.

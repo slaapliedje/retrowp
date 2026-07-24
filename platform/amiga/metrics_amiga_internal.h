@@ -62,6 +62,15 @@ typedef struct {
 typedef struct {
     struct RastPort *rp;
     struct DrawInfo *dri;
+    struct Screen   *screen; /* M15: the real, runtime-queried screen this
+                                 RastPort belongs to -- plat_draw_image needs
+                                 its ViewPort.ColorMap for ObtainBestPen (an
+                                 indexed image's palette must be resolved
+                                 against the REAL screen depth, which is
+                                 never fixed at compile time -- see
+                                 amiga_screen_color_count()'s own comment).
+                                 NULL for the metrics-only RastPort (never
+                                 draws an image, only measures text). */
 } amiga_gc;
 
 #endif /* WP_AMIGA_METRICS_INTERNAL_H */

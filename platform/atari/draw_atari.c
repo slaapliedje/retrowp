@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <string.h>
 #include "platform.h"
 #include "utf8.h"
 #include "metrics_atari_internal.h"
@@ -118,6 +119,129 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
     vsf_interior(agc->vdi, FIS_SOLID);
     vsf_color(agc->vdi, rgb_to_vdi_color(r, g, b));
     v_bar(agc->vdi, pxy);
+    return WP_OK;
+}
+
+/* M15 Phase 5b: real ST VDI raster-copy blit. Two hard, ST-specific
+   constraints shape this (see docs/atari-platform.md and this
+   milestone's own research):
+
+   (1) An MFDB source form in "device-specific" format (fd_stand=0) must
+   be genuine word-interleaved ST bitplanes -- NOT the packed-nibble-
+   per-byte chunky format the wire protocol/gateway actually produce
+   (docs/formats/offload-protocol.md's OFFLOAD_IMAGE section) -- so
+   every pixel is unpacked and re-planed into a scratch buffer here.
+   Standard ST convention: within each 16-pixel word group, bit 15 is
+   the LEFTMOST pixel; plane N holds bit N of each pixel's color index
+   (plane 0 = LSB).
+
+   (2) The ST's palette is a small, GLOBAL, hardware-indexed table
+   (vs_color reprograms real palette registers by index) -- unlike
+   Amiga's per-request ObtainBestPen, which allocates from a shared but
+   independent pen pool. Indices 0/1 already carry the G_WHITE/G_BLACK
+   this backend's own plat_draw_text/plat_fill_rect use for every other
+   on-screen pixel (rgb_to_vdi_color) -- reprogramming them would
+   recolor existing text/UI everywhere on screen, not just this image's
+   box. So this permanently reserves pens 0/1 and only ever programs
+   pens 2..(colors-1) for image content. The real color count (2 mono/
+   4 Medium/16 Low) is queried at runtime via atari_screen_max_colors()
+   (VDI's own work_out[13], the same call metrics_atari.c already makes
+   for DPI) rather than assumed -- do_insert_image already sized its
+   OFFLOAD_IMAGE request against this same real budget. A genuinely
+   mono (2-color) screen has no spare pen at all once 0/1 are reserved,
+   so this honestly fails (WP_ERR) rather than corrupting the two
+   existing text colors -- the caller already falls back to a solid
+   palette[0] rect in that case, the same allowance a missing/unreadable
+   cache file already gets. */
+wp_status plat_draw_image(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
+                           const u8 *pixels, i32 src_width_px, i32 src_height_px,
+                           const u8 palette[][3], u8 palette_count)
+{
+    atari_gc *agc = (atari_gc *)gc;
+    i32 colors, nplanes;
+    i32 wdwidth;
+    u8 pen_for[16];
+    u8 i;
+    i32 px, py;
+    u16 *planebuf;
+    u32 planebuf_words, row_words, src_row_bytes;
+    MFDB src_mfdb, dst_mfdb;
+    short pxy[8];
+
+    if (agc == NULL || pixels == NULL) return WP_ERR;
+    if (w <= 0 || h <= 0 || src_width_px <= 0 || src_height_px <= 0) return WP_ERR;
+    if (palette_count < 1 || palette_count > 16) return WP_ERR;
+
+    colors = atari_screen_max_colors();
+    nplanes = 0;
+    while ((1L << nplanes) < colors && nplanes < 8) nplanes++;
+    if (nplanes < 2) return WP_ERR; /* mono: no spare pen once 0/1 reserved */
+
+    if ((i32)palette_count > colors - 2) palette_count = (u8)(colors - 2);
+
+    for (i = 0; i < palette_count; i++) {
+        short rgb[3];
+        rgb[0] = (short)(((i32)palette[i][0] * 1000) / 255);
+        rgb[1] = (short)(((i32)palette[i][1] * 1000) / 255);
+        rgb[2] = (short)(((i32)palette[i][2] * 1000) / 255);
+        vs_color(agc->vdi, (short)(i + 2), rgb);
+        pen_for[i] = (u8)(i + 2);
+    }
+
+    wdwidth = (src_width_px + 15) / 16;
+    row_words = (u32)wdwidth * (u32)nplanes;
+    planebuf_words = row_words * (u32)src_height_px;
+    planebuf = (u16 *)mem_alloc(planebuf_words * (u32)sizeof(u16));
+    if (planebuf == NULL) return WP_NOMEM;
+    memset(planebuf, 0, planebuf_words * (u32)sizeof(u16));
+
+    src_row_bytes = ((u32)src_width_px + 1u) / 2u;
+    for (py = 0; py < src_height_px; py++) {
+        const u8 *src_row = pixels + (u32)py * src_row_bytes;
+        u16 *plane_row = planebuf + (u32)py * row_words;
+
+        for (px = 0; px < src_width_px; px++) {
+            u8 byte = src_row[px / 2];
+            u8 nibble = (u8)((px % 2 == 0) ? (byte >> 4) : (byte & 0x0F));
+            u8 pen;
+            i32 word_idx = px / 16;
+            i32 bit_idx = 15 - (px % 16);
+            i32 plane;
+
+            if (nibble >= palette_count) nibble = 0;
+            pen = pen_for[nibble];
+
+            for (plane = 0; plane < nplanes; plane++) {
+                if (pen & (1 << plane)) {
+                    u16 *w_ptr = &plane_row[(u32)word_idx * (u32)nplanes + (u32)plane];
+                    *w_ptr = (u16)(*w_ptr | (1u << bit_idx));
+                }
+            }
+        }
+    }
+
+    memset(&src_mfdb, 0, sizeof(src_mfdb));
+    src_mfdb.fd_addr = planebuf;
+    src_mfdb.fd_w = (short)src_width_px;
+    src_mfdb.fd_h = (short)src_height_px;
+    src_mfdb.fd_wdwidth = (short)wdwidth;
+    src_mfdb.fd_stand = 0;
+    src_mfdb.fd_nplanes = (short)nplanes;
+
+    memset(&dst_mfdb, 0, sizeof(dst_mfdb)); /* fd_addr=0 -> real screen, VDI fills in the rest */
+
+    pxy[0] = 0;
+    pxy[1] = 0;
+    pxy[2] = (short)(src_width_px - 1);
+    pxy[3] = (short)(src_height_px - 1);
+    pxy[4] = (short)x;
+    pxy[5] = (short)y;
+    pxy[6] = (short)(x + w - 1);
+    pxy[7] = (short)(y + h - 1);
+
+    vro_cpyfm(agc->vdi, S_ONLY, pxy, &src_mfdb, &dst_mfdb);
+
+    mem_free(planebuf);
     return WP_OK;
 }
 

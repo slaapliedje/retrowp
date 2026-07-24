@@ -672,6 +672,200 @@ static void do_chat(void)
     show_message("Chat", msg);
 }
 
+/* Insert Image (M15 T15.4): pick a source file via the same ASL
+   requester do_file_open reuses, downconvert it through the real
+   OFFLOAD_IMAGE op (do_chat's own CAPS-pre-check pattern -- offload_
+   query() + offload_caps_supports() BEFORE building a request), cache
+   the returned packed pixel bytes to disk, and insert a WP_PARA_IMAGE
+   paragraph at the cursor. Real pixel rendering (reading blob_path
+   back and blitting it) is a later phase (T15.6) -- this phase only
+   needs the paragraph to exist at the right size. */
+#define WP_AMIGA_IMAGE_MAX_FILE_SIZE 65000uL /* wire frame's own WIRE_MAX_PAYLOAD (64K) minus the 6-byte request header */
+#define WP_AMIGA_IMAGE_TIMEOUT_MS    90000uL /* matches this backend's other offload budgets */
+#define WP_AMIGA_IMAGE_TARGET_MAX_W  320u    /* WP_IMAGE_MAX_WIDTH_PX -- the ST low-res ceiling every target clamps against */
+#define WP_AMIGA_IMAGE_TARGET_MAX_H  200u
+
+static u32 g_amiga_image_cache_counter = 0;
+
+/* "PROGDIR:WPIMG###.TMP" -- counter-suffixed so a second Insert Image
+   in one session can't silently overwrite the first image's still-
+   referenced pixel cache file underneath it (a single fixed name
+   would). Mirrors wp_amiga_config_selfcheck's own PROGDIR: scratch-
+   file convention. out must be >= 24 bytes. Wraps at 1000, a real,
+   accepted session-scope limit. */
+static void amiga_format_image_cache_path(char *out, u32 counter)
+{
+    u32 c = counter % 1000u;
+    strcpy(out, "PROGDIR:WPIMG");
+    out[13] = (char)('0' + (c / 100u) % 10u);
+    out[14] = (char)('0' + (c / 10u) % 10u);
+    out[15] = (char)('0' + c % 10u);
+    strcpy(out + 16, ".TMP");
+}
+
+/* Real, runtime-queried screen depth this app's MUI window actually
+   opened on (M9's own finding: MUI opens on whatever the user's real
+   Workbench screen depth is, never fixed at compile time) -- clamped
+   to 16, the most colors any packed-4-bit response can ever carry
+   regardless of what a deeper screen could otherwise show. Falls back
+   to a conservative 4 if the screen/bitmap isn't queryable for any
+   reason, rather than failing the request outright.
+
+   Queries via GetAttr(MUIA_Window_Screen, ...), NOT the _screen(obj)
+   convenience macro -- that macro reads muiRenderInfo(obj)->mri_Screen,
+   valid only "between MUIM_Setup/Cleanup" for the SPECIFIC object whose
+   own Setup populated it (confirmed via libraries/mui.h's own comment);
+   g_win itself never reliably has that render info populated, a real
+   bug found here via a live diagnostic (an on-target dump showed depth
+   0, i.e. a silently NULL screen pointer) after _screen(g_win) compiled
+   clean but returned NULL at runtime. GetAttr is a real MUI Window
+   attribute query that works on the window object directly, regardless
+   of custom-class Setup/Cleanup state. */
+static u32 amiga_screen_color_count(void)
+{
+    struct Screen *scr = NULL;
+    GetAttr(MUIA_Window_Screen, g_win, (ULONG *)&scr);
+    if (scr == NULL || scr->BitMap.Depth < 1) return 4u;
+    if (scr->BitMap.Depth >= 4) return 16u;
+    return (u32)(1uL << (u32)scr->BitMap.Depth);
+}
+
+static void do_insert_image(void)
+{
+    char fullpath[256];
+    plat_file *f;
+    u32 size, read_len;
+    u8 *req_buf;
+    offload_capabilities caps;
+    offload_request req;
+    offload_response resp;
+
+    if (!g_ctx.doc_loaded) return;
+    if (!run_asl_file_requester(WP_FALSE, fullpath, (u32)sizeof(fullpath))) return;
+
+    if (!ensure_offload()) {
+        show_message("Insert Image", "No offload device available (tried " WP_AMIGA_OFFLOAD_ENDPOINT ").");
+        return;
+    }
+    if (offload_query(&caps) != WP_OK || !offload_caps_supports(&caps, OFFLOAD_IMAGE)) {
+        show_message("Insert Image", "This gateway doesn't offer Insert Image.");
+        return;
+    }
+
+    if (plat_file_open(fullpath, PLAT_FILE_READ, &f) != WP_OK) {
+        show_message("Insert Image", "Couldn't open that file.");
+        return;
+    }
+    if (plat_file_size(f, &size) != WP_OK || size == 0 || size > WP_AMIGA_IMAGE_MAX_FILE_SIZE) {
+        plat_file_close(f);
+        show_message("Insert Image", "That image file is too large for this app to send.");
+        return;
+    }
+
+    req_buf = (u8 *)mem_alloc(size + 6);
+    if (req_buf == NULL) { plat_file_close(f); return; }
+
+    req_buf[0] = (u8)amiga_screen_color_count();
+    req_buf[1] = 0; /* target_flags: color, not grayscale -- Amiga's real screen depth already gives a real palette */
+    be_write16(req_buf + 2, (u16)WP_AMIGA_IMAGE_TARGET_MAX_W);
+    be_write16(req_buf + 4, (u16)WP_AMIGA_IMAGE_TARGET_MAX_H);
+
+    if (plat_file_read(f, req_buf + 6, size, &read_len) != WP_OK) {
+        mem_free(req_buf);
+        plat_file_close(f);
+        return;
+    }
+    plat_file_close(f);
+
+    req.op = OFFLOAD_IMAGE;
+    req.payload = req_buf;
+    req.payload_len = read_len + 6;
+    req.timeout_ms = (u32)WP_AMIGA_IMAGE_TIMEOUT_MS;
+
+    if (offload_submit(&req, &resp) != WP_OK) {
+        mem_free(req_buf);
+        show_message("Insert Image", "Insert Image failed or timed out.");
+        return;
+    }
+    mem_free(req_buf);
+
+    if (resp.status != OFFLOAD_OK || resp.result_len < 5) {
+        offload_response_free(&resp);
+        show_message("Insert Image", "The connected gateway couldn't convert that image.");
+        return;
+    }
+
+    {
+        u16 width_px = be_read16(resp.result);
+        u16 height_px = be_read16(resp.result + 2);
+        u8 palette_count = resp.result[4];
+        const u8 *palette = resp.result + 5;
+        const u8 *packed_pixels = palette + (u32)palette_count * 3u;
+        u32 row_bytes = ((u32)width_px + 1u) / 2u;
+        u32 packed_len = row_bytes * (u32)height_px;
+        char cache_path[24];
+        wp_image_desc desc;
+        wp_status st;
+        u32 fname_start, k;
+
+        if (palette_count < 1 || palette_count > 16 ||
+            resp.result_len != 5u + (u32)palette_count * 3u + packed_len) {
+            offload_response_free(&resp);
+            show_message("Insert Image", "The gateway's reply was malformed.");
+            return;
+        }
+
+        amiga_format_image_cache_path(cache_path, g_amiga_image_cache_counter);
+
+        if (plat_file_open(cache_path, PLAT_FILE_WRITE, &f) != WP_OK) {
+            offload_response_free(&resp);
+            show_message("Insert Image", "Couldn't write the image cache file to disk.");
+            return;
+        }
+        st = plat_file_write(f, packed_pixels, packed_len);
+        plat_file_close(f);
+        if (st != WP_OK) {
+            offload_response_free(&resp);
+            show_message("Insert Image", "Couldn't write the image cache file to disk.");
+            return;
+        }
+        g_amiga_image_cache_counter++;
+
+        memset(&desc, 0, sizeof(desc));
+        desc.width_px = (i32)width_px;
+        desc.height_px = (i32)height_px;
+        desc.display_width_twips = amiga_px_to_twips_x((i32)width_px);
+        desc.display_height_twips = amiga_px_to_twips_y((i32)height_px);
+        desc.palette_count = palette_count;
+        memcpy(desc.palette, palette, (u32)palette_count * 3u);
+        if (wp_strpool_append(&g_amiga_doc.strings, (const u8 *)cache_path,
+                               (u32)strlen(cache_path), &desc.blob_path) != WP_OK) {
+            offload_response_free(&resp);
+            return;
+        }
+
+        /* fullpath's own final path separator (':' or '/') marks where
+           the bare filename starts -- AddPart's own convention, same
+           directory-vs-file split run_asl_file_requester's own callers
+           never needed until now. */
+        fname_start = 0;
+        for (k = 0; fullpath[k] != '\0'; k++) {
+            if (fullpath[k] == ':' || fullpath[k] == '/') fname_start = k + 1;
+        }
+        if (fullpath[fname_start] != '\0') {
+            wp_strpool_append(&g_amiga_doc.strings, (const u8 *)(fullpath + fname_start),
+                               (u32)strlen(fullpath + fname_start), &desc.source_name);
+        }
+        offload_response_free(&resp);
+
+        if (wp_edit_insert_image(&g_amiga_doc, &g_amiga_journal, (*wp_keymap_cursor(&g_ctx)), &desc) != WP_OK) {
+            show_message("Insert Image", "Couldn't insert that image into the document.");
+            return;
+        }
+        relayout_document(g_content_width_twips);
+    }
+}
+
 /* Source-agnostic issue record, populated either from
    decode_grammar_issue_at() (the wire response) or directly from
    grammar_lite_check() (services/grammar) when no offload device is
@@ -829,6 +1023,7 @@ static void invoke_backend_action(wp_action_id id)
     case WP_ACT_TOOLS_THESAURUS:    do_thesaurus(); break;
     case WP_ACT_TOOLS_GRAMMARCHECK: do_grammar_check(); break;
     case WP_ACT_TOOLS_CHAT:         do_chat(); break;
+    case WP_ACT_TOOLS_INSERTIMAGE:  do_insert_image(); break;
     default:
         /* Spellcheck stays a no-op: it's a LOCAL, file-based dictionary
            feature (services/spell -- no offload dependency at all, per
@@ -1194,6 +1389,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
         amiga_gc help_gc;
         help_gc.rp = _rp(obj);
         help_gc.dri = _dri(obj);
+        help_gc.screen = NULL; /* the help pager never draws an image */
         paint_help_amiga(&help_gc, obj);
         return 0;
     }
@@ -1220,6 +1416,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
 
     gc.rp = _rp(obj);
     gc.dri = _dri(obj);
+    GetAttr(MUIA_Window_Screen, g_win, (ULONG *)&gc.screen);
 
     y = _mtop(obj) + WP_EDITOR_TOP_MARGIN_PX;
     for (si = 0; si < g_amiga_doc.section_count && y <= _mbottom(obj); si++) {
@@ -1250,41 +1447,107 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
 
             for (li = 0; li < layout->line_count && y <= _mbottom(obj); li++) {
                 wp_line *line = &layout->lines[li];
-                char buf[256];
-                u32 buf_len = 0;
-                u32 r;
                 i32 x_px = _mleft(obj) + WP_EDITOR_LEFT_MARGIN_PX;
-                i32 line_height_px;
-                wp_cstyle line_style = g_amiga_doc.default_cstyle;
+                i32 extra_twips;
+                wp_line_fragment_iter iter;
+                wp_line_fragment frag;
 
                 x_px += amiga_twips_to_px_x(
                     amiga_align_offset_twips(align, content_width_twips, line->width_twips));
 
-                for (r = line->start_run; r <= line->end_run && r < para->run_count; r++) {
-                    wp_run *run = wp_paragraph_run_get(para, (u16)r);
-                    const u8 *bytes = wp_strpool_get(&g_amiga_doc.strings, run->text);
-                    u32 seg_start = (r == line->start_run) ? line->start_offset : 0;
-                    u32 seg_end = (r == line->end_run) ? line->end_offset : run->text.length;
-                    u32 k;
+                /* M15 T15.6: an image paragraph's single line has no run
+                   bytes to fragment -- paint its real indexed-bitmap
+                   content (read back from blob_path on demand, per
+                   services/spell.c's own "stream from disk, don't load
+                   the model whole" precedent) and move straight to the
+                   next line, skipping the fragment-walk/font-cache/
+                   cursor-marker logic below entirely. Falls back to a
+                   solid palette[0] rect (the original T15.6a proof) if
+                   the cache file can't be read for any reason, rather
+                   than drawing nothing at all. */
+                if (para->kind == (u8)WP_PARA_IMAGE) {
+                    const wp_image_desc *img = wp_document_image_get(&g_amiga_doc, para->image);
 
-                    line_style = run->style;
-                    for (k = seg_start; k < seg_end && buf_len < sizeof(buf) - 1; k++) {
-                        buf[buf_len++] = (char)bytes[k];
+                    if (img != NULL && img->palette_count > 0) {
+                        i32 w_px = amiga_twips_to_px_x(line->width_twips);
+                        i32 h_px = amiga_twips_to_px_y(line->height_twips);
+                        wp_bool drew_real = WP_FALSE;
+
+                        if (img->blob_path.length > 0 && img->blob_path.length < 256) {
+                            char path[256];
+                            const u8 *span_bytes = wp_strpool_get(&g_amiga_doc.strings, img->blob_path);
+                            plat_file *f;
+
+                            memcpy(path, span_bytes, img->blob_path.length);
+                            path[img->blob_path.length] = '\0';
+
+                            if (plat_file_open(path, PLAT_FILE_READ, &f) == WP_OK) {
+                                u32 row_bytes = ((u32)img->width_px + 1u) / 2u;
+                                u32 packed_len = row_bytes * (u32)img->height_px;
+                                u8 *pixels = (u8 *)mem_alloc(packed_len);
+
+                                if (pixels != NULL) {
+                                    u32 read_len;
+                                    if (plat_file_read(f, pixels, packed_len, &read_len) == WP_OK &&
+                                        read_len == packed_len) {
+                                        if (plat_draw_image((plat_gc *)&gc, x_px, y, w_px, h_px,
+                                                             pixels, img->width_px, img->height_px,
+                                                             img->palette, img->palette_count) == WP_OK) {
+                                            drew_real = WP_TRUE;
+                                        }
+                                    }
+                                    mem_free(pixels);
+                                }
+                                plat_file_close(f);
+                            }
+                        }
+
+                        if (!drew_real) {
+                            plat_fill_rect((plat_gc *)&gc, x_px, y, w_px, h_px,
+                                           img->palette[0][0], img->palette[0][1], img->palette[0][2]);
+                        }
                     }
+                    y += amiga_twips_to_px_y(line->height_twips);
+                    continue;
                 }
 
-                if (!have_font || line_style != cached_style) {
-                    const wp_char_style *cs = wp_document_cstyle_get(&g_amiga_doc, line_style);
-                    plat_font_metrics fm;
+                extra_twips = wp_justify_space_extra_twips(
+                    &g_amiga_doc, para, line, align, (wp_bool)(li == layout->line_count - 1),
+                    content_width_twips);
 
-                    if (cs != NULL) {
-                        if (font != NULL) plat_font_close(font);
-                        plat_font_open((const u8 *)"", 0, cs->size_twips, cs->flags, &font);
-                        plat_font_metrics_get(font, &fm);
-                        ascent_px = amiga_twips_to_px_y(fm.ascent);
-                        cached_style = line_style;
-                        have_font = WP_TRUE;
+                wp_line_fragment_iter_init(&iter, line);
+                while (wp_line_next_fragment(&g_amiga_doc, para, line, &iter, &frag)) {
+                    wp_run *run = wp_paragraph_run_get(para, (u16)frag.run_index);
+                    const u8 *bytes = wp_strpool_get(&g_amiga_doc.strings, run->text);
+                    u32 frag_len = frag.byte_end - frag.byte_start;
+                    i32 frag_width_twips = 0;
+
+                    if (!have_font || run->style != cached_style) {
+                        const wp_char_style *cs = wp_document_cstyle_get(&g_amiga_doc, run->style);
+
+                        if (cs != NULL) {
+                            plat_font_metrics fm;
+
+                            if (font != NULL) plat_font_close(font);
+                            plat_font_open((const u8 *)"", 0, cs->size_twips, cs->flags, &font);
+                            plat_font_metrics_get(font, &fm);
+                            ascent_px = amiga_twips_to_px_y(fm.ascent);
+                            cached_style = run->style;
+                            have_font = WP_TRUE;
+                        }
                     }
+
+                    if (frag_len == 0 || font == NULL) continue;
+
+                    plat_measure_text(font, bytes + frag.byte_start, frag_len, &frag_width_twips);
+
+                    if (!frag.is_space) {
+                        plat_draw_text((plat_gc *)&gc, font, x_px, y + ascent_px,
+                                        bytes + frag.byte_start, frag_len, 0, 0, 0);
+                    }
+
+                    x_px += amiga_twips_to_px_x(frag_width_twips);
+                    if (frag.is_space) x_px += amiga_twips_to_px_x(extra_twips);
                 }
 
                 if (is_cursor_para && li == cursor_line_index) {
@@ -1293,12 +1556,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                              _mleft(obj) + 1, (LONG)(y + 1));
                 }
 
-                line_height_px = amiga_twips_to_px_y(line->height_twips);
-                if (buf_len > 0 && font != NULL) {
-                    plat_draw_text((plat_gc *)&gc, font, x_px, y + ascent_px,
-                                    (const u8 *)buf, buf_len, 0, 0, 0);
-                }
-                y += line_height_px;
+                y += amiga_twips_to_px_y(line->height_twips);
             }
         }
     }
@@ -1658,6 +1916,34 @@ wp_bool wp_amiga_layout_selfcheck(void)
         if (layout->lines[i].width_twips > content_width_twips) ok = WP_FALSE;
     }
 
+    /* T13.2: mirrors wp_atari_layout_selfcheck's own new JUSTIFY check --
+       can't hand-compute exact widths against a real font on real
+       hardware, so this only checks what every real backend's paint
+       loop actually depends on: interior lines' slack is never
+       negative, and the paragraph's last line always stays exactly 0. */
+    if (ok) {
+        wp_para_style jps;
+        wp_pstyle jpstyle;
+
+        memset(&jps, 0, sizeof(jps));
+        jps.align = WP_ALIGN_JUSTIFY;
+        if (wp_document_pstyle_add(&doc, &jps, &jpstyle) != WP_OK) ok = WP_FALSE;
+        if (ok) wp_paragraph_pstyle_set(para, jpstyle);
+        if (ok && wp_paragraph_relayout(&doc, para, content_width_twips) != WP_OK) ok = WP_FALSE;
+
+        if (ok) {
+            layout = (wp_paragraph_layout *)para->layout;
+            for (i = 0; ok && i < layout->line_count; i++) {
+                wp_bool is_last = (wp_bool)(i == layout->line_count - 1);
+                i32 extra = wp_justify_space_extra_twips(&doc, para, &layout->lines[i],
+                                                          WP_ALIGN_JUSTIFY, is_last,
+                                                          content_width_twips);
+                if (extra < 0) ok = WP_FALSE;
+                if (is_last && extra != 0) ok = WP_FALSE;
+            }
+        }
+    }
+
     wp_document_free(&doc);
     return ok;
 }
@@ -1894,5 +2180,99 @@ wp_bool wp_amiga_config_selfcheck(void)
     }
 
     plat_file_delete(WP_AMIGA_CONFIG_PATH);
+    return ok;
+}
+
+wp_bool wp_amiga_image_selfcheck(void)
+{
+    offload_capabilities caps;
+    wp_bool ok = WP_TRUE;
+    wp_document doc;
+    u32 sec_idx, para_idx;
+
+    memset(&caps, 0, sizeof(caps));
+    caps.ops_supported = (1uL << OFFLOAD_THESAURUS) | (1uL << OFFLOAD_CHAT) | (1uL << OFFLOAD_IMAGE);
+
+    if (!offload_caps_supports(&caps, OFFLOAD_IMAGE)) ok = WP_FALSE;
+    if (!offload_caps_supports(&caps, OFFLOAD_CHAT)) ok = WP_FALSE;
+    if (offload_caps_supports(&caps, OFFLOAD_GRAMMAR_CHECK)) ok = WP_FALSE;
+
+    /* M15 Phase 5: position/size assertion -- an image paragraph must
+       relayout to EXACTLY its descriptor's display_width_twips/
+       display_height_twips, the same "does the engine's own layout math
+       agree with what the paint loop will use" proof wp_amiga_layout_
+       selfcheck already gives text paragraphs, now extended to
+       WP_PARA_IMAGE. Pure engine-side (linebreak.c), no window/screen
+       needed, so this runs safely from the headless AMISMOKE binary. */
+    if (wp_document_init(&doc) == WP_OK) {
+        wp_section *sec;
+        wp_paragraph *para;
+        wp_image_desc desc;
+        wp_image handle;
+
+        if (wp_document_section_add(&doc, &sec_idx) != WP_OK) ok = WP_FALSE;
+        else {
+            sec = wp_document_section_get(&doc, sec_idx);
+            memset(&desc, 0, sizeof(desc));
+            desc.width_px = 4;
+            desc.height_px = 4;
+            desc.display_width_twips = 320;
+            desc.display_height_twips = 240;
+            desc.palette_count = 2;
+            desc.palette[0][0] = 0;   desc.palette[0][1] = 0;   desc.palette[0][2] = 0;
+            desc.palette[1][0] = 255; desc.palette[1][1] = 255; desc.palette[1][2] = 255;
+
+            if (wp_document_image_add(&doc, &desc, &handle) != WP_OK ||
+                wp_section_paragraph_add(sec, &para_idx) != WP_OK) {
+                ok = WP_FALSE;
+            } else {
+                wp_paragraph_layout *layout;
+
+                para = wp_section_paragraph_get(sec, para_idx);
+                para->kind = (u8)WP_PARA_IMAGE;
+                para->image = handle;
+                para->style = doc.default_pstyle;
+
+                if (wp_paragraph_relayout(&doc, para, 1000) != WP_OK) {
+                    ok = WP_FALSE;
+                } else {
+                    layout = (wp_paragraph_layout *)para->layout;
+                    if (layout == NULL || layout->line_count != 1) ok = WP_FALSE;
+                    else if (layout->lines[0].width_twips != desc.display_width_twips) ok = WP_FALSE;
+                    else if (layout->lines[0].height_twips != desc.display_height_twips) ok = WP_FALSE;
+                }
+            }
+        }
+        wp_document_free(&doc);
+    } else {
+        ok = WP_FALSE;
+    }
+
+    /* Bounds/no-crash: plat_draw_image must fail SAFELY (never crash)
+       on degenerate input -- no real window/screen exists in this
+       headless smoke binary, so a zeroed amiga_gc (screen == NULL) is
+       the only gc available; every case below must be turned away by
+       plat_draw_image's own guard clauses rather than dereferencing
+       anything. Doesn't assert exact pixel content -- same "real
+       hardware, not hand-computed" allowance T13.2's own JUSTIFY
+       selfcheck already established -- only that these calls return
+       safely. */
+    {
+        amiga_gc bad_gc;
+        u8 dummy_pixels[8];
+        u8 palette[2][3];
+
+        memset(&bad_gc, 0, sizeof(bad_gc));
+        memset(dummy_pixels, 0, sizeof(dummy_pixels));
+        palette[0][0] = 0;   palette[0][1] = 0;   palette[0][2] = 0;
+        palette[1][0] = 255; palette[1][1] = 255; palette[1][2] = 255;
+
+        if (plat_draw_image(NULL, 0, 0, 4, 4, dummy_pixels, 4, 4, palette, 2) == WP_OK) ok = WP_FALSE;
+        if (plat_draw_image((plat_gc *)&bad_gc, 0, 0, 4, 4, dummy_pixels, 4, 4, palette, 2) == WP_OK) ok = WP_FALSE;
+        if (plat_draw_image((plat_gc *)&bad_gc, 0, 0, 0, 4, dummy_pixels, 4, 4, palette, 2) == WP_OK) ok = WP_FALSE;
+        if (plat_draw_image((plat_gc *)&bad_gc, 0, 0, 4, 4, dummy_pixels, 4, 4, palette, 0) == WP_OK) ok = WP_FALSE;
+        if (plat_draw_image((plat_gc *)&bad_gc, 0, 0, 4, 4, dummy_pixels, 4, 4, palette, 17) == WP_OK) ok = WP_FALSE;
+    }
+
     return ok;
 }

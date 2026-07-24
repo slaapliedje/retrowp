@@ -617,12 +617,10 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 
             for (li = 0; li < layout->line_count; li++) {
                 wp_line *line = &layout->lines[li];
-                char buf[512];
-                u32 buf_len = 0;
-                u32 r;
-                i32 line_height_px;
                 i32 x_px = area.g_x;
-                wp_cstyle line_style = g_doc.default_cstyle;
+                i32 extra_twips;
+                wp_line_fragment_iter iter;
+                wp_line_fragment frag;
 
                 if (y_px > area.g_y + area.g_h) break;
 
@@ -630,46 +628,111 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                    relayout and this paint pass use the same
                    g_content_width_twips column), only where each already-
                    broken line starts drawing -- a pure paint-time x
-                   offset, no engine/layout change needed. Justify is
-                   explicitly not implemented (would need per-word draw
-                   calls with distributed extra spacing, not just one
-                   offset -- documented gap, see docs/atari-platform.md). */
+                   offset, no engine/layout change needed. JUSTIFY
+                   resolves to 0 here (left start) same as LEFT -- correct,
+                   since justify only redistributes slack BETWEEN words,
+                   via the per-fragment walk below (T13.2). */
                 x_px += atari_twips_to_px_x(
                     atari_align_offset_twips(align, g_content_width_twips, line->width_twips));
 
-                for (r = line->start_run; r <= line->end_run && r < para->run_count; r++) {
-                    wp_run *run = wp_paragraph_run_get(para, (u16)r);
+                /* M15 T15.6: an image paragraph's single line has no run
+                   bytes to fragment (wp_line_next_fragment already returns
+                   WP_FALSE for it, per justify.c's own kind-guard) -- paint
+                   its real indexed-bitmap content (read back from blob_path
+                   on demand, per services/spell.c's own "stream from disk,
+                   don't load the model whole" precedent) and move straight
+                   to the next line, skipping the fragment-walk/font-cache
+                   logic below entirely. Falls back to a solid palette[0]
+                   rect if the cache file can't be read, or if this VDI
+                   device has no spare palette register for image content
+                   (see plat_draw_image's own comment in draw_atari.c),
+                   rather than drawing nothing at all. */
+                if (para->kind == (u8)WP_PARA_IMAGE) {
+                    const wp_image_desc *img = wp_document_image_get(&g_doc, para->image);
+
+                    if (img != NULL && img->palette_count > 0) {
+                        i32 w_px = atari_twips_to_px_x(line->width_twips);
+                        i32 h_px = atari_twips_to_px_y(line->height_twips);
+                        wp_bool drew_real = WP_FALSE;
+
+                        if (img->blob_path.length > 0 && img->blob_path.length < 256) {
+                            char ipath[256];
+                            const u8 *span_bytes = wp_strpool_get(&g_doc.strings, img->blob_path);
+                            plat_file *imgf;
+
+                            memcpy(ipath, span_bytes, img->blob_path.length);
+                            ipath[img->blob_path.length] = '\0';
+
+                            if (plat_file_open(ipath, PLAT_FILE_READ, &imgf) == WP_OK) {
+                                u32 row_bytes = ((u32)img->width_px + 1u) / 2u;
+                                u32 packed_len = row_bytes * (u32)img->height_px;
+                                u8 *ipixels = (u8 *)mem_alloc(packed_len);
+
+                                if (ipixels != NULL) {
+                                    u32 read_len;
+                                    if (plat_file_read(imgf, ipixels, packed_len, &read_len) == WP_OK &&
+                                        read_len == packed_len) {
+                                        if (plat_draw_image((plat_gc *)&gc, x_px, y_px, w_px, h_px,
+                                                             ipixels, img->width_px, img->height_px,
+                                                             img->palette, img->palette_count) == WP_OK) {
+                                            drew_real = WP_TRUE;
+                                        }
+                                    }
+                                    mem_free(ipixels);
+                                }
+                                plat_file_close(imgf);
+                            }
+                        }
+
+                        if (!drew_real) {
+                            plat_fill_rect((plat_gc *)&gc, x_px, y_px, w_px, h_px,
+                                           img->palette[0][0], img->palette[0][1], img->palette[0][2]);
+                        }
+                    }
+                    y_px += atari_twips_to_px_y(line->height_twips);
+                    continue;
+                }
+
+                extra_twips = wp_justify_space_extra_twips(
+                    &g_doc, para, line, align, (wp_bool)(li == layout->line_count - 1),
+                    g_content_width_twips);
+
+                wp_line_fragment_iter_init(&iter, line);
+                while (wp_line_next_fragment(&g_doc, para, line, &iter, &frag)) {
+                    wp_run *run = wp_paragraph_run_get(para, (u16)frag.run_index);
                     const u8 *bytes = wp_strpool_get(&g_doc.strings, run->text);
-                    u32 seg_start = (r == line->start_run) ? line->start_offset : 0;
-                    u32 seg_end = (r == line->end_run) ? line->end_offset : run->text.length;
-                    u32 k;
+                    u32 frag_len = frag.byte_end - frag.byte_start;
+                    i32 frag_width_twips = 0;
 
-                    line_style = run->style;
-                    for (k = seg_start; k < seg_end && buf_len < sizeof(buf) - 1; k++) {
-                        buf[buf_len++] = (char)bytes[k];
+                    if (!have_font || run->style != cached_style) {
+                        const wp_char_style *cs = wp_document_cstyle_get(&g_doc, run->style);
+
+                        if (cs != NULL) {
+                            plat_font_metrics fm;
+
+                            if (font != NULL) plat_font_close(font);
+                            plat_font_open((const u8 *)"", 0, cs->size_twips, cs->flags, &font);
+                            plat_font_metrics_get(font, &fm);
+                            ascent_px = atari_twips_to_px_y(fm.ascent);
+                            cached_style = run->style;
+                            have_font = WP_TRUE;
+                        }
                     }
-                }
 
-                if (!have_font || line_style != cached_style) {
-                    const wp_char_style *cs = wp_document_cstyle_get(&g_doc, line_style);
-                    plat_font_metrics fm;
+                    if (frag_len == 0 || font == NULL) continue;
 
-                    if (cs != NULL) {
-                        if (font != NULL) plat_font_close(font);
-                        plat_font_open((const u8 *)"", 0, cs->size_twips, cs->flags, &font);
-                        plat_font_metrics_get(font, &fm);
-                        ascent_px = atari_twips_to_px_y(fm.ascent);
-                        cached_style = line_style;
-                        have_font = WP_TRUE;
+                    plat_measure_text(font, bytes + frag.byte_start, frag_len, &frag_width_twips);
+
+                    if (!frag.is_space) {
+                        plat_draw_text((plat_gc *)&gc, font, x_px, y_px + ascent_px,
+                                        bytes + frag.byte_start, frag_len, 0, 0, 0);
                     }
+
+                    x_px += atari_twips_to_px_x(frag_width_twips);
+                    if (frag.is_space) x_px += atari_twips_to_px_x(extra_twips);
                 }
 
-                line_height_px = atari_twips_to_px_y(line->height_twips);
-                if (buf_len > 0 && font != NULL) {
-                    plat_draw_text((plat_gc *)&gc, font, x_px, y_px + ascent_px,
-                                    (const u8 *)buf, buf_len, 0, 0, 0);
-                }
-                y_px += line_height_px;
+                y_px += atari_twips_to_px_y(line->height_twips);
             }
         }
     }
@@ -1900,6 +1963,191 @@ static void do_chat(void)
     form_alert(1, msg);
 }
 
+/* Insert Image (M15 T15.4): pick a source file, downconvert it through
+   the real OFFLOAD_IMAGE op, cache the returned packed pixel bytes to
+   disk, and insert a WP_PARA_IMAGE paragraph at the cursor. Mirrors
+   do_odt_open's own file-read/offload-submit/error-handling shape and
+   do_chat's own CAPS-pre-check pattern (offload_query() +
+   offload_caps_supports() BEFORE building a request, not submit-and-
+   hope like do_odt_open/do_thesaurus). Real pixel rendering (reading
+   blob_path back and blitting it, via plat_draw_image) happens later,
+   in paint_document -- this function only needs the paragraph to exist
+   at the right size, which is already true once wp_edit_insert_image
+   succeeds. */
+#define WP_ATARI_IMAGE_MAX_FILE_SIZE 65000uL /* wire frame's own WIRE_MAX_PAYLOAD (64K) minus the 6-byte request header, the same client-side cap docs/formats/offload-protocol.md's OFFLOAD_IMAGE section documents */
+#define WP_ATARI_IMAGE_TIMEOUT_MS    60000uL
+#define WP_ATARI_IMAGE_TARGET_MAX_W  320u  /* WP_IMAGE_MAX_WIDTH_PX -- the ST low-res ceiling every target clamps against */
+#define WP_ATARI_IMAGE_TARGET_MAX_H  200u
+
+/* Real, runtime-queried color budget for an inserted image -- NOT a
+   fixed 16, since this project's own real boot resolution is Medium
+   (4 colors total, see docs/atari-platform.md's "Boot resolution:
+   Medium, not Low"), not every ST necessarily runs Low. Two colors
+   (pens 0/1, G_WHITE/G_BLACK) are permanently reserved for the existing
+   text/UI -- see plat_draw_image's own comment in draw_atari.c for why
+   the ST's palette registers can't be shared the way Amiga's per-
+   request ObtainBestPen pens can. Clamped to a minimum of 1 so the
+   request itself always stays in OFFLOAD_IMAGE's valid 1..16 range,
+   even on a genuinely mono (2-color) screen where plat_draw_image will
+   honestly fail and fall back to a solid rect (no spare pen exists at
+   all once 0/1 are reserved). */
+static u32 atari_image_color_budget(void)
+{
+    i32 avail = atari_screen_max_colors() - 2;
+    if (avail < 1) avail = 1;
+    if (avail > 16) avail = 16;
+    return (u32)avail;
+}
+
+static u32 g_atari_image_cache_counter = 0;
+
+/* "C:\WPIMG###.TMP" -- 8.3-safe, same fixed-scratch-path convention as
+   WP_ATARI_SPELL_DICT_PATH/the *_selfcheck scratch files above, except
+   counter-suffixed: a single fixed name would let a SECOND Insert
+   Image in one session silently overwrite the first image's still-
+   referenced pixel cache file underneath it. out must be >= 16 bytes.
+   Wraps at 1000 -- a real, accepted session-scope limit far beyond
+   anything a real editing session would reach. */
+static void atari_format_image_cache_path(char *out, u32 counter)
+{
+    u32 c = counter % 1000u;
+    memcpy(out, "C:\\WPIMG", 8);
+    out[8] = (char)('0' + (c / 100u) % 10u);
+    out[9] = (char)('0' + (c / 10u) % 10u);
+    out[10] = (char)('0' + c % 10u);
+    memcpy(out + 11, ".TMP", 5); /* includes NUL */
+}
+
+static void do_insert_image(void)
+{
+    char path[128];
+    char fname[16];
+    char fullpath[144];
+    plat_file *f;
+    u32 size, read_len;
+    u8 *req_buf;
+    offload_capabilities caps;
+    offload_request req;
+    offload_response resp;
+
+    if (!g_ctx.doc_loaded) return;
+
+    strcpy(path, "C:\\*.*");
+    fname[0] = '\0';
+    if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
+
+    if (!ensure_offload()) {
+        form_alert(1, FA_ERROR "[No offload device available.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");
+        return;
+    }
+    if (offload_query(&caps) != WP_OK || !offload_caps_supports(&caps, OFFLOAD_IMAGE)) {
+        form_alert(1, FA_INFO "[This gateway doesn't offer|Insert Image.][ OK ]");
+        return;
+    }
+
+    if (plat_file_open(fullpath, PLAT_FILE_READ, &f) != WP_OK) {
+        form_alert(1, FA_ERROR "[Couldn't open that file.][ OK ]");
+        return;
+    }
+    if (plat_file_size(f, &size) != WP_OK || size == 0 || size > WP_ATARI_IMAGE_MAX_FILE_SIZE) {
+        plat_file_close(f);
+        form_alert(1, FA_ERROR "[That image file is too large|for this app to send.][ OK ]");
+        return;
+    }
+
+    req_buf = (u8 *)mem_alloc(size + 6);
+    if (req_buf == NULL) { plat_file_close(f); return; }
+
+    req_buf[0] = (u8)atari_image_color_budget();
+    req_buf[1] = 0; /* target_flags: color, not grayscale -- real VDI palette */
+    be_write16(req_buf + 2, (u16)WP_ATARI_IMAGE_TARGET_MAX_W);
+    be_write16(req_buf + 4, (u16)WP_ATARI_IMAGE_TARGET_MAX_H);
+
+    if (plat_file_read(f, req_buf + 6, size, &read_len) != WP_OK) {
+        mem_free(req_buf);
+        plat_file_close(f);
+        return;
+    }
+    plat_file_close(f);
+
+    req.op = OFFLOAD_IMAGE;
+    req.payload = req_buf;
+    req.payload_len = read_len + 6;
+    req.timeout_ms = (u32)WP_ATARI_IMAGE_TIMEOUT_MS;
+
+    if (offload_submit(&req, &resp) != WP_OK) {
+        mem_free(req_buf);
+        form_alert(1, FA_ERROR "[Insert Image failed or timed out.][ OK ]");
+        return;
+    }
+    mem_free(req_buf);
+
+    if (resp.status != OFFLOAD_OK || resp.result_len < 5) {
+        offload_response_free(&resp);
+        form_alert(1, FA_ERROR "[The connected gateway couldn't|convert that image.][ OK ]");
+        return;
+    }
+
+    {
+        u16 width_px = be_read16(resp.result);
+        u16 height_px = be_read16(resp.result + 2);
+        u8 palette_count = resp.result[4];
+        const u8 *palette = resp.result + 5;
+        const u8 *packed_pixels = palette + (u32)palette_count * 3u;
+        u32 row_bytes = ((u32)width_px + 1u) / 2u;
+        u32 packed_len = row_bytes * (u32)height_px;
+        char cache_path[16];
+        wp_image_desc desc;
+        wp_status st;
+
+        if (palette_count < 1 || palette_count > 16 ||
+            resp.result_len != 5u + (u32)palette_count * 3u + packed_len) {
+            offload_response_free(&resp);
+            form_alert(1, FA_ERROR "[The gateway's reply was malformed.][ OK ]");
+            return;
+        }
+
+        atari_format_image_cache_path(cache_path, g_atari_image_cache_counter);
+
+        if (plat_file_open(cache_path, PLAT_FILE_WRITE, &f) != WP_OK) {
+            offload_response_free(&resp);
+            form_alert(1, FA_ERROR "[Couldn't write the image cache|file to disk.][ OK ]");
+            return;
+        }
+        st = plat_file_write(f, packed_pixels, packed_len);
+        plat_file_close(f);
+        if (st != WP_OK) {
+            offload_response_free(&resp);
+            form_alert(1, FA_ERROR "[Couldn't write the image cache|file to disk.][ OK ]");
+            return;
+        }
+        g_atari_image_cache_counter++;
+
+        memset(&desc, 0, sizeof(desc));
+        desc.width_px = (i32)width_px;
+        desc.height_px = (i32)height_px;
+        desc.display_width_twips = atari_px_to_twips_x((i32)width_px);
+        desc.display_height_twips = atari_px_to_twips_y((i32)height_px);
+        desc.palette_count = palette_count;
+        memcpy(desc.palette, palette, (u32)palette_count * 3u);
+        if (wp_strpool_append(&g_doc.strings, (const u8 *)cache_path,
+                               (u32)strlen(cache_path), &desc.blob_path) != WP_OK) {
+            offload_response_free(&resp);
+            return;
+        }
+        if (fname[0] != '\0') {
+            wp_strpool_append(&g_doc.strings, (const u8 *)fname, (u32)strlen(fname), &desc.source_name);
+        }
+        offload_response_free(&resp);
+
+        if (wp_edit_insert_image(&g_doc, &g_journal, (*wp_keymap_cursor(&g_ctx)), &desc) != WP_OK) {
+            form_alert(1, FA_ERROR "[Couldn't insert that image|into the document.][ OK ]");
+            return;
+        }
+        relayout_document(g_content_width_twips);
+    }
+}
+
 wp_bool wp_atari_layout_selfcheck(void)
 {
     wp_document doc;
@@ -1927,6 +2175,38 @@ wp_bool wp_atari_layout_selfcheck(void)
     for (i = 0; ok && i < layout->line_count; i++) {
         if (layout->lines[i].width_twips <= 0) ok = WP_FALSE;
         if (layout->lines[i].width_twips > content_width_twips) ok = WP_FALSE;
+    }
+
+    /* T13.2: real per-word JUSTIFY needs a real font's exact advance
+       widths to draw correctly, but this selfcheck can't hand-compute
+       those on real hardware (see the comment above wp_amiga_layout_
+       selfcheck) -- so it only checks the bounds every real backend's
+       paint loop actually depends on: every interior line's slack is
+       non-negative (each line's natural width is <= the column by
+       construction, so this can never go negative), and the paragraph's
+       last line always stays exactly 0 regardless of alignment, per
+       PDF export's own established convention. */
+    if (ok) {
+        wp_para_style jps;
+        wp_pstyle jpstyle;
+
+        memset(&jps, 0, sizeof(jps));
+        jps.align = WP_ALIGN_JUSTIFY;
+        if (wp_document_pstyle_add(&doc, &jps, &jpstyle) != WP_OK) ok = WP_FALSE;
+        if (ok) wp_paragraph_pstyle_set(para, jpstyle);
+        if (ok && wp_paragraph_relayout(&doc, para, content_width_twips) != WP_OK) ok = WP_FALSE;
+
+        if (ok) {
+            layout = (wp_paragraph_layout *)para->layout;
+            for (i = 0; ok && i < layout->line_count; i++) {
+                wp_bool is_last = (wp_bool)(i == layout->line_count - 1);
+                i32 extra = wp_justify_space_extra_twips(&doc, para, &layout->lines[i],
+                                                          WP_ALIGN_JUSTIFY, is_last,
+                                                          content_width_twips);
+                if (extra < 0) ok = WP_FALSE;
+                if (is_last && extra != 0) ok = WP_FALSE;
+            }
+        }
     }
 
     wp_document_free(&doc);
@@ -2382,11 +2662,20 @@ wp_bool wp_atari_chat_selfcheck(void)
     offload_capabilities caps;
     wp_bool ok = WP_TRUE;
 
+    /* Pure bit-math over a hand-built caps struct, not a real gateway
+       round trip -- proves offload_caps_supports() itself, the shared
+       pre-check every offload-consuming action (Chat, and since M15,
+       Insert Image) relies on before ever building a request. IMAGE is
+       now included as a REAL supported bit (M15 T15.4) rather than the
+       permanently-absent one it used to be -- do_insert_image()'s own
+       real round trip against a real gateway is proven separately by
+       host/tests/test_image_convert.c and the CI matrix's real
+       screenshot verification, not by this function. */
     memset(&caps, 0, sizeof(caps));
-    caps.ops_supported = (1uL << OFFLOAD_THESAURUS) | (1uL << OFFLOAD_CHAT);
+    caps.ops_supported = (1uL << OFFLOAD_THESAURUS) | (1uL << OFFLOAD_CHAT) | (1uL << OFFLOAD_IMAGE);
 
     if (!offload_caps_supports(&caps, OFFLOAD_CHAT)) ok = WP_FALSE;
-    if (offload_caps_supports(&caps, OFFLOAD_IMAGE)) ok = WP_FALSE;
+    if (!offload_caps_supports(&caps, OFFLOAD_IMAGE)) ok = WP_FALSE;
     if (!offload_caps_supports(&caps, OFFLOAD_THESAURUS)) ok = WP_FALSE;
     if (offload_caps_supports(&caps, OFFLOAD_GRAMMAR_CHECK)) ok = WP_FALSE;
 
@@ -2859,18 +3148,26 @@ static void sync_format_check(wp_action_id id)
     }
 }
 
-/* The four backend-supplied (handler == NULL in g_wp_actions) actions
-   that are actually reachable by keyboard shortcut today -- the four
-   Tools actions and Help have shortcut_ascii == 0 (see actions.c), so
+/* The backend-supplied (handler == NULL in g_wp_actions) actions that
+   are actually reachable by keyboard shortcut today -- every other
+   Tools action and Help have shortcut_ascii == 0 (see actions.c), so
    wp_action_find_by_shortcut can never return them from a real
-   keystroke; this switch only needs to cover what can really arrive. */
+   keystroke; this switch only needs to cover what can really arrive.
+   WP_ACT_TOOLS_INSERTIMAGE (M15) is deliberately Ctrl+G-only, NOT
+   added to wp_menu_tree[]'s own hand-built Tools OBJECT chain --
+   touching that structure is exactly the class of change that caused
+   two real regressions earlier in this project's history (see
+   docs/atari-platform.md), and this action doesn't need it: a real
+   keyboard shortcut reaches it just as well, the same mitigation
+   T8.5.7's own dialog actions already used for the same reason. */
 static void invoke_backend_action(wp_action_id id)
 {
     switch (id) {
-    case WP_ACT_FILE_OPEN:  do_file_open(); break;
-    case WP_ACT_FILE_SAVE:  do_file_save(); break;
-    case WP_ACT_EDIT_CUT:   do_edit_cut(); break;
-    case WP_ACT_EDIT_PASTE: do_edit_paste(); break;
+    case WP_ACT_FILE_OPEN:         do_file_open(); break;
+    case WP_ACT_FILE_SAVE:         do_file_save(); break;
+    case WP_ACT_EDIT_CUT:          do_edit_cut(); break;
+    case WP_ACT_EDIT_PASTE:        do_edit_paste(); break;
+    case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
     default: break;
     }
 }

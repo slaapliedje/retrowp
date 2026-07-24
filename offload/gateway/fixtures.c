@@ -128,3 +128,22 @@ const char *fixtures_chat_reply(const u8 *prompt, u32 len, u32 *out_len)
     *out_len = (u32)strlen(k_chat_default_reply);
     return k_chat_default_reply;
 }
+
+static const u8 k_image_palette[2][3] = { { 0, 0, 0 }, { 255, 255, 255 } };
+
+/* 4x4, 2px/byte packed, high nibble = even x -- a checkerboard,
+   index(x,y) = (x+y) % 2, matching the wire format's own convention
+   (docs/formats/offload-protocol.md's OFFLOAD_IMAGE section). */
+static const u8 k_image_pixels[8] = {
+    0x01, 0x01,
+    0x10, 0x10,
+    0x01, 0x01,
+    0x10, 0x10
+};
+
+static const fixtures_image k_image = { 4, 4, 2, k_image_palette, k_image_pixels, 8 };
+
+const fixtures_image *fixtures_image_get(void)
+{
+    return &k_image;
+}

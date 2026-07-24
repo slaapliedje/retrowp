@@ -155,6 +155,16 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_TOOLS_THESAURUS,   WP_MENU_TOOLS,  "Thesaurus",      0,        0,    NULL, NULL },
     { WP_ACT_TOOLS_GRAMMARCHECK, WP_MENU_TOOLS, "Grammar Check",  0,        0,    NULL, NULL },
     { WP_ACT_TOOLS_CHAT,        WP_MENU_TOOLS,  "Chat",           0,        0,    NULL, NULL },
+    /* M15: a real Ctrl+G shortcut, not menu-only like its Tools
+       siblings above -- deliberately, so this action never needs the
+       Atari OBJECT tree touched at all (see docs/atari-platform.md's
+       own account of two real regressions from exactly that class of
+       change) and so DOS -- which has no menu system whatsoever, only
+       four shortcut-bound backend actions wired today -- can reach it
+       at all. The same shortcut also works on Amiga/Mac, where it's
+       redundant with (but harmless alongside) their own dynamically-
+       built Tools menu already showing this entry automatically. */
+    { WP_ACT_TOOLS_INSERTIMAGE, WP_MENU_TOOLS,  "Insert Image",   "Ctrl+G", 0x07, NULL, NULL },
     { WP_ACT_HELP_CONTENTS,     WP_MENU_HELP,   "Contents",       "F1",     0,    NULL, NULL }
 };
 

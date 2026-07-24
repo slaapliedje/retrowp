@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <string.h>
 #include <Quickdraw.h>
 #include "platform.h"
 #include "utf8.h"
@@ -149,6 +150,89 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
     select_fill_pattern(r, g, b);
     PaintRect(&rect);
     PenPat(&qd.black);
+    return WP_OK;
+}
+
+/* M15 Phase 5b: real QuickDraw CopyBits blit, dithered down to this
+   backend's hard-capped 1-bit tier (a plain NewWindow, not NewCWindow --
+   true color is out of scope). Each pixel's palette RGB is reduced to
+   black/white via a 4x4 ordered (Bayer) dither -- extending
+   select_fill_pattern's own per-solid-fill luminance-threshold trick to
+   run per pixel instead of a single flat threshold, so a multi-color
+   source image still reads as recognizable shading rather than one flat
+   gray. Builds a scratch, manually-populated 1-bit BitMap (mirrors
+   metrics_mac.c's own ensure_metrics_port() precedent for constructing
+   a BitMap by hand) and blits it via CopyBits -- WindowPtr IS a GrafPtr,
+   so &mgc->window->portBits is directly usable as the destination
+   BitMap*, no Carbon-only GetPortBitMapForCopyBits needed. */
+static const u8 g_mac_bayer4x4[4][4] = {
+    {  0,  8,  2, 10 },
+    { 12,  4, 14,  6 },
+    {  3, 11,  1,  9 },
+    { 15,  7, 13,  5 }
+};
+
+wp_status plat_draw_image(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
+                           const u8 *pixels, i32 src_width_px, i32 src_height_px,
+                           const u8 palette[][3], u8 palette_count)
+{
+    mac_gc *mgc = (mac_gc *)gc;
+    BitMap src_bm;
+    Rect src_rect, dst_rect;
+    u32 row_bytes, buf_len, src_row_bytes;
+    u8 *bits;
+    i32 px, py;
+
+    if (mgc == NULL || mgc->window == NULL || pixels == NULL) return WP_ERR;
+    if (w <= 0 || h <= 0 || src_width_px <= 0 || src_height_px <= 0) return WP_ERR;
+    if (palette_count < 1 || palette_count > 16) return WP_ERR;
+
+    /* Word-aligned rowBytes -- a real QuickDraw 1-bit BitMap requirement,
+       same "round up, no partial words" shape do_insert_image's own
+       packed-4-bit row math already follows for a different bit depth. */
+    row_bytes = (u32)(((src_width_px + 15) / 16) * 2);
+    buf_len = row_bytes * (u32)src_height_px;
+    bits = (u8 *)mem_alloc(buf_len);
+    if (bits == NULL) return WP_NOMEM;
+    memset(bits, 0, buf_len);
+
+    src_row_bytes = ((u32)src_width_px + 1u) / 2u;
+    for (py = 0; py < src_height_px; py++) {
+        const u8 *src_row = pixels + (u32)py * src_row_bytes;
+        u8 *dst_row = bits + (u32)py * row_bytes;
+
+        for (px = 0; px < src_width_px; px++) {
+            u8 byte = src_row[px / 2];
+            u8 nibble = (u8)((px % 2 == 0) ? (byte >> 4) : (byte & 0x0F));
+            u32 luminance_avg, threshold;
+
+            if (nibble >= palette_count) nibble = 0;
+            luminance_avg = ((u32)palette[nibble][0] + (u32)palette[nibble][1] +
+                              (u32)palette[nibble][2]) / 3u;
+            /* Standard 0-15 -> 0-255 Bayer scaling (val*16+8): keeps the
+               max threshold at 248, strictly below a pure-white pixel's
+               luminance of 255, so solid white regions never misfire
+               black at any of the 16 dither cells. */
+            threshold = (u32)g_mac_bayer4x4[py & 3][px & 3] * 16u + 8u;
+
+            /* 1-bit QuickDraw convention: a set bit is BLACK. */
+            if (luminance_avg <= threshold) {
+                dst_row[px / 8] |= (u8)(0x80 >> (px % 8));
+            }
+        }
+    }
+
+    src_bm.baseAddr = (Ptr)bits;
+    src_bm.rowBytes = (short)row_bytes;
+    SetRect(&src_bm.bounds, 0, 0, (short)src_width_px, (short)src_height_px);
+
+    SetPort(mgc->window);
+    SetRect(&src_rect, 0, 0, (short)src_width_px, (short)src_height_px);
+    SetRect(&dst_rect, (short)x, (short)y, (short)(x + w), (short)(y + h));
+
+    CopyBits(&src_bm, &mgc->window->portBits, &src_rect, &dst_rect, srcCopy, NULL);
+
+    mem_free(bits);
     return WP_OK;
 }
 

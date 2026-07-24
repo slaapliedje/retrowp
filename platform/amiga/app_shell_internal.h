@@ -42,4 +42,12 @@ wp_bool wp_amiga_key_translate_selfcheck(void);
    checks and why. */
 wp_bool wp_amiga_config_selfcheck(void);
 
+/* M15 T15.4: pure bit-math over a hand-built offload_capabilities,
+   proving offload_caps_supports() itself -- the shared pre-check
+   do_insert_image() (and do_chat before it) relies on before ever
+   building a request. Mirrors platform/atari/app_shell.c's own
+   wp_atari_chat_selfcheck exactly; not a real gateway round trip
+   (that's host/tests/test_image_convert.c's job). */
+wp_bool wp_amiga_image_selfcheck(void);
+
 #endif /* WP_AMIGA_APP_SHELL_INTERNAL_H */

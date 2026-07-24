@@ -43,113 +43,22 @@ connection, an honest, narrower scope than wire.c's own resync
 contract, not a silent gap.
 """
 
-import argparse
 import io
 import os
 import re
-import select
-import socket
-import struct
 import sys
-import time
 import zipfile
 from xml.sax.saxutils import escape as xml_escape
 import xml.etree.ElementTree as ET
 
-# ---------------------------------------------------------------------
-# Wire protocol (docs/formats/offload-protocol.md)
-# ---------------------------------------------------------------------
-
-WIRE_MAGIC0 = 0x57
-WIRE_MAGIC1 = 0x50
-WIRE_VERSION = 1
-WIRE_HEADER_SIZE = 12
-WIRE_CRC_SIZE = 2
-
-MSG_HELLO, MSG_CAPS, MSG_REQUEST, MSG_RESPONSE, MSG_ERROR = range(5)
-
-(OP_SPELL_CHECK, OP_GRAMMAR_CHECK, OP_THESAURUS,
- OP_CONVERT_IMPORT, OP_CONVERT_EXPORT, OP_CHAT, OP_IMAGE) = range(7)
-
-STATUS_OK, STATUS_TIMEOUT, STATUS_UNSUPPORTED, STATUS_ERR = range(4)
+from wire_protocol import (
+    STATUS_OK, STATUS_UNSUPPORTED, STATUS_ERR,
+    OP_CONVERT_IMPORT, OP_CONVERT_EXPORT,
+    run_gateway,
+)
 
 FORMAT_ODT = 1
 FORMAT_PDF = 2
-
-CAPS_PAYLOAD_SIZE = 42  # 2 (version) + 4 (ops_supported) + 4 (max_payload) + 32 (name)
-
-
-def crc16_ccitt_false(data):
-    crc = 0xFFFF
-    for byte in data:
-        crc ^= byte << 8
-        for _ in range(8):
-            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if (crc & 0x8000) else (crc << 1) & 0xFFFF
-    return crc
-
-
-def encode_frame(msg_type, op, status, seq, payload):
-    header_tail = bytes([WIRE_VERSION, msg_type, op, status]) + struct.pack('>H', seq) + struct.pack('>I', len(payload))
-    crc = crc16_ccitt_false(header_tail + payload)
-    return bytes([WIRE_MAGIC0, WIRE_MAGIC1]) + header_tail + payload + struct.pack('>H', crc)
-
-
-def encode_caps(ops_supported, name):
-    name_bytes = name.encode('utf-8')[:32].ljust(32, b'\x00')
-    return struct.pack('>HII', WIRE_VERSION, ops_supported, 65536) + name_bytes
-
-
-class GatewayError(Exception):
-    pass
-
-
-class GatewayTimeout(GatewayError):
-    pass
-
-
-def read_exact(read_fd, n, deadline):
-    buf = b''
-    while len(buf) < n:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise GatewayTimeout()
-        r, _, _ = select.select([read_fd], [], [], remaining)
-        if not r:
-            raise GatewayTimeout()
-        chunk = os.read(read_fd, n - len(buf))
-        if not chunk:
-            raise GatewayError('peer closed')
-        buf += chunk
-    return buf
-
-
-def read_frame(read_fd, timeout_s):
-    deadline = time.monotonic() + timeout_s
-    header = read_exact(read_fd, WIRE_HEADER_SIZE, deadline)
-    if header[0] != WIRE_MAGIC0 or header[1] != WIRE_MAGIC1:
-        raise GatewayError('bad magic')
-    version, msg_type, op, status = header[2], header[3], header[4], header[5]
-    seq = struct.unpack('>H', header[6:8])[0]
-    length = struct.unpack('>I', header[8:12])[0]
-    if version != WIRE_VERSION:
-        raise GatewayError('bad version')
-    payload = read_exact(read_fd, length, deadline) if length else b''
-    crc_bytes = read_exact(read_fd, WIRE_CRC_SIZE, deadline)
-    expected = crc16_ccitt_false(header[2:] + payload)
-    if struct.unpack('>H', crc_bytes)[0] != expected:
-        raise GatewayError('crc mismatch')
-    return {'type': msg_type, 'op': op, 'status': status, 'seq': seq}, payload
-
-
-def open_fifo_rdwr(path):
-    """O_RDWR, not O_RDONLY/O_WRONLY -- avoids the classic named-FIFO
-    open-blocks-until-peer-connects deadlock (same trick
-    gw_common.c's gw_open_fifo_rdwr and platform/host/transport_host.c's
-    pipe: backend already rely on)."""
-    if not os.path.exists(path):
-        os.mkfifo(path, 0o600)
-    return os.open(path, os.O_RDWR)
-
 
 # ---------------------------------------------------------------------
 # ODF (ODT) unit conversion
@@ -614,14 +523,19 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
 
 
 # ---------------------------------------------------------------------
-# paragraph model -> PDF bytes (CONVERT_EXPORT, format=PDF, M7 T7.3)
+# paragraph model -> PDF bytes (CONVERT_EXPORT, format=PDF, M7 T7.3;
+# font embedding tier T13.3)
 #
 # Unlike ODT (which only carries already-tagged structured text), PDF
 # needs THIS module to do its own text layout: word-wrap, pagination,
 # and explicit per-line/per-run positioning in a content stream. US
-# Letter, 1in margins, the 4 standard Helvetica variants (no embedding
-# needed -- every PDF viewer has them built in), real Adobe AFM glyph
-# widths (not approximated) for accurate wrapping and positioning.
+# Letter, 1in margins. Two font tiers, chosen independently per style
+# slot (regular/bold/italic/bolditalic): Tier 0 is the 4 standard
+# Type1 Helvetica variants below (zero dependencies, always available,
+# every PDF viewer has them built in); Tier 1 (below _pdf_tier1_slot_
+# info) is real embedded TrueType via fonttools + Liberation Sans, used
+# whenever both are actually available on this host, falling a given
+# slot back to Tier 0 alone if not.
 # ---------------------------------------------------------------------
 
 # Real Adobe Core 14 AFM widths (ASCII 32-126, 1000-unit em), extracted
@@ -629,35 +543,192 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
 # development -- not guessed or approximated. Helvetica-Oblique and
 # Helvetica-BoldOblique share exactly these same widths as their
 # upright counterparts (italic is a shear of the same glyphs, not a
-# separate width table) -- verified against the real AFM files.
+# separate width table) -- verified against the real AFM files. Tier
+# 0's fallback whenever Tier 1 isn't available for a given style slot.
 _HELV_WIDTHS = {32: 278, 33: 278, 34: 355, 35: 556, 36: 556, 37: 889, 38: 667, 39: 222, 40: 333, 41: 333, 42: 389, 43: 584, 44: 278, 45: 333, 46: 278, 47: 278, 48: 556, 49: 556, 50: 556, 51: 556, 52: 556, 53: 556, 54: 556, 55: 556, 56: 556, 57: 556, 58: 278, 59: 278, 60: 584, 61: 584, 62: 584, 63: 556, 64: 1015, 65: 667, 66: 667, 67: 722, 68: 722, 69: 667, 70: 611, 71: 778, 72: 722, 73: 278, 74: 500, 75: 667, 76: 556, 77: 833, 78: 722, 79: 778, 80: 667, 81: 778, 82: 722, 83: 667, 84: 611, 85: 722, 86: 667, 87: 944, 88: 667, 89: 667, 90: 611, 91: 278, 92: 278, 93: 278, 94: 469, 95: 556, 96: 222, 97: 556, 98: 556, 99: 500, 100: 556, 101: 556, 102: 278, 103: 556, 104: 556, 105: 222, 106: 222, 107: 500, 108: 222, 109: 833, 110: 556, 111: 556, 112: 556, 113: 556, 114: 333, 115: 500, 116: 278, 117: 556, 118: 500, 119: 722, 120: 500, 121: 500, 122: 500, 123: 334, 124: 260, 125: 334, 126: 584}
 _HELV_BOLD_WIDTHS = {32: 278, 33: 333, 34: 474, 35: 556, 36: 556, 37: 889, 38: 722, 39: 278, 40: 333, 41: 333, 42: 389, 43: 584, 44: 278, 45: 333, 46: 278, 47: 278, 48: 556, 49: 556, 50: 556, 51: 556, 52: 556, 53: 556, 54: 556, 55: 556, 56: 556, 57: 556, 58: 333, 59: 333, 60: 584, 61: 584, 62: 584, 63: 611, 64: 975, 65: 722, 66: 722, 67: 722, 68: 722, 69: 667, 70: 611, 71: 778, 72: 722, 73: 278, 74: 556, 75: 722, 76: 611, 77: 833, 78: 722, 79: 778, 80: 667, 81: 778, 82: 722, 83: 667, 84: 611, 85: 722, 86: 667, 87: 944, 88: 667, 89: 667, 90: 611, 91: 333, 92: 278, 93: 333, 94: 584, 95: 556, 96: 278, 97: 556, 98: 611, 99: 556, 100: 611, 101: 556, 102: 333, 103: 611, 104: 611, 105: 278, 106: 278, 107: 556, 108: 278, 109: 889, 110: 611, 111: 611, 112: 611, 113: 611, 114: 389, 115: 556, 116: 333, 117: 611, 118: 556, 119: 778, 120: 556, 121: 556, 122: 500, 123: 389, 124: 280, 125: 389, 126: 584}
-_PDF_FALLBACK_WIDTH = 556  # any char outside ASCII 32-126 -- an average-width approximation, not real AFM data for that range
+_PDF_FALLBACK_WIDTH = 556  # any char outside Tier 0's ASCII 32-126 AFM table -- an average-width approximation, never hit for a Tier-1 slot (real widths cover the full 32-255 WinAnsi range there)
 
 _PDF_PAGE_WIDTH = 612.0   # US Letter, points
 _PDF_PAGE_HEIGHT = 792.0
 _PDF_MARGIN = 72.0        # 1 inch
-_PDF_COLUMN_WIDTH = _PDF_PAGE_WIDTH - 2 * _PDF_MARGIN
-_PDF_CONTENT_TOP = _PDF_PAGE_HEIGHT - _PDF_MARGIN
-_PDF_CONTENT_BOTTOM = _PDF_MARGIN
 
 _PDF_FONT_REGULAR = '/F1'
 _PDF_FONT_BOLD = '/F2'
 _PDF_FONT_OBLIQUE = '/F3'
 _PDF_FONT_BOLDOBLIQUE = '/F4'
 
+# ---------------------------------------------------------------------
+# Tier 1: real embedded TrueType, gated on fonttools + Liberation Sans
+# actually being present on this host. Liberation Sans is metrically
+# compatible with Helvetica by design (Red Hat's own stated goal for
+# the family) -- verified during development directly against this
+# module's own _HELV_WIDTHS ('A' advance: 667 in both). No document-
+# level font-family selection exists anywhere in this pipeline yet
+# (RTF's \fonttbl is a skipped destination on import, same as the C
+# engine's importer; every RTF export always declares a single
+# Helvetica font) -- so Tier 1 embeds the same 4 logical style slots
+# Tier 0 already has (regular/bold/italic/bolditalic) in ONE real
+# family, not a font-family feature.
+# ---------------------------------------------------------------------
+
+try:
+    from fontTools.ttLib import TTFont as _TTFont
+    from fontTools import subset as _fonttools_subset
+    _FONTTOOLS_AVAILABLE = True
+except ImportError:
+    _FONTTOOLS_AVAILABLE = False
+
+# Real install paths across the distros this project's real hosts (dev
+# machine, Raspberry Pi gateway) realistically run: Arch, Debian/
+# Ubuntu/Raspbian, Fedora. Checked in order; first hit wins.
+_LIBERATION_CANDIDATES = {
+    'Regular': ['/usr/share/fonts/liberation/LiberationSans-Regular.ttf',
+                '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+                '/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf'],
+    'Bold': ['/usr/share/fonts/liberation/LiberationSans-Bold.ttf',
+             '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+             '/usr/share/fonts/liberation-sans/LiberationSans-Bold.ttf'],
+    'Italic': ['/usr/share/fonts/liberation/LiberationSans-Italic.ttf',
+               '/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf',
+               '/usr/share/fonts/liberation-sans/LiberationSans-Italic.ttf'],
+    'BoldItalic': ['/usr/share/fonts/liberation/LiberationSans-BoldItalic.ttf',
+                   '/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf',
+                   '/usr/share/fonts/liberation-sans/LiberationSans-BoldItalic.ttf'],
+}
+
+# Style slot indices shared by _pdf_run_slot, _pdf_tier1_slot_info, and
+# _pdf_assemble -- 0=regular, 1=bold, 2=italic, 3=bolditalic.
+_PDF_SLOT_STYLE_NAME = {0: 'Regular', 1: 'Bold', 2: 'Italic', 3: 'BoldItalic'}
+_PDF_SLOT_TIER0_OBJ = {0: (10, 'Helvetica'), 1: (11, 'Helvetica-Bold'),
+                        2: (12, 'Helvetica-Oblique'), 3: (13, 'Helvetica-BoldOblique')}
+_PDF_SLOT_TIER0_WIDTHS = {0: _HELV_WIDTHS, 1: _HELV_BOLD_WIDTHS, 2: _HELV_WIDTHS, 3: _HELV_BOLD_WIDTHS}
+_PDF_SLOT_RESOURCE = {0: _PDF_FONT_REGULAR, 1: _PDF_FONT_BOLD, 2: _PDF_FONT_OBLIQUE, 3: _PDF_FONT_BOLDOBLIQUE}
+
+# Identity ToUnicode CMap for codes 0x20-0xFF: correct (not an
+# approximation) precisely because this module's own character codes
+# ARE the Unicode codepoint in that range by construction -- see
+# _pdf_escape_str's own "WinAnsiEncoding matches Latin-1 in this range"
+# comment. Fixes real-viewer text extraction/copy-paste for embedded
+# TrueType fonts (found during development: without this, poppler's
+# text-extraction fallback heuristic breaks down partway through a
+# subsetted font's remapped glyph IDs even though rendering is
+# correct); shared by every Tier-1 slot, since the mapping doesn't
+# depend on which face is embedded.
+_PDF_TOUNICODE_CMAP = (
+    "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
+    "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
+    "/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n"
+    "1 begincodespacerange\n<20> <FF>\nendcodespacerange\n"
+    "1 beginbfrange\n<20> <FF> <0020>\nendbfrange\nendcmap\n"
+    "CMapName currentdict /CMap defineresource pop\nend\nend"
+).encode('ascii')
+
+
+def _liberation_font_path(style_name):
+    for path in _LIBERATION_CANDIDATES[style_name]:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _pdf_tier1_slot_info(slot):
+    """Lazily loads and caches, per style slot, the real metrics needed
+    for BOTH layout (widths, covering the full 32-255 WinAnsi range --
+    not just ASCII, unlike Tier 0's AFM table) and final embedding
+    (ascent/descent/bbox/etc) -- none of this depends on which glyphs
+    end up subsetted, so it's computed once from the full font
+    regardless of what text a given document actually uses. Returns
+    None if fonttools isn't importable or this slot's font file isn't
+    found on this host -- the caller falls that slot back to Tier 0."""
+    if not _FONTTOOLS_AVAILABLE:
+        return None
+    if slot in _pdf_tier1_slot_info._cache:
+        return _pdf_tier1_slot_info._cache[slot]
+
+    info = None
+    path = _liberation_font_path(_PDF_SLOT_STYLE_NAME[slot])
+    if path is not None:
+        try:
+            font = _TTFont(path)
+            upm = font['head'].unitsPerEm
+            cmap = font.getBestCmap()
+            hmtx = font['hmtx']
+            widths = {}
+            for cp in range(32, 256):
+                gname = cmap.get(cp)
+                if gname is not None:
+                    widths[cp] = round(hmtx[gname][0] * 1000 / upm)
+            info = {
+                'path': path,
+                'widths': widths,
+                'ascent': round(font['hhea'].ascent * 1000 / upm),
+                'descent': round(font['hhea'].descent * 1000 / upm),
+                'cap_height': round(getattr(font['OS/2'], 'sCapHeight', font['hhea'].ascent) * 1000 / upm),
+                'bbox': [round(v * 1000 / upm) for v in
+                         (font['head'].xMin, font['head'].yMin, font['head'].xMax, font['head'].yMax)],
+                'italic_angle': font['post'].italicAngle,
+                'flags': 96 if slot in (2, 3) else 32,  # bit 6 (nonsymbolic) always; bit 7 (italic) for slots 2/3
+            }
+        except Exception:
+            info = None
+    _pdf_tier1_slot_info._cache[slot] = info
+    return info
+
+
+_pdf_tier1_slot_info._cache = {}
+
+
+def _pdf_subset_embed(slot, used_chars):
+    """Subsets this slot's real font down to used_chars plus printable
+    ASCII (always included, so a slot with no drawn text -- or an
+    unexpectedly empty used_chars -- still embeds a usable font) and
+    returns the raw TrueType bytes to embed as /FontFile2."""
+    info = _pdf_tier1_slot_info(slot)
+    font = _TTFont(info['path'])
+    options = _fonttools_subset.Options()
+    options.set(layout_features=[])
+    options.drop_tables += ['GSUB', 'GPOS', 'GDEF']
+    subsetter = _fonttools_subset.Subsetter(options=options)
+    text = ''.join(used_chars) + ''.join(chr(c) for c in range(32, 127))
+    subsetter.populate(text=text)
+    subsetter.subset(font)
+    buf = io.BytesIO()
+    font.save(buf)
+    return buf.getvalue()
+
+
+_PDF_COLUMN_WIDTH = _PDF_PAGE_WIDTH - 2 * _PDF_MARGIN
+_PDF_CONTENT_TOP = _PDF_PAGE_HEIGHT - _PDF_MARGIN
+_PDF_CONTENT_BOTTOM = _PDF_MARGIN
+
 _PDF_SUPERSUB_SCALE = 0.65  # typographic convention: super/subscript glyphs render smaller
 
 
-def _pdf_font_for_run(run):
+def _pdf_run_slot(run):
+    """0=regular, 1=bold, 2=italic, 3=bolditalic -- the same 4 logical
+    style slots both font tiers key off of."""
     b, i = run.get('b'), run.get('i')
     if b and i:
-        return _PDF_FONT_BOLDOBLIQUE, _HELV_BOLD_WIDTHS
+        return 3
     if b:
-        return _PDF_FONT_BOLD, _HELV_BOLD_WIDTHS
+        return 1
     if i:
-        return _PDF_FONT_OBLIQUE, _HELV_WIDTHS
-    return _PDF_FONT_REGULAR, _HELV_WIDTHS
+        return 2
+    return 0
+
+
+def _pdf_font_for_run(run):
+    """Returns (resource_name, widths) for this run -- Tier 1's real
+    Liberation Sans widths when that slot is actually available on this
+    host, else Tier 0's AFM table. Both tiers use the SAME resource
+    name per slot (a document only ever needs one font object per slot,
+    whichever tier backs it), so nothing downstream of this needs to
+    know which tier is active."""
+    slot = _pdf_run_slot(run)
+    tier1 = _pdf_tier1_slot_info(slot)
+    widths = tier1['widths'] if tier1 is not None else _PDF_SLOT_TIER0_WIDTHS[slot]
+    return _PDF_SLOT_RESOURCE[slot], widths
 
 
 def _pdf_text_width_pt(text, widths, size_pt):
@@ -796,6 +867,7 @@ def paragraphs_to_pdf_bytes(paragraphs):
     cur_tw = None
     cur_font = cur_size = None
     cur_color = (0, 0, 0)
+    used_chars = {0: set(), 1: set(), 2: set(), 3: set()}  # per style slot, for Tier-1 subsetting
 
     def new_page():
         nonlocal cur_ops, cur_y, cur_tw, cur_font, cur_size, cur_color
@@ -875,6 +947,7 @@ def paragraphs_to_pdf_bytes(paragraphs):
                         cur_ops.append('%.3f %.3f %.3f rg' % (color[0] / 255.0, color[1] / 255.0, color[2] / 255.0))
                         cur_color = color
                     cur_ops.append('(%s) Tj' % _pdf_escape_str(text))
+                    used_chars[_pdf_run_slot(run)].update(text)
 
                     w = _pdf_text_width_pt(text, widths, size_pt)
                     if is_space and extra_per_space:
@@ -898,26 +971,70 @@ def paragraphs_to_pdf_bytes(paragraphs):
         cur_y -= sa
 
     pages.append(cur_ops)
-    return _pdf_assemble(pages)
+    return _pdf_assemble(pages, used_chars)
 
 
-def _pdf_assemble(pages):
+def _pdf_assemble(pages, used_chars):
     """Builds the final PDF byte stream: Catalog, Pages tree, one Page +
-    one content-stream object per page, and 4 standard Type1 font
-    objects (Helvetica/-Bold/-Oblique/-BoldOblique -- no embedding
-    needed, every PDF viewer has these built in). No /Widths array is
-    declared on the font objects: every viewer already knows the
-    standard 14 fonts' real metrics, which is exactly why this module
-    used the SAME real AFM widths for its own layout above -- the two
-    are meant to agree without this file needing to assert it via an
-    explicit array."""
+    one content-stream object per page, and one font object per style
+    slot -- Tier 0's standard Type1 font (Helvetica/-Bold/-Oblique/-
+    BoldOblique, no embedding, no /Widths array needed: every viewer
+    already knows the standard 14 fonts' real metrics, which is exactly
+    why this module used the SAME real AFM widths for its own layout)
+    for whichever slots Tier 1 isn't available for, real embedded
+    TrueType (with a full /Widths array and a shared /ToUnicode CMap)
+    for whichever slots it is."""
     objects = []
-    font_defs = [(10, 'Helvetica'), (11, 'Helvetica-Bold'),
-                 (12, 'Helvetica-Oblique'), (13, 'Helvetica-BoldOblique')]
-    font_res = ' '.join('/F%d %d 0 R' % (i + 1, num) for i, (num, _) in enumerate(font_defs))
+
+    next_obj = 14
+    font_res_parts = []
+    tounicode_num = None
+
+    for slot in (0, 1, 2, 3):
+        resource_name = _PDF_SLOT_RESOURCE[slot][1:]  # strip the leading '/'
+        # Embedding an unused slot would be pure waste (a real font
+        # subset costs real KB even for zero glyphs actually drawn) --
+        # a slot with nothing in used_chars falls back to Tier 0's
+        # free standard font regardless of Tier 1's availability.
+        tier1 = _pdf_tier1_slot_info(slot) if used_chars.get(slot) else None
+
+        if tier1 is None:
+            num, base_name = _PDF_SLOT_TIER0_OBJ[slot]
+            objects.append((num, ('<< /Type /Font /Subtype /Type1 /BaseFont /%s '
+                                   '/Encoding /WinAnsiEncoding >>' % base_name).encode('ascii')))
+            font_res_parts.append('/%s %d 0 R' % (resource_name, num))
+            continue
+
+        if tounicode_num is None:
+            tounicode_num = next_obj
+            next_obj += 1
+            objects.append((tounicode_num, b'<< /Length %d >>\nstream\n' % len(_PDF_TOUNICODE_CMAP) +
+                             _PDF_TOUNICODE_CMAP + b'\nendstream'))
+
+        fontfile_num, next_obj = next_obj, next_obj + 1
+        descr_num, next_obj = next_obj, next_obj + 1
+        font_num, next_obj = next_obj, next_obj + 1
+
+        fontdata = _pdf_subset_embed(slot, used_chars.get(slot, set()))
+        widths_arr = ' '.join(str(tier1['widths'].get(cp, 0)) for cp in range(32, 256))
+        descr = ('<< /Type /FontDescriptor /FontName /LiberationSans /Flags %d '
+                 '/FontBBox [%d %d %d %d] /ItalicAngle %g /Ascent %d /Descent %d '
+                 '/CapHeight %d /StemV 80 /FontFile2 %d 0 R >>' %
+                 (tier1['flags'], tier1['bbox'][0], tier1['bbox'][1], tier1['bbox'][2], tier1['bbox'][3],
+                  tier1['italic_angle'], tier1['ascent'], tier1['descent'], tier1['cap_height'], fontfile_num))
+        objects.append((fontfile_num, b'<< /Length %d /Length1 %d >>\nstream\n' %
+                         (len(fontdata), len(fontdata)) + fontdata + b'\nendstream'))
+        objects.append((descr_num, descr.encode('ascii')))
+        objects.append((font_num, ('<< /Type /Font /Subtype /TrueType /BaseFont /LiberationSans '
+                                    '/FirstChar 32 /LastChar 255 /Widths [%s] '
+                                    '/FontDescriptor %d 0 R /Encoding /WinAnsiEncoding '
+                                    '/ToUnicode %d 0 R >>' %
+                                    (widths_arr, descr_num, tounicode_num)).encode('ascii')))
+        font_res_parts.append('/%s %d 0 R' % (resource_name, font_num))
+
+    font_res = ' '.join(font_res_parts)
 
     page_obj_nums, content_obj_nums = [], []
-    next_obj = 14
     for _ in pages:
         page_obj_nums.append(next_obj)
         next_obj += 1
@@ -927,9 +1044,6 @@ def _pdf_assemble(pages):
     kids = ' '.join('%d 0 R' % n for n in page_obj_nums)
     objects.append((1, b'<< /Type /Catalog /Pages 2 0 R >>'))
     objects.append((2, ('<< /Type /Pages /Kids [%s] /Count %d >>' % (kids, len(pages))).encode('ascii')))
-    for num, base_name in font_defs:
-        objects.append((num, ('<< /Type /Font /Subtype /Type1 /BaseFont /%s '
-                               '/Encoding /WinAnsiEncoding >>' % base_name).encode('ascii')))
     for page_num, content_num, ops in zip(page_obj_nums, content_obj_nums, pages):
         objects.append((page_num, ('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %g %g] '
                                     '/Resources << /Font << %s >> >> /Contents %d 0 R >>' %
@@ -998,50 +1112,9 @@ def handle_request(op, payload):
     return STATUS_UNSUPPORTED, b''
 
 
-def serve(read_fd, write_fd, hello_timeout_ms):
-    try:
-        hdr, _ = read_frame(read_fd, hello_timeout_ms / 1000.0)
-    except GatewayError:
-        return 1
-    if hdr['type'] != MSG_HELLO:
-        return 1
-
-    caps_payload = encode_caps((1 << OP_CONVERT_IMPORT) | (1 << OP_CONVERT_EXPORT), 'odt-gateway')
-    os.write(write_fd, encode_frame(MSG_CAPS, 0, 0, 0, caps_payload))
-
-    while True:
-        try:
-            hdr, payload = read_frame(read_fd, 120.0)
-        except GatewayError:
-            break
-        status, resp_payload = handle_request(hdr['op'], payload)
-        os.write(write_fd, encode_frame(MSG_RESPONSE, hdr['op'], status, hdr['seq'], resp_payload))
-
-    return 0
-
-
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--serial-rx')
-    parser.add_argument('--serial-tx')
-    parser.add_argument('--hello-timeout-ms', type=int, default=5000)
-    args = parser.parse_args()
-
-    if args.serial_rx and args.serial_tx:
-        rx_fd = open_fifo_rdwr(args.serial_rx)
-        tx_fd = open_fifo_rdwr(args.serial_tx)
-        print('serial', flush=True)
-        return serve(rx_fd, tx_fd, args.hello_timeout_ms)
-
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(('127.0.0.1', 0))
-    srv.listen(1)
-    print(srv.getsockname()[1], flush=True)
-    conn, _ = srv.accept()
-    srv.close()
-    fd = conn.fileno()
-    return serve(fd, fd, args.hello_timeout_ms)
+    ops_supported = (1 << OP_CONVERT_IMPORT) | (1 << OP_CONVERT_EXPORT)
+    return run_gateway(handle_request, ops_supported, 'odt-gateway', description=__doc__)
 
 
 if __name__ == '__main__':

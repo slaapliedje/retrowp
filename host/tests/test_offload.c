@@ -260,7 +260,7 @@ void test_offload_chat_unrecognized_prompt_gets_generic_reply(void)
     gateway_stop(&gw);
 }
 
-void test_offload_capabilities_advertise_chat_but_not_image(void)
+void test_offload_capabilities_advertise_chat_but_not_convert_import(void)
 {
     gateway_handle gw;
     offload_capabilities caps;
@@ -270,12 +270,15 @@ void test_offload_capabilities_advertise_chat_but_not_image(void)
 
     ASSERT_TRUE(offload_query(&caps) == WP_OK);
     ASSERT_TRUE((caps.ops_supported & (1uL << OFFLOAD_CHAT)) != 0);
-    /* OFFLOAD_IMAGE is permanently unimplemented by every gateway in
-       this repo (docs/formats/offload-protocol.md) -- no gateway ever
-       sets this bit, which is exactly what lets the Atari-side
-       capability-gating logic (T8.3) be tested against a real,
-       honestly-unsupported op instead of invented test scaffolding. */
-    ASSERT_TRUE((caps.ops_supported & (1uL << OFFLOAD_IMAGE)) == 0);
+    /* OFFLOAD_CONVERT_IMPORT, not OFFLOAD_IMAGE: IMAGE is now a real,
+       supported op here too (M15 T15.4 -- mock_gateway.c answers it
+       from a canned fixture, see fixtures.c), so it can no longer
+       stand in as "something this gateway doesn't implement". mock_
+       gateway.c permanently, by design, never implements ODT/PDF
+       conversion -- that's odt_gateway.py's own exclusive domain
+       (docs/formats/offload-protocol.md) -- making CONVERT_IMPORT an
+       equally permanent, equally honest replacement stand-in. */
+    ASSERT_TRUE((caps.ops_supported & (1uL << OFFLOAD_CONVERT_IMPORT)) == 0);
 
     offload_shutdown();
     gateway_stop(&gw);
@@ -289,15 +292,82 @@ void test_offload_unsupported_op_reports_unsupported(void)
     ASSERT_TRUE(gateway_start(NULL, &gw) == WP_OK);
     ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
 
-    /* OFFLOAD_IMAGE, not OFFLOAD_CHAT: CHAT is now a real, supported op
-       (T8.3), so it can no longer stand in as "something this gateway
-       doesn't implement" -- IMAGE permanently can (docs/formats/
-       offload-protocol.md: no gateway in this repo ever advertises or
-       implements it). */
-    ASSERT_TRUE(submit_word(OFFLOAD_IMAGE, "hello", 2000, &resp) == WP_OK);
+    /* OFFLOAD_CONVERT_IMPORT, not OFFLOAD_IMAGE: see the capabilities
+       test above for why IMAGE no longer serves as "something this
+       gateway doesn't implement" stand-in. */
+    ASSERT_TRUE(submit_word(OFFLOAD_CONVERT_IMPORT, "hello", 2000, &resp) == WP_OK);
     ASSERT_TRUE(resp.status == OFFLOAD_UNSUPPORTED);
     offload_response_free(&resp);
 
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+/* M15: OFFLOAD_IMAGE is now real here too, answered from fixtures.c's
+   single canned 4x4 checkerboard (fixtures_image_get) -- deterministic,
+   Pillow-free wire-level coverage of the encode/decode shape and
+   capability advertisement. Real Pillow-backed content correctness is
+   proven separately, against the real image_gateway.py, by
+   host/tests/test_image_convert.c. */
+void test_offload_capabilities_advertise_image(void)
+{
+    gateway_handle gw;
+    offload_capabilities caps;
+
+    ASSERT_TRUE(gateway_start(NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    ASSERT_TRUE(offload_query(&caps) == WP_OK);
+    ASSERT_TRUE((caps.ops_supported & (1uL << OFFLOAD_IMAGE)) != 0);
+
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+void test_offload_image_returns_canned_fixture_bitmap(void)
+{
+    gateway_handle gw;
+    offload_request req;
+    offload_response resp;
+    /* target_max_colors=16, target_flags=0, target_max_width_px=320,
+       target_max_height_px=200 -- mock_gateway.c's fixture ignores all
+       of this (and the source bytes below) and always answers the same
+       canned bitmap; the request still needs a well-formed 6-byte
+       header + something after it, matching what a real caller would
+       send. */
+    static const u8 req_payload[] = {
+        16, 0, 0x01, 0x40, 0x00, 0xC8, 'x'
+    };
+
+    ASSERT_TRUE(gateway_start(NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    req.op = OFFLOAD_IMAGE;
+    req.payload = req_payload;
+    req.payload_len = (u32)sizeof(req_payload);
+    req.timeout_ms = 2000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+
+    /* width_px(2) height_px(2) palette_count(1) palette(2*3)
+       packed_pixels(8) = 19 bytes, per fixtures.c's k_image. */
+    ASSERT_EQ_U32(resp.result_len, 19);
+    ASSERT_EQ_U32(be_read16(resp.result), 4);      /* width_px */
+    ASSERT_EQ_U32(be_read16(resp.result + 2), 4);  /* height_px */
+    ASSERT_EQ_U32(resp.result[4], 2);              /* palette_count */
+    ASSERT_EQ_U32(resp.result[5], 0);   /* palette[0] = black */
+    ASSERT_EQ_U32(resp.result[6], 0);
+    ASSERT_EQ_U32(resp.result[7], 0);
+    ASSERT_EQ_U32(resp.result[8], 255); /* palette[1] = white */
+    ASSERT_EQ_U32(resp.result[9], 255);
+    ASSERT_EQ_U32(resp.result[10], 255);
+    /* packed pixels: checkerboard rows 0x01,0x01 / 0x10,0x10 / repeat */
+    ASSERT_EQ_U32(resp.result[11], 0x01);
+    ASSERT_EQ_U32(resp.result[12], 0x01);
+    ASSERT_EQ_U32(resp.result[13], 0x10);
+    ASSERT_EQ_U32(resp.result[14], 0x10);
+
+    offload_response_free(&resp);
     offload_shutdown();
     gateway_stop(&gw);
 }

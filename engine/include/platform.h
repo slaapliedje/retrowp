@@ -121,6 +121,28 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
                           u8 r, u8 g, u8 b);
 void      plat_gc_flush(plat_gc *gc);
 
+/* M15: blits a small palette-indexed bitmap at (x,y), scaled to exactly
+   w x h pixels -- the caller already computed w/h from the paragraph's
+   own display_width_twips/height_twips via this backend's existing
+   twips<->px conversion, the same division of labor plat_draw_text's
+   callers already have for font metrics. `pixels` is the raw 4-bit-
+   packed indexed bitmap (row-major, 2 pixels/byte, high nibble = even x
+   -- docs/formats/offload-protocol.md's OFFLOAD_IMAGE section);
+   src_width_px/src_height_px are its real stored dimensions (may differ
+   slightly from w/h after twips<->px rounding -- a backend nearest/
+   box-samples to fit, the same allowance plat_measure_text's callers
+   already make for approximate fit); palette/palette_count gives each
+   nibble's real RGB, for the backend's own nearest-match/dither logic --
+   the SAME per-backend color-approximation pattern rgb_to_vdi_color/
+   rgb_to_pen/select_fill_pattern already use for solid fills, just
+   applied per pixel. Deliberately NOT required of every backend the way
+   plat_dialog_choice is: DOS's own paint loop never calls this at all
+   (pure text mode, no addressable graphics -- see docs/dos-platform.md),
+   so draw_dos.c has no stub and needs none. */
+wp_status plat_draw_image(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
+                           const u8 *pixels, i32 src_width_px, i32 src_height_px,
+                           const u8 palette[][3], u8 palette_count);
+
 
 /* ------------------------------------------------------------------ */
 /* Window / dialog primitives                                          */

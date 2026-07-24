@@ -53,4 +53,25 @@ u32 fixtures_grammar_lookup(const u8 *paragraph, u32 len, const fixtures_grammar
    *out_len. */
 const char *fixtures_chat_reply(const u8 *prompt, u32 len, u32 *out_len);
 
+/* One canned OFFLOAD_IMAGE response (M15): a tiny, fixed 4x4 2-color
+   checkerboard, returned unconditionally regardless of the request's
+   own source bytes/target constraints. This mock gateway has no
+   Pillow dependency and never decodes an image -- unlike THESAURUS/
+   SPELL_CHECK/GRAMMAR_CHECK/CHAT there is nothing to look UP, so this
+   exists purely to give test_offload.c deterministic wire-level
+   coverage of IMAGE's encode/decode and capability gating. Real
+   content correctness (a genuine Pillow decode/resize/quantize) is
+   proven separately, against the real image_gateway.py, by
+   host/tests/test_image_convert.c. */
+typedef struct {
+    u16        width_px;
+    u16        height_px;
+    u8         palette_count;
+    const u8 (*palette)[3];
+    const u8  *packed_pixels;
+    u32        packed_len;
+} fixtures_image;
+
+const fixtures_image *fixtures_image_get(void);
+
 #endif /* WP_GATEWAY_FIXTURES_H */

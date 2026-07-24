@@ -245,53 +245,112 @@ request -- a gateway that doesn't advertise CHAT gets an immediate,
 honest "this gateway doesn't offer Chat" alert with no network round
 trip at all.
 
-### `OFFLOAD_IMAGE`: deliberately not implemented anywhere in this repo
+### `OFFLOAD_IMAGE` (M15 T15.4)
 
-M8's own milestone text pairs CHAT and IMAGE ("Optional CHAT / IMAGE
-ops behind capability flags"), but this project has NO image type
-anywhere -- not in the document model (`docs/document-model.md`), not
-in any format importer/exporter (RTF/ODT/PDF are all explicitly
-text-only, `docs/formats/*.md`), and not in `platform/atari`'s draw
-layer (`plat_draw_text` is the only drawing primitive that exists;
-there is no `plat_draw_image` or equivalent in `platform.h`).
-Implementing IMAGE's capability advertisement and wire plumbing with
-nowhere in this app to actually put the resulting bytes would be a
-hollow feature -- present only to satisfy a checkbox, not something a
-user could ever see or use. `OFFLOAD_IMAGE` stays defined in
-`engine/include/offload.h` (a real, reserved op ID, so a future gateway
-or a future image-capable platform backend has a stable value to target)
-but is never advertised or implemented by any gateway in this repo, and
-`(1uL << OFFLOAD_IMAGE)` is never set in any CAPS response here -- the
-same honest "reserved but unimplemented" treatment CLAUDE.md's own
-project brief gives to other explicitly-future scope (font embedding,
-image support in PDF, M10).
+M8's own milestone text paired CHAT and IMAGE ("Optional CHAT / IMAGE
+ops behind capability flags"), but at that point this project had no
+image type anywhere -- not in the document model, not in any format
+importer/exporter, and not in any backend's draw layer -- so IMAGE
+stayed a reserved, unimplemented op ID (`engine/include/offload.h`)
+until M15 gave the document model a real, minimal image concept
+(`wp_image_desc`, `WP_PARA_IMAGE` -- `docs/document-model.md`'s Image
+section) to put the resulting bytes into.
 
-**A design note for whenever this DOES get built:** a real IMAGE
-feature on this project's vintage targets isn't just "add a bitmap
-type to the document model" -- what a Pi/LLM-side image generator would
+**Design decision, unchanged from the M8-era note that predates this
+op's real implementation:** what a Pi/LLM-side image source would
 naturally produce (modern compressed formats, truecolor or high color
-counts) isn't what any of this project's actual targets can display.
-Atari ST low-res is 16 colors from a 512-color palette; the other
-planned platforms (Amiga, Mac Classic, DOS text-mode) have their own,
-different, and in some cases far more constrained, color/format
-ceilings. A useful IMAGE op would need the GATEWAY to downconvert to
-something genuinely displayable on whichever target asked (a simple,
-low-color, palette-indexed bitmap, not a generically "smaller" modern
-format that still assumes a color depth these targets never had) --
-real scope for a future milestone, not a detail to guess at now while
-the op has no implementation at all.
+counts) isn't what any of this project's real targets can display.
+Atari ST low-res is 16 colors; Amiga/Mac/DOS have their own, different,
+and in some cases far more constrained ceilings. So the GATEWAY
+downconverts to a small, low-color, palette-indexed bitmap matched to
+the REQUESTING target's own real color ceiling, not a one-size-fits-all
+modern format -- the client says what it can display, the gateway
+decides how to get there (real Pillow decode + resize + adaptive
+palette quantization, or real Floyd-Steinberg dithering for a
+monochrome target -- `offload/gateway/image_gateway.py`).
+
+- **Request payload:**
+  ```
+  offset  size  field
+  0       1     target_max_colors     1..16 (Atari low-res: 16; Amiga:
+                                       the real, runtime-queried screen
+                                       depth, capped 16; Mac: 2, paired
+                                       with target_flags bit 0)
+  1       1     target_flags          bit 0: TARGET_GRAYSCALE (ask for
+                                       real dithering, not a generic
+                                       palette quantization); bits 1-7
+                                       reserved, must be 0
+  2       2     target_max_width_px   big-endian; gateway never exceeds
+                                       this OR WP_IMAGE_MAX_WIDTH_PX (320,
+                                       the ST low-res ceiling), whichever
+                                       is smaller
+  4       2     target_max_height_px  big-endian; same clamp against
+                                       WP_IMAGE_MAX_HEIGHT_PX (200)
+  6       ...   source image bytes -- whatever Pillow's Image.open can
+                                       decode (PNG/JPEG/GIF/BMP); capped
+                                       client-side at ~65000 bytes before
+                                       ever being sent (the wire frame's
+                                       own WIRE_MAX_PAYLOAD ceiling minus
+                                       this 6-byte header) -- a hard cap,
+                                       not a chunked-transfer mechanism;
+                                       a multi-MB source needs pre-
+                                       resizing before insert
+  ```
+- **Response payload (status `OFFLOAD_OK`):**
+  ```
+  offset  size  field
+  0       2     width_px       big-endian; actual delivered width,
+                                <= the request's own max
+  2       2     height_px      big-endian; likewise for height
+  4       1     palette_count  1..16 -- MAY be smaller than
+                                target_max_colors (a valid, honest
+                                answer, the same "fewer results than
+                                requested is fine" convention THESAURUS's
+                                empty-list case already established)
+  5       ...   palette_count x 3 bytes (R,G,B); palette[N] is the color
+                                for a pixel whose packed nibble equals N
+  5+3*pc  ...   ceil(width_px/2) * height_px packed 4-bit indexed pixel
+                                bytes, row-major, 2 pixels/byte (high
+                                nibble = even x); an odd width_px leaves
+                                each row's final low nibble unused
+  ```
+  `WP_IMAGE_MAX_WIDTH_PX`/`HEIGHT_PX` (320x200) exist specifically so
+  the worst case -- a full-size, full-16-color response -- fits under
+  `OFFLOAD_MAX_RESPONSE_PAYLOAD` (32768 bytes, `engine/src/
+  offload_client.c`) with ZERO changes needed to the wire protocol
+  layer itself: `5 + 48 + 160*200 = 32053` bytes, comfortably under the
+  existing ceiling. This is why IMAGE needed no `wire.h`/`caps_codec.h`/
+  `offload_client.c` changes at all, unlike CONVERT_IMPORT/EXPORT's own
+  M7 history (which genuinely did need `OFFLOAD_MAX_RESPONSE_PAYLOAD`
+  raised from 4096 to 32768) -- IMAGE's format was chosen backward from
+  that already-established ceiling instead.
+- `OFFLOAD_ERR` for an undecodable/malformed source or a malformed
+  request (payload shorter than the 6-byte header, or a zero-sized
+  target box after clamping); `OFFLOAD_UNSUPPORTED` for a gateway with
+  no Pillow installed (`image_gateway.py` never sets its CAPS bit in
+  that case -- an honest, structural degrade, the same posture
+  `odt_gateway.py`'s own optional `fonttools` PDF-embedding dependency
+  already has).
+- **Deliberately out of scope for this op** (M15's own plan, not a
+  silent gap): no RTF `\pict`/ODT `draw:frame` import of pre-existing
+  embedded images; no round-trip image export back into RTF/ODT (an
+  image paragraph is skipped on save, in this pass); no text-wrap-
+  around-image (a fixed-size, non-flowing block only); no chunked
+  transfer for a source image above the client-side cap; no real pixel
+  rendering on the DOS backend at all (pure text mode, no addressable
+  graphics -- see `docs/dos-platform.md`; DOS still performs the real
+  round trip and shows a bracketed text placeholder instead).
 
 ### Any other op
 
 The mock gateway responds `RESPONSE` with `status = OFFLOAD_UNSUPPORTED`
-and an empty payload for any op it doesn't implement (`IMAGE` always;
-`CONVERT_IMPORT`/`CONVERT_EXPORT` too, for `mock_gateway.c`/
-`ollama_gateway.c` specifically, since ODT/PDF conversion lives in the
-separate `odt_gateway.py`, not either of those; `ollama_gateway.c` also
-reports `OFFLOAD_UNSUPPORTED` for `SPELL_CHECK`, see below) --
-exercising the "absent gracefully" capability-negotiation path
-`OFFLOAD_IMAGE` needs for as long as it stays unimplemented, and that
-every other op needed before it existed.
+and an empty payload for any op it doesn't implement (`CONVERT_IMPORT`/
+`CONVERT_EXPORT`/`IMAGE`, since ODT/PDF conversion lives in
+`odt_gateway.py` and image downconversion lives in `image_gateway.py`,
+neither of which `mock_gateway.c` reimplements; `ollama_gateway.c` also
+reports `OFFLOAD_UNSUPPORTED` for `SPELL_CHECK`/`IMAGE`, see below) --
+exercising the "absent gracefully" capability-negotiation path every op
+needs before (or instead of) a given gateway implements it.
 
 ## Mock Gateway (`offload/gateway/mock_gateway.c`)
 
@@ -323,14 +382,25 @@ failure mode exercised by `test_offload.c`:
 | `--delay-ms=N` | Sleeps N ms before every response | Deterministic `WP_TIMEOUT` with no race on process timing |
 | `--short-frame` | Sends a response header promising a large payload, writes a few bytes, then goes back to waiting for the next request | Client times out on a stalled/incomplete frame, distinct from CRC corruption |
 
+`OFFLOAD_IMAGE` gets the same fixture treatment (M15): a small, hand-
+computed canned bitmap (a 4x4 checkerboard, 2 colors) rather than a
+real Pillow-backed decode -- `mock_gateway.c` intentionally has no
+Pillow dependency, so `host/tests/test_offload.c` gets deterministic,
+Python-free wire-level coverage of IMAGE's encode/decode and capability
+gating (advertised in this gateway's own CAPS response, alongside the
+other four), while the real Pillow-backed decode path is proven
+separately, against the real `image_gateway.py`, by `host/tests/
+test_image_convert.c` (see below).
+
 Real LLM/dictionary integration (Ollama/llama.cpp on a Pi) replacing
 `fixtures.c` is explicit future scope (M8) -- **for a real full
 SPELL_CHECK gateway** (GRAMMAR_CHECK and CHAT are now covered, see
 below). `ollama_gateway.c` below is a narrower, already-implemented
 slice of that scope: three real ops (THESAURUS, GRAMMAR_CHECK, CHAT),
 not the full M8 feature set (SPELL_CHECK remains unimplemented by any
-gateway in this repo, and IMAGE is permanently out of scope -- see its
-own section above).
+gateway in this repo, and IMAGE is real but lives entirely in
+`image_gateway.py`, not `ollama_gateway.c` -- an LLM has nothing to add
+to a deterministic decode/resize/quantize pipeline).
 
 ## Ollama Gateway (`offload/gateway/ollama_gateway.c`, post-M6)
 
@@ -476,3 +546,48 @@ writer with its own text layout (word-wrap, pagination, per-line
 positioning against real Adobe AFM glyph metrics), since unlike ODT, a
 PDF has no importer downstream to defer layout to. `FORMAT_PDF` is
 export-only; there is no PDF import.
+
+## Shared Python gateway plumbing (`offload/gateway/wire_protocol.py`, M15)
+
+Factored out of `odt_gateway.py` once `image_gateway.py` (below) became
+a SECOND Python gateway process needing the exact same frame/CRC/HELLO/
+CAPS/serve-loop boilerplate -- the same "share it once instead of
+risking drift between two copies" reasoning `gw_common.c` already
+applies on the C side for `mock_gateway.c`/`ollama_gateway.c`. Holds
+the wire constants, `encode_frame`/`encode_caps`/`read_frame`/
+`open_fifo_rdwr`, and two entry points every Python gateway's own
+`main()` now just calls into: `serve()` (the HELLO/CAPS handshake plus
+the request/response loop, parameterized on a `handle_request(op,
+payload) -> (status, payload)` callback) and `run_gateway()` (the full
+CLI: `--serial-rx`/`--serial-tx`/`--hello-timeout-ms` parsing, TCP-or-
+FIFO transport setup, then `serve()`). `odt_gateway.py`'s own external
+behavior (CLI flags, CAPS `gateway_name`, ops advertised) is unchanged
+by this refactor -- confirmed by `host/tests/test_convert.c` staying
+green with zero test-file changes.
+
+## Image Gateway (`offload/gateway/image_gateway.py`, M15 T15.4)
+
+A fourth gateway, answering the real `OFFLOAD_IMAGE` op (see that op's
+own section above for the full wire shape and design rationale). Built
+on `wire_protocol.py`, with its own single real dependency, Pillow,
+gated exactly like `odt_gateway.py`'s own optional `fonttools`
+dependency: imported inside a `try/except ImportError`, with the
+`OFFLOAD_IMAGE` CAPS bit set only when the import succeeded -- an
+honest, structural "unsupported" for an environment with no Pillow
+installed, not a crash. Fully deterministic (decode/resize/quantize or
+dither -- no LLM in the loop, unlike `ollama_gateway.c`), so it belongs
+in `make test` the same way `odt_gateway.py` does: `host/tests/
+test_image_convert.c` drives the real `offload_client.c` API against a
+spawned `image_gateway.py`, round-tripping a small hand-authored
+black/white fixture PNG (`host/tests/fixtures/sample_image.png`) and
+asserting exact palette/pixel content -- deterministic because the
+fixture has only two flat colors, so neither the adaptive-palette
+quantize path nor the Floyd-Steinberg dither path has any ambiguous
+midtone to resolve differently across a Pillow version. A second case
+forces the Pillow-unavailable path deterministically, independent of
+whether this dev environment actually has Pillow installed, via a
+test-only `--force-pillow-unavailable` CLI flag (the same fault-
+injection-flag convention `mock_gateway.c`'s `--corrupt-after`/
+`--die-after`/etc. already establish): the CAPS bit is unset and a
+request gets `OFFLOAD_UNSUPPORTED`, exactly the structural degrade a
+real Pillow-less environment would produce.

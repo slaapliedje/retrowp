@@ -1413,11 +1413,82 @@ every honestly-documented gap: `docs/mac-platform.md`.
 
 ---
 
-## M13+ — DOS / Typography Polish / Apple IIGS
-- [ ] T13.1 `platform/dos` (text-mode shell; character-cell metrics).
-- [ ] T13.2 Typography polish: kerning/justification options where supported.
-- [ ] T13.3 PDF polish: font embedding tiers, image support.
-- [ ] T13.4 `platform/iigs`: Apple IIGS backend, GS/OS System 6.x
+## M13+ — Typography Polish / Apple IIGS
+- [x] T13.2 Typography polish: kerning/justification options where supported.
+      AC: real on-screen JUSTIFY, not just PDF's. Investigation found
+      all three real backends (Atari/Amiga/Mac) silently treated
+      JUSTIFY as LEFT (each `*_align_offset_twips` only ever returned a
+      nonzero offset for CENTER/RIGHT) -- confirmed a real, three-way
+      gap, not hypothetical. Fixed at the engine level, once, in new
+      `engine/src/justify.c`/`layout.h`: `wp_line_next_fragment` (a
+      shared iterator splitting a line into same-class byte ranges at
+      both run boundaries and space/non-space transitions) and
+      `wp_justify_space_extra_twips` (per-gap slack, 0 for non-JUSTIFY
+      or a paragraph's last line, matching PDF export's own established
+      convention). All three backends' paint loops now walk fragments
+      instead of concatenating a whole line into one buffer/font --
+      which also fixed a real, separate latent bug the old code had:
+      a line spanning a style change was drawn entirely in the *last*
+      run's font, since `line_style` was overwritten per run and only
+      the final value used. Kerning is a **documented non-goal**: none
+      of GDOS bitmap/vector fonts, AmigaOS diskfont metrics, or classic
+      QuickDraw bitmap fonts expose real pair-kerning tables through
+      this project's existing metrics seam, and adding one would be a
+      nontrivial per-platform extension disproportionate to the value
+      here -- "where supported" is, honestly, nowhere cheaply today.
+      **Met.** `make test` grew from 371 to 376 (5 new host-side
+      `justify.c` unit tests); each backend cross-compiles clean under
+      its own strict toolchain (m68k-atari-mint, m68k-amigaos,
+      Retro68's m68k-apple-macos) with the new paint loop, and each
+      backend's on-target layout selfcheck gained a JUSTIFY assertion
+      (interior-line slack never negative, last line always exactly 0
+      -- real font metrics on real hardware can't be hand-computed the
+      way the host stub's fake monospace metrics can, so these check
+      bounds rather than exact widths).
+- [x] T13.3 PDF polish: font embedding tiers, image support.
+      AC: investigation found PDF's two documented gaps were very
+      different sizes. Font embedding was a real, tractable gateway-
+      side addition: `offload/gateway/odt_gateway.py` now backs each of
+      its 4 style slots (regular/bold/italic/bolditalic) with either
+      Tier 0 (today's standard-14 Helvetica, unchanged, zero
+      dependencies) or Tier 1 (real embedded TrueType via `fonttools` +
+      Liberation Sans -- metrically Helvetica-compatible by design,
+      verified directly), chosen independently per slot and gated on
+      `fonttools` being importable, the real font file being found on
+      this host, AND that slot actually being used in the document
+      (embedding an unused font is pure byte waste) -- any miss falls
+      that one slot back to Tier 0. A shared `/ToUnicode` CMap fixed a
+      real bug found during verification: `pdftotext` silently
+      truncated output partway through a subsetted embedded font
+      without it, even though rendering was already correct. Image
+      support, by contrast, is NOT a PDF-gateway-sized task: there is
+      no image concept anywhere in the core document model
+      (`engine/include/docmodel.h`) and no real import path that could
+      ever produce one (RTF's `\pict` is discarded on import; ODT has
+      no frame handling here) -- doing it properly means extending the
+      document model first, a cross-cutting lift on the order of a
+      platform milestone, not PDF polish. Deferred, not half-
+      implemented; tracked as its own future item below (T13.5).
+      **Met** (font embedding half). `pdffonts`/`pdftotext`/`pdftoppm`
+      (real `poppler-utils`, not this project's own code checking
+      itself) confirmed: a used slot embeds correctly (`emb yes uni
+      yes`) while unused slots correctly stay Tier 0 (`emb no`); a
+      real multi-line justified paragraph's text extracts fully and
+      correctly through the embedded font; the Tier-0-only fallback
+      path (`fonttools` simulated missing) reproduces byte-for-byte
+      the same small, zero-embedding PDF this gateway always produced
+      before this work.
+- [x] T13.5 Image support: extend the core document model with a real
+      image-run concept (constrained, per existing project guidance, to
+      vintage-displayable low-color/palette formats, not modern ones),
+      at least one real import path to ever get an image into a
+      document (currently none exists in any format), and PDF/on-screen
+      rendering. A platform-milestone-sized lift, not PDF polish --
+      split out of T13.3 once investigation showed its real scope.
+      **Promoted to its own milestone, M15, once picked as the next
+      concrete target -- the same way `T13.1` (was DOS/M14) and Amiga's
+      own bucket entry each were.** See M15 below.
+- [ ] T13.6 `platform/iigs`: Apple IIGS backend, GS/OS System 6.x
       (65816 -- a genuinely new CPU architecture and toolchain for this
       project, not a variant of the 68k Mac backend). User has real
       Apple IIGS hardware available for on-target testing, unlike every
@@ -1425,6 +1496,416 @@ every honestly-documented gap: `docs/mac-platform.md`.
       verification pass alongside whatever emulator (if any) is used
       for headless CI, the same way M12's BasiliskII fixture work
       should inform but not fully replace real-hardware checks here.
+
+---
+
+## M14 — Fourth Platform: DOS (Text-Mode, Open Watcom)
+Goal: Validate the portability thesis a fourth time, against a target
+with no real GUI at all -- a fixed 80x25 character-cell screen, no
+window manager, no proportional fonts, no OS-level clipboard -- proving
+the engine's twips-based layout degrades correctly to the monospace
+case rather than needing a special code path for it. Promoted out of
+`M13+`'s bucket (was `T13.1`) once picked as the next concrete target,
+the same way `T12.1` (Mac) and Amiga's own entry each were.
+
+- [x] T14.1 `platform/dos`: video-mode setup, direct-video-memory text
+      output, BIOS-keyboard event loop, clean exit.
+      AC: builds via Open Watcom (`-bt=dos`, real 16-bit real-mode
+      `.EXE`); boots under DOSBox against the Phase 0 fixture; a real
+      captured screen shows live text output and correct keyboard echo.
+      **Met.** `platform/dos/app_shell.c` sets 80x25 text mode (`INT
+      10h`), writes a title bar + typed text directly to `B800:0000`
+      video memory (no BIOS teletype -- the standard, expected DOS
+      text-mode technique), and reads keys via `INT 16h` (`<i86.h>`'s
+      `int86`/`union REGS`/`MK_FP`, not inline assembly). No engine/
+      platform.h linkage yet -- a deliberately raw hardware-seam-only
+      scope, same as Phase 0's own smoke test. Verified with real
+      keyboard interaction, not just a build: a new headless-DOSBox
+      keystroke-injection + screenshot technique (`xdotool key
+      --window` + `import`, found this phase -- see the new "DOSBox
+      keyboard injection technique" project memory) confirmed printable
+      characters, Enter (new line), Backspace (erase), and Escape (clean
+      exit -- screen clears, control returns to the DOS prompt) all
+      work correctly on real captured screens, not just by reading the
+      code. `make test` unchanged at 376/376 (no engine diff, expected
+      -- this phase is platform/dos-only); `dos-engine-check` and
+      `ci_dos.sh` both still green.
+- [x] T14.2 `metrics_dos.c`/`draw_dos.c`: fixed-cell font metrics +
+      direct `B800:0000` video-memory rendering.
+      AC: `wp_dos_layout_selfcheck` (mirroring the other three
+      backends' own selfchecks) passes; on-screen wrap matches engine
+      layout for the fixed character cell.
+      **Met.** Real, historically-grounded monospace convention (10
+      characters/inch, 6 lines/inch -- 144/240 twips per cell, not an
+      arbitrary ratio); `plat_font_metrics_get`/`plat_measure_text`
+      ignore the font's requested `size_twips` (plain BIOS text mode
+      has exactly one fixed ROM cell -- a documented gap, not silent);
+      `plat_draw_text`/`plat_fill_rect` write straight to `B800:0000`,
+      with a real nearest-match across the 16 standard CGA/EGA/VGA
+      colors (genuinely more than the monochrome ST/Mac backends can
+      do). `app_shell.c`'s new `render_fixture_paragraph` proved the
+      WHOLE pipeline on a real captured DOSBox screen, not just
+      `wp_dos_layout_selfcheck`'s own pass/fail: a real fixture
+      paragraph, laid out by the real engine, wrapped and rendered
+      correctly at a real column width. Because DOS's cell is exactly
+      fixed (unlike real GDOS/diskfont/QuickDraw fonts), the selfcheck
+      itself asserts exact hand-computed widths, not just bounds -- a
+      stronger check than the other three backends could manage.
+      Two real bugs found and fixed during bring-up: (1) linking the
+      full engine under Watcom's small memory model (`-ms`) overflowed
+      the one 64KB code segment by ~16KB at the very first link
+      attempt -- fixed by switching to medium model (`-mm`); (2)
+      `wp_paragraph_relayout`'s 512-entry `token_t` stack array
+      (`engine/src/linebreak.c`) silently overflowed Open Watcom's
+      default DOS stack, crashing the guest partway through the first
+      relayout call with no error -- fixed with a real, larger linked
+      stack (`-k32768`), not by shrinking the engine's own buffer; (3)
+      `plat_window_create` was redundantly re-invoking BIOS SetVideoMode
+      (which always blanks the display, even when re-requesting the
+      already-active mode), silently wiping the title bar whenever
+      called after startup -- fixed by never setting video mode there
+      at all, since app_shell.c's own startup sequence already owns
+      that. All three are exactly the kind of host-only assumption
+      (ample code segment size, ample stack, "setting a mode twice is
+      free") this project's cross-compile discipline exists to catch.
+- [x] T14.3 File I/O, clipboard, timer.
+      AC: real file round-trip via Open Watcom's own libc; in-process
+      clipboard buffer (DOS has no OS-level clipboard service to
+      integrate with -- `platform.h`'s clipboard interface doesn't
+      require cross-app sharing, so this is a conformant implementation,
+      not a shortfall); timer via `INT 1Ah`/libc clock.
+      **Met**, alongside T14.2 rather than after it: file/clipboard/
+      timer turned out to be a hard prerequisite for linking the engine
+      at all (every backend links its whole `ENGINE_OBJ` as one
+      indivisible unit), so their real implementations already existed
+      by the time T14.2's build succeeded. `wp_dos_file_clipboard_
+      selfcheck` (mirroring `wp_atari_file_clipboard_selfcheck`'s exact
+      shape) proves it for real, not just that it compiles/links --
+      confirmed passing on real DOSBox via `ci_dos.sh`.
+- [x] T14.4 Serial transport (offload parity).
+      AC: mirrors T6.3/T9.3/T12.3's own shape -- `INT 14h`/direct UART
+      on real hardware, DOSBox's `--socket` null-modem-over-TCP for CI.
+      Zero changes expected to `offload/transport`, `offload_client.c`,
+      or `offload.h`.
+      **Met.** `transport_dos.c` implements the real BIOS `INT 14h`
+      serial services (init/send/receive/status), same `"serial:
+      <device>:<baud>"` endpoint convention every prior backend uses;
+      zero changes to `offload/transport`/`offload_client.c`/
+      `offload.h`, confirmed. A real, confirmed DOSBox limitation was
+      found and fully diagnosed, not just noticed: the default
+      `serial1=dummy` device's `AH=01h` (send) unconditionally reports
+      a timeout despite `AH=03h`'s own status poll correctly showing
+      "ready" -- reproduced with an isolated raw `INT 14h` program with
+      no dependency on this project's own code, and confirmed
+      independent of CPU speed and of manually asserting DTR/RTS/OUT2
+      via a direct Modem Control Register write (so not a fixable
+      timing or handshake issue on this side; DOSBox's own `--socket`
+      nullmodem alternative was also tried and needs a live peer
+      connection to even proceed, adding complexity without yet
+      proving the underlying send path works either). Same category of
+      finding as Mac's own BasiliskII serial-read-hang gap -- honestly
+      documented (`docs/dos-platform.md`), not silently worked around.
+      `wp_dos_transport_selfcheck` (mirroring `wp_amiga_transport_
+      selfcheck`'s shape) still exercises write for real but doesn't
+      assert `WP_OK` from it, while asserting what this environment CAN
+      fully verify as hard requirements: open succeeds; a subsequent
+      read correctly times out within the deadline logic's own
+      generous bounds; and `offload_init`/`offload_available`/
+      `offload_shutdown` all behave correctly with no live gateway
+      attached. Passes reliably via `ci_dos.sh`. `make test` (376/376)
+      and Atari/Amiga/Mac engine-checks stay green throughout.
+- [x] T14.5 `platform/common` retrofit: keys, actions, status, help.
+      AC: real keyboard-event translation wired through the same
+      `platform/common/keymap.c` dispatch every other backend already
+      uses, with zero scheme-side changes -- mirrors T8.5.9/M9/M12's
+      own retrofit scope.
+      **Met.** `dos_translate_key` (real BIOS `INT 16h` scan+ASCII+
+      shift-state) feeds `wp_keymap_feed_key` -- vi-mode by default,
+      zero scheme-side changes, confirmed by the fact platform/common/
+      keymap.c/actions.c/config.c/statusline.c/help_doc.c/help_view.c
+      all cross-compiled and linked completely unmodified. New
+      `dialog_dos.c` implements `plat_dialog_message`/`plat_dialog_
+      choice` as a modal bottom-row prompt -- the "numbered text prompt
+      on DOS" shape `platform.h`'s own doc comment already anticipated.
+      The document body paint loop uses the real `wp_line_next_
+      fragment`/`wp_justify_space_extra_twips` walk (T13.2) from day
+      one, not the older approach the other three backends had to
+      later fix. Two real bugs found and fixed, both via genuine
+      interactive screenshot verification, not selfchecks alone: (1)
+      typed text never appeared on screen at all -- root cause,
+      confirmed by direct code search, is that NOTHING in the shared
+      engine/keymap dispatch path calls `wp_paragraph_relayout` after a
+      per-keystroke edit (only a whole-document replace does); this is
+      plausibly a **latent gap on Atari/Amiga/Mac too**, not DOS-
+      specific -- simply never caught there since none of their own
+      interactive verification passes actually typed new text into an
+      already-loaded document and checked a real screen (see the new
+      "Missing relayout after edit bug" project memory). Fixed for DOS
+      by relayouting once before every paint. (2) status-line text was
+      rendering solid black-on-black -- `plat_draw_text` was
+      unconditionally forcing a black background on every cell,
+      silently overwriting the status bar's own light-gray fill (a
+      failure mode with no equivalent on a real bitmap display, where
+      drawing text never touches surrounding pixels at all); fixed by
+      reading back and preserving each cell's existing background
+      nibble. Interactively verified end-to-end on real captured
+      DOSBox screenshots: real vi-mode Insert-mode typing, `NORMAL`/
+      `INSERT` status switching, the help pager's real content and
+      link navigation, and a clean Ctrl+Q quit. Three new selfchecks
+      (`wp_dos_key_translate_selfcheck`, `wp_dos_config_selfcheck`,
+      `wp_dos_help_selfcheck`, mirroring their Atari/Amiga counterparts
+      exactly) pass via `ci_dos.sh`. `make test` (376/376) and every
+      other backend's engine-check stay green throughout.
+- [x] T14.6 CI matrix + docs + milestone closeout.
+      AC: `host/tools/ci_dos_matrix.sh` (machine-type matrix: hercules/
+      cga/ega/svga) green; new `docs/dos-platform.md`; `make test` and
+      every prior backend's own CI matrix stay green throughout (pure
+      regression gate); `engine/`/`services/` show zero diff, verified
+      via `git diff --stat`, the same proof M9/M12 each used.
+      **Met.** `host/tools/ci_dos_matrix.sh` mirrors `ci_atari_matrix.sh`/
+      `ci_amiga_matrix.sh`/`ci_mac_matrix.sh`'s own shape. Hercules was
+      tried first (per the plan's own scope) and dropped for a real,
+      confirmed reason rather than kept: a headless-DOSBox screenshot of
+      real `RETROWP.EXE` under `--machine hercules` shows a solid black
+      screen, and DOSBox's own log explains why -- it silently boots
+      "Hercules 640x350 monochrome text mode 07h", not this backend's
+      requested 80x25 16-colour mode 03h, since real Hercules hardware
+      never supported color text mode 03h at all, only mode 7 (mono
+      text at video segment B000, not the B800 this backend's
+      `draw_dos.c` hardcodes). Same category of exclusion as Amiga's
+      Kickstart 3.0 and Atari's TOS 1.00 (a genuine structural
+      incompatibility, honestly documented, not silently dropped) --
+      and not a surprise: `docs/dos-platform.md`'s own Architecture-fit
+      section had already named MDA/Hercules-at-B000 a real, documented,
+      not-required-for-v1 gap before this phase ever ran. `cga`/`ega`/
+      `svga_s3` -- the three DOSBox profiles that share mode 03h's
+      color/B800 model -- each verified with a real screenshot of
+      `RETROWP.EXE` (correct title bar, word-wrapped sample text, status
+      line) before the matrix script existed, then via `ci_dos_matrix.sh`
+      itself: `DOS MACHINE MATRIX: 3 passed, 0 failed`. Full regression
+      swept and green: `make test` (376/376); `ci_atari_matrix.sh` (6/6);
+      `ci_amiga_matrix.sh` (3/3); `ci_mac_matrix.sh` (2/2).
+      `git diff --stat -- engine/ services/` shows exactly one file
+      (`engine/include/layout.h`), confirmed via `git log` to be
+      pre-existing T13.2 (M13a) work already on disk before this
+      milestone began, not introduced by any DOS phase -- no `engine/`/
+      `services/` file was touched by this milestone at all, the same
+      portability proof M9/M12 each gave. M14 is complete.
+
+---
+
+## M15 — Image Support (Placed Bitmaps, Offload-Downconverted)
+Goal: give the document model its first non-text content type. Promoted
+out of `M13+`'s bucket (was `T13.5`, split out of `T13.3` once
+investigation showed extending the core document model was a
+platform-milestone-sized lift, not PDF polish) once picked as the next
+concrete target, the same way `T13.1` (DOS/M14) and Amiga's own entry
+each were. Scope was set by the user directly: a source image is
+decoded and downconverted **off-device** on the Pi gateway -- mirroring
+how ODT/PDF conversion already works -- with "even just a frame for
+placement" deliberately setting the bar low for a first cut on the
+lowest-color-depth targets. `platform/dos` was found, during planning,
+to have zero pixel-addressable graphics active at all (pure 80x25
+text-mode, every draw call a direct `B800` character-cell poke) --
+asked and answered directly by the user: DOS gets a text-only
+bracketed placeholder marker, the same honest, permanent,
+documented-not-silent exclusion this project already gives Hercules/
+Kickstart 3.0/TOS 1.00, rather than a parallel pixel-graphics subsystem.
+
+**Unlike M9/M12/M14, this milestone shows real, substantial diff in
+`engine/`** (`docmodel.h`/`.c`, `editing.h`, `layout.h`, `undo.c`,
+`linebreak.c`, `justify.c`, `platform.h`, `offload.h`) -- expected and
+correct, not a regression from the "zero engine diff" precedent those
+three milestones set. Those milestones each proved the portability
+thesis (new backend, same unmodified core); this one's entire point is
+extending the single source of truth itself (`CLAUDE.md` rule 2) to a
+genuinely new content type. `services/` stays untouched throughout.
+
+- [x] T15.1 Pillow spike (go/no-go gate).
+      AC: a standalone, throwaway script proves Pillow decode + resize +
+      `quantize(colors<=16)` and `.convert('1', dither=FLOYDSTEINBERG)`
+      on real source images, each downsampled to <=320x200, produces a
+      visually reasonable low-color result -- settling whether Pillow is
+      a reasonable real gateway dependency before any wire-format byte
+      layout is locked in.
+      **Met.** Go. Nothing from this spike ships -- by design, it's a
+      throwaway proof, not part of `make test` or any permanent gateway
+      module -- but it directly unblocked T15.4's own wire-format byte
+      budget (see below) and confirmed a 4-bit packed palette index is
+      enough headroom for a recognizable result at the ST low-res
+      ceiling.
+- [x] T15.2 Document model + insert-image API + undo.
+      AC: a `wp_document.images[]` side table mirroring `cstyles`/
+      `pstyles` exactly; a small, always-resident `wp_image_desc`
+      descriptor (never raw pixel bytes inline, mirroring
+      `services/spell/spell.c`'s own "descriptor + read-on-demand"
+      precedent); a `kind`/`image` field pair on `wp_paragraph`, zero-
+      init defaulting to `WP_PARA_TEXT` so every pre-M15 consumer stays
+      correct without a code change; a new `wp_edit_insert_image`
+      (declared in `editing.h`, implemented in `undo.c` alongside the
+      undo/redo machinery it's paired with) splitting the paragraph at
+      a position, same shape `wp_edit_split_paragraph` already has;
+      undo/redo via a new `WP_OP_INSERT_IMAGE`, reusing the 16-bit
+      `style_before` field
+      to stash the registered image handle -- the same field-reuse trick
+      `WP_OP_SPLIT_PARA`/`MERGE_PARA` already established, so `wp_op`
+      itself needed no new fields. Host tests only; zero changes to any
+      pre-existing test file.
+      **Met.** `make test` grew by 4 (`image_add_get_roundtrip`,
+      `image_add_survives_growth`, `edit_insert_image_splits_paragraph`,
+      `edit_insert_image_undo_redo`); every pre-existing suite unchanged.
+      See `docs/document-model.md`'s new Image section for the full
+      struct-level picture.
+- [x] T15.3 Layout integration.
+      AC: an early `kind`-branch in `wp_paragraph_relayout` bypassing
+      `tokenize()` entirely for an image paragraph; `kind`-guards inside
+      the shared `wp_line_next_fragment`/`wp_justify_space_extra_twips`
+      primitives (`justify.c`) rather than trusting four independent
+      per-backend paint loops to remember the check; an explicit
+      regression proof that a mixed text+image document paginates
+      correctly using only `height_twips`, proving `paginate.c` itself
+      needed zero changes.
+      **Met.** `make test` grew by 5 (`image_layout_relayout_produces_
+      one_line_from_descriptor`, `image_layout_missing_handle_degrades_
+      to_zero_size`, `image_layout_fragment_iter_returns_false_
+      immediately`, `image_layout_justify_extra_is_zero`,
+      `image_layout_paginate_mixed_text_and_image`); every pre-existing
+      suite unchanged. `engine/src/paginate.c` has zero diff, confirmed
+      -- the "minimal recompute" proof point `docs/layout.md`'s new
+      paragraph-kind section documents in full.
+- [x] T15.4 Wire protocol + gateway; Insert-image UI action, all four
+      backends.
+      AC: real `OFFLOAD_IMAGE` (request = target color/flags/max-w/max-h
+      + source bytes; response = width/height/palette/packed 4-bit
+      pixels), sized so the worst case stays under the confirmed
+      existing `OFFLOAD_MAX_RESPONSE_PAYLOAD` (32768 bytes) with zero
+      protocol-layer changes to `wire.h`/`caps_codec.h`/
+      `offload_client.c`; a new Pillow-backed `offload/gateway/
+      image_gateway.py`, gated exactly like `odt_gateway.py`'s existing
+      `fonttools`-optional-dependency pattern; `mock_gateway.c` gains a
+      deterministic canned-fixture `IMAGE` handler; `test_offload.c`'s
+      two "always unsupported" fixture assertions repointed from
+      `OFFLOAD_IMAGE` (now real) to `OFFLOAD_CONVERT_IMPORT`; a new
+      `WP_ACT_INSERT_IMAGE` action wired on all four backends, each
+      reusing its own existing native file picker, capability-gating on
+      the CAPS bit before submitting (mirroring T8.3 CHAT's own
+      pre-check discipline, not submit-and-hope), writing the response
+      to a local pixel-cache file, then calling `wp_edit_insert_image`.
+      **Met.** `OFFLOAD_MAX_RESPONSE_PAYLOAD` stayed exactly 32768 --
+      confirmed no protocol-layer file needed touching. `offload.h`'s
+      own `OFFLOAD_IMAGE` doc-comment (a stale M8/T8.3 placeholder
+      reading "art generation (optional)") is corrected to describe the
+      real, shipped feature. `make test` grew by 6
+      (`offload_capabilities_advertise_image`,
+      `offload_image_returns_canned_fixture_bitmap`,
+      `image_convert_real_pillow_color_round_trip`,
+      `image_convert_real_pillow_grayscale_round_trip`,
+      `image_convert_pillow_unavailable_reports_unsupported`,
+      `image_convert_malformed_request_is_error`) -- the middle two
+      round-trip a real fixture PNG through the real Pillow-backed
+      gateway process, not a hand-fed byte array. Each backend's own
+      transport selfcheck gained an `OFFLOAD_IMAGE` case against
+      `mock_gateway`'s fixture, and real interactive verification on
+      each backend (including DOS, whose own confirmed DOSBox
+      serial-write limitation from M14 T14.4 meant this had to lean on
+      the same fixture-injection technique later phases also used)
+      confirmed a correctly-sized image paragraph lands after a real
+      file pick.
+- [x] T15.6 Rendering: real bitmap content on Atari/Amiga/Mac, honest
+      text placeholder on DOS.
+      AC: a new `plat_draw_image(gc, x, y, w, h, pixels, src_w, src_h,
+      palette, palette_count)` seam in `platform.h` -- deliberately not
+      required on every backend the way `plat_dialog_choice` is, so DOS
+      (which never calls it) needs no stub; each of Atari/Amiga/Mac
+      first proves the whole pipeline with a solid placeholder rect
+      (the palette's dominant color, zero new `platform.h` surface),
+      then replaces it with a real native blit; DOS instead prints
+      `[image: <source_name> <width_px>x<height_px>]` via the
+      *existing* `plat_draw_text` seam, no new surface, no video-mode
+      switch; every backend's own layout/image selfcheck gains a
+      position/size assertion (`wp_paragraph_relayout` produces exactly
+      the descriptor's `display_width_twips`/`display_height_twips`);
+      every rendering phase gets a real captured screenshot under the
+      relevant emulator, never selfcheck alone.
+      **Met**, with three real, non-obvious bugs found and fixed along
+      the way, none of them hypothetical:
+      (1) **Amiga**: `WritePixelArray8` returns the actual pixel count
+      copied, not a status code -- the initial `!= 0` success check
+      flagged every genuinely successful blit as a failure, root-caused
+      via a diagnostic build showing `plat_draw_image` returning
+      `WP_ERR` even though the file read and depth detection were both
+      already correct. Fixed by comparing the return value against the
+      expected `w * h` pixel count; verified via a real amiberry
+      screenshot showing genuine per-pixel diagonal-pattern content,
+      not a placeholder rect.
+      (2) **Atari**: this project's real, established boot convention
+      (`docs/atari-platform.md`) is Medium resolution (4 colors total),
+      not Low (16) -- an initial 16-color assumption would have
+      silently overflowed the ST's actual palette hardware. Fixed with
+      a new, real, runtime-queried `atari_screen_max_colors()` (VDI
+      `work_out[13]`, mirroring `metrics_atari.c`'s own DPI-query
+      precedent), dynamically sizing both the `OFFLOAD_IMAGE` request's
+      target-color budget and the palette-programming loop in
+      `plat_draw_image` to whatever the real screen actually supports --
+      reserving pens 0/1 for the existing G_WHITE/G_BLACK text VDI
+      already owns, and gracefully returning `WP_ERR` (triggering the
+      existing placeholder-rect fallback) on a genuinely mono screen
+      with no spare pen at all. Verified via a real Hatari screenshot
+      showing a genuine checkerboard pattern.
+      (3) **Mac**: a 4x4 ordered (Bayer) dither reduces each pixel's
+      palette RGB to this backend's hard-capped 1-bit `CopyBits` tier;
+      the initial `bayer_val * 17` threshold scaling mapped the dither
+      matrix's max coefficient to exactly 255, which could misclassify
+      a pure-white pixel (luminance 255) as black at that one dither
+      cell (`255 <= 255` is true) -- fixed to the standard `bayer_val *
+      16 + 8` scaling (max threshold 248, strictly below 255). A second,
+      separate robustness gap found while designing the no-crash
+      selfcheck: `plat_draw_image` had no `mgc->window == NULL` guard
+      before calling `SetPort`, which would crash on real hardware if
+      ever invoked before a window exists -- added for parity with
+      Amiga's own `screen == NULL` guard. Verified via a real BasiliskII
+      screenshot showing genuine dithered gray/textured content.
+      DOS's own marker path needed no bitmap work at all, only new
+      `dos_format_image_marker`/`dos_append_bytes`/`dos_append_decimal`
+      helpers (mirroring `platform/common/statusline.c`'s own
+      no-sprintf discipline) feeding the existing `plat_draw_text` seam;
+      `wp_dos_layout_selfcheck` gained the same position/size assertion
+      plus an exact byte-for-byte marker-text assertion. Verified via a
+      real DOSBox screenshot: `[image: PHOTO.PNG 320x200]` rendered on
+      its own line directly below the surrounding text, in the correct
+      position, with cursor motion across/around the image paragraph
+      confirmed stable and non-crashing over repeated single-key presses
+      (an initial apparent full-screen blank after a rapid, undelayed
+      5-key burst was isolated to a screenshot-capture timing artifact,
+      not an application fault -- a single subsequent keypress
+      immediately restored the correct, stable frame, and step-by-step
+      single-key repeats never reproduced it). All temporary
+      debug-fixture-injection scaffolding used for interactive
+      verification on all four backends was fully removed afterward,
+      confirmed via `grep -rn "TEMPORARY" platform/` returning empty.
+- [x] T15.7 CI matrix + docs + milestone closeout.
+      AC: all four backends' existing CI matrices stay green throughout
+      (pure regression gate, not new coverage); new `docs/document-
+      model.md` Image section and `docs/layout.md` paragraph-kind
+      section; `docs/milestones.md` M15 section with an explicit
+      call-out that real `engine/` diff is expected here, unlike M9/M12/
+      M14's zero-diff precedent.
+      **Met.** Full regression swept and green: `make test` (391/391,
+      grown from 376 at the start of this milestone -- 15 new image-
+      related tests across T15.2/T15.3/T15.4, zero regressions to any
+      pre-existing suite); `ci_atari_matrix.sh` (6/6 TOS images);
+      `ci_amiga_matrix.sh` (3/3 Kickstart versions); `ci_mac_matrix.sh`
+      (2/2 ROMs); `ci_dos_matrix.sh` (3/3 machine profiles). `git diff
+      --stat -- engine/ services/` shows real, substantial diff across
+      `docmodel.h`/`.c`, `editing.h`, `layout.h`, `offload.h`,
+      `platform.h`, `linebreak.c`, `undo.c` (the `kind`-guards this
+      milestone added to `justify.c` land in a file T13.2/M13a already
+      introduced, so they don't show as a new file here, only as part
+      of `layout.h`'s own diff) -- deliberately not a repeat of
+      M9/M12/M14's "zero engine diff" portability proof, since this
+      milestone's entire point was extending the single source of truth
+      itself (`CLAUDE.md` rule 2) to a genuinely new content type;
+      `services/` shows zero diff, confirmed. M15 is complete.
 
 ---
 

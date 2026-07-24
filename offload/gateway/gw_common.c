@@ -140,3 +140,31 @@ u32 gw_encode_grammar_issues(const u16 *start_offsets, const u16 *span_lens,
     }
     return pos;
 }
+
+u32 gw_encode_image_response(u16 width_px, u16 height_px,
+                              const u8 (*palette)[3], u8 palette_count,
+                              const u8 *packed_pixels, u32 packed_len,
+                              u8 *out, u32 out_cap)
+{
+    u32 pos, i;
+    u32 needed = 5u + (u32)palette_count * 3u + packed_len;
+
+    if (out_cap < needed) return 0;
+
+    be_write16(out, width_px);
+    be_write16(out + 2, height_px);
+    out[4] = palette_count;
+    pos = 5;
+
+    for (i = 0; i < palette_count; i++) {
+        out[pos] = palette[i][0];
+        out[pos + 1] = palette[i][1];
+        out[pos + 2] = palette[i][2];
+        pos += 3;
+    }
+
+    memcpy(out + pos, packed_pixels, packed_len);
+    pos += packed_len;
+
+    return pos;
+}

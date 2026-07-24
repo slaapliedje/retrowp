@@ -74,4 +74,52 @@ wp_status wp_document_paginate(wp_document *doc, wp_pagination *out);
 
 void wp_pagination_free(wp_pagination *pagination);
 
+
+/* ------------------------------------------------------------------ */
+/* Justify rendering support (T13.2)                                   */
+/* ------------------------------------------------------------------ */
+
+/* wp_line stores only a byte range plus one aggregate measured width --
+   enough for LEFT/CENTER/RIGHT (a single paint-time x offset), but
+   JUSTIFY needs per-word draw positions. Rather than have every
+   backend re-derive word boundaries from scratch, this shared,
+   host-testable pair does it once: wp_line_next_fragment walks a
+   line's run range yielding maximal same-class (space vs non-space)
+   byte ranges -- split at both run boundaries (so a backend can switch
+   font per style change, fixing the "whole line drawn in the last
+   run's font" bug that motivated this) and space/non-space transitions
+   (mirroring linebreak.c's tokenize() class-merge rule: a run of
+   consecutive spaces is ONE gap, never one gap per raw space byte).
+   wp_justify_space_extra_twips uses it internally to count a line's
+   interior gaps and compute the per-gap slack; a backend adds this
+   amount to its running x position after every space fragment, needing
+   no alignment/last-line logic of its own -- the function already
+   returns 0 whenever it wouldn't apply. */
+
+typedef struct {
+    u32     run_index;
+    u32     byte_start;
+    u32     byte_end;
+    wp_bool is_space;
+} wp_line_fragment;
+
+typedef struct {
+    u32     run_index;
+    u32     byte_offset;
+    wp_bool finished;
+} wp_line_fragment_iter;
+
+void wp_line_fragment_iter_init(wp_line_fragment_iter *iter, const wp_line *line);
+
+wp_bool wp_line_next_fragment(wp_document *doc, wp_paragraph *para, const wp_line *line,
+                               wp_line_fragment_iter *iter, wp_line_fragment *out);
+
+/* 0 unless align is WP_ALIGN_JUSTIFY, the line is not its paragraph's
+   last (matching PDF export's own left-align-last-line convention),
+   and it has at least one interior gap; otherwise
+   (target_width_twips - line->width_twips) / gap_count. */
+i32 wp_justify_space_extra_twips(wp_document *doc, wp_paragraph *para, const wp_line *line,
+                                  u8 align, wp_bool is_last_line_of_paragraph,
+                                  i32 target_width_twips);
+
 #endif /* WP_LAYOUT_H */

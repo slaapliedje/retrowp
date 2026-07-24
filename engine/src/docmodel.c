@@ -134,6 +134,55 @@ wp_status wp_document_pstyle_find_or_add(wp_document *doc, const wp_para_style *
     return wp_document_pstyle_add(doc, style, out);
 }
 
+static wp_status image_table_grow(wp_document *doc, u32 needed_count)
+{
+    u32 new_cap;
+    void *new_mem;
+
+    if (needed_count <= doc->image_capacity) return WP_OK;
+    if (needed_count > 0xFFFFu) return WP_RANGE;
+
+    new_cap = wp_grow_capacity(doc->image_capacity, needed_count, 4);
+    if (new_cap > 0xFFFFu) new_cap = 0xFFFFu;
+
+    new_mem = mem_realloc(doc->images,
+                           (u32)doc->image_capacity * (u32)sizeof(wp_image_desc),
+                           new_cap * (u32)sizeof(wp_image_desc));
+    if (new_mem == NULL) return WP_NOMEM;
+
+    doc->images = (wp_image_desc *)new_mem;
+    doc->image_capacity = (u16)new_cap;
+    return WP_OK;
+}
+
+wp_status wp_document_image_add(wp_document *doc, const wp_image_desc *desc, wp_image *out)
+{
+    wp_status st;
+
+    if (doc->image_count == 0) {
+        st = image_table_grow(doc, 1);
+        if (st != WP_OK) return st;
+        memset(&doc->images[0], 0, sizeof(wp_image_desc));
+        doc->image_count = 1;
+    }
+
+    if (doc->image_count == 0xFFFFu) return WP_RANGE;
+
+    st = image_table_grow(doc, (u32)doc->image_count + 1);
+    if (st != WP_OK) return st;
+
+    doc->images[doc->image_count] = *desc;
+    *out = (wp_image)doc->image_count;
+    doc->image_count++;
+    return WP_OK;
+}
+
+const wp_image_desc *wp_document_image_get(const wp_document *doc, wp_image handle)
+{
+    if (handle == 0 || handle >= doc->image_count) return NULL;
+    return &doc->images[handle];
+}
+
 const wp_char_style *wp_document_cstyle_get(const wp_document *doc, wp_cstyle handle)
 {
     if (handle == 0 || handle >= doc->cstyle_count) return NULL;
@@ -158,6 +207,9 @@ wp_status wp_document_init(wp_document *doc)
     doc->pstyles = NULL;
     doc->pstyle_count = 0;
     doc->pstyle_capacity = 0;
+    doc->images = NULL;
+    doc->image_count = 0;
+    doc->image_capacity = 0;
     doc->sections = NULL;
     doc->section_count = 0;
     doc->section_capacity = 0;
@@ -206,5 +258,6 @@ void wp_document_free(wp_document *doc)
     mem_free(doc->sections);
     mem_free(doc->cstyles);
     mem_free(doc->pstyles);
+    mem_free(doc->images);
     wp_strpool_free(&doc->strings);
 }

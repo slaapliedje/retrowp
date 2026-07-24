@@ -86,11 +86,23 @@ typedef struct {
     wp\_cstyle style;   /* character style index                  */
 } wp\_run;
 
+typedef u16 wp\_image;  /* index into wp\_document.images; 0 = none/invalid */
+
+typedef enum {
+    WP\_PARA\_TEXT  = 0,  /* default -- every zero-initialized paragraph is
+                            text, so every pre-M15 consumer stays
+                            unaffected without a code change */
+    WP\_PARA\_IMAGE = 1
+} wp\_para\_kind;
+
 typedef struct {
     wp\_run   *runs;
     u16       run\_count;
     u16       run\_capacity;
     wp\_pstyle style;      /* paragraph style index               */
+    u8        kind;       /* wp\_para\_kind; runs[]/run\_count stay 0
+                              for an image paragraph              */
+    wp\_image  image;      /* meaningful only when kind == WP\_PARA\_IMAGE */
     /* Layout cache (not serialized): */
     void     *layout;     /* opaque, owned by layout engine      */
     wp\_bool   layout\_dirty;
@@ -118,6 +130,10 @@ typedef struct {
     wp\_para\_style *pstyles;      /* paragraph style table         */
     u16            pstyle\_count;
     u16            pstyle\_capacity;
+
+    wp\_image\_desc *images;       /* placed-image descriptor table  */
+    u16            image\_count;
+    u16            image\_capacity;
 
     wp\_section    *sections;
     u32            section\_count;
@@ -149,7 +165,9 @@ typedef struct {
 typedef enum {
     WP\_OP\_INSERT\_TEXT, WP\_OP\_DELETE\_TEXT,
     WP\_OP\_SET\_CSTYLE,  WP\_OP\_SET\_PSTYLE,
-    WP\_OP\_SPLIT\_PARA,  WP\_OP\_MERGE\_PARA
+    WP\_OP\_SPLIT\_PARA,  WP\_OP\_MERGE\_PARA,
+    WP\_OP\_INSERT\_IMAGE, /* see Images section below */
+    WP\_OP\_GROUP\_BEGIN, WP\_OP\_GROUP\_END
 } wp\_op\_kind;
 
 typedef struct wp\_op {
@@ -161,4 +179,69 @@ typedef struct wp\_op {
     struct wp\_op *next;    /* journal linkage                    */
 } wp\_op;
 
+## Images (M15)
+
+An image is a **paragraph-level, fixed-size, non-flowing block** -- not
+a run-level inline object. `wp_paragraph.kind` (`wp_para_kind`) is `0`
+(`WP_PARA_TEXT`) for every paragraph that existed before this
+milestone and every paragraph any pre-M15 code path still creates --
+that zero-init default is what keeps every unmodified format
+importer/exporter, and every backend that hasn't been taught about
+`WP_PARA_IMAGE`, correctly inert. When `kind == WP_PARA_IMAGE`, the
+paragraph's `runs`/`run_count` stay at their zero-init values and
+`image` names an entry in `wp_document.images` instead.
+
+`wp_document.images` is a fourth append-only side table, mirroring
+`cstyles`/`pstyles` exactly: 1.5x growth, index 0 reserved as the
+sentinel, never compacted (an entry stays registered even after the
+last paragraph referencing it is undone -- undo only ever needs to
+remove/re-add the *paragraph*, never the descriptor). Unlike style
+tables there is no `_find_or_add` -- two images with byte-identical
+descriptor fields are still distinct content (the same photo inserted
+twice deliberately), so de-duplication isn't worth the complexity.
+
+`wp_image_desc` is deliberately small and always resident (unlike a
+`wp_run`'s text, which lives in the string pool): `width_px`/
+`height_px` (the real decoded bitmap size), `display_width_twips`/
+`display_height_twips` (the layout box size -- computed by the
+*inserting backend* from `width_px` via its own twips<->px ratio, the
+same division of labor `plat_font_metrics_get`'s callers already have;
+the engine itself never computes this), a `palette[16][3]` of up to 16
+RGB entries plus `palette_count`, and two `wp_span` pool refs:
+`blob_path` (the native path to a disk-cached file holding the actual
+packed 4-bit pixel bytes) and `source_name` (the original filename/
+caption, optional). **Pixel bytes themselves are never held in memory
+by the document model** -- only `blob_path` names where to stream them
+from at render time, the same "descriptor + read-on-demand, never load
+the whole thing" precedent `services/spell/spell.c` already set for a
+large dictionary. `blob_path` offset 0/length 0 means no pixel cache
+exists at all -- DOS is the one backend that legitimately leaves this
+unset (T15.6: it has no addressable graphics to paint pixels into at
+all, so it never reads a cache file back, only the two integer
+dimensions and `source_name` for its bracketed text marker).
+
+Undo reuses `WP_OP_SPLIT_PARA`/`WP_OP_MERGE_PARA`'s own trick of
+stashing a handle in the 16-bit `style_before` field rather than
+growing `wp_op`: `WP_OP_INSERT_IMAGE` carries the just-registered
+`wp_image` handle there. There is no separate "delete image" op kind --
+undoing an insert is a self-contained inverse (remove the image
+paragraph, re-merge the split), the same shape `WP_OP_SPLIT_PARA`'s own
+undo already has. Because the images table is never compacted, redoing
+the insert afterward can safely reuse the original handle rather than
+re-registering a new descriptor.
+
+**Consumers that must be paragraph-kind-aware**: `wp_paragraph_relayout`
+(`engine/src/linebreak.c`) branches on `kind` before doing anything
+else -- an image paragraph gets exactly one line, sized straight from
+the descriptor's own display box, with `tokenize()` never invoked and
+`content_width_twips` unused (no text-wrap-around-image in this
+milestone). `wp_line_next_fragment`/`wp_justify_space_extra_twips`
+(`engine/src/justify.c`) both guard on `kind == WP_PARA_IMAGE` and
+return immediately (nothing to fragment, nothing to justify) --
+guarded once in the shared primitive rather than trusting every
+per-backend paint loop to remember it independently. See
+`docs/layout.md`'s own paragraph-kind section for the full layout-side
+picture. `engine/src/paginate.c` needed **zero changes** -- it only
+ever reads a line's already-computed `height_twips` when deciding page
+breaks, and an image paragraph's single line has one like any other.
 

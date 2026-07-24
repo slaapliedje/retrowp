@@ -247,6 +247,25 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
         layout->line_count = 0; /* reuse the allocated array; rebuild in place */
     }
 
+    if (para->kind == (u8)WP_PARA_IMAGE) {
+        /* M15: a fixed-size, non-flowing block -- exactly one line sized
+           from the registered descriptor's own display box, no font
+           measurement, tokenize() never invoked. content_width_twips is
+           intentionally unused here (no text-wrap-around-image in this
+           milestone, see docs/document-model.md's Image section); a
+           missing/invalid handle degrades to a zero-size line rather
+           than failing relayout outright. */
+        const wp_image_desc *desc = wp_document_image_get(doc, para->image);
+        i32 w = (desc != NULL) ? desc->display_width_twips : 0;
+        i32 h = (desc != NULL) ? desc->display_height_twips : 0;
+
+        st = emit_line(layout, 0, 0, 0, 0, w, h);
+        if (st != WP_OK) return st;
+
+        para->layout_dirty = WP_FALSE;
+        return WP_OK;
+    }
+
     cache.count = 0;
     st = tokenize(doc, para, &cache, tokens, &token_count);
     if (st != WP_OK) { font_cache_close_all(&cache); return st; }

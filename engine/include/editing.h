@@ -245,6 +245,20 @@ wp_status wp_edit_split_paragraph(wp_document *doc, wp_undo_journal *journal,
 wp_status wp_edit_merge_paragraph(wp_document *doc, wp_undo_journal *journal,
                                    u32 section, u32 paragraph, wp_pos *out_pos);
 
+/* M15: inserts a paragraph-level image at pos, registering desc in
+   doc->images and splitting the current paragraph around it -- the
+   result is [text before pos] [new image paragraph] [text at/after
+   pos], built from wp_document_split_paragraph_raw plus one extra
+   paragraph insert (see docs/document-model.md's Image section). desc
+   is copied into the table; the caller retains no obligation to keep
+   it alive afterward. pos must be a valid position, same acceptance
+   rules as wp_edit_split_paragraph. Undoable through the same journal
+   every other wp_edit_* call uses -- WP_OP_INSERT_IMAGE's own undo is
+   self-contained (remove the image paragraph, re-merge), the same
+   shape WP_OP_SPLIT_PARA's undo already has. */
+wp_status wp_edit_insert_image(wp_document *doc, wp_undo_journal *journal,
+                                wp_pos pos, const wp_image_desc *desc);
+
 /* Deletes the tree range between sel.anchor and sel.caret (order-
    independent). Decomposes into a sequence of calls to
    wp_edit_delete_range (per touched run, including partial first/last

@@ -34,4 +34,12 @@ wp_bool wp_mac_config_selfcheck(void);
    and why. */
 wp_bool wp_mac_help_selfcheck(void);
 
+/* M15 T15.4: pure bit-math over a hand-built offload_capabilities,
+   proving offload_caps_supports() itself -- the shared pre-check
+   do_insert_image() relies on before ever building a request. Mirrors
+   platform/atari/app_shell.c's own wp_atari_chat_selfcheck exactly;
+   not a real gateway round trip (that's host/tests/test_image_convert.c's
+   job). */
+wp_bool wp_mac_image_selfcheck(void);
+
 #endif /* WP_MAC_APP_SHELL_INTERNAL_H */
