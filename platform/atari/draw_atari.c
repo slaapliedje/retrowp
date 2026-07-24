@@ -81,23 +81,31 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
                           const u8 *utf8, u32 len, u8 r, u8 g, u8 b)
 {
     atari_gc *agc = (atari_gc *)gc;
+    const atari_font *af = (const atari_font *)f;
     char buf[256];
     u32 n, out_len, unmapped;
     wp_status st;
 
-    WP_UNUSED(f); /* font attributes are already selected by the caller's
-                     layout pass via plat_measure_text/plat_font_metrics_get;
-                     v_gtext draws with the VDI handle's CURRENT text
-                     attributes, which app_shell.c re-selects per line
-                     via the same font before calling this. */
-
-    if (agc == NULL) return WP_ERR;
+    if (agc == NULL || af == NULL) return WP_ERR;
 
     n = (len < sizeof(buf) - 1) ? len : (u32)(sizeof(buf) - 1);
     st = plat_utf8_to_native(utf8, n, (u8 *)buf, (u32)(sizeof(buf) - 1), &out_len, &unmapped);
     if (st != WP_OK) return st;
     buf[out_len] = '\0';
 
+    /* v_gtext draws with ITS OWN handle's (agc->vdi) current text
+       attributes -- a real, distinct handle from g_metrics_vdi, which
+       is what plat_measure_text/plat_font_metrics_get select during
+       layout (VDI text attributes are per-workstation-handle, not
+       global). This was NOT actually reaching a different result in
+       practice on the real/EmuTOS environments tested (both handles
+       reported the identical selected font, so this alone isn't what
+       causes the ST-High rendering issue documented in
+       docs/atari-platform.md's own ST-High section) -- but it's still
+       the only correct way to guarantee agc->vdi draws at the font
+       plat_font_open was actually asked for, rather than relying on
+       both handles coincidentally agreeing, so it stays. */
+    atari_select_font(agc->vdi, af);
     vst_color(agc->vdi, rgb_to_vdi_color(r, g, b));
     v_gtext(agc->vdi, (short)x, (short)y, buf);
     return WP_OK;

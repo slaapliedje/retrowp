@@ -3535,6 +3535,16 @@ void app_shell_run(void)
     work_in[10] = 2; /* raster coordinates */
     v_opnvwk(work_in, &vdi_handle, work_out);
 
+    /* This window's own drawing handle needs the identical one-time
+       GDOS registration ensure_metrics_vdi already does for the
+       separate metrics-only handle -- otherwise plat_draw_text's own
+       atari_select_font call (draw_atari.c) can only snap to the
+       built-in bitmap font's coarse sizes on THIS handle even when
+       g_metrics_vdi's measurements used the full scalable range,
+       reintroducing the same measure-vs-draw mismatch fixing
+       plat_draw_text alone doesn't fully close. */
+    atari_ensure_gdos_fonts(vdi_handle);
+
     /* work_out[0] is the screen's max addressable X (width in pixels,
        minus one) -- a standard v_opnvwk output, same field the real
        SpeedoGDOS INSTALL.PRG checks before it will run at all (verified:

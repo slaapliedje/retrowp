@@ -654,6 +654,68 @@ finding is also what motivated switching the harness's default
 resolution to Medium -- see "Boot resolution: Medium, not Low" below --
 even though it didn't fix this particular bug.)
 
+### Known gap: ghosted/double-struck text in ST High (mono) resolution
+
+Reported 2026-07-24 ("looks like a crash in ST-High" -- it is not a
+crash; the app boots, loads the sample document, and stays fully
+responsive). Real, reproducible, visually confirmed: every character
+of document-body/help-body text renders with a visible horizontal
+ghost/double-image, at both 10pt (help body) and 12pt (document body,
+this project's real default) -- legible but unpleasant, not a hang or
+an alert. GEM's own menu bar text (`Desk File Edit Tools Format`)
+renders perfectly crisp throughout, on the same screen, at the same
+time -- this is not a whole-screen rendering failure.
+
+**Two real, genuine bugs were found and fixed along the way, kept
+regardless of whether they turned out to be the root cause**:
+`plat_draw_text` (`draw_atari.c`) used to silently discard its own
+`plat_font` parameter (`WP_UNUSED(f)`), relying on the false assumption
+that whatever font `plat_measure_text`/`plat_font_metrics_get` selected
+on the layout pass's own `g_metrics_vdi` handle would carry over to the
+window's separate drawing handle -- VDI text attributes are per-
+workstation-handle, they never do. `metrics_atari_internal.h` now
+exposes the real `atari_font` struct plus two shared functions,
+`atari_select_font(vdi, font)` (point size + effects) and
+`atari_ensure_gdos_fonts(vdi)` (GDOS scalable-font registration, mirrors
+`ensure_metrics_vdi`'s own identical call for the metrics handle) --
+both now called on the window's own drawing handle too, not just the
+metrics one, so any future GDOS-equipped environment measures and draws
+with the guaranteed-identical selection.
+
+**These two fixes did NOT resolve the ST-High ghosting**, and direct
+on-target diagnostic instrumentation (a temporary per-call debug log,
+removed afterward -- `grep -rn "TEMPORARY" platform/atari/` stays
+clean) proved why: `plat_draw_text` is called exactly once per word
+fragment, at monotonically increasing, sane X positions, through the
+identical VDI handle number (`g_metrics_vdi` and the window's own
+drawing handle report the SAME handle in this environment) -- so this
+is not a double-call, wrong-position, or cross-handle-mismatch bug in
+this project's own code at all. The decisive finding: **`vst_point`
+selects the byte-for-byte identical font (`charw=7 charh=13 cellw=8
+cellh=16`) for the same 12pt request in BOTH ST Medium (crisp) and ST
+High (ghosted)** -- same glyph bitmap, same handle, same call pattern,
+only the resolution differs. Confirmed on **real TOS 1.04**, not just
+EmuTOS -- ruling out both an emulation-only artifact and a font-
+selection bug, and pointing instead at how GEM/VDI's `v_gtext` blits
+this specific glyph bitmap into ST High's genuinely different
+1-bitplane (mono) framebuffer versus Medium's 2-bitplane one. A forced
+8pt test (a much smaller glyph, `charh=4`) showed no visible ghosting,
+suggesting the effect is tied to glyph/cell size on this specific
+video mode rather than being universal -- consistent with, though not
+conclusive proof of, a real GEM/TOS 1-bitplane text-blit characteristic
+at larger cell sizes, not a portable-engine or `platform/atari` layout
+bug.
+
+**Status: documented, not fixed.** No safe, well-tested fix was found
+in this pass -- the candidate workaround (clamp/reduce the requested
+point size specifically on mono/1-bitplane devices) trades text-size
+fidelity for legibility and needs real empirical work to find a safe
+threshold before it's worth shipping, rather than guessing. `make test`
+(391/391) and `ci_atari_matrix.sh` (6/6) stay green throughout --
+this is a real, honestly-flagged visual gap on one specific resolution,
+the same category of exclusion as Hercules-under-DOS or the missing
+kerning-table gap elsewhere in this doc, not a silent one.
+
 ## File I/O, clipboard, timer, and basic editing (T4.3)
 
 `file_atari.c` implements `plat_file_*` directly over mintlib's `fopen`/

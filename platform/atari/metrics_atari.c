@@ -67,13 +67,23 @@ static wp_status ensure_metrics_vdi(void)
        never leave g_num_colors at something nonsensical. */
     if (work_out[13] > 0) g_num_colors = (i32)work_out[13];
 
+    atari_ensure_gdos_fonts(g_metrics_vdi);
+
+    return WP_OK;
+}
+
+void atari_ensure_gdos_fonts(VdiHdl vdi)
+{
     /* Ask a resident scalable-font GDOS to load its fonts for this
        workstation. If none is resident, or the call fails, this is a
        no-op: vst_point() continues to snap to the nearest built-in
-       bitmap size exactly as it did before GDOS was ever probed for. */
-    if (vq_gdos() != 0) vst_load_fonts(g_metrics_vdi, 0);
-
-    return WP_OK;
+       bitmap size exactly as it did before GDOS was ever probed for.
+       Must be called once per REAL handle that will select fonts --
+       registering g_metrics_vdi here does nothing for a window's own
+       separate drawing handle, the same "attributes don't cross
+       handles" reason atari_select_font (below) has to be called on
+       both. */
+    if (vq_gdos() != 0) vst_load_fonts(vdi, 0);
 }
 
 i32 atari_twips_to_px_x(i32 twips)
@@ -106,11 +116,6 @@ i32 atari_screen_max_colors(void)
     return g_num_colors;
 }
 
-typedef struct {
-    short point_size;
-    u16   style_flags;
-} atari_font;
-
 static short map_effects(u16 style_flags)
 {
     short effects = TXT_NORMAL;
@@ -123,15 +128,18 @@ static short map_effects(u16 style_flags)
     return effects;
 }
 
-/* Re-applies this font's point size and effects to the shared metrics
-   VDI handle. Must run before any query that depends on current text
-   attributes (vst_point, vqt_extent, vqt_fontinfo). */
-static void select_font(const atari_font *f)
+/* Re-applies this font's point size and effects to vdi's own current
+   text attributes. Must run on a handle before any of ITS OWN calls
+   that depend on current text attributes (vst_point, vqt_extent,
+   vqt_fontinfo, v_gtext) -- see metrics_atari_internal.h's own comment
+   on why this takes an explicit vdi param rather than assuming
+   g_metrics_vdi the way this function used to. */
+void atari_select_font(VdiHdl vdi, const atari_font *f)
 {
     short charw, charh, cellw, cellh;
 
-    vst_point(g_metrics_vdi, f->point_size, &charw, &charh, &cellw, &cellh);
-    vst_effects(g_metrics_vdi, map_effects(f->style_flags));
+    vst_point(vdi, f->point_size, &charw, &charh, &cellw, &cellh);
+    vst_effects(vdi, map_effects(f->style_flags));
 }
 
 wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
@@ -218,7 +226,7 @@ wp_status plat_measure_text(plat_font *f, const u8 *utf8, u32 len,
     }
     buf[n] = '\0';
 
-    select_font(af);
+    atari_select_font(g_metrics_vdi, af);
 
     if (n == 0) {
         *width_twips_out = 0;

@@ -43,6 +43,45 @@ i32 atari_px_to_twips_y(i32 px);
    many VDI palette registers/bitplanes are real). */
 i32 atari_screen_max_colors(void);
 
+/* plat_font's real backing type -- shared here (not private to
+   metrics_atari.c) because VDI text attributes are per-VDI-HANDLE
+   state, not global: a size/style selected on g_metrics_vdi (via
+   plat_measure_text/plat_font_metrics_get, during layout) has zero
+   effect on a window's own separate drawing handle's later v_gtext
+   calls. draw_atari.c needs the real point_size/style_flags to
+   re-select on ITS handle before drawing, not just an opaque pointer
+   it can't read. */
+typedef struct {
+    short point_size;
+    u16   style_flags;
+} atari_font;
+
+/* Applies point size + effects (bold/italic/underline) to vdi's own
+   CURRENT text attributes -- must be called on ANY handle (metrics or
+   drawing) before that handle's own vst_point-dependent calls
+   (vqt_extent/vqt_fontinfo/v_gtext) will agree with what plat_font_open
+   was actually asked for. A real, found-on-real-hardware bug this
+   fixes: draw_atari.c's plat_draw_text used to discard its plat_font
+   parameter entirely, on the false assumption that whatever the
+   layout pass selected on g_metrics_vdi would carry over to the
+   window's own vdi handle -- it never does, VDI attributes don't
+   cross handles. The mismatch was invisible at ST Low/Medium (close
+   enough between the two handles' default vs requested sizes to not
+   visibly overlap) but produced real, visible double-struck/ghosted
+   text at ST High, where the DPI difference made the gap large. */
+void atari_select_font(VdiHdl vdi, const atari_font *f);
+
+/* One-time-per-handle: if a scalable-font GDOS is resident, loads its
+   fonts for vdi so atari_select_font's vst_point can hit the exact
+   requested size on THIS handle too, instead of silently snapping to
+   the built-in bitmap font's coarser sizes the way an unregistered
+   handle does -- see ensure_metrics_vdi's identical call for
+   g_metrics_vdi. Every real drawing handle (the app's one window vdi,
+   reused by paint_document/paint_status_line/paint_help) needs this
+   called on it once, the same reason it needs atari_select_font before
+   every draw -- a fresh v_opnvwk handle starts with neither. */
+void atari_ensure_gdos_fonts(VdiHdl vdi);
+
 /* plat_gc for this backend: a real window's VDI handle plus the AES
    window handle it belongs to (needed for wind_get_grect-based clipping
    during redraw). Callers (app_shell.c) construct one directly -- there
