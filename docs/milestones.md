@@ -1497,6 +1497,89 @@ every honestly-documented gap: `docs/mac-platform.md`.
       for headless CI, the same way M12's BasiliskII fixture work
       should inform but not fully replace real-hardware checks here.
 
+      Scoping research (2026-07-24): real, current toolchain path is
+      **ORCA/C + Golden Gate** (github.com/byteworksinc/ORCA-C +
+      juiced.gs/store/golden-gate) -- Golden Gate runs ORCA/C directly
+      on Linux and produces real GS/OS Toolbox binaries without an
+      emulator for the build step itself, closer to a real cross-
+      compiler than a from-scratch stack; ~$10, not FOSS. cc65 cannot
+      target 65816/GS/OS; llvm-mos has no IIGS support yet (open issue,
+      unresolved). CPU is **little-endian** (unlike every 68k backend
+      so far) -- needs the same byte-swap-on-I/O treatment `platform/
+      dos` already has for x86; engine logic itself needs zero changes
+      (endian-neutral by construction, CLAUDE.md rule already covers
+      this). GS/OS Toolbox (Window/Menu/Event/Dialog/Scrap Manager,
+      QuickDraw II, Font Manager) looks like a real architectural
+      sibling of classic Mac Toolbox -- `platform/mac/app_shell.c` is
+      a much closer structural template to adapt than a from-scratch
+      design, even though CPU/toolchain are unrelated. RAM tier is a
+      genuine fit: GS/OS System 6 itself requires 1MB minimum, matching
+      this project's own 1MB baseline almost exactly. Real hardware has
+      two Toolbox-accessible RS-232 ports on a real Z8530 SCC -- solid
+      basis for the offload link. Emulators (KEGS, GSplus) are real and
+      maintained but neither documents a headless/CI mode the way
+      Hatari/DOSBox do; the same Xvfb+xdotool approach already proven
+      for four other backends is a reasonable bet, unverified. Apple's
+      ROM is a real licensing gray area (not freely redistributable,
+      only informally-circulated archives) -- real hardware access
+      sidesteps this for the verification pass that actually matters.
+- [ ] T13.7 `platform/c900`: Commodore 900 backend, Coherent (a Unix
+      work-alike by Mark Williams Company) on a Zilog Z8001. Requested
+      2026-07-24. The most architecturally different backend this
+      project would ever build -- not a GUI-toolkit port at all, but
+      this project's first genuine Unix-tty backend: cursor positioning
+      via terminal escapes through a real tty layer, not a direct video
+      memory poke (`platform/dos`) or a GUI event loop (GEM/MUI/
+      Toolbox). CPU is **big-endian** (Z8000 family, like 68k) -- zero
+      endian-adaptation needed, unlike the IIGS's little-endian 65816.
+
+      Scoping research (2026-07-24): public specs for the real C900 are
+      thin and conflicting across sources (clock speed cited as both
+      6 MHz and 10 MHz; RAM cited as both 512KB and 1MB/1024KB stock)
+      -- only 50 prototypes were ever built, none sold commercially, so
+      there is no authoritative spec sheet the way there is for a mass-
+      market machine. None of that uncertainty matters much in practice
+      though: `github.com/MichalPleban/commodore-900-emulator` (MIT-
+      licensed, plain C99, `make`-buildable) is a real, purpose-built,
+      **headless-by-design** Z8001+Z8010 emulator explicitly built "for
+      software cross-development on the host machine" -- 1MB RAM, 20MB
+      disk, one serial line that redirects straight to the host
+      console, `--input` for scripted keystrokes, `--max=N` instruction
+      caps, and a `--selftest` mode needing no ROM/disk at all. This is
+      a better native CI fit than any of the four existing backends'
+      own GUI emulators (Hatari/amiberry/BasiliskII/DOSBox), all of
+      which need the Xvfb+xdotool workaround this one wouldn't. It
+      ships a real BIOS dump and a bootable Coherent 0.7.3 disk image
+      directly in the repo, under a genuine BSD-style redistribution
+      license from Robert Swartz (the real Mark Williams Company
+      rightsholder) -- legally clean, unlike the IIGS ROM situation.
+      Only models one serial line total, almost certainly needed for
+      the Coherent console/tty itself -- testing the offload link
+      specifically may need more serial modeling than this build has;
+      real Model 1 hardware had multiple RS-232 ports.
+
+      **The one real open question, and it's a hard gate, not a detail:
+      the toolchain.** No modern Z8000 cross-compiler exists (a ~1998
+      Cygnus GCC backend is long dead/unmaintained). The realistic path
+      is compiling *on* the emulated machine using Coherent's own
+      bundled native C compiler (the repo's `tools/disk.py` can copy
+      files on/off the disk image for exactly this) -- meaning
+      iteration happens at emulated-Z8001 speed, not a fast host cross-
+      compile, a genuinely different workflow than every other backend
+      here. Worse, Coherent 0.7.x predates ANSI C89 (ratified 1989) --
+      Mark Williams' compiler is plausibly K&R-only, and it's genuinely
+      unknown whether this project's strict-C89 engine compiles as-is
+      or needs a real compatibility pass for this one target.
+
+      **Recommended before any real platform/c900 work starts**: a
+      Phase 0 spike, the same shape M15's own Pillow go/no-go gate had
+      -- prove Coherent's native `cc` can build a trivial C program
+      exercising a few of this project's real patterns (`const`,
+      function prototypes, the fixed-width `types.h` typedefs) inside
+      this emulator. That answers the one question that actually gates
+      the rest of the milestone, cheaply, before committing to a full
+      plan.
+
 ---
 
 ## M14 — Fourth Platform: DOS (Text-Mode, Open Watcom)
