@@ -126,7 +126,8 @@ int main(void)
     v_opnvwk(work_in, &vdi_handle, work_out);
     check(vdi_handle != 0, "v_opnvwk assigned a vdi handle");
 
-    wp_menu_tree_init(wcell, hcell);
+    wp_menu_tree_init(wcell, hcell,
+                      (short)(work_out[0] + 1), (short)(work_out[1] + 1));
     check(wp_menu_tree_selfcheck(), "menu tree ob_next/head/tail linkage");
 
     r = menu_bar(wp_menu_tree, MENU_INSTALL);

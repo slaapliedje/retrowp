@@ -1025,11 +1025,18 @@ static void invoke_backend_action(wp_action_id id)
     case WP_ACT_TOOLS_CHAT:         do_chat(); break;
     case WP_ACT_TOOLS_INSERTIMAGE:  do_insert_image(); break;
     default:
-        /* Spellcheck stays a no-op: it's a LOCAL, file-based dictionary
-           feature (services/spell -- no offload dependency at all, per
-           the M9 plan's own Phase 4 intro), not part of T9.3's offload
-           scope, and this app has no dictionary file on its fixture yet
-           -- a real, honestly-flagged gap, not a crash. */
+        /* Spellcheck is still not implemented here: it's a LOCAL,
+           file-based dictionary feature (services/spell -- no offload
+           dependency at all, per the M9 plan's own Phase 4 intro), not
+           part of T9.3's offload scope, and this app has no dictionary
+           file on its fixture yet. That remains an honest gap -- but it
+           used to be a SILENT one: the menu item was live, and picking
+           it did nothing at all, with no message and no beep, which is
+           indistinguishable to a user from the menu being broken. Say
+           so instead. */
+        show_message("Not available",
+                     "Spell Check needs a local dictionary file,\n"
+                     "which this build does not ship yet.");
         break;
     }
 }
@@ -1043,6 +1050,13 @@ static void invoke_backend_action(wp_action_id id)
 static void invoke_action(wp_action_id id)
 {
     const wp_action *act = wp_action_find(id);
+
+    /* wp_action_find returns NULL for an out-of-range id, and the id
+       arrives here as a u8 out of wp_keymap_feed_key's outcome struct --
+       so a stale or garbage id from a future keymap scheme would crash
+       here rather than no-op. Cheap to rule out. */
+    if (act == NULL) return;
+
     if (act->handler != NULL) {
         act->handler(&g_ctx);
     } else {
@@ -1641,6 +1655,23 @@ static const char *group_title(wp_menu_group group)
     }
 }
 
+/* MUI does not copy the strings handed to it. MUIA_Menuitem_Shortcut is
+   an [I..] attribute and MUI_Menuitem.doc is explicit that the buffer
+   "must remain valid throughout the object's life time"
+   (MUIA_Menuitem_CopyStrings defaults to FALSE). The menustrip is only
+   realized into a real menu when the window opens -- long after
+   build_menustrip() has returned -- so the `char shortcut[2]` this used
+   to declare INSIDE the item loop was a dangling pointer into a dead
+   stack frame by the time MUI read it, and every shortcut-bearing item
+   was handed the very same address. Titles were never affected (those
+   are string literals in actions.c), which is why this surfaced as
+   wrong or blank Amiga-key glyphs rather than as a crash, and why the
+   menu strip passing a visual check on its top-level titles never
+   caught it. Process-lifetime storage, one slot per action, indexed by
+   action id -- safe because test_actions_table_row_order_matches_enum
+   now pins .id to its table row. */
+static char g_menu_shortcut[WP_ACT_COUNT][2];
+
 static Object *build_menustrip(void)
 {
     static const wp_menu_group groups[] = {
@@ -1662,13 +1693,23 @@ static Object *build_menustrip(void)
         for (ai = 0; ai < (u32)WP_ACT_COUNT; ai++) {
             const wp_action *act = &g_wp_actions[ai];
             Object *item;
-            char shortcut[2];
+            char *shortcut = g_menu_shortcut[act->id];
 
             if (act->group != groups[gi]) continue;
 
-            shortcut[0] = act->shortcut_ascii
-                ? (char)((act->shortcut_ascii + ('a' - 1)) - 'a' + 'A')
-                : '\0';
+            /* Only a real Ctrl+<letter> maps onto an Amiga-key letter.
+               The previous math reduced to shortcut_ascii + 0x40 applied
+               unconditionally, which is right for 0x01..0x1A ('A'..'Z')
+               but turned WP_ACT_FORMAT_SIZE's 0x1D into ']' -- a
+               meaningless accelerator glyph, and on an item whose
+               key_hint_utf8 is deliberately 0 ("show no hint") at that.
+               actions.h explicitly allows printable ASCII in this byte
+               space too, so the range has to be checked, not assumed. */
+            if (act->shortcut_ascii >= 0x01 && act->shortcut_ascii <= 0x1A) {
+                shortcut[0] = (char)('A' + act->shortcut_ascii - 1);
+            } else {
+                shortcut[0] = '\0';
+            }
             shortcut[1] = '\0';
 
             item = MenuitemObject,
@@ -1846,14 +1887,23 @@ void app_shell_run(void)
             id = (LONG)DoMethod(g_app, MUIM_Application_NewInput, &sigs);
             if (id == (LONG)MUIV_Application_ReturnID_Quit) break;
             if (id >= WP_RETURNID_ACTION_BASE && id < WP_RETURNID_ACTION_BASE + WP_ACT_COUNT) {
-                const wp_action *act = wp_action_find((wp_action_id)(id - WP_RETURNID_ACTION_BASE));
+                wp_action_id act_id = (wp_action_id)(id - WP_RETURNID_ACTION_BASE);
 
-                if (act != NULL) {
-                    if (act->handler != NULL) {
-                        act->handler(&g_ctx);
-                    } else {
-                        invoke_backend_action(act->id);
-                    }
+                /* The keyboard path hard-routes every key to the help
+                   pager while it is open (see amiga_dispatch_key), but
+                   this path never checked, so picking Bold/Size/Cut from
+                   the menu while the help viewer was showing mutated the
+                   document invisibly behind it. Quit still has to work,
+                   or help becomes a trap with no menu way out. */
+                if (g_help_active && act_id != WP_ACT_FILE_QUIT) {
+                    /* swallowed on purpose while help is up */
+                } else {
+                    /* Was an inline copy of invoke_action()'s own
+                       handler-or-backend branch. Two copies of one
+                       policy means anything added to invoke_action --
+                       an Atari-style sync_format_check, say -- would
+                       silently not apply to menu picks. Call it. */
+                    invoke_action(act_id);
                     MUI_Redraw(g_editor, MADF_DRAWOBJECT);
                     if (g_ctx.quit_requested) break;
                 }

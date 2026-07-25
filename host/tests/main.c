@@ -211,6 +211,7 @@ void test_msword_ctrl_a_selects_all(void);
 void test_msword_ctrl_z_undo_and_ctrl_y_redo(void);
 void test_msword_ctrl_letter_action_bindings(void);
 void test_msword_unbound_ctrl_letter_beeps(void);
+void test_msword_ctrl_q_quits(void);
 void test_msword_find_jumps_to_match(void);
 void test_msword_find_wraps_around_document(void);
 void test_msword_find_not_found_beeps(void);
@@ -226,6 +227,9 @@ void test_msword_no_leaks(void);
 void test_actions_find_by_id(void);
 void test_actions_find_by_shortcut(void);
 void test_actions_every_shortcut_is_unique(void);
+void test_actions_table_row_order_matches_enum(void);
+void test_actions_every_action_is_reachable(void);
+void test_actions_every_action_has_a_label(void);
 void test_actions_format_bold_toggles_style_flags(void);
 void test_actions_file_quit_sets_flag(void);
 void test_actions_edit_copy_sets_clipboard(void);
@@ -665,6 +669,7 @@ static const test_case g_cases[] = {
     { "msword_ctrl_z_undo_and_ctrl_y_redo", test_msword_ctrl_z_undo_and_ctrl_y_redo },
     { "msword_ctrl_letter_action_bindings", test_msword_ctrl_letter_action_bindings },
     { "msword_unbound_ctrl_letter_beeps", test_msword_unbound_ctrl_letter_beeps },
+    { "msword_ctrl_q_quits", test_msword_ctrl_q_quits },
     { "msword_find_jumps_to_match", test_msword_find_jumps_to_match },
     { "msword_find_wraps_around_document", test_msword_find_wraps_around_document },
     { "msword_find_not_found_beeps", test_msword_find_not_found_beeps },
@@ -679,6 +684,9 @@ static const test_case g_cases[] = {
     { "actions_find_by_id", test_actions_find_by_id },
     { "actions_find_by_shortcut", test_actions_find_by_shortcut },
     { "actions_every_shortcut_is_unique", test_actions_every_shortcut_is_unique },
+    { "actions_table_row_order_matches_enum", test_actions_table_row_order_matches_enum },
+    { "actions_every_action_is_reachable", test_actions_every_action_is_reachable },
+    { "actions_every_action_has_a_label", test_actions_every_action_has_a_label },
     { "actions_format_bold_toggles_style_flags", test_actions_format_bold_toggles_style_flags },
     { "actions_file_quit_sets_flag", test_actions_file_quit_sets_flag },
     { "actions_edit_copy_sets_clipboard", test_actions_edit_copy_sets_clipboard },

@@ -55,6 +55,52 @@ void test_actions_every_shortcut_is_unique(void)
     }
 }
 
+/* wp_action_find() returns &g_wp_actions[id] on a bare bounds check --
+   it trusts the table's row order to match the wp_action_id enum exactly,
+   and never verifies the .id field it just indexed past. Every backend
+   depends on that: Amiga bakes act->id into its MUI ReturnID and indexes
+   back positionally on dispatch, Mac counts ordinal position within a
+   .group, Atari switches on raw menu object indices. If a row were ever
+   inserted or reordered without moving the enum in lockstep, all of them
+   would silently fire the WRONG action -- no crash, no warning, just a
+   menu item that does someone else's job. Nothing checked this until now. */
+void test_actions_table_row_order_matches_enum(void)
+{
+    u32 i;
+
+    for (i = 0; i < WP_ACT_COUNT; i++) {
+        ASSERT_TRUE(g_wp_actions[i].id == (wp_action_id)i);
+        ASSERT_TRUE(wp_action_find((wp_action_id)i) == &g_wp_actions[i]);
+    }
+}
+
+/* Every action must be reachable by a human: it either sits in a real
+   native menu group, or it has a keyboard shortcut, or both. An entry
+   with neither is dead weight that no backend can ever invoke. */
+void test_actions_every_action_is_reachable(void)
+{
+    u32 i;
+
+    for (i = 0; i < WP_ACT_COUNT; i++) {
+        ASSERT_TRUE(g_wp_actions[i].group != WP_MENU_NONE ||
+                    g_wp_actions[i].shortcut_ascii != 0);
+    }
+}
+
+/* Every action must also carry a non-empty label: the Amiga and Mac
+   backends both build their menus by folding this table and passing
+   .label_utf8 straight to MenuitemObject/InsertMenuItem, neither of
+   which tolerates a NULL. */
+void test_actions_every_action_has_a_label(void)
+{
+    u32 i;
+
+    for (i = 0; i < WP_ACT_COUNT; i++) {
+        ASSERT_TRUE(g_wp_actions[i].label_utf8 != NULL);
+        ASSERT_TRUE(g_wp_actions[i].label_utf8[0] != '\0');
+    }
+}
+
 void test_actions_format_bold_toggles_style_flags(void)
 {
     wp_document doc;

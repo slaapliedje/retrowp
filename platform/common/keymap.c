@@ -350,6 +350,9 @@ static wp_keymap_outcome feed_key_mw(wp_app_ctx *ctx, wp_key_event ev)
         outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
         outcome.action_id = (u8)WP_ACT_FILE_SAVE;
         break;
+    case WP_MSACTION_QUIT:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_QUIT;
+        break;
     case WP_MSACTION_OPEN:
         outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
         outcome.action_id = (u8)WP_ACT_FILE_OPEN;

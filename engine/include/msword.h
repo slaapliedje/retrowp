@@ -125,6 +125,13 @@ typedef enum {
                                 scheme's own keymap.c arm does */
     WP_MSACTION_BEEP,       /* invalid/unbound chord */
     WP_MSACTION_SAVE,       /* Ctrl-S */
+    WP_MSACTION_QUIT,       /* Ctrl-Q -- this scheme had no quit binding at
+                                all until now. Harmless on the backends with
+                                a menu bar (File > Quit is always there), but
+                                DOS has no menu whatsoever, and its title bar
+                                advertises "Ctrl+Q: Quit" unconditionally --
+                                so under keymap=msword the DOS build could
+                                not be exited from the keyboard at all. */
     WP_MSACTION_OPEN,       /* Ctrl-O */
     WP_MSACTION_CUT,        /* Ctrl-X */
     WP_MSACTION_COPY,       /* Ctrl-C */

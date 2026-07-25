@@ -1875,3 +1875,71 @@ or modifier bit was needed. The full 6-image TOS matrix stayed green
 throughout as a pure regression gate, confirmed via
 `wp_atari_key_translate_selfcheck` and the existing config selfcheck
 both continuing to pass unchanged.
+
+## The menu bar never actually worked (found and fixed by real interaction)
+
+Reported symptom: "the ST version is crashing with the menus not
+actually doing anything but corrupting the screen." Nothing was
+crashing. Two independent, real bugs were behind it, both found only by
+driving a live Hatari session with the mouse and looking at the screen
+-- the full 6-image TOS matrix was green the entire time, because every
+check in it is structural (`wp_menu_tree_selfcheck` walks linkage) and
+nothing in CI has ever looked at a pixel.
+
+### Bug 1: dropdowns were structurally unable to render
+
+Four separate defects in the hand-built `wp_menu_tree[]`, each
+sufficient on its own to stop a dropdown appearing:
+
+1. **`OF_HIDETREE` on all five dropdown boxes.** The previous comment
+   kept it "defensively -- cheap, and not proven unnecessary." It was
+   the primary blocker: the AES does **not** clear `OF_HIDETREE` when it
+   drops a menu down, and `objc_draw` skips a hidden subtree
+   unconditionally. Removing it made every menu work, with no return of
+   the install-time "glyph noise" it was guarding against -- the 4-level
+   tree shape already makes that structurally impossible.
+2. **`ob_spec == 0` on every container.** For `G_BOX`/`G_IBOX`,
+   `ob_spec` is a packed colour/border word, not a string pointer
+   (Compendium p.6.18; layout `borderc:4 | textc:4 | opaque:1 |
+   pattern:3 | fillc:4`, thickness in bits 23-16). Zero decodes to
+   "no frame, transparent, white-on-white", so a dropdown painted no
+   background and no border and its item text landed straight on top of
+   the document. Now `WP_MENU_BOX_OBSPEC`/`WP_MENU_BAR_OBSPEC`.
+3. **`OF_LASTOB` set on five objects.** The Compendium is explicit
+   (p.6.16): it marks "the last object in the object tree. (Required!)"
+   -- singular. The AES stops its linear scan at the first one, which
+   sat at index 17, making the File/Edit/Tools/Format dropdown boxes
+   (18..39) invisible to it. This is why **Desk was the only menu that
+   worked**, which is what made the bug so easy to miss -- the AES
+   rebuilds the Desk box itself at `MENU_INSTALL` (`menu_fixup`).
+   `wp_menu_tree_selfcheck` previously *asserted* all five as correct;
+   it now counts them and requires exactly one, on the final object.
+4. **Containers not enclosing their children.** The array literal
+   authors ROOT/BAR/ACTIVE at a nominal 40 cells wide (correct only on a
+   320px screen -- half the display at 640px) and ROOT just 1 cell tall,
+   so DROPDOWNS at y=1..9 fell outside its own parent. `wp_menu_tree_init`
+   now takes the real screen size and sizes those four in pixels.
+
+### Bug 2: the screen corruption was mouse droppings
+
+`graf_mouse(ARROW)` at startup was the *only* mouse call in the whole
+backend. There was no `wind_update(BEG_UPDATE/END_UPDATE)` and no
+`graf_mouse(M_OFF/M_ON)` around any drawing, so every repaint painted
+under a visible AES cursor, corrupting its save-under buffer; the next
+cursor movement restored those stale bytes. The visible result was a
+permanent garbage block at the screen centre -- the mouse's power-on
+position. On a Medium-res screen the stale planes decode to a solid
+green rectangle, which made it look like an image-drawing bug rather
+than a cursor bug. Both calls are now wrapped around `redraw_window`,
+the single paint entry point. Confirmed fixed on EmuTOS **and** real
+TOS 1.04 by A/B-ing the pre-fix binary against the post-fix one.
+
+### Not a bug: red/green striping under Alt+arrow
+
+While driving the mouse via TOS keyboard-mouse-emulation
+(`xdotool key alt+Up`, the technique in this document's own testing
+notes), real TOS 1.04 shows heavy red/green vertical striping. It is
+**not** a RetroWP defect: it reproduces identically on the unmodified
+pre-fix binary, never reproduces on EmuTOS, and does not occur at all
+when the same session is driven with plain (non-Alt) arrow keys. Treat
+it as an artifact of that input path on TOS 1.04, not as a regression.

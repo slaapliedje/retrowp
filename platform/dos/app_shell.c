@@ -555,6 +555,20 @@ static void paint_help(plat_gc *gc)
    screen redraw is cheap enough that this project's other backends'
    own per-rectangle optimization has no real DOS equivalent worth
    building. */
+/* The real "how do I get out of here" chord for the ACTIVE scheme, as
+   each scheme actually implements it: wordstar's Ctrl+K prefix then Q
+   (wordstar.c), emacs's Ctrl+X Ctrl+C (emacs.c), wordperfect's bare F7
+   (wordperfect.c). vi and msword both land on Ctrl+Q. */
+static const char *quit_key_hint(void)
+{
+    switch ((wp_keymap_id)g_ctx.keymap_id) {
+    case WP_KEYMAP_WORDSTAR:    return "Ctrl+K Q";
+    case WP_KEYMAP_EMACS:       return "Ctrl+X Ctrl+C";
+    case WP_KEYMAP_WORDPERFECT: return "F7";
+    default:                    return "Ctrl+Q";
+    }
+}
+
 static void redraw_screen(void)
 {
     plat_window *win;
@@ -563,9 +577,27 @@ static void redraw_screen(void)
     int cursor_col = 0;
 
     clear_rows(DOS_TITLE_ROW, DOS_SCREEN_ROWS - 1, DOS_ATTR_NORMAL);
-    draw_string(DOS_TITLE_ROW, 0,
-                "RetroWP -- DOS (F1: Help, Ctrl+Q: Quit)                                       ",
-                DOS_ATTR_TITLE);
+    {
+        /* This line used to hardcode "Ctrl+Q: Quit" for every keymap. It
+           was only ever true for vi (which reaches WP_ACT_FILE_QUIT
+           through its shortcut fallback) and, since WP_MSACTION_QUIT, for
+           msword. Under wordstar Ctrl+Q is a PREFIX key, emacs quits with
+           Ctrl+X Ctrl+C, and wordperfect with F7 -- so the single hint
+           this backend shows was actively wrong for three of the five
+           schemes, on the one backend that has no menu bar to fall back
+           on when the advertised key does nothing. */
+        static char title[DOS_SCREEN_COLS + 1];
+        int n = 0;
+        const char *p;
+
+        for (p = "RetroWP -- DOS (F1: Help, "; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
+        for (p = quit_key_hint(); *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
+        for (p = ": Quit)"; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
+        while (n < DOS_SCREEN_COLS) title[n++] = ' ';
+        title[n] = '\0';
+
+        draw_string(DOS_TITLE_ROW, 0, title, DOS_ATTR_TITLE);
+    }
 
     if (plat_window_create((const u8 *)"", 0, 0, 0, &win) != WP_OK) return;
     plat_window_get_gc(win, &gc);
@@ -947,6 +979,11 @@ static void invoke_action(wp_action_id id)
 {
     const wp_action *act = wp_action_find(id);
 
+    /* wp_action_find returns NULL for an out-of-range id, and id reaches
+       us as a plain u8 out of wp_keymap_outcome -- so a stale or garbage
+       action_id from any scheme would crash here rather than no-op. */
+    if (act == NULL) return;
+
     if (act->handler != NULL) {
         act->handler(&g_ctx);
     } else {
@@ -993,7 +1030,24 @@ static wp_bool dos_dispatch_key(void)
         return WP_FALSE;
     }
 
-    if (!g_ctx.doc_loaded) return WP_FALSE;
+    if (!g_ctx.doc_loaded) {
+        /* With no document there is nothing for the keymap to edit, and
+           feeding it would work on a document that isn't there -- which
+           is why this gate exists. But it used to swallow EVERY key, and
+           set_document_from_text() returns early WITHOUT setting
+           doc_loaded when format_txt_import fails. A failed startup
+           import therefore left the app in a state where only F1 did
+           anything at all: no way to open a file, and -- since DOS has
+           no menu bar to fall back on -- no way to quit either, short of
+           killing the machine. Resolve the two actions that genuinely
+           don't need a document straight from the shortcut table,
+           bypassing the keymap entirely. */
+        const wp_action *esc = wp_action_find_by_shortcut(ascii);
+
+        if (esc != NULL && esc->id == WP_ACT_FILE_QUIT) return WP_TRUE;
+        if (esc != NULL && esc->id == WP_ACT_FILE_OPEN) do_file_open();
+        return WP_FALSE;
+    }
 
     outcome = wp_keymap_feed_key(&g_ctx, ev, ascii);
 

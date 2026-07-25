@@ -186,8 +186,17 @@ extern OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
    menu_bar() -- both for the string patching (C89 has no designated
    initializers, so the OBSPEC union in the static array literal is left
    {0}) and the scaling. Call exactly once per process -- calling twice
-   double-scales every coordinate. */
-void wp_menu_tree_init(short wcell, short hcell);
+   double-scales every coordinate.
+
+   screen_w_px/screen_h_px are the REAL screen size in pixels (VDI
+   v_opnvwk work_out[0]/[1] plus one), used to size the four container
+   objects that the compile-time literal cannot express: the literal's
+   nominal 40-cell width is only correct on a 320px screen, and its
+   1-cell-tall ROOT does not enclose DROPDOWNS at all -- which is why
+   dropdowns never rendered. See the function body for the full
+   derivation. */
+void wp_menu_tree_init(short wcell, short hcell,
+                        short screen_w_px, short screen_h_px);
 
 /* Walks ob_next/ob_head/ob_tail and asserts the sibling-chain convention
    holds (see app_shell.c for the convention itself). A hand-built GEM

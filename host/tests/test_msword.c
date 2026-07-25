@@ -395,7 +395,30 @@ void test_msword_unbound_ctrl_letter_beeps(void)
     wp_undo_journal_init(&journal);
     wp_msword_init(&vs, &doc, &journal);
 
-    ASSERT_TRUE(feed_full(&vs, 'q', (u8)WP_MOD_CTRL) == WP_MSACTION_BEEP);
+    /* 'q' used to be the unbound letter this asserted on; it is now a
+       real Quit binding (see WP_MSACTION_QUIT). 'k' is genuinely unbound
+       in handle_ctrl_letter. */
+    ASSERT_TRUE(feed_full(&vs, 'k', (u8)WP_MOD_CTRL) == WP_MSACTION_BEEP);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* Ctrl-Q had no binding in this scheme at all, which left the DOS build
+   -- the only backend with no menu bar to fall back on -- with no way to
+   exit from the keyboard under keymap=msword, while its title bar
+   advertised "Ctrl+Q: Quit" regardless. */
+void test_msword_ctrl_q_quits(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_msword_state vs;
+
+    build_doc_two_paras(&doc, "", "");
+    wp_undo_journal_init(&journal);
+    wp_msword_init(&vs, &doc, &journal);
+
+    ASSERT_TRUE(feed_full(&vs, 'q', (u8)WP_MOD_CTRL) == WP_MSACTION_QUIT);
 
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);

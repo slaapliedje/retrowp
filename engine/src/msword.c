@@ -141,6 +141,7 @@ static wp_msword_action_kind handle_ctrl_letter(wp_msword_state *vs, wp_key_even
     case 'u': return WP_MSACTION_FORMAT_UNDERLINE;
     case 's': return WP_MSACTION_SAVE;
     case 'o': return WP_MSACTION_OPEN;
+    case 'q': return WP_MSACTION_QUIT;
     case 'c': return WP_MSACTION_COPY;
     case 'x': return WP_MSACTION_CUT;
     case 'v': return WP_MSACTION_PASTE;

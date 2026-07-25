@@ -581,10 +581,19 @@ static void invoke_backend_action(wp_action_id id)
            the transport seam itself (Phase 4) aren't wired to any UI
            yet, matching how platform/amiga/app_shell.c's own T9.3 also
            left Spellcheck as a no-op (a local-dictionary feature, no
-           offload dependency). A no-op here is an honest, flagged gap,
-           not a crash. Insert Image (M15) is the first exception --
-           see its own comment for why it could be wired up without
-           this backend's missing alert mechanism getting in the way. */
+           offload dependency). Insert Image (M15) is the first
+           exception -- see its own comment for why it could be wired up
+           without this backend's missing alert mechanism getting in the
+           way.
+
+           Still an honest gap -- but no longer a SILENT one. These are
+           live, selectable menu items; picking one used to return here
+           and do absolutely nothing, which a user cannot distinguish
+           from the menu itself being broken. This backend has no alert
+           mechanism (no ALRT/DITL resource, and none constructible at
+           runtime here), so SysBeep is the honest minimum: it says "that
+           did nothing" instead of pretending it worked. */
+        SysBeep(10);
         break;
     }
 }
@@ -642,8 +651,37 @@ static void build_action_menus(void)
             if (act->group != groups[gi]) continue;
 
             c_to_pstr(act->label_utf8, pitem);
-            InsertMenuItem(menu, pitem, item_after);
+
+            /* Append a harmless placeholder, then set the real text with
+               SetMenuItemText, rather than handing label_utf8 straight to
+               InsertMenuItem as this used to. AppendMenu/InsertMenuItem
+               PARSE the string they are given: ';' (or Return) splits one
+               call into TWO items, '/' introduces a command key, '(' marks
+               the item disabled, '^'/'!'/'<' set icon/mark/style, and a
+               leading '-' makes a divider. Since do_menu_command maps a
+               chosen item back to an action purely by counting ordinal
+               position, one ';' in a future label would insert two items
+               for one increment and make every item below it in that menu
+               fire the WRONG action -- silently. SetMenuItemText parses
+               nothing, so the label is always literal. */
+            AppendMenu(menu, (ConstStringPtr) "\p ");
             item_after++;
+            SetMenuItemText(menu, item_after, pitem);
+
+            /* Command-key equivalents were never set at all -- no label
+               carried a '/X' and SetItemCmd was never called -- so
+               MenuKey() always returned 0 for these menus. That did more
+               than just fail to work: do_menu_command(0) hits its early
+               return, and the cmdKey branch in the event loop had already
+               SWALLOWED the keystroke, so Cmd+O/S/Q/X/C/V did nothing and
+               never reached the editor either. Only a real Ctrl+<letter>
+               (0x01..0x1A) maps onto a command-key letter; the table also
+               allows printable ASCII (e.g. FORMAT_SIZE's 0x1D), which
+               must not be blindly offset into a nonsense glyph. */
+            if (act->shortcut_ascii >= 0x01 && act->shortcut_ascii <= 0x1A) {
+                SetItemCmd(menu, item_after,
+                           (CharParameter)('A' + act->shortcut_ascii - 1));
+            }
             any = WP_TRUE;
         }
 
@@ -678,6 +716,18 @@ static void do_menu_command(long menu_choice)
         count++;
         if (count == item) {
             invoke_action(act);
+            /* The Menu Manager saves and restores the bits under a
+               pulled-down menu, so dismissing one generates NO update
+               event -- nothing repaints unless we ask. Neither this
+               function nor the inMenuBar case ever did, so Format >
+               Bold/Italic/Underline (status-line change), Format >
+               Size/Alignment (PopUpMenuSelect, which also saves bits)
+               and Help > Contents all applied correctly and then showed
+               nothing until some unrelated later event forced a redraw.
+               invoke_backend_action's own comment claimed "the caller
+               ... already triggers an InvalRect afterward -- see both
+               call sites"; only the F1 keyboard call site actually did. */
+            if (g_win != NULL) InvalRect(&g_win->portRect);
             break;
         }
     }

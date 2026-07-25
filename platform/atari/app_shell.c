@@ -68,15 +68,53 @@
    under ROOT, so it is never install-time-painted by that call, which is
    what fixes both the "only one title renders" bug (all titles are now
    descendants of index 1) and the old dropdown "glyph noise" bug (dropdowns
-   are no longer descendants of index 1 at all). OF_HIDETREE is kept on
-   every dropdown box anyway, defensively -- cheap, and not proven
-   unnecessary for every code path that might redraw DROPDOWNS directly.
+   are no longer descendants of index 1 at all). OF_HIDETREE used to be
+   kept on every dropdown box anyway, "defensively -- cheap, and not proven
+   unnecessary". It was neither cheap nor defensive: it is what stopped the
+   menus working at all. The AES does NOT clear OF_HIDETREE when it drops a
+   menu down -- objc_draw skips a hidden subtree unconditionally, so a
+   pre-hidden box can never paint. Confirmed empirically under Hatari: with
+   the flag set, hovering File/Edit/Tools/Format highlighted the title and
+   dropped nothing; clearing it made all four render correctly, with no
+   return of the install-time "glyph noise" the flag was there to guard
+   against -- because the 4-level shape above already makes that
+   structurally impossible (ob_draw(tree, 1, ...) cannot reach DROPDOWNS).
+   The Desk menu was the one exception that DID work with the flag set,
+   which is what made this so easy to miss: the AES rebuilds the Desk box
+   itself at MENU_INSTALL time (menu_fixup) and resets its flags.
 
    Desk's dropdown box is deliberately real (the old flat trees shipped
    with none at all): exactly 8 children per the Compendium -- an
    app-defined "About RetroWP..." item (opens the help viewer's About
    node), a disabled separator, and 6 AES-reserved dummy slots the AES
    overwrites at MENU_INSTALL time to list running accessories/apps. */
+/* ob_spec on a container G_BOX/G_IBOX is NOT a string pointer -- it is a
+   packed color/border word. Atari Compendium, "The Object-Specific Field"
+   (p.6.18): G_BOX and G_IBOX both hold "a WORD containing color
+   information" in the low 16 bits, with "a signed BYTE representing the
+   border thickness of the box" in bits 23-16. The color word's own layout
+   (same page, OBJC_COLORWORD) is:
+
+     bits 15-12 borderc | 11-8 textc | 7 opaque | 6-4 pattern | 3-0 fillc
+
+   and the color indices (p.6.19) put WHITE at 0, BLACK at 1.
+
+   These were left at the array literal's {0} until now: wp_menu_tree_init
+   only ever patched ob_spec.free_string on the G_TITLE/G_STRING objects,
+   so every container kept ob_spec == 0. Decoded through the layout above
+   that is border thickness 0 (no frame at all), bit 7 clear (TRANSPARENT,
+   so the interior is never filled), and white-on-white. A dropdown box
+   drawn that way paints no background and no frame -- its item strings
+   land directly on top of whatever the window was already showing, and
+   nothing erases the document underneath. That is the real cause of the
+   "menus do nothing but corrupt the screen" report: the AES was dropping
+   each menu down correctly the whole time, into an invisible box. */
+#define WP_MENU_BOX_OBSPEC  0x00FF1180L /* thickness -1, black border, black
+                                            text, opaque, solid white fill */
+#define WP_MENU_BAR_OBSPEC  0x00000180L /* thickness 0 (the bar has no frame
+                                            of its own), black text, opaque,
+                                            solid white fill */
+
 OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     /* next,                    head,                   tail,                   type,     flags,       state,       spec, x,  y, w,  h */
     { -1,                        WP_MENU_OBJ_BAR,         WP_MENU_OBJ_DROPDOWNS,  G_IBOX,   OF_NONE,     OS_NORMAL,   {0}, 0,  0, 40, 1 },
@@ -88,7 +126,7 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_FORMAT_TITLE,  -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 18, 0, 7,  1 },
     { WP_MENU_OBJ_ACTIVE,        -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 25, 0, 8,  1 },
     { WP_MENU_OBJ_ROOT,          WP_MENU_OBJ_DESK_BOX,    WP_MENU_OBJ_FORMAT_BOX, G_IBOX,   OF_NONE,     OS_NORMAL,   {0}, 0,  1, 40, 8 },
-    { WP_MENU_OBJ_FILE_BOX,      WP_MENU_OBJ_DESK_ABOUT,  WP_MENU_OBJ_DESK_DUMMY6, G_BOX,   OF_HIDETREE, OS_NORMAL,   {0}, 0,  0, 20, 8 },
+    { WP_MENU_OBJ_FILE_BOX,      WP_MENU_OBJ_DESK_ABOUT,  WP_MENU_OBJ_DESK_DUMMY6, G_BOX,   OF_NONE    , OS_NORMAL,   {0}, 0,  0, 20, 8 },
     { WP_MENU_OBJ_DESK_SEP,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 20, 1 },
     { WP_MENU_OBJ_DESK_DUMMY1,   -1,                      -1,                     G_STRING, OF_NONE,     OS_DISABLED, {0}, 0,  1, 20, 1 },
     { WP_MENU_OBJ_DESK_DUMMY2,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 20, 1 },
@@ -96,21 +134,21 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_DESK_DUMMY4,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  4, 20, 1 },
     { WP_MENU_OBJ_DESK_DUMMY5,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  5, 20, 1 },
     { WP_MENU_OBJ_DESK_DUMMY6,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  6, 20, 1 },
-    { WP_MENU_OBJ_DESK_BOX,      -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  7, 20, 1 },
-    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_OPEN,   WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_HIDETREE, OS_NORMAL,   {0}, 6,  0, 8,  3 },
+    { WP_MENU_OBJ_DESK_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  7, 20, 1 },
+    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_OPEN,   WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE    , OS_NORMAL,   {0}, 6,  0, 8,  3 },
     { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 8,  1 },
     { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 8,  1 },
-    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  2, 8,  1 },
-    { WP_MENU_OBJ_TOOLS_BOX,     WP_MENU_OBJ_EDIT_CUT,    WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_HIDETREE, OS_NORMAL,   {0}, 12, 0, 8,  3 },
+    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 8,  1 },
+    { WP_MENU_OBJ_TOOLS_BOX,     WP_MENU_OBJ_EDIT_CUT,    WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE    , OS_NORMAL,   {0}, 12, 0, 8,  3 },
     { WP_MENU_OBJ_EDIT_COPY,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 8,  1 },
     { WP_MENU_OBJ_EDIT_PASTE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 8,  1 },
-    { WP_MENU_OBJ_EDIT_BOX,      -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  2, 8,  1 },
-    { WP_MENU_OBJ_FORMAT_BOX,    WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_CHAT, G_BOX, OF_HIDETREE, OS_NORMAL, {0}, 18, 0, 16, 4 },
+    { WP_MENU_OBJ_EDIT_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 8,  1 },
+    { WP_MENU_OBJ_FORMAT_BOX,    WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_CHAT, G_BOX, OF_NONE    , OS_NORMAL, {0}, 18, 0, 16, 4 },
     { WP_MENU_OBJ_TOOLS_THESAURUS, -1,                    -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 16, 1 },
     { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, -1,                 -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 16, 1 },
     { WP_MENU_OBJ_TOOLS_CHAT,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 16, 1 },
-    { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  3, 16, 1 },
-    { WP_MENU_OBJ_DROPDOWNS,     WP_MENU_OBJ_FORMAT_BOLD, WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, G_BOX, OF_HIDETREE, OS_NORMAL, {0}, 25, 0, 16, 8 },
+    { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  3, 16, 1 },
+    { WP_MENU_OBJ_DROPDOWNS,     WP_MENU_OBJ_FORMAT_BOLD, WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, G_BOX, OF_NONE    , OS_NORMAL, {0}, 25, 0, 16, 8 },
     { WP_MENU_OBJ_FORMAT_ITALIC, -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 16, 1 },
     { WP_MENU_OBJ_FORMAT_UNDERLINE, -1,                   -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 16, 1 },
     { WP_MENU_OBJ_FORMAT_SIZE_UP, -1,                     -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 16, 1 },
@@ -162,7 +200,8 @@ static char g_text_desk_dummy4[32];
 static char g_text_desk_dummy5[32];
 static char g_text_desk_dummy6[32];
 
-void wp_menu_tree_init(short wcell, short hcell)
+void wp_menu_tree_init(short wcell, short hcell,
+                        short screen_w_px, short screen_h_px)
 {
     short i;
 
@@ -198,6 +237,19 @@ void wp_menu_tree_init(short wcell, short hcell)
     wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY5].ob_spec.free_string = g_text_desk_dummy5;
     wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_spec.free_string = g_text_desk_dummy6;
 
+    /* Containers take a color/border WORD, not a string pointer -- see
+       WP_MENU_BOX_OBSPEC's own comment above for the Compendium-documented
+       layout and for why leaving these at {0} made every dropdown paint as
+       an invisible, non-erasing box. ROOT and DROPDOWNS stay 0: they are
+       G_IBOXes that exist only to group, and are meant to draw nothing.
+       ACTIVE stays 0 too -- it exactly overlays BAR, which now fills. */
+    wp_menu_tree[WP_MENU_OBJ_BAR].ob_spec.index        = WP_MENU_BAR_OBSPEC;
+    wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_spec.index   = WP_MENU_BOX_OBSPEC;
+    wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_spec.index   = WP_MENU_BOX_OBSPEC;
+    wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_spec.index   = WP_MENU_BOX_OBSPEC;
+    wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_spec.index  = WP_MENU_BOX_OBSPEC;
+    wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_spec.index = WP_MENU_BOX_OBSPEC;
+
     /* Scale the whole tree from the array literal's logical
        character-cell units into real pixels -- see this function's own
        declaration comment (app_shell_internal.h) for why a hand-built
@@ -210,6 +262,32 @@ void wp_menu_tree_init(short wcell, short hcell)
         wp_menu_tree[i].ob_y = (short)(wp_menu_tree[i].ob_y * hcell);
         wp_menu_tree[i].ob_height = (short)(wp_menu_tree[i].ob_height * hcell);
     }
+
+    /* The array literal authors every container at a nominal 40 cells
+       wide and ROOT at 1 cell tall. Both are wrong on a real ST screen,
+       and the height one is why dropdowns never appeared at all: at
+       640x200/640x400 the bar spans only HALF the display, and ROOT --
+       1 cell tall -- does not contain DROPDOWNS, which starts at y=1
+       and runs 8 cells further down. A child that lies outside its own
+       parent's rectangle has nothing to draw into. The Compendium's
+       menu-bar contract (Ch.6, "The Menu Bar") wants ROOT screen-sized,
+       BAR/ACTIVE spanning the full width, and DROPDOWNS covering
+       everything below the bar.
+
+       Done here in real pixels, AFTER the cell scaling above, because a
+       runtime screen size cannot be expressed in the compile-time array
+       literal -- the same reason the string pointers are patched in
+       rather than initialized. */
+    wp_menu_tree[WP_MENU_OBJ_ROOT].ob_x = 0;
+    wp_menu_tree[WP_MENU_OBJ_ROOT].ob_y = 0;
+    wp_menu_tree[WP_MENU_OBJ_ROOT].ob_width = screen_w_px;
+    wp_menu_tree[WP_MENU_OBJ_ROOT].ob_height = screen_h_px;
+
+    wp_menu_tree[WP_MENU_OBJ_BAR].ob_width = screen_w_px;
+    wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_width = screen_w_px;
+
+    wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_width = screen_w_px;
+    wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_height = (short)(screen_h_px - hcell);
 }
 
 /* Walks every parent's child chain (ob_head -> ob_next -> ... ->
@@ -241,6 +319,31 @@ static wp_bool child_chain_ok(short parent)
 
 wp_bool wp_menu_tree_selfcheck(void)
 {
+    /* OF_LASTOB means "last object in the TREE", singular -- Atari
+       Compendium p.6.16 states it outright: "This flag signals to the
+       AES that the current OBJECT is the last in the object tree.
+       (Required!)". This tree used to set it on the last CHILD of every
+       dropdown box (5 objects), and this selfcheck asserted that as
+       correct, so it could never catch it. The AES stops its linear
+       scan of the array at the first OF_LASTOB it finds, which sat at
+       WP_MENU_OBJ_DESK_DUMMY6 (17) -- everything after it, i.e. the
+       File/Edit/Tools/Format dropdown boxes at 18..39, was invisible to
+       the AES. Verified on a real Hatari boot: only the Desk menu
+       dropped down; every other title highlighted on hover and then did
+       nothing. Checked here as a whole-array count rather than as
+       per-object assertions so the "exactly one, and it is the final
+       object" invariant cannot drift again. */
+    {
+        short i;
+        short lastob_count = 0;
+
+        for (i = 0; i < WP_MENU_OBJ_COUNT; i++) {
+            if (wp_menu_tree[i].ob_flags & OF_LASTOB) lastob_count++;
+        }
+        if (lastob_count != 1) return WP_FALSE;
+        if ((wp_menu_tree[WP_MENU_OBJ_COUNT - 1].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    }
+
     if (!child_chain_ok(WP_MENU_OBJ_ROOT)) return WP_FALSE;
     if (!child_chain_ok(WP_MENU_OBJ_BAR)) return WP_FALSE;
     if (!child_chain_ok(WP_MENU_OBJ_ACTIVE)) return WP_FALSE;
@@ -311,7 +414,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_head != WP_MENU_OBJ_DESK_ABOUT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_tail != WP_MENU_OBJ_DESK_DUMMY6) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
     if (WP_MENU_OBJ_DESK_DUMMY6 != WP_MENU_OBJ_DESK_ABOUT + 7) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_DESK_ABOUT].ob_next != WP_MENU_OBJ_DESK_SEP) return WP_FALSE;
@@ -326,14 +429,14 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY4].ob_next != WP_MENU_OBJ_DESK_DUMMY5) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY5].ob_next != WP_MENU_OBJ_DESK_DUMMY6) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_next != WP_MENU_OBJ_DESK_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_spec.free_string != g_text_desk_dummy6) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_next != WP_MENU_OBJ_EDIT_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_head != WP_MENU_OBJ_FILE_OPEN) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_tail != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_x) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_next != WP_MENU_OBJ_FILE_SAVE) return WP_FALSE;
@@ -341,14 +444,14 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_next != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_spec.free_string != g_text_save) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_next != WP_MENU_OBJ_FILE_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_spec.free_string != g_text_quit) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_head != WP_MENU_OBJ_EDIT_CUT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_tail != WP_MENU_OBJ_EDIT_PASTE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_x) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_CUT].ob_next != WP_MENU_OBJ_EDIT_COPY) return WP_FALSE;
@@ -356,14 +459,14 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_COPY].ob_next != WP_MENU_OBJ_EDIT_PASTE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_COPY].ob_spec.free_string != g_text_copy) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_next != WP_MENU_OBJ_EDIT_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_spec.free_string != g_text_paste) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_next != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_head != WP_MENU_OBJ_TOOLS_SPELLCHECK) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_CHAT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_x) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_next != WP_MENU_OBJ_TOOLS_THESAURUS) return WP_FALSE;
@@ -380,13 +483,13 @@ wp_bool wp_menu_tree_selfcheck(void)
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_spec.free_string != g_text_chat) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_next != WP_MENU_OBJ_DROPDOWNS) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_head != WP_MENU_OBJ_FORMAT_BOLD) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_tail != WP_MENU_OBJ_FORMAT_ALIGN_RIGHT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_flags & OF_HIDETREE) == 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_x) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOLD].ob_next != WP_MENU_OBJ_FORMAT_ITALIC) return WP_FALSE;
@@ -2838,14 +2941,36 @@ static void paint_help(short window_handle, VdiHdl vdi)
     }
 }
 
+/* Every repaint in this backend funnels through here, so this is the one
+   place that has to observe GEM's two screen-ownership rules:
+
+     wind_update(BEG_UPDATE/END_UPDATE) tells the AES "I am drawing, do
+     not drop a menu or draw an alert on top of me right now", and
+     graf_mouse(M_OFF/M_ON) takes the mouse cursor off the screen for the
+     duration -- the VDI has no idea the cursor is there, so drawing
+     under a visible cursor corrupts the AES's save-under buffer, and the
+     next cursor move restores those stale bytes onto the screen.
+
+   Neither was being done anywhere in this backend: graf_mouse(ARROW) at
+   startup was the only mouse call in the entire file. The visible
+   symptom was a permanent block of garbage at the screen centre -- the
+   mouse's power-on position, painted over by the startup document draw
+   and then "restored" on first movement. On a 4-plane Medium-res screen
+   the stale planes decode to a solid green rectangle, which is what made
+   it look like an image-drawing bug rather than a cursor bug. */
 static void redraw_window(short window_handle, VdiHdl vdi)
 {
     GRECT r, work, doc_area;
     short pxy[4];
     i32 bar_h_px;
 
+    wind_update(BEG_UPDATE);
+    graf_mouse(M_OFF, (const MFORM *)0);
+
     if (g_help_active) {
         paint_help(window_handle, vdi);
+        graf_mouse(M_ON, (const MFORM *)0);
+        wind_update(END_UPDATE);
         return;
     }
 
@@ -2873,6 +2998,9 @@ static void redraw_window(short window_handle, VdiHdl vdi)
     vs_clip(vdi, 0, pxy);
 
     paint_status_line(window_handle, vdi, work, bar_h_px);
+
+    graf_mouse(M_ON, (const MFORM *)0);
+    wind_update(END_UPDATE);
 }
 
 /* Translates one AES key into a portable wp_key_event (M8.5) --
@@ -3213,6 +3341,12 @@ static void open_help_node(short window_handle, VdiHdl vdi,
 static void invoke_action(wp_action_id id)
 {
     const wp_action *act = wp_action_find(id);
+
+    /* wp_action_find returns NULL for an out-of-range id, and id reaches
+       us as a plain u8 out of wp_keymap_outcome -- so a stale or garbage
+       action_id from any scheme would crash here rather than no-op. */
+    if (act == NULL) return;
+
     if (act->handler != NULL) {
         act->handler(&g_ctx);
         sync_format_check(id);
@@ -3558,7 +3692,8 @@ void app_shell_run(void)
         form_alert(1, FA_ERROR "[Screen is under 80 columns.|Text and menus may be cramped|at this resolution.][ OK ]");
     }
 
-    wp_menu_tree_init(wcell, hcell);
+    wp_menu_tree_init(wcell, hcell,
+                      (short)(work_out[0] + 1), (short)(work_out[1] + 1));
     menu_bar(wp_menu_tree, MENU_INSTALL);
 
     /* Query the desktop work area AFTER installing the menu bar -- AES
