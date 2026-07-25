@@ -55,4 +55,11 @@ wp_bool wp_dos_help_selfcheck(void);
    job). */
 wp_bool wp_dos_image_selfcheck(void);
 
+/* The menu selfcheck for the backend that has no menu: since every
+   action here is reachable only by shortcut, this checks reachability
+   itself, plus that the advertised quit chord is real under every
+   keymap scheme (msword once had no quit binding at all, making the app
+   unexitable). See app_shell.c. */
+wp_bool wp_dos_menu_selfcheck(void);
+
 #endif /* WP_DOS_APP_SHELL_INTERNAL_H */

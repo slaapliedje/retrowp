@@ -205,6 +205,16 @@ void wp_menu_tree_init(short wcell, short hcell,
    explicitly rather than trusted. */
 wp_bool wp_menu_tree_selfcheck(void);
 
+/* The backend's whole menu selfcheck: platform/common/menucheck.h's
+   portable table checks, then wp_menu_tree_selfcheck's GEM OBJECT tree
+   checks, then a leaf-level sweep (every item is a real G_STRING with a
+   label, none hidden, and the dispatched/inert leaf counts are what the
+   MN_SELECTED switch was written against). Run on-target by SMOKE.PRG.
+   See app_shell.c for what the leaf-count constants are FOR -- they are
+   a tripwire for adding a menu item without a dispatch case, not proof
+   that dispatch exists. */
+wp_bool wp_atari_menu_selfcheck(void);
+
 /* Handles one AES message as delivered in evnt_multi's MesagBuf (msg[0]
    is the message type; the rest depend on type -- see the AES message
    layout in gem.h/mt_gem.h). Returns WP_TRUE if the app should quit

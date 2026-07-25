@@ -25,6 +25,15 @@ void test_file_roundtrip(void);
 void test_pipe_transport_loopback_and_timeout(void);
 void test_fake_monospace_metrics(void);
 
+/* menucheck.c */
+void test_menucheck_accel_letter_maps_only_ctrl_letters(void);
+void test_menucheck_accel_letter_0x0c_is_ctrl_l(void);
+void test_menucheck_label_rejects_menu_metacharacters(void);
+void test_menucheck_live_action_table_is_menu_safe(void);
+void test_menucheck_every_live_label_is_literal_safe(void);
+void test_menucheck_shortcut_bytes_are_unique(void);
+void test_menucheck_no_menu_group_is_empty(void);
+
 /* edit_render.c */
 void test_edit_render_typed_text_is_visible_after_relayout(void);
 void test_edit_render_delete_marks_layout_dirty_and_stays_in_bounds(void);
@@ -498,6 +507,14 @@ static const test_case g_cases[] = {
     { "file_roundtrip", test_file_roundtrip },
     { "pipe_transport_loopback_and_timeout", test_pipe_transport_loopback_and_timeout },
     { "fake_monospace_metrics", test_fake_monospace_metrics },
+
+    { "menucheck_accel_letter_maps_only_ctrl_letters", test_menucheck_accel_letter_maps_only_ctrl_letters },
+    { "menucheck_accel_letter_0x0c_is_ctrl_l", test_menucheck_accel_letter_0x0c_is_ctrl_l },
+    { "menucheck_label_rejects_menu_metacharacters", test_menucheck_label_rejects_menu_metacharacters },
+    { "menucheck_live_action_table_is_menu_safe", test_menucheck_live_action_table_is_menu_safe },
+    { "menucheck_every_live_label_is_literal_safe", test_menucheck_every_live_label_is_literal_safe },
+    { "menucheck_shortcut_bytes_are_unique", test_menucheck_shortcut_bytes_are_unique },
+    { "menucheck_no_menu_group_is_empty", test_menucheck_no_menu_group_is_empty },
 
     { "edit_render_typed_text_is_visible_after_relayout", test_edit_render_typed_text_is_visible_after_relayout },
     { "edit_render_delete_marks_layout_dirty_and_stays_in_bounds", test_edit_render_delete_marks_layout_dirty_and_stays_in_bounds },

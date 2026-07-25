@@ -129,6 +129,7 @@ int main(void)
     wp_menu_tree_init(wcell, hcell,
                       (short)(work_out[0] + 1), (short)(work_out[1] + 1));
     check(wp_menu_tree_selfcheck(), "menu tree ob_next/head/tail linkage");
+    check(wp_atari_menu_selfcheck(), "menu model + leaf sweep + dispatch-coverage tripwire");
 
     r = menu_bar(wp_menu_tree, MENU_INSTALL);
     check(r != 0, "menu_bar(MENU_INSTALL) succeeded");

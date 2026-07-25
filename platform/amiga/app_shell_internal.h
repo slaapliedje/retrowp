@@ -50,4 +50,11 @@ wp_bool wp_amiga_config_selfcheck(void);
    (that's host/tests/test_image_convert.c's job). */
 wp_bool wp_amiga_image_selfcheck(void);
 
+/* Menu construction check that needs no live Menustrip: the portable
+   table checks plus the shortcut-buffer LIFETIME property that actually
+   broke here (MUI does not copy MUIA_Menuitem_Shortcut, so every
+   pointer must be distinct, in-range process-lifetime storage that is
+   still valid after the builder returns). See app_shell.c. */
+wp_bool wp_amiga_menu_selfcheck(void);
+
 #endif /* WP_AMIGA_APP_SHELL_INTERNAL_H */

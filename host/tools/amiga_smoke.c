@@ -62,6 +62,10 @@ int main(void)
     report(ok ? "config: PASS\n" : "config: FAIL\n");
     if (!ok) all_ok = WP_FALSE;
 
+    ok = wp_amiga_menu_selfcheck();
+    report(ok ? "menu: PASS\n" : "menu: FAIL\n");
+    if (!ok) all_ok = WP_FALSE;
+
     ok = wp_amiga_image_selfcheck();
     report(ok ? "image: PASS\n" : "image: FAIL\n");
     if (!ok) all_ok = WP_FALSE;

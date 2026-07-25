@@ -19,6 +19,7 @@
 #include "keymap.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "menucheck.h"
 #include "metrics_mac_internal.h"
 #include "offload.h"
 #include "config.h"
@@ -690,13 +691,16 @@ static void build_action_menus(void)
                than just fail to work: do_menu_command(0) hits its early
                return, and the cmdKey branch in the event loop had already
                SWALLOWED the keystroke, so Cmd+O/S/Q/X/C/V did nothing and
-               never reached the editor either. Only a real Ctrl+<letter>
-               (0x01..0x1A) maps onto a command-key letter; the table also
-               allows printable ASCII (e.g. FORMAT_SIZE's 0x1D), which
-               must not be blindly offset into a nonsense glyph. */
-            if (act->shortcut_ascii >= 0x01 && act->shortcut_ascii <= 0x1A) {
-                SetItemCmd(menu, item_after,
-                           (CharParameter)('A' + act->shortcut_ascii - 1));
+               never reached the editor either. The letter comes from the
+               shared rule rather than a local range test: Amiga had its
+               own separate copy of the same decision and got it wrong a
+               different way (offsetting every byte, so FORMAT_SIZE's
+               0x1D became ']'). One function, two callers -- see
+               platform/common/menucheck.h. */
+            {
+                u8 accel = wp_menu_accel_letter(act->shortcut_ascii);
+
+                if (accel != 0) SetItemCmd(menu, item_after, (CharParameter)accel);
             }
             any = WP_TRUE;
         }
@@ -1575,6 +1579,105 @@ wp_bool wp_mac_config_selfcheck(void)
 
     plat_file_delete(WP_MAC_CONFIG_PATH);
     return ok;
+}
+
+/* Menu construction, checked without a real menu bar.
+   ------------------------------------------------------------------
+   The Mac menu bugs were all decidable from the table plus this file's
+   own two helper rules, no Menu Manager needed:
+
+     - no item ever got a command-key equivalent, so MenuKey() returned
+       0 while the cmdKey branch had already swallowed the keystroke;
+     - labels went straight into a call that PARSES metacharacters,
+       while do_menu_command maps a chosen item back to an action by
+       counting ordinal position;
+     - menu IDs are derived by arithmetic on a group enum, which shares
+       its base with the Apple menu.
+
+   All three are checked here. */
+wp_bool wp_mac_menu_selfcheck(void)
+{
+    static const wp_menu_group groups[] = {
+        WP_MENU_FILE, WP_MENU_EDIT, WP_MENU_FORMAT, WP_MENU_TOOLS, WP_MENU_HELP
+    };
+    const u32 group_count = (u32)(sizeof(groups) / sizeof(groups[0]));
+    unsigned char pbuf[256];
+    u32 i, j;
+
+    if (!wp_menu_model_selfcheck()) return WP_FALSE;
+
+    /* Menu IDs must be distinct from each other AND from the Apple menu.
+       do_menu_command already special-cases menuID == WP_MENU_APPLE_ID
+       and returns early, so a group whose derived ID collided with it
+       would have every one of its items silently swallowed. The
+       arithmetic is WP_MENU_APPLE_ID + group, and WP_MENU_NONE is 0 --
+       so this holds only because no built group is WP_MENU_NONE, which
+       is exactly the kind of thing worth pinning rather than assuming. */
+    for (i = 0; i < group_count; i++) {
+        short id_i = (short)(WP_MENU_APPLE_ID + (int)groups[i]);
+
+        if (id_i == WP_MENU_APPLE_ID) return WP_FALSE;
+        for (j = 0; j < group_count; j++) {
+            if (j == i) continue;
+            if (id_i == (short)(WP_MENU_APPLE_ID + (int)groups[j])) return WP_FALSE;
+        }
+        if (group_title(groups[i]) == (const char *)0) return WP_FALSE;
+    }
+
+    for (i = 0; i < (u32)WP_ACT_COUNT; i++) {
+        const wp_action *act = &g_wp_actions[i];
+        u32 n;
+
+        if (act->group == WP_MENU_NONE) continue;
+
+        /* Every menu-bound action's group must map back to exactly one
+           built menu -- do_menu_command finds an action by re-deriving
+           WP_MENU_APPLE_ID + act->group and comparing to the picked
+           menuID, so an action in an unbuilt group is unreachable. */
+        {
+            wp_bool built = WP_FALSE;
+
+            for (j = 0; j < group_count; j++) {
+                if (act->group == groups[j]) built = WP_TRUE;
+            }
+            if (!built) return WP_FALSE;
+        }
+
+        /* Labels must survive Pascal conversion intact: c_to_pstr caps
+           at 255 and the buffers here are 256, so a longer label would
+           be silently truncated into a different menu entry. */
+        c_to_pstr(act->label_utf8, pbuf);
+        n = (u32)pbuf[0];
+        if (n == 0) return WP_FALSE;
+        if (n > 255) return WP_FALSE;
+        for (j = 0; j < n; j++) {
+            if (pbuf[j + 1] != (unsigned char)act->label_utf8[j]) return WP_FALSE;
+        }
+        if (act->label_utf8[n] != '\0') return WP_FALSE; /* truncated */
+
+        /* And must contain nothing AppendMenu/InsertMenuItem would parse.
+           This backend deliberately avoids that parsing (placeholder +
+           SetMenuItemText), so this is a tripwire on the labels rather
+           than on the call -- it protects the next backend, and any
+           future label edit, from reintroducing the ordinal drift. */
+        if (!wp_menu_label_is_literal_safe(act->label_utf8)) return WP_FALSE;
+    }
+
+    /* The command-key letter must round-trip: MenuKey() hands back the
+       letter the user typed, and do_menu_command resolves it by ordinal,
+       so a letter that does not match what SetItemCmd was given makes
+       the accelerator dead in exactly the way it already was once. */
+    for (i = 0; i < (u32)WP_ACT_COUNT; i++) {
+        u8 accel = wp_menu_accel_letter(g_wp_actions[i].shortcut_ascii);
+
+        if (accel == 0) continue;
+        if (accel < 'A' || accel > 'Z') return WP_FALSE;
+        if (wp_action_find_by_shortcut(g_wp_actions[i].shortcut_ascii) != &g_wp_actions[i]) {
+            return WP_FALSE;
+        }
+    }
+
+    return WP_TRUE;
 }
 
 wp_bool wp_mac_image_selfcheck(void)

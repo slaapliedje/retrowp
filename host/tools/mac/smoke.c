@@ -31,7 +31,11 @@ static void report(const char *line)
 
 int main(void)
 {
-    char buf[128];
+    /* Every selfcheck line is strcpy'd in with no bound check, so this
+       must stay comfortably ahead of their total. Seven lines is ~97
+       bytes today; 128 left barely one line of headroom, and the next
+       selfcheck added would have overflowed the stack silently. */
+    char buf[256];
     u32 pos = 0;
     wp_bool ok;
     const char *line;
@@ -70,6 +74,11 @@ int main(void)
 
     ok = wp_mac_help_selfcheck();
     line = ok ? "help: PASS\n" : "help: FAIL\n";
+    strcpy(buf + pos, line);
+    pos += (u32)strlen(line);
+
+    ok = wp_mac_menu_selfcheck();
+    line = ok ? "menu: PASS\n" : "menu: FAIL\n";
     strcpy(buf + pos, line);
     pos += (u32)strlen(line);
 

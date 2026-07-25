@@ -45,6 +45,7 @@ set(RETROWP_COMMON_SRC
     ${RETROWP_ROOT}/platform/common/help_doc.c
     ${RETROWP_ROOT}/platform/common/help_view.c
     ${RETROWP_ROOT}/platform/common/statusline.c
+    ${RETROWP_ROOT}/platform/common/menucheck.c
 )
 
 # build/generated/help_retrowp.h (Phase 5) is produced by the top-level

@@ -11,6 +11,7 @@
 #include "offload.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "menucheck.h"
 #include "config.h"
 #include "statusline.h"
 #include "help_doc.h"
@@ -1447,6 +1448,80 @@ wp_bool wp_dos_config_selfcheck(void)
 
     plat_file_delete(WP_DOS_CONFIG_PATH);
     return ok;
+}
+
+/* The menu selfcheck for a backend with no menu.
+   ------------------------------------------------------------------
+   DOS has no menu bar at all, so its whole action surface is the
+   shortcut table -- which makes reachability MORE load-bearing here
+   than anywhere else, not less. The failure this backend actually
+   shipped was of exactly that kind: under keymap=msword there was no
+   quit action bound at all, so the app was genuinely unexitable, and
+   the title bar advertised "Ctrl+Q: Quit" on the three schemes where
+   that chord does nothing.
+
+   So the portable table check runs here too, and then the two DOS
+   specifics: every action this backend claims to implement must be
+   reachable, and the advertised quit chord must be real for every
+   scheme. */
+wp_bool wp_dos_menu_selfcheck(void)
+{
+    /* Every action DOS wires by shortcut. Menu-only actions on the other
+       three backends (Spell/Thesaurus/Grammar/Chat, Help Contents) are
+       deliberately absent -- DOS reaches Help via F1 and the rest not at
+       all, a documented gap, not an oversight. Insert Image is here
+       precisely because it was given a real Ctrl+G for this reason. */
+    static const wp_action_id reachable[] = {
+        WP_ACT_FILE_OPEN, WP_ACT_FILE_SAVE, WP_ACT_FILE_QUIT,
+        WP_ACT_EDIT_CUT, WP_ACT_EDIT_COPY, WP_ACT_EDIT_PASTE,
+        WP_ACT_FORMAT_BOLD, WP_ACT_FORMAT_ITALIC, WP_ACT_FORMAT_UNDERLINE,
+        WP_ACT_FORMAT_SIZE, WP_ACT_FORMAT_ALIGN,
+        WP_ACT_TOOLS_INSERTIMAGE
+    };
+    const u32 reachable_count = (u32)(sizeof(reachable) / sizeof(reachable[0]));
+    u8 saved_keymap;
+    u32 i;
+
+    if (!wp_menu_model_selfcheck()) return WP_FALSE;
+
+    for (i = 0; i < reachable_count; i++) {
+        const wp_action *act = wp_action_find(reachable[i]);
+
+        if (act == (const wp_action *)0) return WP_FALSE;
+        /* Reachable means a real shortcut byte that resolves back to
+           this exact action -- not merely "listed above". */
+        if (act->shortcut_ascii == 0) return WP_FALSE;
+        if (wp_action_find_by_shortcut(act->shortcut_ascii) != act) return WP_FALSE;
+    }
+
+    /* Quit specifically: unreachable quit is unrecoverable on a backend
+       with no menu and no window chrome. Check it under EVERY scheme,
+       since the binding lives in the scheme, not in the action table --
+       which is exactly how msword ended up with none. */
+    saved_keymap = g_ctx.keymap_id;
+    for (i = 0; i < (u32)WP_KEYMAP_COUNT; i++) {
+        const char *hint;
+
+        g_ctx.keymap_id = (u8)i;
+        hint = quit_key_hint();
+        if (hint == (const char *)0 || hint[0] == '\0') {
+            g_ctx.keymap_id = saved_keymap;
+            return WP_FALSE;
+        }
+        /* The hint must name the scheme's own chord, not the default
+           one. Only vi and msword quit on Ctrl+Q; the other three each
+           have their own, and advertising Ctrl+Q there was the bug. */
+        if ((wp_keymap_id)i == WP_KEYMAP_WORDSTAR    && hint[0] != 'C') { g_ctx.keymap_id = saved_keymap; return WP_FALSE; }
+        if ((wp_keymap_id)i == WP_KEYMAP_WORDPERFECT && hint[0] != 'F') { g_ctx.keymap_id = saved_keymap; return WP_FALSE; }
+    }
+    g_ctx.keymap_id = saved_keymap;
+
+    /* Ctrl+Q must resolve to Quit in the action table itself: that is
+       what the doc-not-loaded escape path and the vi/msword schemes both
+       lean on. */
+    if (wp_action_find_by_shortcut(0x11) != wp_action_find(WP_ACT_FILE_QUIT)) return WP_FALSE;
+
+    return WP_TRUE;
 }
 
 wp_bool wp_dos_image_selfcheck(void)

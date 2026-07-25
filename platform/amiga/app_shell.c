@@ -32,6 +32,7 @@
 #include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "menucheck.h"
 #include "metrics_amiga_internal.h"
 #include "offload.h"
 #include "grammar.h"
@@ -1749,6 +1750,21 @@ static const char *group_title(wp_menu_group group)
    now pins .id to its table row. */
 static char g_menu_shortcut[WP_ACT_COUNT][2];
 
+/* Fills this action's own slot and returns the pointer MUI will hold, or
+   NULL for "no accelerator". Factored out of build_menustrip purely so
+   wp_amiga_menu_selfcheck below can exercise the exact same code path
+   and check the exact property that broke: that the returned pointer
+   is process-lifetime storage unique to this action, not a shared
+   (and, before the fix, already-dead) buffer. */
+static const char *menu_shortcut_for(const wp_action *act)
+{
+    char *slot = g_menu_shortcut[act->id];
+
+    slot[0] = (char)wp_menu_accel_letter(act->shortcut_ascii);
+    slot[1] = '\0';
+    return (slot[0] != '\0') ? slot : (const char *)0;
+}
+
 static Object *build_menustrip(void)
 {
     static const wp_menu_group groups[] = {
@@ -1770,28 +1786,22 @@ static Object *build_menustrip(void)
         for (ai = 0; ai < (u32)WP_ACT_COUNT; ai++) {
             const wp_action *act = &g_wp_actions[ai];
             Object *item;
-            char *shortcut = g_menu_shortcut[act->id];
+            const char *shortcut;
 
             if (act->group != groups[gi]) continue;
 
-            /* Only a real Ctrl+<letter> maps onto an Amiga-key letter.
-               The previous math reduced to shortcut_ascii + 0x40 applied
-               unconditionally, which is right for 0x01..0x1A ('A'..'Z')
-               but turned WP_ACT_FORMAT_SIZE's 0x1D into ']' -- a
-               meaningless accelerator glyph, and on an item whose
-               key_hint_utf8 is deliberately 0 ("show no hint") at that.
-               actions.h explicitly allows printable ASCII in this byte
-               space too, so the range has to be checked, not assumed. */
-            if (act->shortcut_ascii >= 0x01 && act->shortcut_ascii <= 0x1A) {
-                shortcut[0] = (char)('A' + act->shortcut_ascii - 1);
-            } else {
-                shortcut[0] = '\0';
-            }
-            shortcut[1] = '\0';
+            /* Shared rule via a shared helper, not a local copy: this
+               used to reduce to shortcut_ascii + 0x40 applied
+               unconditionally, right for 0x01..0x1A ('A'..'Z') but
+               turning WP_ACT_FORMAT_SIZE's 0x1D into ']'. Mac had its
+               own separate copy of the same decision and got it wrong
+               differently (never derived an accelerator at all), so both
+               now call platform/common/menucheck.h's one function. */
+            shortcut = menu_shortcut_for(act);
 
             item = MenuitemObject,
                 MUIA_Menuitem_Title, (IPTR)act->label_utf8,
-                MUIA_Menuitem_Shortcut, (IPTR)(shortcut[0] ? shortcut : NULL),
+                MUIA_Menuitem_Shortcut, (IPTR)shortcut,
                 End;
             if (item == NULL) continue;
 
@@ -2313,6 +2323,80 @@ wp_bool wp_amiga_config_selfcheck(void)
 
     plat_file_delete(WP_AMIGA_CONFIG_PATH);
     return ok;
+}
+
+/* Menu construction, checked without building a real Menustrip.
+   ------------------------------------------------------------------
+   Almost none of what broke here needed MUI to be running. The bug that
+   shipped was a LIFETIME bug: MUIA_Menuitem_Shortcut is [I..] and MUI
+   does not copy it (MUIA_Menuitem_CopyStrings defaults FALSE), while
+   the strip is only realized when the window opens -- long after
+   build_menustrip() returned. The old `char shortcut[2]` inside the
+   item loop therefore handed every shortcut-bearing item the SAME
+   address, into a dead stack frame.
+
+   So this checks the property directly: run the real per-action
+   shortcut path for every action, keep each returned pointer, and then
+   require that they are all still distinct, still in range, and still
+   holding their own value after the whole loop has run. A shared or
+   stack-local buffer fails the distinctness check immediately; a
+   dangling one fails the range check. Neither needs a menu to exist. */
+wp_bool wp_amiga_menu_selfcheck(void)
+{
+    const char *ptrs[WP_ACT_COUNT];
+    u8 expect[WP_ACT_COUNT];
+    u32 i, j;
+
+    if (!wp_menu_model_selfcheck()) return WP_FALSE;
+
+    for (i = 0; i < (u32)WP_ACT_COUNT; i++) {
+        const wp_action *act = &g_wp_actions[i];
+
+        expect[i] = wp_menu_accel_letter(act->shortcut_ascii);
+        ptrs[i] = menu_shortcut_for(act);
+
+        /* NULL exactly when there is no accelerator -- passing a pointer
+           to an empty string instead would make MUI render a blank
+           accelerator column rather than none. */
+        if (expect[i] == 0) {
+            if (ptrs[i] != (const char *)0) return WP_FALSE;
+        } else {
+            if (ptrs[i] == (const char *)0) return WP_FALSE;
+        }
+    }
+
+    /* Everything below runs AFTER the loop above finished, which is the
+       whole point: this is the moment MUI would first dereference these
+       pointers, and the moment the old stack buffer was already gone. */
+    for (i = 0; i < (u32)WP_ACT_COUNT; i++) {
+        if (ptrs[i] == (const char *)0) continue;
+
+        /* Inside the process-lifetime array, not some other frame. */
+        if (ptrs[i] != g_menu_shortcut[i]) return WP_FALSE;
+
+        /* Still its own value, NUL-terminated, one letter. */
+        if ((u8)ptrs[i][0] != expect[i]) return WP_FALSE;
+        if (ptrs[i][1] != '\0') return WP_FALSE;
+
+        /* Distinct from every other item's buffer. The shipped bug was
+           exactly this: one address shared by all twelve. */
+        for (j = 0; j < (u32)WP_ACT_COUNT; j++) {
+            if (j == i) continue;
+            if (ptrs[j] != (const char *)0 && ptrs[j] == ptrs[i]) return WP_FALSE;
+        }
+    }
+
+    /* Every group this backend builds a title for must resolve to a real
+       title string; group_title returning NULL would hand
+       MenuObjectT a NULL and silently drop the whole menu. */
+    if (group_title(WP_MENU_FILE) == (const char *)0) return WP_FALSE;
+    if (group_title(WP_MENU_EDIT) == (const char *)0) return WP_FALSE;
+    if (group_title(WP_MENU_FORMAT) == (const char *)0) return WP_FALSE;
+    if (group_title(WP_MENU_TOOLS) == (const char *)0) return WP_FALSE;
+    if (group_title(WP_MENU_HELP) == (const char *)0) return WP_FALSE;
+    if (group_title(WP_MENU_NONE) != (const char *)0) return WP_FALSE;
+
+    return WP_TRUE;
 }
 
 wp_bool wp_amiga_image_selfcheck(void)

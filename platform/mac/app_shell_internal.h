@@ -42,4 +42,11 @@ wp_bool wp_mac_help_selfcheck(void);
    job). */
 wp_bool wp_mac_image_selfcheck(void);
 
+/* Menu construction check that needs no live menu bar: the portable
+   table checks plus this backend's own three hazards -- derived menu
+   IDs colliding with the Apple menu, labels that the Menu Manager would
+   PARSE (which would drift do_menu_command's ordinal mapping), and
+   command-key letters. See app_shell.c. */
+wp_bool wp_mac_menu_selfcheck(void);
+
 #endif /* WP_MAC_APP_SHELL_INTERNAL_H */

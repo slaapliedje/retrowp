@@ -68,6 +68,10 @@ int main(void)
     report(ok ? "help: PASS\r\n" : "help: FAIL\r\n");
     if (!ok) all_ok = WP_FALSE;
 
+    ok = wp_dos_menu_selfcheck();
+    report(ok ? "menu: PASS\r\n" : "menu: FAIL\r\n");
+    if (!ok) all_ok = WP_FALSE;
+
     ok = wp_dos_image_selfcheck();
     report(ok ? "image: PASS\r\n" : "image: FAIL\r\n");
     if (!ok) all_ok = WP_FALSE;

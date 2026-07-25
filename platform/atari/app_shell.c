@@ -22,6 +22,7 @@
 #include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "menucheck.h"
 #include "statusline.h"
 #include "help_doc.h"
 #include "help_view.h"
@@ -509,6 +510,103 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_next != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_spec.free_string != g_text_align_right) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+
+    return WP_TRUE;
+}
+
+/* Number of selectable leaf items across all five dropdowns: About, the
+   3 File items, 3 Edit, 4 Tools, 8 Format. The Desk separator and the
+   six AES-reserved dummy slots are leaves too but are never dispatched,
+   so they are excluded here and counted separately below.
+
+   This is deliberately a hard-coded constant. wp_dispatch_message's
+   MN_SELECTED handler is a hand-written switch on raw object indices
+   (see task "route dispatch through the action registry"), so nothing
+   in the program can enumerate which objects have a case. What this
+   constant CAN do is fail the moment someone adds a menu item without
+   revisiting that switch -- which is the realistic way an item ends up
+   drawn, highlightable, and silently inert. Bumping it is the prompt to
+   go add the dispatch case. */
+#define WP_ATARI_MENU_TITLES              5   /* Desk File Edit Tools Format */
+#define WP_ATARI_MENU_DISPATCHED_LEAVES  19   /* About + 3 File + 3 Edit + 4 Tools + 8 Format */
+#define WP_ATARI_MENU_INERT_LEAVES        7   /* separator + 6 AES-reserved Desk slots */
+
+wp_bool wp_atari_menu_selfcheck(void)
+{
+    short i;
+    short titles = 0;
+    short items = 0;
+    short dispatched = 0;
+    short inert = 0;
+
+    /* The portable half first: row order, labels, accelerator bytes,
+       group coverage -- everything this backend's menu depends on that
+       is not GEM-specific. Runs here as well as on the host so the SAME
+       table is proven under the m68k cross-compiler's own word sizes. */
+    if (!wp_menu_model_selfcheck()) return WP_FALSE;
+
+    /* Then the GEM OBJECT tree itself. */
+    if (!wp_menu_tree_selfcheck()) return WP_FALSE;
+
+    for (i = 0; i < WP_MENU_OBJ_COUNT; i++) {
+        const OBJECT *ob = &wp_menu_tree[i];
+
+        if (ob->ob_head != -1) continue; /* a container, not a leaf */
+
+        /* Menu-bar titles are leaves too (no children) but are G_TITLE,
+           not selectable items -- count them apart rather than letting
+           them fall into the item arithmetic below. */
+        if (ob->ob_type == G_TITLE) {
+            titles++;
+        } else if (ob->ob_type == G_STRING) {
+            items++;
+
+            /* The AES-reserved Desk slots and the separator are the only
+               leaves with no dispatch case, and the tree's own comment
+               already establishes that they are CONTIGUOUS (menu_fixup
+               patches them by index arithmetic, not chain traversal), so
+               an index range is the honest way to identify them -- not
+               ob_state, which marks only the separator. */
+            if (i >= WP_MENU_OBJ_DESK_SEP && i <= WP_MENU_OBJ_DESK_DUMMY6) inert++;
+            else dispatched++;
+        } else {
+            return WP_FALSE; /* a leaf that is neither a title nor an item */
+        }
+
+        /* Every leaf must point at a real buffer. A NULL ob_spec is what
+           a half-finished menu edit looks like: the AES walks it and
+           draws garbage or faults. (ob_spec for a G_STRING/G_TITLE IS a
+           pointer, unlike the containers' packed colour word.) */
+        if (ob->ob_spec.free_string == (char *)0) return WP_FALSE;
+
+        /* ...but only the items this app owns must be non-EMPTY. The six
+           AES-reserved Desk slots are deliberately blank char[32]
+           buffers: menu_register()/menu_fixup() write installed desk
+           accessory names into them at runtime, so an empty string there
+           is the correct initial state, not a missing label. Asserting
+           otherwise is what made this check fail on its first real
+           boot. */
+        if (!(i >= WP_MENU_OBJ_DESK_DUMMY1 && i <= WP_MENU_OBJ_DESK_DUMMY6)) {
+            if (ob->ob_spec.free_string[0] == '\0') return WP_FALSE;
+        }
+
+        /* No leaf may be hidden. OF_HIDETREE on a dropdown BOX was the
+           bug that made four of the five menus structurally undrawable
+           (the AES never clears it, so objc_draw skips the subtree); the
+           same flag on an individual item hides just that item, equally
+           silently. */
+        if ((ob->ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
+    }
+
+    if (titles != WP_ATARI_MENU_TITLES) return WP_FALSE;
+    if (items != WP_ATARI_MENU_DISPATCHED_LEAVES + WP_ATARI_MENU_INERT_LEAVES) return WP_FALSE;
+    if (dispatched != WP_ATARI_MENU_DISPATCHED_LEAVES) return WP_FALSE;
+    if (inert != WP_ATARI_MENU_INERT_LEAVES) return WP_FALSE;
+
+    /* The separator is the one item that must be greyed: it is drawn as
+       a rule between About and the desk-accessory slots, and an enabled
+       separator is selectable and dispatches nothing. */
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_SEP].ob_state != OS_DISABLED) return WP_FALSE;
 
     return WP_TRUE;
 }
