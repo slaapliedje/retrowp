@@ -57,5 +57,36 @@ void wp_statusline_paint(plat_gc *gc, plat_font *font,
         len = append_bytes(buf, len, WP_STATUSLINE_BUF_MAX, view->pending_cmd_utf8, view->pending_cmd_len);
     }
 
-    if (len > 0) plat_draw_text(gc, font, x + 4, y, buf, len, 0, 0, 0);
+    if (len > 0) {
+        /* plat_draw_text's y is the text BASELINE, not the top of the
+           glyph box -- every document paint loop in this project already
+           passes `y + ascent_px` for exactly that reason. This function
+           used to pass the top of the bar, which put the whole glyph
+           body ABOVE the bar and outside the caller's clip rectangle:
+           on Atari the mode/search text rendered as a couple of stray
+           pixel rows and was unreadable, so vi's ":"/"/" prompt looked
+           like it was not being drawn at all. DOS was unaffected and hid
+           the bug, because its "font" is a fixed text cell and its
+           plat_draw_text takes a row index, where ascent is meaningless.
+
+           The offset is derived as a RATIO of the bar height rather than
+           by converting metrics twips to pixels here: this file is
+           platform-neutral and has no twips<->px conversion of its own
+           (each backend owns that), but the caller already sized this bar
+           from the same font's own line height, so ascent/line_height
+           scales correctly on every backend. Degrades to y (today's
+           behavior) when metrics are unavailable or the bar is one cell
+           tall, which is exactly the DOS case. */
+        i32 baseline = y;
+        plat_font_metrics fm;
+
+        if (h > 1 && plat_font_metrics_get(font, &fm) == WP_OK) {
+            i32 line_twips = fm.ascent + fm.descent + fm.leading;
+
+            if (line_twips > 0 && fm.ascent > 0) {
+                baseline = y + (h * fm.ascent) / line_twips;
+            }
+        }
+        plat_draw_text(gc, font, x + 4, baseline, buf, len, 0, 0, 0);
+    }
 }

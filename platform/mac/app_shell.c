@@ -167,19 +167,27 @@ static wp_bool            g_help_active = WP_FALSE;
 #define WP_MAC_CONFIG_PATH "RetroWP.cfg"
 
 /* Phase 3: the width (in twips) every paragraph's real
-   wp_paragraph_layout was last built against, plus a "the document
-   itself just changed" flag -- together these tell draw_document below
-   when it must call relayout_document again. Unlike platform/amiga/
-   app_shell.c (whose MUI Area object has no real size until MUI's own
-   layout pass runs), a Mac window's portRect is already known the
-   moment NewWindow returns, so relayout could happen eagerly right
-   after loading a document the way platform/atari/app_shell.c's
-   replace_document does -- this still checks on every draw too, cheap
-   insurance against a real resize (this phase doesn't wire up the
-   window's own grow box, a documented gap, but the check costs
-   nothing and stays correct if that's ever added). */
+   wp_paragraph_layout was last built against -- lets relayout_document
+   tell a real resize (every line must re-break) apart from an ordinary
+   redraw. Unlike platform/amiga/app_shell.c (whose MUI Area object has
+   no real size until MUI's own layout pass runs), a Mac window's
+   portRect is already known the moment NewWindow returns, so relayout
+   could happen eagerly right after loading a document the way
+   platform/atari/app_shell.c's replace_document does -- draw_document
+   still checks on every draw too, cheap insurance against a real
+   resize (this phase doesn't wire up the window's own grow box, a
+   documented gap, but the check costs nothing and stays correct if
+   that's ever added).
+
+   There used to be a companion g_needs_relayout flag meaning "the
+   document itself is new". It was removed with the stale-layout fix in
+   draw_document: it only ever tracked whole-document REPLACEMENT, so it
+   was blind to keystroke edits -- which is precisely how that bug got
+   in. para->layout_dirty, which the engine already maintains per
+   paragraph, subsumes it and covers edits too (a freshly imported
+   document's paragraphs all start with layout == NULL, so the "new
+   document" case still forces a rebuild without a separate flag). */
 static i32 g_content_width_twips = 0;
-static wp_bool g_needs_relayout = WP_TRUE;
 
 static const char g_sample_text[] =
     "RetroWP on Mac Classic (M12 Phase 2)\n"
@@ -191,13 +199,18 @@ static const char g_sample_text[] =
     "Press j/k to move the cursor down/up, i to enter Insert mode,\n"
     "Esc to return to Normal mode, :q Enter to quit.\n";
 
-/* Relayouts every paragraph at content_width_twips, mirroring platform/
-   amiga/app_shell.c's relayout_document exactly -- see docs/layout.md.
-   Records the width used so draw_document can tell a real resize
-   (width changed) apart from "nothing to do" without re-relayouting
-   every single redraw. */
+/* Relayouts only what actually needs it, mirroring platform/amiga/
+   app_shell.c's relayout_document exactly -- see docs/layout.md. A
+   paragraph is rebuilt when its layout was never built (layout == NULL),
+   when the engine marked it layout_dirty (any content edit -- edit.c
+   sets it on every insert/delete), or when the column itself changed (a
+   real resize, where nothing is dirty but every line must re-break).
+   wp_paragraph_relayout has no early-out of its own (linebreak.c
+   measures unconditionally), so this check is what makes calling
+   relayout_document before every paint affordable. */
 static void relayout_document(i32 content_width_twips)
 {
+    wp_bool width_changed = (wp_bool)(content_width_twips != g_content_width_twips);
     u32 si, pi;
 
     g_content_width_twips = content_width_twips;
@@ -207,6 +220,7 @@ static void relayout_document(i32 content_width_twips)
 
         for (pi = 0; pi < pc; pi++) {
             wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            if (!width_changed && para->layout != NULL && !para->layout_dirty) continue;
             wp_paragraph_relayout(&g_mac_doc, para, content_width_twips);
         }
     }
@@ -229,7 +243,9 @@ static void set_document_from_text(const u8 *utf8, u32 len)
     wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id, &g_mac_doc, &g_mac_journal);
     (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_start(&g_mac_doc);
     g_ctx.doc_loaded = WP_TRUE;
-    g_needs_relayout = WP_TRUE; /* new paragraphs -- see this flag's own comment */
+    /* No "document is new" flag to set: every paragraph format_txt_import
+       just built has layout == NULL, which relayout_document already
+       treats as needing a rebuild -- see g_content_width_twips's comment. */
 }
 
 static void load_sample_document(void)
@@ -1045,16 +1061,22 @@ static void draw_document(WindowPtr w)
     /* Real per-window pixel width, converted through the SAME twips<->px
        ratio metrics_mac.c uses for measurement -- Phase 3's real point,
        "on-screen wrap matches engine layout," only holds if layout and
-       paint agree on this number. Relayout only when it actually
-       changes (a real resize) or the document itself just changed. */
+       paint agree on this number. */
     content_width_px = (i32)(r.right - r.left) - WP_DOC_LEFT_MARGIN_PX - WP_DOC_RIGHT_MARGIN_PX;
     if (content_width_px < WP_DOC_MIN_CONTENT_PX) content_width_px = WP_DOC_MIN_CONTENT_PX;
     content_width_twips = mac_px_to_twips(content_width_px);
 
-    if (g_needs_relayout || content_width_twips != g_content_width_twips) {
-        relayout_document(content_width_twips);
-        g_needs_relayout = WP_FALSE;
-    }
+    /* Unconditional, because the previous gate ("relayout only on a
+       resize or a whole-document replace") could not see a KEYSTROKE
+       edit at all: nothing in the engine's edit path (vimode.c/edit.c)
+       or platform/common/keymap.c relayouts after an edit -- it only
+       sets para->layout_dirty. So typed text landed in the model as a
+       real wp_run byte edit while this loop kept walking a STALE
+       para->layout that didn't know about the new bytes. relayout_document
+       consults layout_dirty itself, so a redraw that changed nothing
+       still does no measuring. platform/dos/app_shell.c already carried
+       this fix; Mac, Amiga and Atari never got it. */
+    relayout_document(content_width_twips);
 
     gc.window = w;
 
@@ -1159,9 +1181,20 @@ static void draw_document(WindowPtr w)
                 wp_line_fragment_iter_init(&iter, line);
                 while (wp_line_next_fragment(&g_mac_doc, para, line, &iter, &frag)) {
                     wp_run *run = wp_paragraph_run_get(para, (u16)frag.run_index);
-                    const u8 *bytes = wp_strpool_get(&g_mac_doc.strings, run->text);
+                    const u8 *bytes;
                     u32 frag_len = frag.byte_end - frag.byte_start;
                     i32 frag_width_twips = 0;
+
+                    /* The layout is rebuilt from the current runs before
+                       any paint, so an out-of-range run index should be
+                       impossible here -- but this used to dereference the
+                       result unchecked, which turned any future
+                       stale-layout regression into a wild read rather than
+                       a visibly wrong glyph. Cheap insurance on the one
+                       path that walks engine-supplied indices. */
+                    if (run == NULL) continue;
+                    bytes = wp_strpool_get(&g_mac_doc.strings, run->text);
+                    if (bytes == NULL) continue;
 
                     if (!have_font || run->style != cached_style) {
                         const wp_char_style *cs = wp_document_cstyle_get(&g_mac_doc, run->style);
@@ -1169,12 +1202,27 @@ static void draw_document(WindowPtr w)
                         if (cs != NULL) {
                             plat_font_metrics fm;
 
-                            if (font != NULL) plat_font_close(font);
-                            plat_font_open((const u8 *)"", 0, cs->size_twips, cs->flags, &font);
-                            plat_font_metrics_get(font, &fm);
-                            ascent_px = mac_twips_to_px(fm.ascent);
-                            cached_style = run->style;
-                            have_font = WP_TRUE;
+                            /* Clear `font` between the close and the open:
+                               plat_font_open does NOT write *out when it
+                               fails (WP_NOMEM), so leaving the old value in
+                               place made plat_font_metrics_get read freed
+                               memory and the plat_font_close after this loop
+                               free the same block twice. Same fix applied to
+                               all four backends. */
+                            if (font != NULL) {
+                                plat_font_close(font);
+                                font = NULL;
+                            }
+                            have_font = WP_FALSE;
+                            if (plat_font_open((const u8 *)"", 0, cs->size_twips,
+                                                cs->flags, &font) == WP_OK &&
+                                plat_font_metrics_get(font, &fm) == WP_OK) {
+                                ascent_px = mac_twips_to_px(fm.ascent);
+                                cached_style = run->style;
+                                have_font = WP_TRUE;
+                            } else {
+                                font = NULL;
+                            }
                         }
                     }
 

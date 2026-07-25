@@ -25,6 +25,13 @@ void test_file_roundtrip(void);
 void test_pipe_transport_loopback_and_timeout(void);
 void test_fake_monospace_metrics(void);
 
+/* edit_render.c */
+void test_edit_render_typed_text_is_visible_after_relayout(void);
+void test_edit_render_delete_marks_layout_dirty_and_stays_in_bounds(void);
+void test_edit_render_insert_marks_layout_dirty_and_stays_in_bounds(void);
+void test_edit_render_deleted_text_disappears_after_relayout(void);
+void test_edit_render_clean_paragraphs_are_not_relayouted(void);
+
 /* cursor.c */
 void test_cursor_forward_crosses_paragraph_boundary(void);
 void test_cursor_forward_backward_step_counts_match(void);
@@ -491,6 +498,12 @@ static const test_case g_cases[] = {
     { "file_roundtrip", test_file_roundtrip },
     { "pipe_transport_loopback_and_timeout", test_pipe_transport_loopback_and_timeout },
     { "fake_monospace_metrics", test_fake_monospace_metrics },
+
+    { "edit_render_typed_text_is_visible_after_relayout", test_edit_render_typed_text_is_visible_after_relayout },
+    { "edit_render_delete_marks_layout_dirty_and_stays_in_bounds", test_edit_render_delete_marks_layout_dirty_and_stays_in_bounds },
+    { "edit_render_insert_marks_layout_dirty_and_stays_in_bounds", test_edit_render_insert_marks_layout_dirty_and_stays_in_bounds },
+    { "edit_render_deleted_text_disappears_after_relayout", test_edit_render_deleted_text_disappears_after_relayout },
+    { "edit_render_clean_paragraphs_are_not_relayouted", test_edit_render_clean_paragraphs_are_not_relayouted },
 
     { "cursor_forward_crosses_paragraph_boundary", test_cursor_forward_crosses_paragraph_boundary },
     { "cursor_forward_backward_step_counts_match", test_cursor_forward_backward_step_counts_match },

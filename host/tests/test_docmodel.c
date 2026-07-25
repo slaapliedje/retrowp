@@ -203,8 +203,17 @@ void test_docmodel_pstyle_and_cstyle_set(void)
     ASSERT_TRUE(wp_paragraph_run_add(para, span, doc.default_cstyle, &run_idx) == WP_OK);
     run = wp_paragraph_run_get(para, run_idx);
 
-    wp_run_cstyle_set(run, bold_cs);
+    /* run_add above already dirtied the paragraph; clear it so this
+       asserts wp_run_cstyle_set's OWN invalidation, not a leftover. */
+    para->layout_dirty = WP_FALSE;
+    wp_run_cstyle_set(para, run_idx, bold_cs);
     ASSERT_EQ_U32(run->style, bold_cs);
+    ASSERT_EQ_U32(para->layout_dirty, WP_TRUE);
+
+    /* Out-of-range index is a no-op, not a wild write. */
+    para->layout_dirty = WP_FALSE;
+    wp_run_cstyle_set(para, (u16)(para->run_count + 5), bold_cs);
+    ASSERT_EQ_U32(para->layout_dirty, WP_FALSE);
 
     wp_document_free(&doc);
 }

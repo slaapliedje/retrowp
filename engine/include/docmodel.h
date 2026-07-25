@@ -268,6 +268,17 @@ wp_paragraph *wp_section_paragraph_get(wp_section *section, u32 index);
 wp_run       *wp_paragraph_run_get(wp_paragraph *para, u16 index);
 
 void wp_paragraph_pstyle_set(wp_paragraph *para, wp_pstyle style);
-void wp_run_cstyle_set(wp_run *run, wp_cstyle style);
+
+/* Takes the paragraph and a run INDEX rather than a wp_run* on purpose.
+   A character style carries size_twips and the bold/italic flags, all of
+   which change measured text width -- so changing one invalidates the
+   paragraph's line breaks and its layout must be rebuilt. A wp_run has
+   no way back to its owning paragraph, so the older
+   wp_run_cstyle_set(run, style) form physically could not set
+   layout_dirty and silently left every caller painting stale lines
+   (a font-size change re-measured nothing until some unrelated edit
+   happened to dirty the same paragraph). No-op if index is out of
+   range. */
+void wp_run_cstyle_set(wp_paragraph *para, u16 index, wp_cstyle style);
 
 #endif /* WP_DOCMODEL_H */

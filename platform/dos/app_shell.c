@@ -207,8 +207,17 @@ static const char g_sample_text[] =
 
 #define WP_DOS_CONFIG_PATH "C:\\RETROWP.CFG"
 
+/* Relayouts only what actually needs it: a paragraph whose layout was
+   never built (layout == NULL), one the engine marked layout_dirty (any
+   content edit -- edit.c sets it on every insert/delete), or every
+   paragraph when the column itself changed. wp_paragraph_relayout has
+   no early-out of its own (it opens fonts, tokenizes and measures
+   unconditionally -- see linebreak.c), so without this check the
+   relayout-before-every-paint below would re-measure a completely
+   unchanged document on every redraw. */
 static void relayout_document(i32 content_width_twips)
 {
+    wp_bool width_changed = (wp_bool)(content_width_twips != g_content_width_twips);
     u32 si, pi;
 
     g_content_width_twips = content_width_twips;
@@ -218,6 +227,7 @@ static void relayout_document(i32 content_width_twips)
 
         for (pi = 0; pi < pc; pi++) {
             wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            if (!width_changed && para->layout != NULL && !para->layout_dirty) continue;
             wp_paragraph_relayout(&g_doc, para, content_width_twips);
         }
     }
@@ -293,7 +303,7 @@ static void apply_current_style_to_run_at(wp_pos pos)
     style.size_twips = g_ctx.current_size_twips;
 
     if (wp_document_cstyle_find_or_add(&g_doc, &style, &handle) == WP_OK) {
-        wp_run_cstyle_set(run, handle);
+        wp_run_cstyle_set(para, (u16)pos.run, handle);
     }
 }
 
@@ -473,17 +483,43 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                 wp_line_fragment_iter_init(&iter, line);
                 while (wp_line_next_fragment(&g_doc, para, line, &iter, &frag)) {
                     wp_run *run = wp_paragraph_run_get(para, (u16)frag.run_index);
-                    const u8 *bytes = wp_strpool_get(&g_doc.strings, run->text);
+                    const u8 *bytes;
                     u32 frag_len = frag.byte_end - frag.byte_start;
+
+                    /* The layout is rebuilt from the current runs before
+                       any paint, so an out-of-range run index should be
+                       impossible here -- but this used to dereference the
+                       result unchecked, which turned any future
+                       stale-layout regression into a wild read rather than
+                       a visibly wrong glyph. Cheap insurance on the one
+                       path that walks engine-supplied indices. */
+                    if (run == NULL) continue;
+                    bytes = wp_strpool_get(&g_doc.strings, run->text);
+                    if (bytes == NULL) continue;
 
                     if (!have_font || run->style != cached_style) {
                         const wp_char_style *cs = wp_document_cstyle_get(&g_doc, run->style);
 
                         if (cs != NULL) {
-                            if (font != NULL) plat_font_close(font);
-                            plat_font_open((const u8 *)"", 0, cs->size_twips, cs->flags, &font);
-                            cached_style = run->style;
-                            have_font = WP_TRUE;
+                            /* Clear `font` between the close and the open:
+                               plat_font_open does NOT write *out when it
+                               fails (WP_NOMEM), so leaving the old value in
+                               place left a freed pointer that the
+                               plat_font_close after this loop would free a
+                               second time. Same fix applied to all four
+                               backends. */
+                            if (font != NULL) {
+                                plat_font_close(font);
+                                font = NULL;
+                            }
+                            have_font = WP_FALSE;
+                            if (plat_font_open((const u8 *)"", 0, cs->size_twips,
+                                                cs->flags, &font) == WP_OK) {
+                                cached_style = run->style;
+                                have_font = WP_TRUE;
+                            } else {
+                                font = NULL;
+                            }
                         }
                     }
 
@@ -613,13 +649,18 @@ static void redraw_screen(void)
            Without this, typed text landed in the document model (a
            real wp_run byte-level edit) but never appeared on screen:
            paint_document_body was walking a STALE para->layout that
-           simply didn't know about the new bytes yet. Relayouting the
-           whole document before every paint is not the cheapest fix
-           (wp_document_paginate's own layout_dirty check would only
-           redo the actually-edited paragraph), but it is correct, and
-           this document is short enough that the cost is not
-           observable -- a documented, deliberate simplicity choice,
-           not an oversight. */
+           simply didn't know about the new bytes yet.
+
+           This was for a long time the ONLY backend carrying the fix.
+           Atari, Amiga and Mac each kept their own version of the
+           narrower "relayout on resize or whole-document replace" gate,
+           which is blind to keystroke edits by construction -- so all
+           three silently failed to show typed text (Amiga additionally
+           rendered a row of 00 boxes, painting run/offset ranges that no
+           longer described the reshaped run array). All four now do the
+           same thing here. relayout_document itself consults
+           layout_dirty, so an unchanged document costs one flag test
+           per paragraph rather than a full re-measure. */
         relayout_document(g_content_width_twips);
         paint_document_body(DOS_DOC_TOP_ROW, DOS_DOC_BOTTOM_ROW, gc, &cursor_row, &cursor_col);
         paint_status_line(gc);

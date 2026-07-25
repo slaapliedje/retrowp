@@ -35,6 +35,13 @@ void run_remove_at(wp_paragraph *para, u16 index)
         para->runs[i] = para->runs[i + 1];
     }
     para->run_count--;
+    /* Removing a run renumbers every run after it, so any wp_line still
+       holding start_run/end_run indices now describes different runs
+       than it did -- the layout must be rebuilt before anything paints
+       it. The insert side gets this for free (run_insert_at goes
+       through wp_paragraph_run_add, which sets the flag); the remove
+       side had no such incidental path and silently skipped it. */
+    para->layout_dirty = WP_TRUE;
 }
 
 wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos *out_pos)
@@ -531,6 +538,19 @@ wp_status wp_document_delete_range_raw(wp_document *doc, u32 section,
     run = &para->runs[run_index];
 
     if (start_offset >= end_offset || end_offset > run->text.length) return WP_RANGE;
+
+    /* Every path below shortens or removes run bytes, which invalidates
+       this paragraph's line list: a wp_line records absolute
+       start_run/end_run/start_offset/end_offset, so after a delete those
+       ranges describe MORE bytes than the runs still hold. A paint loop
+       walking that stale layout doesn't merely show deleted text -- it
+       reads past the end of the shortened run's span in the string pool.
+       Marking dirty here is what makes the four backends' own
+       relayout-before-paint see the change; without it, a delete was
+       invisible to them and the out-of-bounds read stood. (Only the
+       mid-run split case below ever set the flag, and only by accident,
+       via run_insert_at.) */
+    para->layout_dirty = WP_TRUE;
 
     if (start_offset == 0 && end_offset == run->text.length) {
         run_remove_at(para, run_index);

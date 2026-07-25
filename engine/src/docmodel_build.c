@@ -145,7 +145,9 @@ void wp_paragraph_pstyle_set(wp_paragraph *para, wp_pstyle style)
     para->layout_dirty = WP_TRUE;
 }
 
-void wp_run_cstyle_set(wp_run *run, wp_cstyle style)
+void wp_run_cstyle_set(wp_paragraph *para, u16 index, wp_cstyle style)
 {
-    run->style = style;
+    if (index >= para->run_count) return;
+    para->runs[index].style = style;
+    para->layout_dirty = WP_TRUE; /* size/flags change measured width -- see docmodel.h */
 }

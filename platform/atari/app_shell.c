@@ -588,8 +588,22 @@ static const char g_sample_text[] =
     "are driven entirely through the platform.h VDI metrics seam -- "
     "the engine itself has never heard of GEM.\n";
 
+/* Relayouts only what actually needs it: a paragraph whose layout was
+   never built (layout == NULL), one the engine marked layout_dirty (any
+   content edit -- edit.c sets it on every insert/delete), or every
+   paragraph when the column itself changed (a real window resize, where
+   nothing is dirty but every line must re-break).
+
+   The dirty check is what makes calling this before EVERY paint cheap
+   enough to be the correct default: wp_paragraph_relayout has no
+   early-out of its own (it opens fonts, tokenizes and measures
+   unconditionally -- see linebreak.c), so relayouting a clean document
+   on each redraw would mean a full re-measure per keystroke on an 8MHz
+   68000. Skipping clean paragraphs reduces the steady-state cost to one
+   flag test each. */
 static void relayout_document(i32 content_width_twips)
 {
+    wp_bool width_changed = (wp_bool)(content_width_twips != g_content_width_twips);
     u32 si, pi;
 
     g_content_width_twips = content_width_twips;
@@ -597,6 +611,7 @@ static void relayout_document(i32 content_width_twips)
         wp_section *sec = wp_document_section_get(&g_doc, si);
         for (pi = 0; pi < sec->para_count; pi++) {
             wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            if (!width_changed && para->layout != NULL && !para->layout_dirty) continue;
             wp_paragraph_relayout(&g_doc, para, content_width_twips);
         }
     }
@@ -803,9 +818,20 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                 wp_line_fragment_iter_init(&iter, line);
                 while (wp_line_next_fragment(&g_doc, para, line, &iter, &frag)) {
                     wp_run *run = wp_paragraph_run_get(para, (u16)frag.run_index);
-                    const u8 *bytes = wp_strpool_get(&g_doc.strings, run->text);
+                    const u8 *bytes;
                     u32 frag_len = frag.byte_end - frag.byte_start;
                     i32 frag_width_twips = 0;
+
+                    /* The layout is rebuilt from the current runs before
+                       any paint, so an out-of-range run index should be
+                       impossible here -- but this used to dereference the
+                       result unchecked, which turned any future
+                       stale-layout regression into a wild read rather than
+                       a visibly wrong glyph. Cheap insurance on the one
+                       path that walks engine-supplied indices. */
+                    if (run == NULL) continue;
+                    bytes = wp_strpool_get(&g_doc.strings, run->text);
+                    if (bytes == NULL) continue;
 
                     if (!have_font || run->style != cached_style) {
                         const wp_char_style *cs = wp_document_cstyle_get(&g_doc, run->style);
@@ -813,12 +839,27 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                         if (cs != NULL) {
                             plat_font_metrics fm;
 
-                            if (font != NULL) plat_font_close(font);
-                            plat_font_open((const u8 *)"", 0, cs->size_twips, cs->flags, &font);
-                            plat_font_metrics_get(font, &fm);
-                            ascent_px = atari_twips_to_px_y(fm.ascent);
-                            cached_style = run->style;
-                            have_font = WP_TRUE;
+                            /* Clear `font` between the close and the open:
+                               plat_font_open does NOT write *out when it
+                               fails (WP_NOMEM), so leaving the old value in
+                               place made plat_font_metrics_get read freed
+                               memory and the plat_font_close after this loop
+                               free the same block twice. Same fix applied to
+                               all four backends. */
+                            if (font != NULL) {
+                                plat_font_close(font);
+                                font = NULL;
+                            }
+                            have_font = WP_FALSE;
+                            if (plat_font_open((const u8 *)"", 0, cs->size_twips,
+                                                cs->flags, &font) == WP_OK &&
+                                plat_font_metrics_get(font, &fm) == WP_OK) {
+                                ascent_px = atari_twips_to_px_y(fm.ascent);
+                                cached_style = run->style;
+                                have_font = WP_TRUE;
+                            } else {
+                                font = NULL;
+                            }
                         }
                     }
 
@@ -885,7 +926,7 @@ static void apply_current_style_to_run_at(wp_pos pos)
     style.size_twips = g_ctx.current_size_twips;
 
     if (wp_document_cstyle_find_or_add(&g_doc, &style, &handle) == WP_OK) {
-        wp_run_cstyle_set(run, handle);
+        wp_run_cstyle_set(para, (u16)pos.run, handle);
     }
 }
 
@@ -2975,6 +3016,24 @@ static void redraw_window(short window_handle, VdiHdl vdi)
     }
 
     wind_get_grect(window_handle, WF_WORKXYWH, &work);
+
+    /* Nothing in the engine's edit path (vimode.c/edit.c) or platform/
+       common/keymap.c relayouts a paragraph after a keystroke edits it
+       -- it only sets para->layout_dirty and leaves the rebuild to the
+       app. Before this call, only a whole-document replace (Open, Cut,
+       Paste) ever triggered relayout_document, so typed text landed in
+       the model as a real wp_run byte edit but paint_document kept
+       walking a STALE para->layout that didn't know about the new
+       bytes: on screen the document silently truncated mid-sentence and
+       the typed characters never appeared at all. Verified interactively
+       under Hatari/EmuTOS -- platform/dos/app_shell.c already carried
+       exactly this fix and exactly this comment (found there during M14
+       Phase 5 visual verification); Atari, Amiga and Mac never got it.
+       relayout_document skips clean paragraphs, so this costs one flag
+       test per paragraph on a redraw that changed nothing. */
+    if (g_ctx.doc_loaded) {
+        relayout_document(atari_px_to_twips_x((i32)work.g_w));
+    }
 
     bar_h_px = statusline_height_px();
     if (bar_h_px > work.g_h) bar_h_px = 0; /* degenerate/tiny window -- skip the bar rather

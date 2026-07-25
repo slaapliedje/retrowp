@@ -182,19 +182,25 @@ static wp_help_view_state g_help_view;
 static wp_bool           g_help_active = WP_FALSE;
 
 /* T9.2: the width (in twips) every paragraph's real wp_paragraph_layout
-   was last built against, plus a "the document itself just changed"
-   flag -- together these tell editor_draw (below) when it must call
-   relayout_document again. Unlike platform/atari/app_shell.c, which
-   knows its window's real pixel geometry the moment wind_open_grect
-   returns, a MUI Area subclass has no real size until MUI's own layout
-   pass has run (which happens only once the Application/Window is
-   actually opened) -- so relaying out eagerly right after loading a
-   document, the way Atari's replace_document does, isn't possible here.
-   Relayout instead happens lazily, the first time editor_draw sees a
-   real object width, and again whenever that width changes (a real
-   window resize) or g_needs_relayout says the document itself is new. */
+   was last built against -- lets relayout_document tell a real resize
+   (every line must re-break) apart from an ordinary redraw. Unlike
+   platform/atari/app_shell.c, which knows its window's real pixel
+   geometry the moment wind_open_grect returns, a MUI Area subclass has
+   no real size until MUI's own layout pass has run (which happens only
+   once the Application/Window is actually opened) -- so relaying out
+   eagerly right after loading a document, the way Atari's
+   replace_document does, isn't possible here. The first relayout
+   happens lazily, on the first editor_draw that sees a real width.
+
+   There used to be a companion g_needs_relayout flag meaning "the
+   document itself is new". It was removed with the stale-layout fix in
+   editor_draw: it only ever tracked whole-document REPLACEMENT, so it
+   was blind to keystroke edits -- which is precisely how that bug got
+   in. para->layout_dirty, which the engine already maintains per
+   paragraph, subsumes it and covers edits too (a freshly imported
+   document's paragraphs all start with layout == NULL, so the "new
+   document" case still forces a rebuild without a separate flag). */
 static i32 g_content_width_twips = 0;
-static wp_bool g_needs_relayout = WP_TRUE;
 
 static const char g_sample_text[] =
     "RetroWP on Amiga (M9 T9.1b)\n"
@@ -213,6 +219,7 @@ static const char g_sample_text[] =
    single redraw. */
 static void relayout_document(i32 content_width_twips)
 {
+    wp_bool width_changed = (wp_bool)(content_width_twips != g_content_width_twips);
     u32 si, pi;
 
     g_content_width_twips = content_width_twips;
@@ -220,9 +227,42 @@ static void relayout_document(i32 content_width_twips)
         wp_section *sec = wp_document_section_get(&g_amiga_doc, si);
         for (pi = 0; pi < sec->para_count; pi++) {
             wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            /* Only what actually needs it: never-built (layout == NULL),
+               engine-marked dirty (any content edit -- edit.c sets it on
+               every insert/delete), or every paragraph when the column
+               itself changed (a real resize, where nothing is dirty but
+               every line must re-break). wp_paragraph_relayout has no
+               early-out of its own (linebreak.c measures unconditionally),
+               so this check is what makes calling relayout_document
+               before every paint affordable. */
+            if (!width_changed && para->layout != NULL && !para->layout_dirty) continue;
             wp_paragraph_relayout(&g_amiga_doc, para, content_width_twips);
         }
     }
+}
+
+/* Rebuilds the layout of whatever the engine just marked dirty, to be
+   called after ANY edit and before the repaint that follows it.
+
+   This is deliberately NOT done inside editor_draw. Doing it there is
+   what platform/dos/app_shell.c does (its paint is a plain text-cell
+   write with no toolkit underneath), but on Amiga it crashed the app
+   outright: RETROWP died with "Program failed (error #80000004)" --
+   an illegal-instruction trap -- on the first keystroke, reproducibly.
+   wp_paragraph_relayout allocates and opens/measures/closes fonts
+   through the metrics seam, and running all of that from inside a MUI
+   Area subclass's own MUIM_Draw is not safe. Relayouting here instead
+   -- in the event handler, before MUI_Redraw -- keeps Draw a pure
+   painter, which is what MUI expects of it.
+
+   Safe to call before the first real draw: g_content_width_twips is 0
+   until editor_draw has seen a real object width, and this no-ops in
+   that case (editor_draw does that first layout itself). */
+static void amiga_relayout_after_edit(void)
+{
+    if (!g_ctx.doc_loaded) return;
+    if (g_content_width_twips <= 0) return; /* no real width known yet */
+    relayout_document(g_content_width_twips);
 }
 
 static void set_document_from_text(const u8 *utf8, u32 len)
@@ -242,7 +282,9 @@ static void set_document_from_text(const u8 *utf8, u32 len)
     wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id, &g_amiga_doc, &g_amiga_journal);
     (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_start(&g_amiga_doc);
     g_ctx.doc_loaded = WP_TRUE;
-    g_needs_relayout = WP_TRUE; /* new paragraphs -- see this flag's own comment */
+    /* No "document is new" flag to set: every paragraph format_txt_import
+       just built has layout == NULL, which relayout_document already
+       treats as needing a rebuild -- see g_content_width_twips's comment. */
 }
 
 static void load_sample_document(void)
@@ -1413,19 +1455,22 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     /* Real per-object pixel width, converted through the SAME twips<->px
        ratio metrics_amiga.c uses for measurement (T9.2's actual point:
        "on-screen wrap matches engine layout" only holds if layout and
-       paint agree on this number). Relayout only when it actually
-       changes (a real resize) or the document itself just changed --
-       see g_needs_relayout's own comment; MUI has no equivalent of
-       Atari's wind_open-time-known geometry, so this can't happen any
-       earlier than the first real Draw. */
+       paint agree on this number). MUI has no equivalent of Atari's
+       wind_open-time-known geometry, so the first relayout can't happen
+       any earlier than the first real Draw. */
     content_width_px = (i32)(_mright(obj) - _mleft(obj) + 1)
                         - WP_EDITOR_LEFT_MARGIN_PX - WP_EDITOR_RIGHT_MARGIN_PX;
     if (content_width_px < WP_EDITOR_MIN_CONTENT_PX) content_width_px = WP_EDITOR_MIN_CONTENT_PX;
     content_width_twips = amiga_px_to_twips_x(content_width_px);
 
-    if (g_needs_relayout || content_width_twips != g_content_width_twips) {
+    /* Layout happens here ONLY for the two cases that can't be handled
+       anywhere else: the very first draw (before which this object has
+       no real width at all) and a genuine resize. Edit-driven relayout
+       deliberately does NOT happen inside Draw -- see
+       amiga_relayout_after_edit's own comment for the crash that
+       caused. */
+    if (g_content_width_twips == 0 || content_width_twips != g_content_width_twips) {
         relayout_document(content_width_twips);
-        g_needs_relayout = WP_FALSE;
     }
 
     gc.rp = _rp(obj);
@@ -1532,9 +1577,20 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                 wp_line_fragment_iter_init(&iter, line);
                 while (wp_line_next_fragment(&g_amiga_doc, para, line, &iter, &frag)) {
                     wp_run *run = wp_paragraph_run_get(para, (u16)frag.run_index);
-                    const u8 *bytes = wp_strpool_get(&g_amiga_doc.strings, run->text);
+                    const u8 *bytes;
                     u32 frag_len = frag.byte_end - frag.byte_start;
                     i32 frag_width_twips = 0;
+
+                    /* The layout is rebuilt from the current runs before
+                       any paint, so an out-of-range run index should be
+                       impossible here -- but this used to dereference the
+                       result unchecked, which turned any future
+                       stale-layout regression into a wild read rather than
+                       a visibly wrong glyph. Cheap insurance on the one
+                       path that walks engine-supplied indices. */
+                    if (run == NULL) continue;
+                    bytes = wp_strpool_get(&g_amiga_doc.strings, run->text);
+                    if (bytes == NULL) continue;
 
                     if (!have_font || run->style != cached_style) {
                         const wp_char_style *cs = wp_document_cstyle_get(&g_amiga_doc, run->style);
@@ -1542,12 +1598,32 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                         if (cs != NULL) {
                             plat_font_metrics fm;
 
-                            if (font != NULL) plat_font_close(font);
-                            plat_font_open((const u8 *)"", 0, cs->size_twips, cs->flags, &font);
-                            plat_font_metrics_get(font, &fm);
-                            ascent_px = amiga_twips_to_px_y(fm.ascent);
-                            cached_style = run->style;
-                            have_font = WP_TRUE;
+                            /* Clear `font` between the close and the open.
+                               plat_font_open does NOT write *out when it
+                               fails (WP_NOMEM), so the old code left `font`
+                               pointing at the font it had just closed:
+                               plat_font_metrics_get then read freed memory,
+                               and the plat_font_close after the paint loop
+                               freed the same block a second time. A double
+                               free corrupts the allocator's own structures,
+                               which on AmigaOS takes down whatever task
+                               allocates next -- not necessarily this one.
+                               (Observed: "«IPrefs» Program failed (error
+                               #80000004)" while typing in RetroWP.) */
+                            if (font != NULL) {
+                                plat_font_close(font);
+                                font = NULL;
+                            }
+                            have_font = WP_FALSE;
+                            if (plat_font_open((const u8 *)"", 0, cs->size_twips,
+                                                cs->flags, &font) == WP_OK &&
+                                plat_font_metrics_get(font, &fm) == WP_OK) {
+                                ascent_px = amiga_twips_to_px_y(fm.ascent);
+                                cached_style = run->style;
+                                have_font = WP_TRUE;
+                            } else {
+                                font = NULL; /* nothing valid to draw or free with */
+                            }
                         }
                     }
 
@@ -1589,6 +1665,7 @@ static ULONG editor_handleevent(struct IClass *cl, Object *obj, struct MUIP_Hand
 
     translate_rawkey(msg->imsg, &ev);
     quit = amiga_dispatch_key(ev);
+    amiga_relayout_after_edit();
     MUI_Redraw(obj, MADF_DRAWOBJECT);
     if (quit) {
         DoMethod(_app(obj), MUIM_Application_ReturnID, (LONG)MUIV_Application_ReturnID_Quit);
@@ -1904,6 +1981,11 @@ void app_shell_run(void)
                        an Atari-style sync_format_check, say -- would
                        silently not apply to menu picks. Call it. */
                     invoke_action(act_id);
+                    /* Same reason the keyboard path calls this: Cut,
+                       Paste and Alignment all mutate the document, and
+                       Draw is not allowed to relayout on this backend.
+                       See amiga_relayout_after_edit. */
+                    amiga_relayout_after_edit();
                     MUI_Redraw(g_editor, MADF_DRAWOBJECT);
                     if (g_ctx.quit_requested) break;
                 }
