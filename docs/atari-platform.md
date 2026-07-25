@@ -1943,3 +1943,72 @@ notes), real TOS 1.04 shows heavy red/green vertical striping. It is
 pre-fix binary, never reproduces on EmuTOS, and does not occur at all
 when the same session is driven with plain (non-Alt) arrow keys. Treat
 it as an artifact of that input path on TOS 1.04, not as a regression.
+
+## Multitasking gate: FreeMiNT + XaAES under ARAnyM (AFROS)
+
+`ci_atari_matrix.sh` covers six real TOS/EmuTOS versions, and every one
+of them is single-tasking. That is a structural blind spot, not a
+coverage gap that more TOS images would close. `host/tools/ci_afros.sh`
+boots the same `SMOKE.PRG` under ARAnyM running AFROS (FreeMiNT + XaAES
++ fVDI) to cover three things the single-TOS matrix cannot express:
+
+- **AES discipline.** Omitting `wind_update(BEG_UPDATE/END_UPDATE)` or
+  `graf_mouse(M_OFF/M_ON)` around drawing is merely *cosmetic* under
+  plain TOS -- it corrupts the AES cursor save-under, i.e. "mouse
+  droppings", which is exactly how that bug was found here (see the
+  menu-bar section above). Under a multitasking AES the same omission is
+  a correctness bug: another process can draw into the window
+  mid-paint, and unbalanced BEG/END can wedge the screen semaphore. The
+  fix shipped against the single-TOS symptom; this is what actually
+  exercises the reason for it.
+- **Real colour depth and resolution.** AFROS ships fVDI configured for
+  ARAnyM, so 8/16-bit and large screens are reachable. The Atari colour
+  path is a nearest-match into a small fixed palette and has never run
+  above 4 bitplanes; `plat_draw_image` still assumes ST-low ceilings.
+- **Memory protection.** `MEM_PROT=YES` in the environment turns on
+  MiNT's MMU-backed process isolation, which catches handing private
+  memory to another process (an OBJECT tree to XaAES, buffers via
+  scrap/AV). Plain TOS has no such concept at all. This is a *runtime*
+  BootstrapArgs knob -- no `--enable-fullmmu` ARAnyM rebuild needed.
+
+The smoke binary needs no changes: ARAnyM implements the same Native
+Features interface Hatari does, so `NF_STDERR`/`NF_EXIT` still make the
+emulator process exit with the smoke's own status, and this stays an
+exit-code harness rather than a log-scraping one. Verified in both
+directions -- all 23 checks pass under XaAES with and without MEM_PROT,
+and deliberately breaking one selfcheck constant produces
+`AFROS CI: FAILED (exit 1)`.
+
+The smoke is launched from XaAES's own `run` list, not from `mint.cnf`.
+`mint.cnf` executes during kernel init, *before* the AES exists, which
+would run every selfcheck single-tasking and quietly defeat the point.
+
+### Why AFROS rather than a hand-built MiNT install
+
+Two things make rolling your own painful, and AFROS solves both:
+
+- ARAnyM's HostFS is provided by MiNT's `hostfs.xfs`, but MiNT itself
+  lives on the HostFS drive -- a genuine chicken-and-egg. AFROS boots
+  the kernel through ARAnyM's own NF bootstrap call
+  (`Bootstrap = system/mintara.prg`) and side-steps it entirely. Going
+  the other way needs a bootable AHDI-partitioned disk image; a bare
+  FAT16 image is not enough (TOS wants an Atari partition table, not
+  MBR), and `atari-hd-image` plus explicit geometry still did not
+  enumerate here.
+- fVDI has to match the emulated hardware. Lifting a real-hardware
+  install is not sufficient: an attempt to reuse a Vampire/SAGA setup
+  failed because its only fVDI driver was `saga.sys`, which does not
+  exist under ARAnyM. AFROS ships a driver built for it.
+
+AFROS also ships a working `emutos-aranym.img`. Worth knowing
+separately: the image at `~/.aranym/emutos-aranym.img` on the
+development machine bus-errors at boot (`addr=00e00000`), reproducibly,
+with an untouched config and no fixture involved -- an environment
+problem unrelated to this project.
+
+The gate is deliberately NOT folded into `ci_atari_matrix.sh`: it asks a
+different question and boots a whole operating system rather than a
+single `.PRG`. It reaches a full XaAES desktop in under 35 seconds,
+though, so it is cheap enough to run per-change rather than nightly. It
+skips cleanly with a pointer to the project if no AFROS install is
+present (`AFROS_FIXTURE`, default `~/src/afros`).
