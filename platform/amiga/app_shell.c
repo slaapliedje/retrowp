@@ -1057,12 +1057,26 @@ static void do_grammar_check(void)
 
 static void invoke_backend_action(wp_action_id id)
 {
+    /* Every Help entry opens the same document at a different node, so
+       they share one arm keyed off the shared registry's own mapping
+       rather than growing a case per node -- see actions.h for why that
+       mapping lives in platform/common rather than being repeated here,
+       on Mac, on DOS and on Atari. */
+    {
+        u32 node_len = 0;
+        const char *node = wp_action_help_node(id, &node_len);
+
+        if (node != NULL) {
+            open_help_node(node, node_len);
+            return;
+        }
+    }
+
     switch (id) {
     case WP_ACT_FILE_OPEN:      do_file_open(); break;
     case WP_ACT_FILE_SAVE:      do_file_save(); break;
     case WP_ACT_EDIT_CUT:       do_edit_cut(); break;
     case WP_ACT_EDIT_PASTE:     do_edit_paste(); break;
-    case WP_ACT_HELP_CONTENTS:  do_help_contents(); break;
     case WP_ACT_TOOLS_THESAURUS:    do_thesaurus(); break;
     case WP_ACT_TOOLS_GRAMMARCHECK: do_grammar_check(); break;
     case WP_ACT_TOOLS_CHAT:         do_chat(); break;

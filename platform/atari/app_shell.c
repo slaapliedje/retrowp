@@ -120,13 +120,14 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     /* next,                    head,                   tail,                   type,     flags,       state,       spec, x,  y, w,  h */
     { -1,                        WP_MENU_OBJ_BAR,         WP_MENU_OBJ_DROPDOWNS,  G_IBOX,   OF_NONE,     OS_NORMAL,   {0}, 0,  0, 40, 1 },
     { WP_MENU_OBJ_DROPDOWNS,     WP_MENU_OBJ_ACTIVE,      WP_MENU_OBJ_ACTIVE,     G_BOX,    OF_NONE,     OS_NORMAL,   {0}, 0,  0, 40, 1 },
-    { WP_MENU_OBJ_BAR,           WP_MENU_OBJ_DESK_TITLE,  WP_MENU_OBJ_FORMAT_TITLE, G_BOX,  OF_NONE,     OS_NORMAL,   {0}, 0,  0, 40, 1 },
+    { WP_MENU_OBJ_BAR,           WP_MENU_OBJ_DESK_TITLE,  WP_MENU_OBJ_HELP_TITLE,   G_BOX,  OF_NONE,     OS_NORMAL,   {0}, 0,  0, 40, 1 },
     { WP_MENU_OBJ_FILE_TITLE,    -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 0,  0, 6,  1 },
     { WP_MENU_OBJ_EDIT_TITLE,    -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 6,  0, 6,  1 },
     { WP_MENU_OBJ_TOOLS_TITLE,   -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 12, 0, 6,  1 },
     { WP_MENU_OBJ_FORMAT_TITLE,  -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 18, 0, 7,  1 },
-    { WP_MENU_OBJ_ACTIVE,        -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 25, 0, 8,  1 },
-    { WP_MENU_OBJ_ROOT,          WP_MENU_OBJ_DESK_BOX,    WP_MENU_OBJ_FORMAT_BOX, G_IBOX,   OF_NONE,     OS_NORMAL,   {0}, 0,  1, 40, 8 },
+    { WP_MENU_OBJ_HELP_TITLE,    -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 25, 0, 8,  1 },
+    { WP_MENU_OBJ_ACTIVE,        -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   {0}, 33, 0, 6,  1 },
+    { WP_MENU_OBJ_ROOT,          WP_MENU_OBJ_DESK_BOX,    WP_MENU_OBJ_HELP_BOX,   G_IBOX,   OF_NONE,     OS_NORMAL,   {0}, 0,  1, 40, 8 },
     { WP_MENU_OBJ_FILE_BOX,      WP_MENU_OBJ_DESK_ABOUT,  WP_MENU_OBJ_DESK_DUMMY6, G_BOX,   OF_NONE    , OS_NORMAL,   {0}, 0,  0, 20, 8 },
     { WP_MENU_OBJ_DESK_SEP,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 20, 1 },
     { WP_MENU_OBJ_DESK_DUMMY1,   -1,                      -1,                     G_STRING, OF_NONE,     OS_DISABLED, {0}, 0,  1, 20, 1 },
@@ -149,7 +150,7 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, -1,                 -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 16, 1 },
     { WP_MENU_OBJ_TOOLS_CHAT,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 16, 1 },
     { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  3, 16, 1 },
-    { WP_MENU_OBJ_DROPDOWNS,     WP_MENU_OBJ_FORMAT_BOLD, WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, G_BOX, OF_NONE    , OS_NORMAL, {0}, 25, 0, 16, 8 },
+    { WP_MENU_OBJ_HELP_BOX,      WP_MENU_OBJ_FORMAT_BOLD, WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, G_BOX, OF_NONE    , OS_NORMAL, {0}, 25, 0, 16, 8 },
     { WP_MENU_OBJ_FORMAT_ITALIC, -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 16, 1 },
     { WP_MENU_OBJ_FORMAT_UNDERLINE, -1,                   -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 16, 1 },
     { WP_MENU_OBJ_FORMAT_SIZE_UP, -1,                     -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 16, 1 },
@@ -157,7 +158,18 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_FORMAT_ALIGN_LEFT, -1,                  -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  4, 16, 1 },
     { WP_MENU_OBJ_FORMAT_ALIGN_CENTER, -1,                -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  5, 16, 1 },
     { WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, -1,                 -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  6, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_BOX,    -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  7, 16, 1 }
+    { WP_MENU_OBJ_FORMAT_BOX,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  7, 16, 1 },
+    /* Help's dropdown box and items. The TITLE is NOT here -- it sits up
+       with the other titles at array index 8, and it has to: see
+       WP_MENU_OBJ_HELP_TITLE's own comment for the index arithmetic the
+       AES does. Box x=33 repeats its title's x so it falls directly
+       underneath, the same rule every other box follows. OF_LASTOB lives
+       on the final array entry and nowhere else -- it moved off Align
+       Right when these were added. */
+    { WP_MENU_OBJ_DROPDOWNS,     WP_MENU_OBJ_HELP_CONTENTS, WP_MENU_OBJ_HELP_FORMAT, G_BOX, OF_NONE,     OS_NORMAL,   {0}, 33, 0, 15, 3 },
+    { WP_MENU_OBJ_HELP_KEYS,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 15, 1 },
+    { WP_MENU_OBJ_HELP_FORMAT,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 15, 1 },
+    { WP_MENU_OBJ_HELP_BOX,      -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  2, 15, 1 }
 };
 
 static char g_text_desk[]  = " Desk ";
@@ -183,6 +195,16 @@ static char g_text_size_down[] = "  Size -";
 static char g_text_align_left[] = "  Align Left";
 static char g_text_align_center[] = "  Align Center";
 static char g_text_align_right[] = "  Align Right";
+static char g_text_help[] = " Help ";
+/* Labels come from the shared registry (g_wp_actions[].label_utf8), not
+   from these buffers -- these carry this backend's own two-space menu-
+   item indent, which is a GEM presentation convention the portable table
+   has no business knowing about. wp_menu_tree_selfcheck asserts the
+   registry label appears inside each one, so a label renamed in
+   actions.c cannot leave a stale string sitting in the ST's menu. */
+static char g_text_help_contents[] = "  Contents";
+static char g_text_help_keys[] = "  Editing Keys";
+static char g_text_help_format[] = "  Format Keys";
 
 /* Desk dropdown: an app-defined item, a disabled separator, then 6
    AES-reserved dummy slots (see app_shell_internal.h's block comment --
@@ -229,6 +251,10 @@ void wp_menu_tree_init(short wcell, short hcell,
     wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_LEFT].ob_spec.free_string = g_text_align_left;
     wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_CENTER].ob_spec.free_string = g_text_align_center;
     wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_spec.free_string = g_text_align_right;
+    wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_spec.free_string = g_text_help;
+    wp_menu_tree[WP_MENU_OBJ_HELP_CONTENTS].ob_spec.free_string = g_text_help_contents;
+    wp_menu_tree[WP_MENU_OBJ_HELP_KEYS].ob_spec.free_string = g_text_help_keys;
+    wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT].ob_spec.free_string = g_text_help_format;
     wp_menu_tree[WP_MENU_OBJ_DESK_ABOUT].ob_spec.free_string = g_text_desk_about;
     wp_menu_tree[WP_MENU_OBJ_DESK_SEP].ob_spec.free_string = g_text_desk_sep;
     wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY1].ob_spec.free_string = g_text_desk_dummy1;
@@ -250,6 +276,7 @@ void wp_menu_tree_init(short wcell, short hcell,
     wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_spec.index   = WP_MENU_BOX_OBSPEC;
     wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_spec.index  = WP_MENU_BOX_OBSPEC;
     wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_spec.index = WP_MENU_BOX_OBSPEC;
+    wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_spec.index    = WP_MENU_BOX_OBSPEC;
 
     /* Scale the whole tree from the array literal's logical
        character-cell units into real pixels -- see this function's own
@@ -318,6 +345,26 @@ static wp_bool child_chain_ok(short parent)
     return WP_FALSE; /* budget exhausted -- cycle or chain never reaches tail */
 }
 
+/* Number of selectable leaf items across all six dropdowns. The Desk
+   separator and the six AES-reserved dummy slots are leaves too but are
+   never dispatched, so they are excluded here and counted separately.
+
+   Still a hard-coded constant, but it now guards less than it used to:
+   dispatch is a table (g_menu_actions) rather than a hand-written
+   switch, and menu_action_map_selfcheck walks that table against both
+   the tree and the registry. What this count still catches is the case
+   neither of those can -- a leaf added to the tree that is in NEITHER
+   the table nor the local-item list, i.e. drawn, highlightable, and
+   silently inert. Bumping it remains the prompt to go wire the item up. */
+#define WP_ATARI_MENU_TITLES              6   /* Desk File Edit Tools Format Help */
+#define WP_ATARI_MENU_DISPATCHED_LEAVES  22   /* About + 3 File + 3 Edit + 4 Tools + 8 Format + 3 Help */
+#define WP_ATARI_MENU_INERT_LEAVES        7   /* separator + 6 AES-reserved Desk slots */
+
+/* Defined next to the dispatch table it validates, far below -- this
+   selfcheck runs it as its last step so a tree that is structurally
+   perfect but wired to nothing still fails. */
+static wp_bool menu_action_map_selfcheck(void);
+
 wp_bool wp_menu_tree_selfcheck(void)
 {
     /* OF_LASTOB means "last object in the TREE", singular -- Atari
@@ -354,11 +401,13 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (!child_chain_ok(WP_MENU_OBJ_EDIT_BOX)) return WP_FALSE;
     if (!child_chain_ok(WP_MENU_OBJ_TOOLS_BOX)) return WP_FALSE;
     if (!child_chain_ok(WP_MENU_OBJ_FORMAT_BOX)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_HELP_BOX)) return WP_FALSE;
 
     /* ROOT -> BAR (ob_head), DROPDOWNS (ob_tail). */
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_next != -1) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_head != WP_MENU_OBJ_BAR) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_tail != WP_MENU_OBJ_DROPDOWNS) return WP_FALSE;
+    if (WP_MENU_OBJ_ROOT != 0) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_type != G_IBOX) return WP_FALSE;
 
     /* BAR -> ACTIVE, its only child. menu_bar() draws index 1's subtree,
@@ -373,7 +422,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     /* ACTIVE -> Desk/File/Edit/Tools/Format titles, in on-screen order. */
     if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_next != WP_MENU_OBJ_BAR) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_head != WP_MENU_OBJ_DESK_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_tail != WP_MENU_OBJ_FORMAT_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_tail != WP_MENU_OBJ_HELP_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_type != G_BOX) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_next != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
@@ -394,16 +443,71 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_type != G_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_spec.free_string != g_text_tools) return WP_FALSE;
 
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_next != WP_MENU_OBJ_ACTIVE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_next != WP_MENU_OBJ_HELP_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_type != G_TITLE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_spec.free_string != g_text_format) return WP_FALSE;
+
+    /* Help is the last title, so its ob_next closes the ring back to the
+       parent -- the same "last sibling points at its parent" rule every
+       other chain here ends with. Getting this wrong is not a visual
+       glitch: the AES walks siblings until it sees the parent index, so
+       a wrong value here is an unterminated walk. */
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_next != WP_MENU_OBJ_ACTIVE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_head != -1) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_tail != -1) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_type != G_TITLE) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_spec.free_string != g_text_help) return WP_FALSE;
+
+    /* THE TITLES MUST BE CONTIGUOUS ARRAY INDICES FROM DESK_TITLE, in
+       menu-bar order. The AES locates a title's dropdown box by walking
+       DROPDOWNS's child chain (ititle - THEACTIVE - 1) times -- array
+       index arithmetic on the title itself, with no link involved (see
+       WP_MENU_OBJ_HELP_TITLE's comment for how this was learned). A
+       title placed anywhere else keeps every chain valid and every other
+       assertion here green, while silently addressing the wrong box or
+       running off the end of the chain. Asserted as arithmetic on the
+       whole run so inserting a seventh title in the wrong place fails
+       here instead of on someone's screen. */
+    if (WP_MENU_OBJ_DESK_TITLE != WP_MENU_OBJ_ACTIVE + 1) return WP_FALSE;
+    if (WP_MENU_OBJ_FILE_TITLE != WP_MENU_OBJ_DESK_TITLE + 1) return WP_FALSE;
+    if (WP_MENU_OBJ_EDIT_TITLE != WP_MENU_OBJ_FILE_TITLE + 1) return WP_FALSE;
+    if (WP_MENU_OBJ_TOOLS_TITLE != WP_MENU_OBJ_EDIT_TITLE + 1) return WP_FALSE;
+    if (WP_MENU_OBJ_FORMAT_TITLE != WP_MENU_OBJ_TOOLS_TITLE + 1) return WP_FALSE;
+    if (WP_MENU_OBJ_HELP_TITLE != WP_MENU_OBJ_FORMAT_TITLE + 1) return WP_FALSE;
+
+    /* And the same count of boxes, in the same order, since that walk
+       pairs the Nth title with the Nth box positionally. */
+    {
+        short t = WP_MENU_OBJ_DESK_TITLE;
+        short b = wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_head;
+        short n = 0;
+
+        while (t != WP_MENU_OBJ_ACTIVE && n <= WP_MENU_OBJ_COUNT) {
+            if (b < 0 || b >= WP_MENU_OBJ_COUNT) return WP_FALSE;
+            /* Each box must sit under its own title. */
+            if (wp_menu_tree[b].ob_x != wp_menu_tree[t].ob_x) return WP_FALSE;
+            t = wp_menu_tree[t].ob_next;
+            b = wp_menu_tree[b].ob_next;
+            n++;
+        }
+        if (n != WP_ATARI_MENU_TITLES) return WP_FALSE;
+        /* Both chains must close on their own parent at the same step. */
+        if (b != WP_MENU_OBJ_DROPDOWNS) return WP_FALSE;
+    }
+
+    /* Titles must not overlap, or two of them highlight as one region.
+       Checked as a chain rather than against hardcoded x values so it
+       keeps holding at any cell width. */
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_x <
+        wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_x +
+        wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_width) return WP_FALSE;
 
     /* DROPDOWNS -> one G_BOX per title, same left-to-right order, each
        structurally unreachable from BAR's subtree (see the tree's own
        top-of-file comment for why that's the actual fix). */
     if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_next != WP_MENU_OBJ_ROOT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_head != WP_MENU_OBJ_DESK_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_tail != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_tail != WP_MENU_OBJ_HELP_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_type != G_IBOX) return WP_FALSE;
 
     /* Desk's dropdown: exactly 8 children (About, disabled separator, 6
@@ -486,7 +590,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_spec.free_string != g_text_chat) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
 
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_next != WP_MENU_OBJ_DROPDOWNS) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_next != WP_MENU_OBJ_HELP_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_head != WP_MENU_OBJ_FORMAT_BOLD) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_tail != WP_MENU_OBJ_FORMAT_ALIGN_RIGHT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_type != G_BOX) return WP_FALSE;
@@ -509,27 +613,39 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_CENTER].ob_spec.free_string != g_text_align_center) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_next != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_spec.free_string != g_text_align_right) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    /* Align Right used to carry OF_LASTOB as the final array entry. The
+       Help objects are now the final entries, so it must NOT -- the
+       whole-array count above already proves there is exactly one, but
+       this pins WHICH object lost it, since a stray extra here is the
+       exact shape of the bug that once hid every dropdown from the AES. */
+    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_next != WP_MENU_OBJ_DROPDOWNS) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_head != WP_MENU_OBJ_HELP_CONTENTS) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_tail != WP_MENU_OBJ_HELP_FORMAT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_type != G_BOX) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_x) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_CONTENTS].ob_next != WP_MENU_OBJ_HELP_KEYS) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_CONTENTS].ob_spec.free_string != g_text_help_contents) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_KEYS].ob_next != WP_MENU_OBJ_HELP_FORMAT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_KEYS].ob_spec.free_string != g_text_help_keys) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT].ob_next != WP_MENU_OBJ_HELP_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT].ob_spec.free_string != g_text_help_format) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+
+    /* Every item this menu bar shows must resolve to a real action, and
+       every action the shared registry files under a group this backend
+       builds must appear somewhere in the tree. Proving both directions
+       is the point of routing dispatch through the registry at all --
+       one direction alone still permits a menu item that dispatches
+       nothing, or a registered action no ST user can ever reach. */
+    if (!menu_action_map_selfcheck()) return WP_FALSE;
 
     return WP_TRUE;
 }
 
-/* Number of selectable leaf items across all five dropdowns: About, the
-   3 File items, 3 Edit, 4 Tools, 8 Format. The Desk separator and the
-   six AES-reserved dummy slots are leaves too but are never dispatched,
-   so they are excluded here and counted separately below.
-
-   This is deliberately a hard-coded constant. wp_dispatch_message's
-   MN_SELECTED handler is a hand-written switch on raw object indices
-   (see task "route dispatch through the action registry"), so nothing
-   in the program can enumerate which objects have a case. What this
-   constant CAN do is fail the moment someone adds a menu item without
-   revisiting that switch -- which is the realistic way an item ends up
-   drawn, highlightable, and silently inert. Bumping it is the prompt to
-   go add the dispatch case. */
-#define WP_ATARI_MENU_TITLES              5   /* Desk File Edit Tools Format */
-#define WP_ATARI_MENU_DISPATCHED_LEAVES  19   /* About + 3 File + 3 Edit + 4 Tools + 8 Format */
-#define WP_ATARI_MENU_INERT_LEAVES        7   /* separator + 6 AES-reserved Desk slots */
 
 wp_bool wp_atari_menu_selfcheck(void)
 {
@@ -1159,7 +1275,20 @@ static wp_bool str_ends_with_ci(const char *s, const char *suffix)
     return WP_TRUE;
 }
 
+/* 9600 with no flow control is the deliberately conservative default: it
+   is what the 1MB plain-TOS baseline (CLAUDE.md rule 5) can keep up with
+   through a polled BIOS AUX device, and it assumes nothing about the
+   cable beyond TX/RX/GND. It is a DEFAULT, not a ceiling -- Rsconf()
+   itself tops out at 19200 (transport_atari.c documents why), and a
+   machine with a properly wired RTS/CTS cable can ask for handshaking:
+
+       -DWP_ATARI_OFFLOAD_ENDPOINT='"serial:aux:19200:hard"'
+
+   Both ends must agree out of band; there is no baud negotiation in the
+   protocol (docs/atari-platform.md). */
+#ifndef WP_ATARI_OFFLOAD_ENDPOINT
 #define WP_ATARI_OFFLOAD_ENDPOINT "serial:aux:9600"
+#endif
 
 static wp_bool g_offload_init_attempted = WP_FALSE;
 
@@ -3445,13 +3574,38 @@ static void sync_format_check(wp_action_id id)
    docs/atari-platform.md), and this action doesn't need it: a real
    keyboard shortcut reaches it just as well, the same mitigation
    T8.5.7's own dialog actions already used for the same reason. */
-static void invoke_backend_action(wp_action_id id)
+/* Defined below, next to the F1 path that was its only caller before the
+   Help menu existed. Forward-declared rather than moved so this change
+   does not reshuffle unrelated code. */
+static void open_help_node(short window_handle, VdiHdl vdi,
+                            const char *node_name, u32 node_name_len);
+
+static void invoke_backend_action(short window_handle, VdiHdl vdi, wp_action_id id)
 {
+    const char *node;
+    u32 node_len = 0;
+
+    /* The three Help entries differ only by which node of the one help
+       document they open, so they share a single arm rather than three
+       near-identical ones. The node name comes from the shared registry
+       (wp_action_help_node) so all four backends open the same node for
+       the same action -- see actions.h for why that mapping is not
+       repeated per backend. */
+    node = wp_action_help_node(id, &node_len);
+    if (node != NULL) {
+        open_help_node(window_handle, vdi, node, node_len);
+        return;
+    }
+
     switch (id) {
     case WP_ACT_FILE_OPEN:         do_file_open(); break;
     case WP_ACT_FILE_SAVE:         do_file_save(); break;
     case WP_ACT_EDIT_CUT:          do_edit_cut(); break;
     case WP_ACT_EDIT_PASTE:        do_edit_paste(); break;
+    case WP_ACT_TOOLS_SPELLCHECK:  do_spell_check(); break;
+    case WP_ACT_TOOLS_THESAURUS:   do_thesaurus(); break;
+    case WP_ACT_TOOLS_GRAMMARCHECK: do_grammar_check(); break;
+    case WP_ACT_TOOLS_CHAT:        do_chat(); break;
     case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
     default: break;
     }
@@ -3495,7 +3649,7 @@ static void open_help_node(short window_handle, VdiHdl vdi,
    Atari-specific menu-checkmark sync) -- now the one place that logic
    lives, shared between that fallback (inside wp_keymap_feed_key's own
    VI arm) and any other scheme's WP_KEYMAP_RESULT_ACTION outcome. */
-static void invoke_action(wp_action_id id)
+static void invoke_action(short window_handle, VdiHdl vdi, wp_action_id id)
 {
     const wp_action *act = wp_action_find(id);
 
@@ -3508,7 +3662,7 @@ static void invoke_action(wp_action_id id)
         act->handler(&g_ctx);
         sync_format_check(id);
     } else {
-        invoke_backend_action(id);
+        invoke_backend_action(window_handle, vdi, id);
     }
 }
 
@@ -3558,7 +3712,7 @@ wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key, short kstate
         do_file_save();
         return WP_TRUE;
     case WP_KEYMAP_RESULT_ACTION:
-        invoke_action((wp_action_id)outcome.action_id);
+        invoke_action(window_handle, vdi, (wp_action_id)outcome.action_id);
         break;
     default:
         break;
@@ -3570,83 +3724,184 @@ wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key, short kstate
     return WP_FALSE;
 }
 
+/* Menu item -> registry action. This replaced a hand-written switch that
+   duplicated, case for case, the dispatch wp_dispatch_key already did
+   through invoke_action() -- the exact duplication M8.5 introduced the
+   action registry to end, which this backend (the registry's own
+   birthplace) had never actually adopted for its menu path. The two
+   copies had already drifted: the menu arm redrew after some actions and
+   not others, and Spell/Thesaurus/Grammar/Chat were reachable ONLY from
+   the menu, never from invoke_action, so no keymap scheme could ever
+   expose them.
+
+   A table, not a switch, so menu_action_map_selfcheck below can walk it
+   and prove both directions of the mapping on target. */
+typedef struct {
+    short obj;
+    wp_action_id action;
+} wp_menu_action_pair;
+
+static const wp_menu_action_pair g_menu_actions[] = {
+    { WP_MENU_OBJ_FILE_OPEN,          WP_ACT_FILE_OPEN },
+    { WP_MENU_OBJ_FILE_SAVE,          WP_ACT_FILE_SAVE },
+    { WP_MENU_OBJ_FILE_QUIT,          WP_ACT_FILE_QUIT },
+    { WP_MENU_OBJ_EDIT_CUT,           WP_ACT_EDIT_CUT },
+    { WP_MENU_OBJ_EDIT_COPY,          WP_ACT_EDIT_COPY },
+    { WP_MENU_OBJ_EDIT_PASTE,         WP_ACT_EDIT_PASTE },
+    { WP_MENU_OBJ_TOOLS_SPELLCHECK,   WP_ACT_TOOLS_SPELLCHECK },
+    { WP_MENU_OBJ_TOOLS_THESAURUS,    WP_ACT_TOOLS_THESAURUS },
+    { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, WP_ACT_TOOLS_GRAMMARCHECK },
+    { WP_MENU_OBJ_TOOLS_CHAT,         WP_ACT_TOOLS_CHAT },
+    { WP_MENU_OBJ_FORMAT_BOLD,        WP_ACT_FORMAT_BOLD },
+    { WP_MENU_OBJ_FORMAT_ITALIC,      WP_ACT_FORMAT_ITALIC },
+    { WP_MENU_OBJ_FORMAT_UNDERLINE,   WP_ACT_FORMAT_UNDERLINE },
+    { WP_MENU_OBJ_HELP_CONTENTS,      WP_ACT_HELP_CONTENTS },
+    { WP_MENU_OBJ_HELP_KEYS,          WP_ACT_HELP_KEYS },
+    { WP_MENU_OBJ_HELP_FORMAT,        WP_ACT_HELP_FORMAT }
+};
+
+#define WP_MENU_ACTION_COUNT \
+    ((short)(sizeof(g_menu_actions) / sizeof(g_menu_actions[0])))
+
+/* Registry actions in a menu group this backend builds that deliberately
+   have NO row above. Each is still reachable; an action that is neither
+   mapped nor listed here is dead weight in a menu bar, which is what
+   menu_action_map_selfcheck refuses to let happen silently. */
+static wp_bool action_exempt_from_menu(wp_action_id id)
+{
+    switch (id) {
+    /* This backend's Format menu is deliberately FINER-grained than the
+       registry: the registry has one cycling "Size..." and one cycling
+       "Alignment...", while the ST menu offers explicit Size +/- and
+       Align Left/Center/Right, which is better for a mouse. Both
+       registry actions remain reachable by their own Ctrl shortcuts, so
+       nothing is lost -- there is simply no 1:1 item to map. */
+    case WP_ACT_FORMAT_SIZE:
+    case WP_ACT_FORMAT_ALIGN:
+        return WP_TRUE;
+    /* Ctrl+G only, by design -- see actions.c's own comment on why this
+       one stays off the hand-built OBJECT tree. */
+    case WP_ACT_TOOLS_INSERTIMAGE:
+        return WP_TRUE;
+    default:
+        return WP_FALSE;
+    }
+}
+
+/* Menu items with no registry action at all, because the action they
+   perform is finer-grained than (Size/Align) or conventionally outside
+   (Desk's About) the shared registry. Returns WP_TRUE if it handled the
+   item. Kept separate from the table so the table stays a pure mapping
+   that the selfcheck can reason about. */
+static wp_bool dispatch_local_menu_item(short window_handle, VdiHdl vdi, short obj)
+{
+    switch (obj) {
+    case WP_MENU_OBJ_DESK_ABOUT:
+        /* GEM convention puts About under Desk, not Help -- so this one
+           item opens a help node without a registry action behind it. */
+        open_help_node(window_handle, vdi, "About", 5);
+        return WP_TRUE;
+    case WP_MENU_OBJ_FORMAT_SIZE_UP:    change_font_size(1); return WP_TRUE;
+    case WP_MENU_OBJ_FORMAT_SIZE_DOWN:  change_font_size(-1); return WP_TRUE;
+    case WP_MENU_OBJ_FORMAT_ALIGN_LEFT:   apply_alignment(WP_ALIGN_LEFT); return WP_TRUE;
+    case WP_MENU_OBJ_FORMAT_ALIGN_CENTER: apply_alignment(WP_ALIGN_CENTER); return WP_TRUE;
+    case WP_MENU_OBJ_FORMAT_ALIGN_RIGHT:  apply_alignment(WP_ALIGN_RIGHT); return WP_TRUE;
+    default:
+        return WP_FALSE;
+    }
+}
+
+/* Returns WP_TRUE to quit. Redraws unconditionally afterwards rather
+   than per-action: the old switch redrew after some items and not
+   others, which left alert-box residue on screen after Save, Thesaurus
+   and Chat (each pops a form_alert that the AES does not restore behind)
+   until something else happened to trigger a repaint. redraw_window is
+   idempotent, so "always" is both simpler and more correct than a list
+   of which actions dirty the window -- the same conclusion the Mac
+   backend reached separately. */
+static wp_bool dispatch_menu_item(short window_handle, VdiHdl vdi, short obj)
+{
+    short i;
+
+    if (!dispatch_local_menu_item(window_handle, vdi, obj)) {
+        for (i = 0; i < WP_MENU_ACTION_COUNT; i++) {
+            if (g_menu_actions[i].obj != obj) continue;
+            invoke_action(window_handle, vdi, g_menu_actions[i].action);
+            break;
+        }
+    }
+
+    if (g_ctx.quit_requested) return WP_TRUE;
+
+    /* open_help_node already redrew to show the viewer; redrawing again
+       is harmless but pointless, and skipping it keeps the help screen
+       from being painted twice on a slow ST. */
+    if (!g_help_active) redraw_window(window_handle, vdi);
+    return WP_FALSE;
+}
+
+/* Proves the table above in BOTH directions on target, which is the
+   whole reason dispatch is a table rather than a switch:
+
+     forward  -- every mapped menu object is a real leaf of wp_menu_tree
+                 and every mapped action id resolves in the registry, so
+                 a renumbered WP_MENU_OBJ_* or a removed action fails
+                 loudly instead of dispatching the wrong item;
+     backward -- every registry action filed under a group this backend
+                 builds a title for is either mapped or explicitly
+                 exempt, so adding an action to actions.c without giving
+                 ST users any way to reach it cannot pass unnoticed.
+
+   The backward direction is the one that matters for a shared registry:
+   Amiga and Mac build their menus by folding over g_wp_actions, so they
+   pick up a new action automatically, and this hand-built tree would
+   otherwise be the one backend that silently doesn't. */
+static wp_bool menu_action_map_selfcheck(void)
+{
+    short i;
+    u32 a;
+
+    for (i = 0; i < WP_MENU_ACTION_COUNT; i++) {
+        short obj = g_menu_actions[i].obj;
+        short j;
+
+        if (obj < 0 || obj >= WP_MENU_OBJ_COUNT) return WP_FALSE;
+        if (wp_menu_tree[obj].ob_type != G_STRING) return WP_FALSE;
+        if (wp_menu_tree[obj].ob_head != -1) return WP_FALSE; /* must be a leaf */
+        if (wp_action_find(g_menu_actions[i].action) == NULL) return WP_FALSE;
+
+        /* Two rows pointing at one object would make the second
+           unreachable; two rows pointing at one action is legitimate
+           nowhere in this table today and almost certainly a copy-paste
+           slip if it appears. */
+        for (j = 0; j < i; j++) {
+            if (g_menu_actions[j].obj == obj) return WP_FALSE;
+            if (g_menu_actions[j].action == g_menu_actions[i].action) return WP_FALSE;
+        }
+    }
+
+    for (a = 0; a < (u32)WP_ACT_COUNT; a++) {
+        const wp_action *act = &g_wp_actions[a];
+        wp_bool mapped = WP_FALSE;
+
+        if (act->group == WP_MENU_NONE) continue;
+        if (action_exempt_from_menu(act->id)) continue;
+
+        for (i = 0; i < WP_MENU_ACTION_COUNT; i++) {
+            if (g_menu_actions[i].action == act->id) mapped = WP_TRUE;
+        }
+        if (!mapped) return WP_FALSE;
+    }
+
+    return WP_TRUE;
+}
+
 wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
 {
     switch (msg[0]) {
     case MN_SELECTED:
         menu_tnormal(wp_menu_tree, msg[3], UNHIGHLIGHT);
-        switch (msg[4]) {
-        case WP_MENU_OBJ_DESK_ABOUT:
-            open_help_node(window_handle, vdi, "About", 5);
-            break;
-        case WP_MENU_OBJ_FILE_QUIT:
-            wp_action_find(WP_ACT_FILE_QUIT)->handler(&g_ctx);
-            return (wp_bool)g_ctx.quit_requested;
-        case WP_MENU_OBJ_FILE_OPEN:
-            do_file_open();
-            redraw_window(window_handle, vdi);
-            break;
-        case WP_MENU_OBJ_FILE_SAVE:
-            do_file_save();
-            break;
-        case WP_MENU_OBJ_EDIT_CUT:
-            do_edit_cut();
-            redraw_window(window_handle, vdi);
-            break;
-        case WP_MENU_OBJ_EDIT_COPY:
-            wp_action_find(WP_ACT_EDIT_COPY)->handler(&g_ctx);
-            break;
-        case WP_MENU_OBJ_EDIT_PASTE:
-            do_edit_paste();
-            redraw_window(window_handle, vdi);
-            break;
-        case WP_MENU_OBJ_TOOLS_SPELLCHECK:
-            do_spell_check();
-            break;
-        case WP_MENU_OBJ_TOOLS_THESAURUS:
-            do_thesaurus();
-            break;
-        case WP_MENU_OBJ_TOOLS_GRAMMARCHECK:
-            do_grammar_check();
-            redraw_window(window_handle, vdi);
-            break;
-        case WP_MENU_OBJ_TOOLS_CHAT:
-            do_chat();
-            break;
-        case WP_MENU_OBJ_FORMAT_BOLD:
-            wp_action_find(WP_ACT_FORMAT_BOLD)->handler(&g_ctx);
-            sync_format_check(WP_ACT_FORMAT_BOLD);
-            break;
-        case WP_MENU_OBJ_FORMAT_ITALIC:
-            wp_action_find(WP_ACT_FORMAT_ITALIC)->handler(&g_ctx);
-            sync_format_check(WP_ACT_FORMAT_ITALIC);
-            break;
-        case WP_MENU_OBJ_FORMAT_UNDERLINE:
-            wp_action_find(WP_ACT_FORMAT_UNDERLINE)->handler(&g_ctx);
-            sync_format_check(WP_ACT_FORMAT_UNDERLINE);
-            break;
-        case WP_MENU_OBJ_FORMAT_SIZE_UP:
-            change_font_size(1);
-            break;
-        case WP_MENU_OBJ_FORMAT_SIZE_DOWN:
-            change_font_size(-1);
-            break;
-        case WP_MENU_OBJ_FORMAT_ALIGN_LEFT:
-            apply_alignment(WP_ALIGN_LEFT);
-            redraw_window(window_handle, vdi);
-            break;
-        case WP_MENU_OBJ_FORMAT_ALIGN_CENTER:
-            apply_alignment(WP_ALIGN_CENTER);
-            redraw_window(window_handle, vdi);
-            break;
-        case WP_MENU_OBJ_FORMAT_ALIGN_RIGHT:
-            apply_alignment(WP_ALIGN_RIGHT);
-            redraw_window(window_handle, vdi);
-            break;
-        default:
-            break;
-        }
-        return WP_FALSE;
+        return dispatch_menu_item(window_handle, vdi, msg[4]);
 
     case WM_CLOSED:
         return WP_TRUE;

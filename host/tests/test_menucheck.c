@@ -1,6 +1,8 @@
 #include <string.h>
 #include "test.h"
 #include "menucheck.h"
+#include "help_doc.h"
+#include "help_retrowp.h"
 
 /* Host-side coverage for platform/common/menucheck.c -- the shared menu
    rules the four backends fold g_wp_actions[] through.
@@ -124,4 +126,61 @@ void test_menucheck_no_menu_group_is_empty(void)
         }
         ASSERT_TRUE(any);
     }
+}
+
+/* Every WP_ACT_HELP_* action must name a node that really exists in the
+   shipped help document, and no other action may claim one.
+
+   This is the check that makes wp_action_help_node safe to share across
+   four backends. wp_help_doc_find_node falls back to node 0 on a miss,
+   so a typo or a renamed @node does not crash and does not log -- every
+   Help menu item just quietly opens the index page instead of the topic
+   it names. That is invisible in a screenshot unless you already know
+   which node you asked for, and invisible to every on-target selfcheck,
+   because nothing about it is structurally wrong. Pinning the names
+   against the real parsed document is the only place it can be caught. */
+void test_menucheck_help_actions_name_real_help_nodes(void)
+{
+    wp_help_doc doc;
+    u32 i;
+    u32 help_actions = 0;
+
+    ASSERT_TRUE(wp_help_doc_parse(g_help_source_retrowp,
+                                   (u32)g_help_source_retrowp_len, &doc) == WP_OK);
+
+    for (i = 0; i < (u32)WP_ACT_COUNT; i++) {
+        u32 len = 0;
+        const char *node = wp_action_help_node((wp_action_id)i, &len);
+
+        if (g_wp_actions[i].group == WP_MENU_HELP) {
+            /* Every Help-group action resolves... */
+            ASSERT_TRUE(node != NULL);
+            ASSERT_TRUE(len == (u32)strlen(node));
+            ASSERT_TRUE(wp_help_doc_find_node(&doc, (const u8 *)node, len)
+                        != WP_HELP_NODE_NONE);
+            help_actions++;
+        } else {
+            /* ...and nothing else does, so a non-Help action can never
+               be silently swallowed by the Help arm that every backend's
+               invoke_backend_action now runs BEFORE its own switch. */
+            ASSERT_TRUE(node == NULL);
+        }
+    }
+
+    /* Guards against the whole loop passing vacuously if the Help group
+       were ever emptied out. */
+    ASSERT_TRUE(help_actions >= 3);
+
+    wp_help_doc_free(&doc);
+}
+
+/* A NULL len out-param is legal -- the backends that only need the
+   pointer shouldn't have to invent a variable to throw away. */
+void test_menucheck_help_node_tolerates_null_len(void)
+{
+    ASSERT_TRUE(wp_action_help_node(WP_ACT_HELP_CONTENTS, NULL) != NULL);
+    ASSERT_TRUE(wp_action_help_node(WP_ACT_FILE_OPEN, NULL) == NULL);
+    /* Out of range must be NULL, not a wild read: every backend feeds
+       this the same u8 that came out of a keymap outcome. */
+    ASSERT_TRUE(wp_action_help_node((wp_action_id)WP_ACT_COUNT, NULL) == NULL);
 }

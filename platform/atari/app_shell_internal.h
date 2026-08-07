@@ -135,39 +135,72 @@
 #define WP_MENU_OBJ_EDIT_TITLE         5
 #define WP_MENU_OBJ_TOOLS_TITLE        6
 #define WP_MENU_OBJ_FORMAT_TITLE       7
-#define WP_MENU_OBJ_DROPDOWNS          8
-#define WP_MENU_OBJ_DESK_BOX           9
-#define WP_MENU_OBJ_DESK_ABOUT         10
-#define WP_MENU_OBJ_DESK_SEP           11
-#define WP_MENU_OBJ_DESK_DUMMY1        12
-#define WP_MENU_OBJ_DESK_DUMMY2        13
-#define WP_MENU_OBJ_DESK_DUMMY3        14
-#define WP_MENU_OBJ_DESK_DUMMY4        15
-#define WP_MENU_OBJ_DESK_DUMMY5        16
-#define WP_MENU_OBJ_DESK_DUMMY6        17
-#define WP_MENU_OBJ_FILE_BOX           18
-#define WP_MENU_OBJ_FILE_OPEN          19
-#define WP_MENU_OBJ_FILE_SAVE          20
-#define WP_MENU_OBJ_FILE_QUIT          21
-#define WP_MENU_OBJ_EDIT_BOX           22
-#define WP_MENU_OBJ_EDIT_CUT           23
-#define WP_MENU_OBJ_EDIT_COPY          24
-#define WP_MENU_OBJ_EDIT_PASTE         25
-#define WP_MENU_OBJ_TOOLS_BOX          26
-#define WP_MENU_OBJ_TOOLS_SPELLCHECK   27
-#define WP_MENU_OBJ_TOOLS_THESAURUS    28
-#define WP_MENU_OBJ_TOOLS_GRAMMARCHECK 29
-#define WP_MENU_OBJ_TOOLS_CHAT         30
-#define WP_MENU_OBJ_FORMAT_BOX         31
-#define WP_MENU_OBJ_FORMAT_BOLD        32
-#define WP_MENU_OBJ_FORMAT_ITALIC      33
-#define WP_MENU_OBJ_FORMAT_UNDERLINE   34
-#define WP_MENU_OBJ_FORMAT_SIZE_UP     35
-#define WP_MENU_OBJ_FORMAT_SIZE_DOWN   36
-#define WP_MENU_OBJ_FORMAT_ALIGN_LEFT    37
-#define WP_MENU_OBJ_FORMAT_ALIGN_CENTER  38
-#define WP_MENU_OBJ_FORMAT_ALIGN_RIGHT   39
-#define WP_MENU_OBJ_COUNT        40
+/* Help's title. It MUST live here, immediately after Format, and every
+   title MUST stay contiguous from WP_MENU_OBJ_DESK_TITLE -- this is not
+   tidiness, it is the AES's own addressing scheme. This header already
+   records it above, from a direct read of EmuTOS's aes/gemmnlib.c:
+   menu_sub() finds a title's dropdown box by walking DROPDOWNS's child
+   chain forward exactly (ititle - THEACTIVE - 1) times, i.e. by ARRAY
+   INDEX arithmetic on the title, not by any link the title carries.
+
+   Learned the hard way anyway: Help was first APPENDED at index 40 (to
+   avoid renumbering, which has broken this tree twice before), leaving
+   the chain links correct and every selfcheck green. 40 - 2 - 1 = 37
+   steps down a chain with six children, so the AES walked off the end
+   and stopped erasing dropdowns entirely -- traversing the menu bar left
+   every box it passed painted on screen at once. Nothing structural was
+   wrong, so no selfcheck could see it; it took a real Hatari screenshot
+   of a cursor traverse, and an A/B against the pre-change binary, to
+   catch and attribute. At index 8 the arithmetic gives 8 - 2 - 1 = 5,
+   the sixth child of DROPDOWNS, which is Help's box. */
+#define WP_MENU_OBJ_HELP_TITLE         8
+#define WP_MENU_OBJ_DROPDOWNS          9
+#define WP_MENU_OBJ_DESK_BOX           10
+#define WP_MENU_OBJ_DESK_ABOUT         11
+#define WP_MENU_OBJ_DESK_SEP           12
+#define WP_MENU_OBJ_DESK_DUMMY1        13
+#define WP_MENU_OBJ_DESK_DUMMY2        14
+#define WP_MENU_OBJ_DESK_DUMMY3        15
+#define WP_MENU_OBJ_DESK_DUMMY4        16
+#define WP_MENU_OBJ_DESK_DUMMY5        17
+#define WP_MENU_OBJ_DESK_DUMMY6        18
+#define WP_MENU_OBJ_FILE_BOX           19
+#define WP_MENU_OBJ_FILE_OPEN          20
+#define WP_MENU_OBJ_FILE_SAVE          21
+#define WP_MENU_OBJ_FILE_QUIT          22
+#define WP_MENU_OBJ_EDIT_BOX           23
+#define WP_MENU_OBJ_EDIT_CUT           24
+#define WP_MENU_OBJ_EDIT_COPY          25
+#define WP_MENU_OBJ_EDIT_PASTE         26
+#define WP_MENU_OBJ_TOOLS_BOX          27
+#define WP_MENU_OBJ_TOOLS_SPELLCHECK   28
+#define WP_MENU_OBJ_TOOLS_THESAURUS    29
+#define WP_MENU_OBJ_TOOLS_GRAMMARCHECK 30
+#define WP_MENU_OBJ_TOOLS_CHAT         31
+#define WP_MENU_OBJ_FORMAT_BOX         32
+#define WP_MENU_OBJ_FORMAT_BOLD        33
+#define WP_MENU_OBJ_FORMAT_ITALIC      34
+#define WP_MENU_OBJ_FORMAT_UNDERLINE   35
+#define WP_MENU_OBJ_FORMAT_SIZE_UP     36
+#define WP_MENU_OBJ_FORMAT_SIZE_DOWN   37
+#define WP_MENU_OBJ_FORMAT_ALIGN_LEFT    38
+#define WP_MENU_OBJ_FORMAT_ALIGN_CENTER  39
+#define WP_MENU_OBJ_FORMAT_ALIGN_RIGHT   40
+/* Help (M8.5's action registry finally reaching this backend's own menu
+   bar). APPENDED at the end rather than inserted in on-screen order:
+   nothing in the AES cares about array position -- it walks ob_next/
+   ob_head/ob_tail indices -- and renumbering the 40 entries above is
+   precisely the class of edit this tree has already been broken by
+   twice. The one real array-order rule, OF_LASTOB on the final object,
+   moves with the append (asserted in wp_menu_tree_selfcheck), and the
+   one real contiguity rule applies only to the AES-reserved Desk block
+   at 10..17, far above anything touched here. So: array order no longer
+   matches menu-bar order, deliberately. */
+#define WP_MENU_OBJ_HELP_BOX             41
+#define WP_MENU_OBJ_HELP_CONTENTS        42
+#define WP_MENU_OBJ_HELP_KEYS            43
+#define WP_MENU_OBJ_HELP_FORMAT          44
+#define WP_MENU_OBJ_COUNT        45
 
 extern OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 

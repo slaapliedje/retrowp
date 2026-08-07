@@ -40,6 +40,8 @@ typedef enum {
     WP_ACT_TOOLS_CHAT,
     WP_ACT_TOOLS_INSERTIMAGE,
     WP_ACT_HELP_CONTENTS,
+    WP_ACT_HELP_KEYS,
+    WP_ACT_HELP_FORMAT,
     WP_ACT_COUNT
 } wp_action_id;
 
@@ -94,5 +96,19 @@ extern const wp_action g_wp_actions[WP_ACT_COUNT];
 
 const wp_action *wp_action_find(wp_action_id id);
 const wp_action *wp_action_find_by_shortcut(u8 ascii);
+
+/* Maps a WP_ACT_HELP_* action to the help-document node it opens, e.g.
+   WP_ACT_HELP_KEYS -> "Normal". Returns NULL (and leaves *len alone) for
+   any action that is not a help entry.
+
+   Shared rather than repeated per backend because all four open the same
+   docs/help/retrowp.help through the same portable viewer, and a node
+   name that exists in only three of the four copies fails as a silently
+   empty help screen rather than as a build error. The node names are
+   real @node identifiers in that file -- wp_help_doc_find_node falls
+   back to node 0 on a miss, so a typo here degrades to "the index page"
+   rather than to nothing; host/tests/test_menucheck.c pins them against
+   the real parsed document so a rename cannot drift past unnoticed. */
+const char *wp_action_help_node(wp_action_id id, u32 *len);
 
 #endif /* WP_ACTIONS_H */

@@ -33,6 +33,8 @@ void test_menucheck_live_action_table_is_menu_safe(void);
 void test_menucheck_every_live_label_is_literal_safe(void);
 void test_menucheck_shortcut_bytes_are_unique(void);
 void test_menucheck_no_menu_group_is_empty(void);
+void test_menucheck_help_actions_name_real_help_nodes(void);
+void test_menucheck_help_node_tolerates_null_len(void);
 
 /* edit_render.c */
 void test_edit_render_typed_text_is_visible_after_relayout(void);
@@ -515,6 +517,8 @@ static const test_case g_cases[] = {
     { "menucheck_every_live_label_is_literal_safe", test_menucheck_every_live_label_is_literal_safe },
     { "menucheck_shortcut_bytes_are_unique", test_menucheck_shortcut_bytes_are_unique },
     { "menucheck_no_menu_group_is_empty", test_menucheck_no_menu_group_is_empty },
+    { "menucheck_help_actions_name_real_help_nodes", test_menucheck_help_actions_name_real_help_nodes },
+    { "menucheck_help_node_tolerates_null_len", test_menucheck_help_node_tolerates_null_len },
 
     { "edit_render_typed_text_is_visible_after_relayout", test_edit_render_typed_text_is_visible_after_relayout },
     { "edit_render_delete_marks_layout_dirty_and_stays_in_bounds", test_edit_render_delete_marks_layout_dirty_and_stays_in_bounds },

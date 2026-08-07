@@ -165,8 +165,38 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
        redundant with (but harmless alongside) their own dynamically-
        built Tools menu already showing this entry automatically. */
     { WP_ACT_TOOLS_INSERTIMAGE, WP_MENU_TOOLS,  "Insert Image",   "Ctrl+G", 0x07, NULL, NULL },
-    { WP_ACT_HELP_CONTENTS,     WP_MENU_HELP,   "Contents",       "F1",     0,    NULL, NULL }
+    { WP_ACT_HELP_CONTENTS,     WP_MENU_HELP,   "Contents",       "F1",     0,    NULL, NULL },
+    /* Two more entry points into the SAME help document, not new content:
+       docs/help/retrowp.help already carries a node per topic, and the
+       viewer already navigates between them. Reaching "how do I move the
+       cursor" took F1 then a link-follow; on a 1MB ST driving a pager
+       with the keyboard, one menu pick instead of two steps is a real
+       difference. No shortcut byte on either -- F1 remains the single
+       keyboard door into help, and every free Ctrl-letter is worth more
+       to an editing command than to a second way into a menu that is
+       already one click away. See wp_action_help_node for the mapping. */
+    { WP_ACT_HELP_KEYS,         WP_MENU_HELP,   "Editing Keys",   0,        0,    NULL, NULL },
+    { WP_ACT_HELP_FORMAT,       WP_MENU_HELP,   "Format Keys",    0,        0,    NULL, NULL }
 };
+
+const char *wp_action_help_node(wp_action_id id, u32 *len)
+{
+    const char *name;
+
+    switch (id) {
+    case WP_ACT_HELP_CONTENTS: name = "Main";   break;
+    case WP_ACT_HELP_KEYS:     name = "Normal"; break;
+    case WP_ACT_HELP_FORMAT:   name = "Format"; break;
+    default:                   return NULL;
+    }
+
+    if (len != NULL) {
+        u32 n = 0;
+        while (name[n] != '\0') n++;
+        *len = n;
+    }
+    return name;
+}
 
 const wp_action *wp_action_find(wp_action_id id)
 {

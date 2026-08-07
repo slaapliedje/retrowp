@@ -1005,8 +1005,28 @@ static void do_insert_image(void)
    backend, and DOS has no menu -- see docs/dos-platform.md. Insert
    Image (M15) is real Ctrl+G, not menu-only, for exactly that reason:
    it's the only way DOS could ever reach it at all). */
+/* Defined just below, next to the F1 path. Forward-declared so the Help
+   arm can sit in invoke_backend_action without reshuffling the file. */
+static void open_help_node(const char *node_name, u32 node_name_len);
+
 static void invoke_backend_action(wp_action_id id)
 {
+    /* DOS has no menu bar, so nothing dispatches a Help action here
+       today -- F1 calls open_help_node directly and none of the
+       WP_ACT_HELP_* entries carries a shortcut byte. Wired anyway, and
+       through the same shared node mapping the other three backends
+       use, so that a keymap scheme emitting one of these actions works
+       here instead of silently doing nothing. */
+    {
+        u32 node_len = 0;
+        const char *node = wp_action_help_node(id, &node_len);
+
+        if (node != NULL) {
+            open_help_node(node, node_len);
+            return;
+        }
+    }
+
     switch (id) {
     case WP_ACT_FILE_OPEN:         do_file_open(); break;
     case WP_ACT_FILE_SAVE:         do_file_save(); break;

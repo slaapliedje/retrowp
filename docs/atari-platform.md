@@ -1797,7 +1797,9 @@ real `.HYP`/ST-Guide research spike and its result) lives in
 account: F1 opens a real, separate UI mode (`g_help_active` in
 `app_shell.c`) that takes over `wp_dispatch_key`/`redraw_window` until
 the pager itself reports a close request. No Help menu item this pass --
-same `wp_menu_tree[]`-avoidance reasoning as the retrofit above.
+same `wp_menu_tree[]`-avoidance reasoning as the retrofit above. (That
+gap is closed further down; see "Help menu, and menu dispatch through
+the action registry".)
 
 **Confirmed live on real Hatari** -- the one piece of this milestone's
 UI work an interactive screenshot actually confirmed end-to-end (Phase
@@ -2162,3 +2164,170 @@ way here, because inserting an image needs a live `OFFLOAD_IMAGE`
 round trip that this gate does not perform. The single-TOS matrix
 cannot see it at all: there `nplanes` is 1/2/4 and genuinely matches
 the device.
+
+## Help menu, and menu dispatch through the action registry
+
+Two long-standing gaps in one change, both flagged in this file already:
+M8.5's Help system shipped with "no Help menu item this pass", and the
+same milestone's action registry -- which this backend *introduced* --
+was never adopted by this backend's own menu path.
+
+### The registry finally drives the menu
+
+`MN_SELECTED` was a hand-written `switch` on raw `WP_MENU_OBJ_*`
+indices, case-for-case duplicating what `wp_dispatch_key` already did
+through `invoke_action()`. That is exactly the duplication the registry
+existed to end, and the two copies had already drifted apart in two
+visible ways:
+
+- The menu arm redrew after some actions and not others. Save,
+  Thesaurus and Chat each pop a `form_alert` the AES does not restore
+  behind, so their alert residue stayed on screen until something else
+  happened to trigger a repaint.
+- Spell Check, Thesaurus, Grammar Check and Chat were reachable **only**
+  from the menu. They were absent from `invoke_backend_action`, so no
+  keymap scheme could ever expose them however it bound its keys.
+
+Dispatch is now a table (`g_menu_actions`) rather than a switch, so
+`menu_action_map_selfcheck()` can walk it and prove both directions on
+target: every mapped object is a real `G_STRING` leaf of the tree and
+every mapped id resolves in the registry; and every registry action
+filed under a group this backend builds a title for is either mapped or
+explicitly exempt. The backward direction is the one that matters for a
+*shared* registry -- Amiga and Mac build their menus by folding over
+`g_wp_actions[]`, so they pick up a new action automatically, and this
+hand-built tree would otherwise be the one backend that silently didn't.
+
+Three actions are deliberately exempt, each with its reason in
+`action_exempt_from_menu()`. Two of them are worth restating: this
+backend's Format menu is deliberately **finer**-grained than the
+registry, offering explicit Size +/- and Align Left/Center/Right where
+the registry has one cycling "Size..." and one cycling "Alignment...".
+A 1:1 mapping would be a downgrade, so those items stay local and the
+registry actions stay reachable by their own Ctrl shortcuts.
+
+Redraw is now unconditional after any menu dispatch (except when the
+help viewer just opened and painted itself, or when quitting), rather
+than a per-action list of which items dirty the window. `redraw_window`
+is idempotent, so "always" is both simpler and more correct -- the same
+conclusion the Mac backend reached independently.
+
+### Bug 3: menu titles must be contiguous array indices
+
+Adding a sixth title broke dropdown erasing outright. Traversing the
+menu bar left **every** box the cursor passed painted on screen at once,
+each clipped by the next -- Desk, File, Edit, Tools, Format and Help all
+visible simultaneously.
+
+The cause is a rule this very file already recorded, from a direct read
+of EmuTOS's `aes/gemmnlib.c`, and which was then not applied:
+
+> `menu_sub()` … given a title's object index `ititle`, it walks
+> `tree[tree[THESCREEN].ob_tail].ob_head` forward via `ob_next` exactly
+> **`(ititle - THEACTIVE - 1)`** times to find that title's dropdown box
+
+That is **array-index arithmetic on the title**, with no link involved.
+Help was first *appended* at index 40 -- deliberately, to avoid
+renumbering, which has broken this tree twice before. `40 - 2 - 1 = 37`
+steps down a chain with six children, so the AES walked off the end and
+stopped erasing dropdowns entirely. At index 8 (immediately after
+Format) the arithmetic gives `8 - 2 - 1 = 5`, the sixth child of
+DROPDOWNS, which is Help's box.
+
+**Every menu title must therefore be a contiguous array index starting
+at `WP_MENU_OBJ_DESK_TITLE`, in menu-bar order.** The dropdown *boxes*
+were already in the right relative order, so only the title had to move;
+indices 8..39 shifted up by one.
+
+Two things about how this was found are worth keeping:
+
+- **No selfcheck could see it.** Every chain was valid, `ob_head`/
+  `ob_tail`/`ob_next` all consistent, counts right, `OF_LASTOB` in the
+  right place -- the whole 6-image matrix passed green, and so did both
+  AFROS gates. Nothing was structurally wrong; the AES simply addressed
+  the tree by a rule the structure doesn't encode.
+- **It took a real screenshot plus an A/B.** A cursor traverse under
+  Hatari showed the trail; the pre-change binary run through the
+  *identical* input path showed none. Input speed (250ms/press, 4s
+  settle), RAM (`--memsize 4`), and the cursor's final resting position
+  were each ruled out by direct experiment, and a variant with the Help
+  objects present-but-unlinked was clean -- which localised it to
+  linking a sixth title/box pair, not to the objects existing.
+
+`wp_menu_tree_selfcheck` now asserts the contiguity arithmetic directly,
+and walks the title and box chains in lockstep checking that each box
+shares its title's `ob_x` and that both chains close on their parent at
+the same step. A seventh title added in the wrong place now fails there
+instead of on someone's screen.
+
+### Growing the OBJECT tree without breaking it
+
+The two array-position rules that *are* real were both handled and are
+both asserted:
+
+- `OF_LASTOB` marks the last object **in the array**, and there must be
+  exactly one. It moved off Align Right onto the final Help item.
+  `wp_menu_tree_selfcheck` counts them across the whole array *and* now
+  pins that Align Right specifically no longer carries it -- a stray
+  extra is the exact shape of the bug that once hid every dropdown from
+  the AES.
+- Contiguity is load-bearing for the AES-reserved Desk block (now
+  11..18), which `menu_fixup()` patches by index arithmetic, and -- as
+  Bug 3 above cost an afternoon to rediscover -- for the run of menu
+  titles.
+
+`WP_ATARI_MENU_TITLES` 5 -> 6 and `WP_ATARI_MENU_DISPATCHED_LEAVES`
+19 -> 22. Those counts guard less than they used to now that dispatch is
+a walkable table, but they still catch the one case the table cannot: a
+leaf added to the tree that is in *neither* the table nor the local-item
+list, i.e. drawn, highlightable, and silently inert.
+
+### Three entry points, one document
+
+The Help menu carries Contents, Editing Keys and Format Keys -- not new
+content, just three doors into `docs/help/retrowp.help`, which already
+had a node per topic. On a 1MB ST driving a pager with the keyboard, one
+menu pick instead of F1-then-follow-a-link is a real difference.
+
+The action -> node mapping (`wp_action_help_node` in
+`platform/common/actions.c`) is **shared**, not repeated per backend, and
+that is deliberate: `wp_help_doc_find_node` falls back to node 0 on a
+miss, so a typo or a renamed `@node` does not crash and does not log --
+every Help item just quietly opens the index page instead of the topic
+it names. Nothing structural is wrong, so no on-target selfcheck can see
+it. `host/tests/test_menucheck.c` pins the names against the real parsed
+document instead (verified to fail when a node name is deliberately
+mistyped).
+
+Because the registry is shared, Mac, Amiga and DOS gained the same two
+entries at the same time; each backend's `invoke_backend_action` grew a
+single Help arm keyed off that mapping rather than a case per node. DOS
+has no menu bar and none of these actions carries a shortcut byte, so
+nothing dispatches them there today -- wired anyway so a keymap scheme
+emitting one works rather than silently doing nothing.
+
+### Build-system gotcha found here
+
+`make` in this project has **no header-dependency tracking**, and it bit
+this one change twice -- both times as a *confusing false failure*, not
+an obvious one:
+
+- Adding the two enum values to `actions.h` left
+  `build/platform_common/menucheck.o` compiled against the old
+  `WP_ACT_COUNT`; its `wp_action_find((wp_action_id)WP_ACT_COUNT)` bounds
+  check compiled to `wp_action_find(17)` while the freshly-built
+  `actions.o` had 19 rows, so a valid row came back where NULL was
+  expected and `wp_menu_model_selfcheck()` failed a host test.
+- Renumbering `WP_MENU_OBJ_*` left `atari_smoke.o` sending the OLD index
+  for `WP_MENU_OBJ_FILE_QUIT` while `app_shell.o`'s dispatch table held
+  the new one. The synthesized `MN_SELECTED` matched no table row, quit
+  was never requested, and **all six TOS images plus the AFROS gate went
+  red against a completely correct tree.**
+
+In both cases the code was right and the object files merely disagreed
+about a constant. A false red is worse than a slow build: it trains you
+to distrust the one gate that has actually caught real regressions here.
+
+**Until `-MMD -MP` lands: clean-build (`rm -rf build bin`) after any
+shared-header change, and treat a failure that appears immediately after
+a header edit as suspect until a clean build reproduces it.**
