@@ -243,10 +243,21 @@ $(ATARI_BUILD)/convertsmoke/%.o: host/tools/%.c | $(ATARI_BUILD)/convertsmoke
 $(ATARI_BIN)/CONVERTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/convertsmoke/atari_convert_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
-$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/common $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BUILD)/convertsmoke $(ATARI_BIN):
+# The multitasking-AES redraw prober (host/tools/atari_wmredraw_probe.c).
+# Unlike every other .PRG here it links NOTHING but gemlib -- it is a
+# second AES process that covers and uncovers RetroWP's window, and has
+# no business knowing what a document is. Keeping it engine-free also
+# keeps it buildable and startable in a fraction of RETROWP.PRG's time.
+$(ATARI_BUILD)/redrawprobe/%.o: host/tools/%.c | $(ATARI_BUILD)/redrawprobe
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -c $< -o $@
+
+$(ATARI_BIN)/WMREDRAW.PRG: $(ATARI_BUILD)/redrawprobe/atari_wmredraw_probe.o | $(ATARI_BIN)
+	$(ATARICC) $^ -o $@ -lgem
+
+$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/common $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BUILD)/convertsmoke $(ATARI_BUILD)/redrawprobe $(ATARI_BIN):
 	mkdir -p $@
 
-.PHONY: atari atari-smoke atari-serial-smoke atari-convert-smoke
+.PHONY: atari atari-smoke atari-serial-smoke atari-convert-smoke atari-wmredraw-probe
 atari: $(ATARI_BIN)/RETROWP.PRG
 
 atari-smoke: $(ATARI_BIN)/SMOKE.PRG
@@ -254,6 +265,8 @@ atari-smoke: $(ATARI_BIN)/SMOKE.PRG
 atari-serial-smoke: $(ATARI_BIN)/SERIALTST.PRG
 
 atari-convert-smoke: $(ATARI_BIN)/CONVERTST.PRG
+
+atari-wmredraw-probe: $(ATARI_BIN)/WMREDRAW.PRG
 
 # ---------------------------------------------------------------------
 # Amiga cross build (M9). Real target toolchain, not a host stub: Bebbo's

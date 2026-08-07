@@ -2012,3 +2012,153 @@ single `.PRG`. It reaches a full XaAES desktop in under 35 seconds,
 though, so it is cheap enough to run per-change rather than nightly. It
 skips cleanly with a pointer to the project if no AFROS install is
 present (`AFROS_FIXTURE`, default `~/src/afros`).
+
+### Selecting a resolution headlessly: `fvdi.sys` is a script
+
+This costs an afternoon if you assume otherwise, so: AFROS's
+`drive_c/fvdi.sys` is **not a flat config file**. It is a branching
+script. It prints a resolution menu, waits for a keypress, and jumps to
+a label:
+
+```
+setkey 0
+waitkey 1
+casekey 0 res800
+casekey 1 res1024
+casekey 2 res1280
+:res800
+01r aranym.sys mode 640x480x8@72 assumenf irq accelerate xxxxxxx
+goto font_specification
+:res1024
+01r aranym.sys mode 1024x768x32@72 assumenf irq accelerate xxxxxxx
+```
+
+Several `01r aranym.sys mode ...` lines are uncommented at once because
+they are *alternative branches*, not a priority list -- editing them
+changes nothing about which one runs. Headless there is no keypress, so
+**`setkey N` is the selection**. Stock AFROS ships `setkey 0`, which is
+why every attempt to reach a deeper colour mode by other means stays
+stubbornly at 640x480x8. `setkey 1` gives 1024x768x32 true colour, which
+is the entire reason for running under ARAnyM at all -- the Atari draw
+path had never executed above 4 bitplanes before this. Note the file has
+CRLF line endings, so a `sed 's/^setkey 0$/.../'` silently matches
+nothing.
+
+RetroWP renders correctly at 1024x768x32 and appears in the XaAES
+taskbar as a peer of Tera Desktop, TosWin2 and GAME. An earlier
+"text is clipped mid-word instead of wrapping" observation at 640x480
+was **not** a defect: the window was simply wider than the visible
+screen.
+
+### The partial-redraw gate: `ci_afros_redraw.sh`
+
+The first bullet above -- AES drawing discipline -- is the one that
+motivated this whole testbed, and booting the selfcheck smoke does not
+actually exercise it: nothing ever covers RetroWP's window.
+`host/tools/ci_afros_redraw.sh` closes that. It boots `RETROWP.PRG` and
+`WMREDRAW.PRG` (`host/tools/atari_wmredraw_probe.c`) side by side, has
+the probe repeatedly open a window across RetroWP's text band and close
+it again, and asserts that every pixel it covered comes back
+byte-identical.
+
+The cover/uncover cycle is driven from **inside** the emulated machine,
+not by host clicks, for a concrete reason: ARAnyM under Xvfb does not
+track host pointer motion at all. Neither an absolute `XWarpPointer`
+(`xdotool mousemove`) nor a relative delta reaches the emulated mouse,
+with or without X input focus -- the emulated cursor simply stays where
+it was. The AES's own Alt+Arrow keyboard mouse emulation *does* work
+under XaAES, but in coarse and non-uniform steps (~38px horizontally,
+~18px vertically per press as measured here), which makes a taskbar
+button an unreliable target. Driving it from a second AES process
+sidesteps the host input layer entirely and is exactly reproducible.
+This differs from the Hatari recipe, where Alt+Arrow plus a bare click
+is the working technique.
+
+Two details in the harness are load-bearing rather than incidental:
+
+- **The probe runs one unmeasured warm-up cycle before the baseline
+  screenshot.** Opening any window makes it the top window, and XaAES
+  redraws the previously-top window's frame in its inactive colours --
+  a real, correct state change that never reverts when the new window
+  closes. Measured against a baseline taken before any of that, every
+  cycle "fails" on ~33k pixels of *another application's* title bar and
+  scrollbars while RetroWP itself is pixel-perfect. Baselining after one
+  cycle makes it a steady-state-to-steady-state comparison.
+- **The probe reports its own cover rectangle** over `NF_STDERR`
+  (`WMREDRAW: rect X Y W H`), which the host translates by the ARAnyM
+  window's *measured* position. ARAnyM places its SDL window at an
+  offset of its own choosing (320,272 on a bare Xvfb root here), so
+  assuming an origin is how an earlier hand-aimed attempt at this test
+  clicked empty desktop and proved nothing. The Xvfb root is also made
+  taller than the emulated screen, since at 1280x1024 the bottom of a
+  1024x768 Atari screen -- RetroWP's whole status line -- fell outside
+  the captured image.
+
+Every phase transition is announced over `NF_STDERR`, but those markers
+are **hints, not timing**. A first version ran `tail -F` on the log in
+shell and screenshotted directly on each marker; markers arrived 5-8
+seconds late (that lag was `tail -F`'s one-second poll plus each capture
+serialising behind the previous one, not anything in the emulator), so
+the "covered" grab consistently photographed an already-uncovered screen
+and the "uncovered" grab caught the *next* cycle's cover window. It
+looked exact and was not.
+
+Each marker now starts a wait for a screen *predicate*: after `covered`,
+poll until the region really differs from the baseline; after `restored`,
+poll until the region stops changing between consecutive grabs, then
+compare that settled frame. Settling is judged frame-to-frame and never
+against the baseline, so the wait cannot launder a bad repaint into a
+pass. Reading the log directly instead of through `tail -F` also brought
+the observed lag down to 0.1-0.5s, and that figure is printed on every
+run -- a lag creeping toward the poll timeout is what would quietly turn
+this gate flaky.
+
+That mistake surfaced as a loud failure rather than a false green only
+because the harness asserts the cover actually happened before it
+asserts anything about the restore. Worth copying into any other
+screenshot-driven gate: check that the disturbance you are testing
+against actually occurred, or "nothing changed" passes for the wrong
+reason.
+
+**Result.** 3/3 cycles pass with `MEM_PROT=NO` and 3/3 with
+`MEM_PROT=YES` -- 141600 of 143360 pixels genuinely covered each cycle,
+zero differing pixels on restore. RetroWP services a real partial
+`WM_REDRAW` from an independent process and repaints the exposed region
+from its own document model without corruption, which is the specific
+behaviour the `wind_update`/`graf_mouse` discipline exists for and the
+last part of this testbed's rationale that was still unproven.
+
+### What true colour actually reports, and one open question
+
+The probe prints `WMREDRAW: screen 1024x768 colors=256` on every run.
+That number is `work_out[13]`, which is exactly what
+`atari_screen_max_colors()` (`metrics_atari.c`) returns -- so **a
+32-bit true-colour fVDI screen reports 256**, not 2 and not the real
+depth. Printing it every run also proves the gate really ran at the
+intended mode rather than silently falling back to `setkey 0`'s
+640x480x8.
+
+Three of the true-colour concerns this testbed was built to check are
+settled by observation:
+
+- `needs_80_column_warning` behaves correctly at 1024 -- no alert, since
+  the threshold is 640.
+- The fVDI font path works: text renders correctly at 1024x768x32, so
+  `atari_ensure_gdos_fonts` and font selection are not EmuTOS-bitmap-
+  font-specific.
+- `rgb_to_vdi_color` works at 32bpp, but only because it is a two-entry
+  luminance threshold returning `G_BLACK`/`G_WHITE` and this app never
+  asks for anything else. A real colour feature needs a genuine
+  nearest-match search.
+
+`plat_draw_image` is **not** settled and is worth flagging: with
+`colors = 256` it derives `nplanes = 8`, skips its own `nplanes < 2`
+mono refusal, and hands `vro_cpyfm` a `fd_stand = 0` (device-specific)
+source MFDB with 8 planes against a 32-bit chunky destination -- while
+its `vs_color` pen programming has no meaning on a device with no
+hardware palette. That may be fine (fVDI may convert), may produce
+garbage, or may need `fd_stand = 1`. It has not been observed either
+way here, because inserting an image needs a live `OFFLOAD_IMAGE`
+round trip that this gate does not perform. The single-TOS matrix
+cannot see it at all: there `nplanes` is 1/2/4 and genuinely matches
+the device.
