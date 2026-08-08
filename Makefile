@@ -5,8 +5,34 @@
 
 CC ?= cc
 
-STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror
-RELAXED_CFLAGS = -Wall -Wextra
+# Header-dependency tracking. Without this, `make` rebuilds an object only
+# when its own .c changes -- never when a header it includes changes -- so
+# editing a shared header silently leaves a mix of objects compiled against
+# the old and new versions of it. That is not a theoretical tidiness point:
+# it produced two CONFUSING FALSE FAILURES in a single session, each of
+# which looked like a real defect in correct code.
+#
+#   - Adding two enum values to platform/common/actions.h left
+#     menucheck.o holding the old WP_ACT_COUNT while actions.o had the
+#     new one, so a bounds check compiled to a comparison against 17
+#     while the table had 19 rows -- a host test failed on correct code.
+#   - Renumbering WP_MENU_OBJ_* left atari_smoke.o sending the old index
+#     for FILE_QUIT while app_shell.o's dispatch table held the new one.
+#     ALL SIX TOS IMAGES plus the AFROS gate went red against a
+#     completely correct menu tree.
+#
+# A gate that reds on correct code is worse than a slow build: it teaches
+# you to distrust the one thing that catches real regressions.
+#
+# -MMD writes a .d beside each .o listing the headers that object really
+# read (-MMD not -MD: system headers are excluded, they don't change here).
+# -MP adds a phony target for each of those headers, so DELETING a header
+# doesn't wedge make with "No rule to make target" -- it just rebuilds.
+DEPFLAGS = -MMD -MP
+
+
+STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror $(DEPFLAGS)
+RELAXED_CFLAGS = -Wall -Wextra $(DEPFLAGS)
 
 INCLUDES = -Iengine/include -Iplatform/host -Iplatform/common -Ioffload/transport -Iservices/spell -Iservices/grammar -Ihost/tests -I$(GENERATED)
 
@@ -162,8 +188,8 @@ ATARICC ?= m68k-atari-mint-gcc
 # of trapping into Hatari, so pass/fail never reaches the emulator's own
 # exit code -- reproduced and root-caused during T4.1 development, see
 # docs/atari-platform.md.
-ATARI_STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror -O2
-ATARI_RELAXED_CFLAGS = -Wall -Wextra -O2
+ATARI_STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror -O2 $(DEPFLAGS)
+ATARI_RELAXED_CFLAGS = -Wall -Wextra -O2 $(DEPFLAGS)
 ATARI_INCLUDES       = -Iengine/include -Iplatform/atari -Iplatform/common -Ioffload/transport -I$(GENERATED)
 
 ATARI_BUILD = build/atari
@@ -298,8 +324,8 @@ AMIGACC        ?= $(AMIGA_TOOLROOT)/bin/m68k-amigaos-gcc
 
 AMIGA_CPU = -m68000 -msoft-float -fbbb=abcefilmnprsz0
 
-AMIGA_STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror $(AMIGA_CPU)
-AMIGA_RELAXED_CFLAGS = -Wall -Wextra $(AMIGA_CPU)
+AMIGA_STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror $(AMIGA_CPU) $(DEPFLAGS)
+AMIGA_RELAXED_CFLAGS = -Wall -Wextra $(AMIGA_CPU) $(DEPFLAGS)
 AMIGA_INCLUDES       = -Iengine/include -Iplatform/amiga -Iplatform/common -Ioffload/transport -I$(GENERATED)
 
 AMIGA_BUILD = build/amiga
@@ -420,7 +446,7 @@ amiga-smoke: $(AMIGA_BIN)/AMISMOKE
 MAC_TOOLROOT ?= $(HOME)/opt/Retro68-build/toolchain
 MACCC        ?= $(MAC_TOOLROOT)/bin/m68k-apple-macos-gcc
 
-MAC_STRICT_CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror -O2
+MAC_STRICT_CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror -O2 $(DEPFLAGS)
 MAC_INCLUDES      = -Iengine/include -Iplatform/mac -Iplatform/common -Ioffload/transport -I$(GENERATED)
 
 MAC_BUILD = build/mac_engine_check
@@ -483,6 +509,32 @@ DOSCC        ?= $(DOS_TOOLROOT)/binl64/wcc
 DOSLINK      ?= $(DOS_TOOLROOT)/binl64/wcl
 DOS_ENV       = WATCOM=$(DOS_TOOLROOT) PATH=$(DOS_TOOLROOT)/binl64:$$PATH
 
+# Watcom's own make-dependency generation. Not $(DEPFLAGS): wcc names the
+# dependency file explicitly rather than deriving it from the object, so
+# these have to be expanded per-rule where $@ exists. -adfs forces '/'
+# separators (wcc defaults to DOS-style '\', which GNU make would read as
+# line continuations); -adt names the target, which would otherwise be
+# written without the build/dos/... prefix and match nothing; -add names
+# the FIRST dependency, which wcc otherwise writes as a bare basename
+# ("app_shell.c", not "platform/dos/app_shell.c") that make cannot
+# resolve -- found by running make twice, since the .d files are only
+# consumed on the invocation AFTER the one that writes them.
+#
+# wcc has no -MP equivalent, so dos_depfix below synthesises the same
+# phony header targets afterwards. That is not optional politeness: the
+# -include at the bottom of this file globs EVERY .d under build/, so a
+# .d without phony targets wedges the HOST build too, not just DOS --
+# "No rule to make target 'platform/common/menucheck.h'" from `make
+# test`, which would be a thoroughly baffling way to learn that a DOS
+# object file remembered a header you deleted.
+DOS_DEPFLAGS = -ad=$(@:.o=.d) -adfs -adt=$@ -add=$<
+
+# Appends "<header>:" phony targets to a Watcom-generated .d, matching
+# what GCC's -MP emits inline. Takes the .d path as $(1).
+define dos_depfix
+tr ' ' '\n' < $(1) | sed -n 's/^\(.*\.h\)$$/\1:/p' >> $(1)
+endef
+
 DOS_STRICT_CFLAGS  = -0 -mm -bt=dos -za -zastd=c89 -we -wx
 DOS_RELAXED_CFLAGS = -0 -mm -bt=dos -wx
 # engine/include first, deliberately: Watcom's own h/ ships a same-
@@ -526,19 +578,24 @@ dos-engine-check: $(DOS_ENGINE_OBJ) $(DOS_TRANSPORT_OBJ) $(DOS_SERVICES_OBJ)
 	@echo "engine + offload/transport + services cross-compile clean for Open Watcom DOS"
 
 $(DOS_BUILD)/engine/%.o: engine/src/%.c | $(DOS_BUILD)/engine
-	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) $(DOS_DEPFLAGS) -fo=$@ $<
+	@$(call dos_depfix,$(@:.o=.d))
 
 $(DOS_BUILD)/transport/%.o: offload/transport/%.c | $(DOS_BUILD)/transport
-	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) $(DOS_DEPFLAGS) -fo=$@ $<
+	@$(call dos_depfix,$(@:.o=.d))
 
 $(DOS_BUILD)/services/%.o: services/spell/%.c | $(DOS_BUILD)/services
-	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) $(DOS_DEPFLAGS) -fo=$@ $<
+	@$(call dos_depfix,$(@:.o=.d))
 
 $(DOS_BUILD)/services/%.o: services/grammar/%.c | $(DOS_BUILD)/services
-	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) $(DOS_DEPFLAGS) -fo=$@ $<
+	@$(call dos_depfix,$(@:.o=.d))
 
 $(DOS_BUILD)/common/%.o: platform/common/%.c | $(DOS_BUILD)/common
-	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) $(DOS_DEPFLAGS) -fo=$@ $<
+	@$(call dos_depfix,$(@:.o=.d))
 
 # Phase 0's own smoke test (M14 T14.6's go/no-go gate) was a
 # freestanding program with no engine/platform-dos linkage -- platform/
@@ -547,7 +604,8 @@ $(DOS_BUILD)/common/%.o: platform/common/%.c | $(DOS_BUILD)/common
 # so it now needs the full platform/dos + engine/transport/services
 # object set, same as SMOKE.PRG/AMISMOKE each needed from very early on.
 $(DOS_BUILD)/smoke/%.o: host/tools/%.c | $(DOS_BUILD)/smoke
-	env $(DOS_ENV) $(DOSCC) $(DOS_RELAXED_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+	env $(DOS_ENV) $(DOSCC) $(DOS_RELAXED_CFLAGS) $(DOS_INCLUDES) $(DOS_DEPFLAGS) -fo=$@ $<
+	@$(call dos_depfix,$(@:.o=.d))
 
 $(DOS_BIN)/SMOKE.EXE: $(DOS_PLATFORM_OBJ) $(DOS_BUILD)/smoke/dos_smoke.o $(DOS_ENGINE_OBJ) $(DOS_COMMON_OBJ) $(DOS_TRANSPORT_OBJ) $(DOS_SERVICES_OBJ) | $(DOS_BIN)
 	env $(DOS_ENV) $(DOSLINK) -0 -mm -bt=dos -k32768 $^ -fe=$@
@@ -572,7 +630,8 @@ dos-smoke: $(DOS_BIN)/SMOKE.EXE
 $(DOS_BUILD)/app/app_shell.o: $(GENERATED)/help_retrowp.h
 
 $(DOS_BUILD)/app/%.o: platform/dos/%.c | $(DOS_BUILD)/app
-	env $(DOS_ENV) $(DOSCC) $(DOS_RELAXED_CFLAGS) $(DOS_INCLUDES) -fo=$@ $<
+	env $(DOS_ENV) $(DOSCC) $(DOS_RELAXED_CFLAGS) $(DOS_INCLUDES) $(DOS_DEPFLAGS) -fo=$@ $<
+	@$(call dos_depfix,$(@:.o=.d))
 
 $(DOS_BIN)/RETROWP.EXE: $(DOS_PLATFORM_OBJ) $(DOS_BUILD)/app/main.o $(DOS_ENGINE_OBJ) $(DOS_COMMON_OBJ) $(DOS_TRANSPORT_OBJ) $(DOS_SERVICES_OBJ) | $(DOS_BIN)
 	env $(DOS_ENV) $(DOSLINK) -0 -mm -bt=dos -k32768 $^ -fe=$@
@@ -585,3 +644,10 @@ dos: $(DOS_BIN)/RETROWP.EXE
 
 clean:
 	rm -rf $(BUILD) $(BIN)
+
+# Every .d emitted above, if any. Deliberately last, and deliberately a
+# wildcard rather than a derived list: on a clean tree there are no .d
+# files and nothing is included, which is exactly right because a clean
+# tree compiles everything regardless.
+DEPFILES := $(shell find build -name '*.d' 2>/dev/null)
+-include $(DEPFILES)
