@@ -803,18 +803,35 @@ than through this seam -- the status line (which *does* go through
 bug, just less obviously (a black bar with technically-legible text,
 easy to mistake for an intentional "reversed video" look until the
 help pager's fully-invisible text made it unambiguous). Fixed by adding
-a real luminance-threshold pattern selection (`select_fill_pattern`,
-extending `draw_atari.c`'s own 2-tone `rgb_to_vdi_color` approach to a
-third tier, `qd.ltGray`, so the status line's/help pager's own gray
-highlight bars render distinctly from both pure black and pure white),
+a real luminance-threshold pattern selection (`select_fill_pattern`),
 restoring the pen to black afterward since `draw_document`'s own
 cursor-marker `PaintRect` call assumes that default.
+
+That fix originally added a *third* tier, `qd.ltGray`, "so the status
+line's/help pager's own gray highlight bars render distinctly from both
+pure black and pure white". **That tier has since been removed**, and the
+threshold now matches `draw_atari.c` exactly (two tones at 384). On a
+1-bit screen there is no gray: `0xC0` became a dither, and both of this
+project's only two `0xC0` callers draw *black text on top of it*
+(`statusline.c`, whose own comment asks for "a legible neutral background
+for black text", and `help_view.c`'s selected-link highlight). Small
+black glyphs over a dither are mush -- confirmed on-target under
+BasiliskII, where the vi mode indicator and the `:`/`/` command line were
+unreadable without zooming to 500%. The tier's stated purpose was in
+direct conflict with its only two real uses.
+
+Removing it cost the help pager its selection cue, because the `> `
+marker was drawn on *every* link rather than only the selected one -- so
+selection is now carried by the text itself (`> ` selected, two spaces
+otherwise, in `platform/common/help_view.c`). That also fixed the same
+defect on Atari, which thresholds `0xC0` to white and had therefore never
+shown help selection at all.
 
 ### Verified on-target
 
 Real screenshots, one continuous session: the status line correctly
-shows `NORMAL` (vi-mode's current state) in a properly-rendered gray
-bar; F1 opens the help pager showing real compiled-in content
+shows `NORMAL` (vi-mode's current state) in a status bar -- gray at the
+time of that session, white since the `ltGray` tier was removed above; F1 opens the help pager showing real compiled-in content
 ("Welcome to RetroWP..."), a real list of topic links with the
 selected one highlighted, and the hint bar
 ("HELP -- j/k select, Enter follow, Backspace back, Esc/q close");

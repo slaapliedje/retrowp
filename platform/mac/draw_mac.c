@@ -116,24 +116,44 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
    whatever pattern was already current. The main document body never
    surfaced this, since it clears its own background via a direct
    EraseRect call (always white, by QuickDraw's own contract) rather
-   than through this seam -- draw_atari.c's own rgb_to_vdi_color makes
-   the identical luminance-threshold simplification for its 2-tone ST
-   palette; this extends it to a third tier (qd.ltGray) so the status
-   line's/help pager's own gray highlight bars (0xC0,0xC0,0xC0) render
-   distinctly from both pure black and pure white. The pen is always
-   restored to black afterward, since draw_document's own cursor-marker
-   PaintRect call (and any future direct PaintRect caller) assumes that
-   default. */
+   than through this seam. The pen is always restored to black
+   afterward, since draw_document's own cursor-marker PaintRect call
+   (and any future direct PaintRect caller) assumes that default.
+
+   TWO tiers, thresholded at 384 -- deliberately the identical rule
+   draw_atari.c's rgb_to_vdi_color uses for the ST's 2-tone palette,
+   rather than a Mac-specific variant.
+
+   There WAS a third tier here (qd.ltGray for the 96..224 band), added so
+   the status line's and help pager's 0xC0 gray bars would "render
+   distinctly from both pure black and pure white". It was removed
+   because on a 1-bit screen there is no gray: 0xC0 became a dither, and
+   BOTH of this project's only two 0xC0 callers draw BLACK TEXT ON TOP OF
+   IT (platform/common/statusline.c:44, whose own comment asks for "a
+   legible neutral background for black text", and help_view.c:310's
+   selected-link highlight). Small black glyphs over a dither on 1-bit
+   are mush -- verified on-target under BasiliskII, where the vi mode
+   indicator and the ":"/"/" command line were unreadable without
+   zooming to 500%. The tier's stated purpose was in direct conflict with
+   its only two real uses.
+
+   Dropping it did cost something, which is now paid for properly rather
+   than waved away. The help pager's 0xC0 rect was the ONLY cue for which
+   link is selected -- its "> " prefix was drawn on every link, not just
+   the selected one, so white-filling that rect would have made selection
+   invisible here. (Atari, thresholding at this same 384, had that bug
+   all along: selection has never been visible on the ST.) So
+   help_view.c now puts the selection in the TEXT -- "> " on the selected
+   link, spaces on the rest -- which fixes both backends and leaves this
+   seam free to do the simple, correct thing. */
 static void select_fill_pattern(u8 r, u8 g, u8 b)
 {
     u32 luminance = (u32)r + (u32)g + (u32)b;
 
-    if (luminance >= 224u * 3u) {
-        PenPat(&qd.white);
-    } else if (luminance >= 96u * 3u) {
-        PenPat(&qd.ltGray);
-    } else {
+    if (luminance < 384u) {
         PenPat(&qd.black);
+    } else {
+        PenPat(&qd.white);
     }
 }
 

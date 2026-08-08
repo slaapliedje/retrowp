@@ -1807,6 +1807,24 @@ UI work an interactive screenshot actually confirmed end-to-end (Phase
 text word-wraps correctly against real VDI-measured metrics, and the
 link list (with its `> ` marker) and hint bar render as designed.
 
+**Corrected later**: that `> ` marker was drawn on *every* link, not just
+the selected one, and the only cue for which topic was actually selected
+was a `0xC0` gray highlight rect -- which `rgb_to_vdi_color` thresholds
+to WHITE on this backend (luminance 576 >= 384). So selection was
+invisible on the ST from the day this shipped: you could move through the
+topic list with `j`/`k` and nothing on screen changed. Nobody noticed
+because the screenshot above looks entirely correct -- every link has its
+marker, the text is legible, and there is no way to tell from one still
+frame that the highlight is missing.
+
+It surfaced only from the other end, on the Mac, where the same `0xC0`
+became a 50% dither that made the *status line* unreadable (see
+`docs/mac-platform.md`). Fixing that meant asking what the gray rect was
+actually for. `platform/common/help_view.c` now puts selection in the
+text -- `> ` on the selected link, two spaces on the others -- which
+fixes both backends and needs nothing from either one's draw seam. The
+highlight rect is kept where colour is real.
+
 **Test-harness lesson, worth keeping for next time**: the live
 verification above only worked once a wrong assumption was corrected.
 Hatari's F11 key is "toggle fullscreen" (per `man hatari`), **not** a

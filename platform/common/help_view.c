@@ -278,7 +278,25 @@ void wp_help_view_paint(plat_gc *gc, plat_font *font,
         if (is_link) {
             u32 n = text_len;
             if (n > (u32)sizeof(marker_buf) - 2) n = (u32)sizeof(marker_buf) - 2;
-            marker_buf[0] = '>';
+            /* The marker carries SELECTION, not just link-ness: "> " on
+               the selected link, two spaces on the others so every label
+               still lines up.
+
+               It used to be "> " on every link, which left the gray
+               highlight rect below as the ONLY selection cue -- and that
+               rect is invisible on any backend whose fill seam thresholds
+               0xC0 gray to white. draw_atari.c has always done exactly
+               that (rgb_to_vdi_color, threshold 384), so which help topic
+               was selected has never been visible on the ST at all; the
+               Mac only escaped it by rendering the gray as a dither, which
+               in turn made the status line unreadable (see
+               draw_mac.c's select_fill_pattern). Encoding selection in the
+               text fixes both, and needs nothing from the backends.
+
+               The highlight rect is kept as well: on a backend with real
+               colour it reinforces this, and it costs nothing where it
+               resolves to white. */
+            marker_buf[0] = (char)(is_selected ? '>' : ' ');
             marker_buf[1] = ' ';
             memcpy(marker_buf + 2, text, n);
             text = marker_buf;
