@@ -1179,3 +1179,80 @@ make the matrix permanently red while telling us nothing new each run;
 hiding it would repeat the mistake this whole task exists to fix. Same
 "excluded with a real reason, stated out loud, not silently skipped"
 treatment that script already gives Kickstart 3.0.
+
+## Kickstart 2.04/2.05: two bugs, neither of them visible (T164)
+
+The T158 app gate's first run found that `RETROWP` never opened a window
+under Kickstart 2.04 or 2.05, while passing on 3.1. `AMISMOKE` passed on
+all three. Two independent defects were stacked on top of each other,
+and the first one hid the second.
+
+### Bug 1: asl.library killed the app before `main()` ran
+
+Captured by temporarily replacing the fixture's own
+`RUN >NIL: SYS:RETROWP` hook with a foreground run whose output went to
+a file — the `>NIL:` was discarding the answer. The app printed exactly
+one line:
+
+```
+asl.library failed to load
+```
+
+`libstubs.a(asl.o)` defines `_AslBase` and carries an auto-open
+descriptor that libnix's `__initlibraries` walks **before `main()`**; if
+that open fails it prints this and exits. So on a Kickstart where
+asl.library will not open, not one line of this app's own code ever ran
+— no window, no crash, and nothing whatsoever to see. That is why
+instrumenting `open_libraries()` produced no markers at all, not even
+one written as its first statement.
+
+Two changes, and the second is the real point:
+
+- `platform/amiga/app_shell.c` now **defines `AslBase` itself**, so the
+  linker satisfies the symbol from our object and never pulls `asl.o`
+  in. No auto-open entry exists, and startup is ours to control. The ASL
+  call stubs come from `proto/asl.h` inlines and do not need that
+  object.
+- **asl.library is now optional.** It provides the file requester — one
+  feature — and requiring it to *start* made an entire editor unusable
+  on any system lacking it, which is the opposite of this project's own
+  degrade-or-tier rule (CLAUDE.md rule 5). `open_libraries()` no longer
+  lists it as required; `run_asl_file_requester` checks for a NULL base
+  and says so in a requester instead. That guard is load-bearing rather
+  than defensive: every ASL entry point is an inline that jumps through
+  `AslBase`, so calling one with a NULL base is a wild jump, not a
+  failed call.
+
+### Bug 2: AllocBitMap is V39-only
+
+With bug 1 fixed the app got further and then genuinely crashed —
+illegal-instruction count went from 1 (Kickstart's own probe) to 2.
+Milestone markers put it inside `relayout_document` on the first paint,
+with the stack measured healthy (4096 total, 1296 used), so not a repeat
+of T151.
+
+That path reaches `metrics_amiga.c`'s `ensure_metrics_rp`, which called
+`AllocBitMap`. **`AllocBitMap` is graphics.library V39 (Kickstart 3.0)**
+— verified against the NDK's own `graphics_lib.sfd`, where it appears
+after the `==version 39` marker, while `InitBitMap` and `AllocRaster`
+sit above `==version 36` and exist on every Amiga. Kickstart 2.04/2.05
+ship graphics.library V37, so that call jumped past the end of the
+library's jump table.
+
+The guard has to be a **version check**, not a NULL check: there is no
+return value to test when the call itself is a wild jump. On pre-V39 the
+measuring bitmap is now built the way every pre-3.0 Amiga program built
+one — `AllocRaster` for the plane plus `InitBitMap` on a static
+`struct BitMap`.
+
+### Verified
+
+All three Kickstarts pass the app gate (2.04, 2.05, 3.1), and the
+matrix's temporary 3.1-only exclusion is gone rather than left to rot.
+A real screenshot under Kickstart 2.04 shows the MUI window open with
+the sample document rendered and the caret on the first line.
+
+**Known remaining limitation on 2.04/2.05**: asl.library still does not
+open there, so File Open/Save report that the requester is unavailable.
+The editor itself is fully usable; only the native file dialogs are
+missing. Tracked separately rather than left as a surprise.

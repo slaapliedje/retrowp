@@ -128,6 +128,11 @@ static struct RastPort g_metrics_rp;
 static struct BitMap *g_metrics_bitmap = NULL;
 static wp_bool g_metrics_rp_ready = WP_FALSE;
 
+/* Pre-V39 fallback storage for the measuring bitmap -- see
+   ensure_metrics_rp. Process-lifetime, never freed, exactly like the
+   AllocBitMap path above it. */
+static struct BitMap g_metrics_bitmap_v37;
+
 static void ensure_metrics_rp(void)
 {
     if (g_metrics_rp_ready) return;
@@ -135,7 +140,31 @@ static void ensure_metrics_rp(void)
                                       own comment on why a failed attempt
                                       below must not retry every call */
 
-    g_metrics_bitmap = AllocBitMap(1, 1, 1, 0, NULL);
+    /* AllocBitMap is graphics.library V39 (Kickstart 3.0) -- verified
+       against the NDK's own graphics_lib.sfd, where it appears after
+       the "==version 39" marker, while InitBitMap/AllocRaster sit above
+       "==version 36" and so exist on every Amiga.
+
+       Kickstart 2.04/2.05 ship graphics.library V37, where calling
+       AllocBitMap jumps past the end of the library's jump table --
+       a wild jump, not a failed call, so it faults rather than
+       returning NULL. That is the whole reason RetroWP could not run on
+       those Kickstarts (T164): the very first paint calls relayout,
+       which measures text, which lands here. Two separate lessons in
+       one bug -- the failure was an illegal instruction at a garbage
+       address, and the guard has to be a VERSION CHECK, because there
+       is no return value to test. */
+    if (GfxBase != NULL && GfxBase->LibNode.lib_Version >= 39) {
+        g_metrics_bitmap = AllocBitMap(1, 1, 1, 0, NULL);
+    } else {
+        PLANEPTR plane = AllocRaster(1, 1);
+
+        if (plane != NULL) {
+            InitBitMap(&g_metrics_bitmap_v37, 1, 1, 1);
+            g_metrics_bitmap_v37.Planes[0] = plane;
+            g_metrics_bitmap = &g_metrics_bitmap_v37;
+        }
+    }
     if (g_metrics_bitmap == NULL) return;
 
     InitRastPort(&g_metrics_rp);

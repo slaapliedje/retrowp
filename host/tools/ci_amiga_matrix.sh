@@ -91,34 +91,22 @@ while IFS= read -r entry; do
     # this matrix passed 3/3 while RETROWP crashed on ~17 of 18 boots.
     # Boot the real app against this same Kickstart.
     #
-    # Only 3.1 for now, and NOT because the other two are inconvenient:
-    # the first run of this gate found that the interactive app does not
-    # open its window at all under Kickstart 2.04 or 2.05 (no crash --
-    # the illegal-instruction count stays at Kickstart's own single
-    # MOVEC probe -- it simply never appears; a real screenshot at 90s
-    # shows a booted Workbench with no RetroWP window). AMISMOKE passes
-    # on all three, so that gap had never been visible before. Tracked
-    # separately; gating on it here would make this matrix permanently
-    # red and tell us nothing new each run (task #164). Same "excluded with a real
-    # reason, stated out loud, not silently skipped" treatment this
-    # script already gives Kickstart 3.0 above.
-    case "$label" in
-    kick-3.1-*)
-        OFFSET=$((OFFSET + 1))
-        if run_amiga_app_once "$rom" "$OFFSET"; then
-            :
-        else
-            echo "FAIL: $label (RETROWP app gate)"
-            echo "--- RETROWP app gate ---"
-            cat "$AMIGA_APP_LOG"
-            ENTRY_OK=0
-        fi
-        rm -rf "$(dirname "$AMIGA_APP_LOG")"
-        ;;
-    *)
-        echo "SKIP: $label RETROWP app gate -- app does not open a window on this Kickstart (known, tracked as task #164)"
-        ;;
-    esac
+    # Runs on EVERY Kickstart in the list. It was briefly 3.1-only:
+    # the gate's first run found the app never opened a window at all
+    # under 2.04/2.05, which turned out to be two real defects it had
+    # been blind to (T164 -- asl.library aborting startup before main,
+    # and AllocBitMap being V39-only). Both fixed, so the exclusion is
+    # gone rather than left to rot.
+    OFFSET=$((OFFSET + 1))
+    if run_amiga_app_once "$rom" "$OFFSET"; then
+        :
+    else
+        echo "FAIL: $label (RETROWP app gate)"
+        echo "--- RETROWP app gate ---"
+        cat "$AMIGA_APP_LOG"
+        ENTRY_OK=0
+    fi
+    rm -rf "$(dirname "$AMIGA_APP_LOG")"
 
     if [ "$ENTRY_OK" -eq 1 ]; then
         echo "PASS: $label"

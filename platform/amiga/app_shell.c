@@ -108,6 +108,20 @@ wp_bool wp_amiga_file_clipboard_selfcheck(void)
    proto/intuition.h declares `struct IntuitionBase *IntuitionBase`) --
    this file only assigns them, never redeclares. */
 
+/* T164: DEFINING AslBase here is load-bearing, not tidiness.
+   libstubs.a(asl.o) defines _AslBase and carries an auto-open
+   descriptor that libnix's __initlibraries walks BEFORE main() runs; if
+   that open fails it prints "asl.library failed to load" and exits. So
+   on a Kickstart where asl.library will not open, this app died before
+   a single line of its own code ran -- no window, no crash, nothing to
+   see (which is exactly how it presented under Kickstart 2.04/2.05: a
+   booted Workbench with no RetroWP window and no fault at all).
+   Defining the symbol ourselves means the linker satisfies it from this
+   object and never pulls asl.o in, so no auto-open entry exists and
+   startup is ours to control. The ASL call stubs themselves come from
+   proto/asl.h inlines and do not need that object. */
+struct Library *AslBase = NULL;
+
 static wp_bool open_libraries(void)
 {
     /* MUIMASTER_VMIN (mui.h's own suggested minimum, 20) is newer than
@@ -123,7 +137,13 @@ static wp_bool open_libraries(void)
     UtilityBase   = OpenLibrary((CONST_STRPTR)"utility.library", 37);
     AslBase       = OpenLibrary((CONST_STRPTR)"asl.library", 37);
     KeymapBase    = OpenLibrary((CONST_STRPTR)"keymap.library", 37);
-    return (IntuitionBase && GfxBase && UtilityBase && AslBase && KeymapBase)
+    /* AslBase is deliberately NOT in this list. asl.library provides the
+       file requester -- one feature -- and requiring it to start made a
+       whole editor unusable on any system that lacks it, which is the
+       opposite of this project's own degrade-or-tier rule (CLAUDE.md
+       rule 5). It is opened above on a best-effort basis; when it is
+       NULL, Open/Save say so and everything else works. */
+    return (IntuitionBase && GfxBase && UtilityBase && KeymapBase)
            ? WP_TRUE : WP_FALSE;
 }
 
@@ -300,6 +320,19 @@ static wp_bool run_asl_file_requester(wp_bool save_mode, char *out_path, u32 out
 {
     struct FileRequester *fr;
     wp_bool ok = WP_FALSE;
+
+    /* asl.library is optional (see open_libraries). Every ASL entry
+       point below is an inline that jumps through AslBase, so calling
+       one with a NULL base is a wild jump, not a failed call -- this
+       guard is the whole reason the library can safely be optional. */
+    if (AslBase == NULL) {
+        MUI_Request(g_app, g_win, 0, (CONST_STRPTR)"RetroWP",
+                     (CONST_STRPTR)"OK",
+                     (CONST_STRPTR)"asl.library is not available on this system,\n"
+                                    "so the file requester cannot be opened.\n"
+                                    "Everything else still works.");
+        return WP_FALSE;
+    }
 
     fr = (struct FileRequester *)AllocAslRequestTags(ASL_FileRequest,
         ASLFR_InitialDrawer, (IPTR)"SYS:",
