@@ -211,7 +211,7 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
 {
     wp_paragraph_layout *layout;
     font_cache cache;
-    token_t tokens[MAX_TOKENS];
+    token_t *tokens;
     u32 token_count;
     wp_status st;
     i32 indent_left = 0, indent_right = 0, indent_first = 0;
@@ -266,9 +266,26 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
         return WP_OK;
     }
 
+    /* HEAP, not stack. This was `token_t tokens[MAX_TOKENS]` -- a single
+       ~14KB automatic array (512 entries x 28 bytes), which is more
+       stack than some of this project's own targets give a process in
+       total. AmigaOS hands a RUN-launched program 4096 bytes; measured
+       on target, 1292 of those were already in use by the time MUI's
+       draw callback reached this function, leaving ~2.8KB for a 14KB
+       frame. The result was a ~5x overflow that scribbled over whatever
+       lived below the stack -- surviving harmlessly when that memory
+       happened to be dead, and producing wild jumps into garbage when it
+       was not, which is why RetroWP crashed on roughly 17 of 18 Amiga
+       boots with an illegal instruction at a different address each time
+       and sometimes took an unrelated task (IPrefs) down with it.
+       Allocated after the image-paragraph branch above, so an image
+       paragraph -- which never tokenizes -- pays nothing. */
+    tokens = (token_t *)mem_alloc((u32)(sizeof(token_t) * MAX_TOKENS));
+    if (tokens == NULL) return WP_NOMEM;
+
     cache.count = 0;
     st = tokenize(doc, para, &cache, tokens, &token_count);
-    if (st != WP_OK) { font_cache_close_all(&cache); return st; }
+    if (st != WP_OK) { font_cache_close_all(&cache); mem_free(tokens); return st; }
 
     if (token_count == 0) {
         /* Empty paragraph: exactly one zero-width line, sized by the
@@ -277,10 +294,11 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
         i32 dummy_width, height;
 
         st = measure_and_height(&cache, doc, style, (const u8 *)"", 0, &dummy_width, &height);
-        if (st != WP_OK) { font_cache_close_all(&cache); return st; }
+        if (st != WP_OK) { font_cache_close_all(&cache); mem_free(tokens); return st; }
 
         st = emit_line(layout, 0, 0, 0, 0, 0, height);
         font_cache_close_all(&cache);
+        mem_free(tokens);
         if (st != WP_OK) return st;
 
         para->layout_dirty = WP_FALSE;
@@ -314,7 +332,7 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
             } else {
                 st = emit_line(layout, line_start_run, line_start_offset,
                                 line_end_run, line_end_offset, line_width, line_height);
-                if (st != WP_OK) { font_cache_close_all(&cache); return st; }
+                if (st != WP_OK) { font_cache_close_all(&cache); mem_free(tokens); return st; }
 
                 is_first_line = WP_FALSE;
                 line_start_run = t->start_run;
@@ -331,10 +349,11 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
     if (have_line_content) {
         st = emit_line(layout, line_start_run, line_start_offset,
                         line_end_run, line_end_offset, line_width, line_height);
-        if (st != WP_OK) { font_cache_close_all(&cache); return st; }
+        if (st != WP_OK) { font_cache_close_all(&cache); mem_free(tokens); return st; }
     }
 
     font_cache_close_all(&cache);
+    mem_free(tokens);
     para->layout_dirty = WP_FALSE;
     return WP_OK;
 }

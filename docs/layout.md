@@ -111,6 +111,26 @@ indent_right - indent_first`; every other line gets
 `content_width_twips - indent_left - indent_right`. This lets a hanging
 or first-line indent work without the caller needing to know about it.
 
+**The token buffer lives on the HEAP, deliberately.** `tokenize()`
+describes a paragraph's wrap points in a fixed 512-entry `token_t`
+array, and `wp_paragraph_relayout` used to declare that array as an
+ordinary local — about **14KB in a single stack frame**. That is more
+stack than some of this project's targets hand a process in total:
+AmigaOS gives a `RUN`-launched program **4096 bytes**, of which ~1292
+were already spent by the time MUI's draw callback reached layout
+(measured on target, `docs/amiga-platform.md`). The result was a ~5x
+overflow that corrupted whatever sat below the stack — nondeterministic
+wild jumps that crashed RetroWP on ~17 of 18 Amiga boots and sometimes
+took an unrelated system task down instead. It is `mem_alloc`'d now,
+per CLAUDE.md's "all engine allocation goes through mem_alloc" rule,
+and freed on every exit path. The allocation happens *after* the
+image-paragraph branch, so an image paragraph — which never tokenizes —
+pays nothing.
+
+The general rule this establishes for `engine/`: **large buffers do not
+go on the stack**, because the engine's stack frames are shared by every
+backend and the tightest target sets the budget for all of them.
+
 **Font handling**: a small fixed-size (8-entry) linear-scan cache of
 `(wp_cstyle, plat_font*)` keyed by character style, opened lazily and
 all closed at the end of one `wp_paragraph_relayout` call, avoids

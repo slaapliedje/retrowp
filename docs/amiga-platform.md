@@ -972,3 +972,89 @@ clean) -- environmental amiberry boot flakiness specific to this one
 Kickstart image under this fixture, not a regression from any source
 change (confirmed by the crash happening at Kickstart's own filesystem-
 install stage, before any of this project's own code executes).
+
+## The startup crash was a stack overflow in the shared engine (T151)
+
+`RETROWP` died with `Program failed (error #80000004)` — an illegal
+instruction — on roughly **17 of 18 boots**, with zero user input. It was
+originally recorded as happening "after ~13 typed characters"; measuring
+it showed typing had nothing to do with it, and the app usually never
+finished opening its window at all.
+
+### What it actually was
+
+`engine/src/linebreak.c`'s `wp_paragraph_relayout` declared
+
+```c
+token_t tokens[MAX_TOKENS];   /* 512 x 28 bytes ~= 14KB, on the STACK */
+```
+
+Measured on target (`FindTask(NULL)->tc_SPUpper - tc_SPLower`, with the
+value encoded into a marker filename so the host could read it straight
+off DH0:):
+
+| | bytes |
+| --- | --- |
+| Total stack, `RUN`-launched from `S/Startup-Sequence` | **4096** |
+| Already used when MUI's draw callback reached layout | **1292** |
+| Headroom available for a ~14000-byte frame | **~2804** |
+
+A ~5x overflow. It scribbled over whatever lived below the stack —
+harmless when that memory happened to be dead, wild jumps into garbage
+when it was not. That explains every previously-confusing symptom at
+once: a different fault address each run, ~1 boot in 18 surviving
+cleanly, the rate changing whenever unrelated code changed, alerts that
+sometimes named an unrelated task (`IPrefs`) instead of RetroWP, and
+`AMISMOKE` passing 3/3 while the interactive app died — the smoke test
+runs before `LoadWB`, when the memory below its stack is mostly free.
+
+Fixed by moving the buffer to the heap (`mem_alloc`, freed on every exit
+path), which is what CLAUDE.md's memory rules ask for anyway. It is in
+the shared engine, so this was never Amiga-specific — the ST and Mac
+survive it only because their toolchains hand out a far larger stack.
+An image paragraph never tokenizes, so it now pays no allocation at all.
+
+### Reading amiberry's "Illegal instruction" lines
+
+**One per boot is normal and appears on completely clean boots:**
+
+```
+Illegal instruction: 4e7b at 00F80C38 -> 00F80CC0
+```
+
+`4e7b` is `MOVEC`, a 68020+ instruction, at a Kickstart ROM address —
+Kickstart probing for a 68020 and catching the expected exception.
+
+A **second** line, with a garbage opcode at a **RAM** address that
+differs run to run, is a real guest crash:
+
+```
+Illegal instruction: 00f0 at 0027EBE4 -> 00F80AD2
+Illegal instruction: 00f9 at 0021CFD4 -> 00F80AD2
+```
+
+`grep -c 'Illegal instruction'` is therefore a complete crash detector:
+1 is healthy, >= 2 is a real fault. Cheaper and far more reliable than
+screenshot parsing. This project's own notes had previously written
+these off as an amiberry JIT quirk — they are not, and that
+misattribution is part of why this bug survived so long. (The CI config
+runs `--model A500`, a 68000; JIT does not even apply, and `-c 4 -F 8`
+are chip/fast RAM sizes, not JIT flags.)
+
+### `__stack` does not work here
+
+`unsigned long __stack = 65536;` in `platform/amiga/main.c` is silently
+ignored by this amiga-gcc/libnix toolchain — the app still measured 4096
+bytes. An experiment resting on it proves nothing, so read the real size
+at runtime rather than trusting the cookie. Keeping large buffers out of
+shared engine stack frames is the durable fix; a bigger stack would only
+have hidden this one.
+
+### Verified
+
+12/12 clean boots with the fix (every one reaching the main event loop,
+and `emu_illegal_insn=1` on all of them), against 17/18 crashing before.
+Reverting only the engine change and rebuilding reproduced faults again
+(3 of 6 boots), confirming the causal link rather than inferring it.
+A real screenshot shows the MUI window open with the sample document
+rendered.
