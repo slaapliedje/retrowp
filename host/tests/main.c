@@ -337,6 +337,11 @@ void test_justify_last_line_of_paragraph_returns_zero(void);
 void test_justify_computes_extra_per_gap(void);
 void test_justify_single_word_line_has_no_gap(void);
 void test_justify_fragment_iter_splits_at_run_boundary_not_at_word(void);
+void test_justify_cursor_x_measures_from_line_start_not_paragraph_start(void);
+void test_justify_cursor_x_past_line_end_clamps_to_line_width(void);
+void test_justify_cursor_x_accumulates_justify_slack(void);
+void test_justify_cursor_x_crosses_run_boundaries(void);
+void test_justify_cursor_x_in_skipped_zero_length_run(void);
 
 /* paginate.c */
 void test_paginate_known_page_size_yields_expected_page_count(void);
@@ -788,6 +793,11 @@ static const test_case g_cases[] = {
     { "justify_computes_extra_per_gap", test_justify_computes_extra_per_gap },
     { "justify_single_word_line_has_no_gap", test_justify_single_word_line_has_no_gap },
     { "justify_fragment_iter_splits_at_run_boundary_not_at_word", test_justify_fragment_iter_splits_at_run_boundary_not_at_word },
+    { "justify_cursor_x_measures_from_line_start_not_paragraph_start", test_justify_cursor_x_measures_from_line_start_not_paragraph_start },
+    { "justify_cursor_x_past_line_end_clamps_to_line_width", test_justify_cursor_x_past_line_end_clamps_to_line_width },
+    { "justify_cursor_x_accumulates_justify_slack", test_justify_cursor_x_accumulates_justify_slack },
+    { "justify_cursor_x_crosses_run_boundaries", test_justify_cursor_x_crosses_run_boundaries },
+    { "justify_cursor_x_in_skipped_zero_length_run", test_justify_cursor_x_in_skipped_zero_length_run },
 
     { "paginate_known_page_size_yields_expected_page_count", test_paginate_known_page_size_yields_expected_page_count },
     { "paginate_new_section_always_starts_new_page", test_paginate_new_section_always_starts_new_page },

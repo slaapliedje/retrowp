@@ -212,3 +212,60 @@ other line, computed by the branch above. This is a deliberate proof
 point, not an oversight -- pagination's page-break arithmetic is
 already fully decoupled from *what kind of content* produced a line's
 height.
+
+## Caret Positioning: `wp_line_cursor_x_twips` (T157)
+
+`wp_line` stores a byte range plus one aggregate measured width -- enough
+to *draw* a line, but nothing in it says where inside that line a given
+`(run, offset)` cursor falls. Every backend that paints a caret needs
+that number, and every one of them originally derived it (or failed to)
+on its own:
+
+| Backend | Before T157 |
+| --- | --- |
+| DOS | correct -- but only because a fixed-cell font makes the column a pure byte count (`cursor_col_in_line`), with no measuring at all |
+| Mac | caret hardcoded to the left margin, and anchored an ascent too high |
+| Amiga | the same two defects, verbatim |
+| Atari | no caret drawn at all |
+
+So this is the second function in `justify.c` to exist for exactly the
+reason the first one does (see `wp_justify_space_extra_twips` above):
+shared paint-loop support the engine owns, because four independent
+re-derivations is how three of four backends got it wrong.
+
+`wp_line_cursor_x_twips(doc, para, line, cursor_run, cursor_offset,
+space_extra_twips)` walks the line's fragments in the same order and by
+the same rules the paint loop does, accumulating measured width until it
+reaches the cursor, then measures the partial fragment up to the cursor's
+own byte offset. It returns twips relative to the **line's own drawing
+origin** -- so a caller adds it to wherever it was about to start
+painting that line (left margin plus the line's alignment offset), not to
+the paragraph's or the window's origin. Notable behaviors, all
+host-tested in `host/tests/test_justify.c`:
+
+- **`space_extra_twips`** is the value `wp_justify_space_extra_twips`
+  returned for this same line, so a JUSTIFY line's stretched gaps are
+  counted exactly where the paint loop's own `extra_twips` advance
+  counts them. Pass `0` when not justifying.
+- **A cursor at or past the line's end** returns the full content width
+  -- the ordinary case while typing, where the cursor sits one past the
+  character just inserted.
+- **A cursor parked in a zero-length run** (an edit can leave one behind,
+  `docs/editing.md`) still resolves correctly. The fragment walk skips
+  empty runs entirely, so a walk that only stopped on a *matching*
+  fragment would never stop and the caret would jump to the end of the
+  line; stopping as soon as a fragment's run index passes the cursor's is
+  what prevents that.
+- **Fonts are opened here, not borrowed** from the caller. A paint loop's
+  cached font belongs to whatever run it last drew, which is not
+  necessarily the cursor's run. Measuring goes through `plat_measure_text`
+  like everything else (CLAUDE.md rule 4).
+- **Image paragraphs** return `0`, same guard as the other two functions.
+
+The return unit is twips, so each backend applies its own twips->px
+ratio. On a backend whose ratio is not exact (Amiga's is
+`(twips * dpi_x) / 1440`; Mac's is a plain `/20` and *is* exact, since
+`plat_measure_text` there returns whole pixels scaled by 20) converting
+the total once can differ by about a pixel from summing per-fragment
+pixel widths -- below the width of the caret itself, and not worth
+threading a conversion callback through the engine to avoid.

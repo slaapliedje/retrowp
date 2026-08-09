@@ -122,4 +122,41 @@ i32 wp_justify_space_extra_twips(wp_document *doc, wp_paragraph *para, const wp_
                                   u8 align, wp_bool is_last_line_of_paragraph,
                                   i32 target_width_twips);
 
+
+/* ------------------------------------------------------------------ */
+/* Cursor positioning support (T157)                                   */
+/* ------------------------------------------------------------------ */
+
+/* Width in twips of the part of `line` that lies BEFORE (cursor_run,
+   cursor_offset) -- i.e. how far right of the line's own drawing origin
+   a caret marker belongs. Add it to whatever x the caller would start
+   painting that line at (left margin + this line's alignment offset)
+   and the caret lands on the glyph boundary the cursor actually sits at.
+   space_extra_twips is the same value wp_justify_space_extra_twips
+   returned for this line, so a justified line's stretched gaps are
+   accounted for; pass 0 if the caller isn't justifying.
+
+   Exists for the same reason wp_justify_space_extra_twips does: every
+   backend's paint loop needs it, and re-deriving a fragment walk per
+   backend is how three of the four ended up painting the caret at a
+   hardcoded left margin regardless of the cursor's real column (Mac and
+   Amiga did exactly that; Atari painted no caret at all; only DOS got it
+   right, and only because a fixed-cell font makes the column a pure byte
+   count with no measuring involved).
+
+   Measures through plat_measure_text (CLAUDE.md rule 4), opening the
+   run's font itself rather than borrowing the caller's -- a caller's
+   cached font belongs to whatever run it last drew, which is not
+   necessarily the cursor's run. Returns twips so the caller applies its
+   own twips->px ratio; on a backend whose ratio is not exact this can
+   differ by a pixel or so from summing per-fragment pixel widths, which
+   is below the width of the caret itself.
+
+   0 for an empty line, for an image paragraph, or for a cursor at the
+   line's start; the full line content width for a cursor at or past its
+   end (the common case while typing). Callers are expected to have
+   already established that the cursor is on THIS line. */
+i32 wp_line_cursor_x_twips(wp_document *doc, wp_paragraph *para, const wp_line *line,
+                            u32 cursor_run, u32 cursor_offset, i32 space_extra_twips);
+
 #endif /* WP_LAYOUT_H */

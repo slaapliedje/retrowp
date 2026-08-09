@@ -162,3 +162,175 @@ void test_justify_fragment_iter_splits_at_run_boundary_not_at_word(void)
 
     wp_document_free(&doc);
 }
+
+/* ---- wp_line_cursor_x_twips (T157) -------------------------------- */
+
+/* Same fixed host metrics as above: 120 twips per character at the
+   default cstyle, so every expected value below is (character count from
+   the LINE's own start) * 120 -- hand-computed, not captured from a
+   previous run. */
+
+void test_justify_cursor_x_measures_from_line_start_not_paragraph_start(void)
+{
+    wp_document doc;
+    wp_paragraph *para;
+    wp_paragraph_layout *layout;
+    static const char *text = "The quick brown fox jumps\n";
+
+    ASSERT_TRUE(format_txt_import((const u8 *)text, (u32)strlen(text), &doc) == WP_OK);
+    para = wp_section_paragraph_get(wp_document_section_get(&doc, 0), 0);
+    ASSERT_TRUE(wp_paragraph_relayout(&doc, para, 1100) == WP_OK);
+    layout = (wp_paragraph_layout *)para->layout;
+    ASSERT_EQ_U32(layout->line_count, 3); /* "The quick" / "brown fox" / "jumps" */
+
+    /* THE regression this whole function exists for. Byte offset 13 is
+       "brown fox"'s 'w' -- 13 characters into the PARAGRAPH but only 3
+       into line 1, which starts at offset 10. A caret positioned from
+       the paragraph offset would land 10 characters too far right; the
+       old Mac code landed it at the margin regardless. */
+    ASSERT_EQ_U32(wp_line_cursor_x_twips(&doc, para, &layout->lines[1], 0, 13, 0), 360);
+
+    /* Line 1's own start and end. */
+    ASSERT_EQ_U32(wp_line_cursor_x_twips(&doc, para, &layout->lines[1], 0, 10, 0), 0);
+    ASSERT_EQ_U32(wp_line_cursor_x_twips(&doc, para, &layout->lines[1], 0, 19, 0), 1080);
+
+    /* And line 0, to prove the offset-13 answer above isn't an accident
+       of measuring the whole paragraph and happening to match. */
+    ASSERT_EQ_U32(wp_line_cursor_x_twips(&doc, para, &layout->lines[0], 0, 4, 0), 480);
+
+    wp_document_free(&doc);
+}
+
+void test_justify_cursor_x_past_line_end_clamps_to_line_width(void)
+{
+    wp_document doc;
+    wp_paragraph *para;
+    wp_paragraph_layout *layout;
+    static const char *text = "The quick brown fox jumps\n";
+
+    ASSERT_TRUE(format_txt_import((const u8 *)text, (u32)strlen(text), &doc) == WP_OK);
+    para = wp_section_paragraph_get(wp_document_section_get(&doc, 0), 0);
+    ASSERT_TRUE(wp_paragraph_relayout(&doc, para, 1100) == WP_OK);
+    layout = (wp_paragraph_layout *)para->layout;
+
+    /* An offset beyond this line entirely (it belongs to line 2) walks
+       every fragment and stops -- the caret parks at end-of-content
+       rather than running off into whatever the next line measures.
+       This is also the ordinary typing case: the cursor sits one past
+       the last character it just inserted. */
+    ASSERT_EQ_U32(wp_line_cursor_x_twips(&doc, para, &layout->lines[1], 0, 25, 0), 1080);
+
+    wp_document_free(&doc);
+}
+
+void test_justify_cursor_x_accumulates_justify_slack(void)
+{
+    wp_document doc;
+    wp_paragraph *para;
+    wp_paragraph_layout *layout;
+    i32 extra;
+    static const char *text = "The quick brown fox jumps\n";
+
+    ASSERT_TRUE(format_txt_import((const u8 *)text, (u32)strlen(text), &doc) == WP_OK);
+    para = wp_section_paragraph_get(wp_document_section_get(&doc, 0), 0);
+    ASSERT_TRUE(wp_paragraph_relayout(&doc, para, 1100) == WP_OK);
+    layout = (wp_paragraph_layout *)para->layout;
+
+    /* Line 1 "brown fox" stretched to a 1300-twip column: one gap, 220
+       twips of slack (test_justify_computes_extra_per_gap's own math). */
+    extra = wp_justify_space_extra_twips(&doc, para, &layout->lines[1],
+                                          WP_ALIGN_JUSTIFY, WP_FALSE, 1300);
+    ASSERT_EQ_U32(extra, 220);
+
+    /* Offset 16 is 'f' -- past the stretched gap, so the caret must
+       include the slack the paint loop also added there:
+       "brown" 600 + " " 120 + 220 = 940. Passing 0 for a justified line
+       would put it 220 twips left of the glyph it points at. */
+    ASSERT_EQ_U32(wp_line_cursor_x_twips(&doc, para, &layout->lines[1], 0, 16, extra), 940);
+
+    /* Before the gap, the slack must NOT be counted yet. */
+    ASSERT_EQ_U32(wp_line_cursor_x_twips(&doc, para, &layout->lines[1], 0, 15, extra), 600);
+
+    wp_document_free(&doc);
+}
+
+void test_justify_cursor_x_crosses_run_boundaries(void)
+{
+    wp_document doc;
+    u32 sec_idx, para_idx;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_span span;
+    u16 run_idx;
+    wp_paragraph_layout *layout;
+
+    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
+    ASSERT_TRUE(wp_document_section_add(&doc, &sec_idx) == WP_OK);
+    sec = wp_document_section_get(&doc, sec_idx);
+    ASSERT_TRUE(wp_section_paragraph_add(sec, &para_idx) == WP_OK);
+    para = wp_section_paragraph_get(sec, para_idx);
+
+    /* Same "wor" + "d" + " there" three-run shape the fragment-iterator
+       test above uses -- a cursor offset is per-RUN, so the walk has to
+       carry accumulated width across run boundaries, not restart. */
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"wor", 3, &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, doc.default_cstyle, &run_idx) == WP_OK);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"d", 1, &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, doc.default_cstyle, &run_idx) == WP_OK);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)" there", 6, &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, doc.default_cstyle, &run_idx) == WP_OK);
+
+    ASSERT_TRUE(wp_paragraph_relayout(&doc, para, 1200) == WP_OK);
+    layout = (wp_paragraph_layout *)para->layout;
+    ASSERT_EQ_U32(layout->line_count, 1);
+
+    /* run 1 offset 0 == run 0 offset 3: both mean "after wor". */
+    ASSERT_EQ_U32(wp_line_cursor_x_twips(&doc, para, &layout->lines[0], 0, 3, 0), 360);
+    ASSERT_EQ_U32(wp_line_cursor_x_twips(&doc, para, &layout->lines[0], 1, 0, 0), 360);
+
+    /* run 2 offset 3 == "wor" + "d" + " " + "th" = 7 chars. */
+    ASSERT_EQ_U32(wp_line_cursor_x_twips(&doc, para, &layout->lines[0], 2, 3, 0), 840);
+
+    /* End of the last run -- the whole line, 10 characters. */
+    ASSERT_EQ_U32(wp_line_cursor_x_twips(&doc, para, &layout->lines[0], 2, 6, 0), 1200);
+
+    wp_document_free(&doc);
+}
+
+void test_justify_cursor_x_in_skipped_zero_length_run(void)
+{
+    wp_document doc;
+    u32 sec_idx, para_idx;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_span span;
+    u16 run_idx;
+    wp_paragraph_layout *layout;
+
+    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
+    ASSERT_TRUE(wp_document_section_add(&doc, &sec_idx) == WP_OK);
+    sec = wp_document_section_get(&doc, sec_idx);
+    ASSERT_TRUE(wp_section_paragraph_add(sec, &para_idx) == WP_OK);
+    para = wp_section_paragraph_get(sec, para_idx);
+
+    /* An edit can leave a zero-length run behind (docs/editing.md), and
+       the cursor can be parked in it. wp_line_next_fragment skips such a
+       run entirely -- so a walk that only ever stops on a MATCHING
+       fragment would never stop, and the caret would jump to the end of
+       the line. */
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"ab", 2, &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, doc.default_cstyle, &run_idx) == WP_OK);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"", 0, &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, doc.default_cstyle, &run_idx) == WP_OK);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"cd", 2, &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, doc.default_cstyle, &run_idx) == WP_OK);
+
+    ASSERT_TRUE(wp_paragraph_relayout(&doc, para, 1200) == WP_OK);
+    layout = (wp_paragraph_layout *)para->layout;
+    ASSERT_EQ_U32(layout->line_count, 1);
+
+    /* After "ab", not after "abcd". */
+    ASSERT_EQ_U32(wp_line_cursor_x_twips(&doc, para, &layout->lines[0], 1, 0, 0), 240);
+
+    wp_document_free(&doc);
+}

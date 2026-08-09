@@ -1129,12 +1129,14 @@ static void draw_document(WindowPtr w)
             for (li = 0; li < layout->line_count && y <= doc_bottom; li++) {
                 wp_line *line = &layout->lines[li];
                 i32 x_px = r.left + WP_DOC_LEFT_MARGIN_PX;
+                i32 line_origin_px;
                 i32 extra_twips;
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
 
                 x_px += mac_twips_to_px(
                     mac_align_offset_twips(align, content_width_twips, line->width_twips));
+                line_origin_px = x_px;   /* the fragment walk below advances x_px past it */
 
                 /* M15 T15.6: an image paragraph's single line has no run
                    bytes to fragment -- paint its real indexed-bitmap
@@ -1257,10 +1259,37 @@ static void draw_document(WindowPtr w)
                     if (frag.is_space) x_px += mac_twips_to_px(extra_twips);
                 }
 
+                /* The caret x used to be a hardcoded r.left + 2: the guard
+                   picked the right LINE, but nothing ever derived a column
+                   from the cursor's run/offset, so the marker sat at the
+                   left margin no matter where the cursor really was. That
+                   was the only caret feedback this backend has, and it
+                   read as a broken feature rather than a misplaced marker
+                   -- searching "/quit" moved the cursor correctly but drew
+                   the caret at the start of the paragraph while the match
+                   was near the end of its second line, which looked like
+                   the search itself had failed. wp_line_cursor_x_twips
+                   does the fragment walk (shared, host-tested, and
+                   justify-aware, so a JUSTIFY line's stretched gaps count
+                   the same way this loop's own extra_twips advance does). */
                 if (is_cursor_para && li == cursor_line_index) {
                     Rect mark;
-                    SetRect(&mark, (short)(r.left + 2), (short)(y - ascent_px),
-                                    (short)(r.left + 5), (short)(y + 2));
+                    i32 caret_px = line_origin_px + mac_twips_to_px(
+                        wp_line_cursor_x_twips(&g_mac_doc, para, line,
+                                                wp_keymap_cursor(&g_ctx)->run,
+                                                wp_keymap_cursor(&g_ctx)->offset,
+                                                extra_twips));
+
+                    /* y is the line's TOP -- the draw loop above derives
+                       its baseline as y + ascent_px. The old rect spanned
+                       (y - ascent_px)..(y + 2), which is the correct
+                       shape measured from a BASELINE, so the caret was
+                       painted one full ascent above the line it marks:
+                       visible in this fix's own before/after screenshots
+                       as a bar floating in the gap above the text.
+                       Same shape, re-anchored to the line top. */
+                    SetRect(&mark, (short)caret_px, (short)y,
+                                    (short)(caret_px + 3), (short)(y + ascent_px + 2));
                     PaintRect(&mark);
                 }
 

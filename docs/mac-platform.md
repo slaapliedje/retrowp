@@ -41,6 +41,21 @@ passing CI entrypoint.
   cmake -S host/tools/mac -B build/mac -DCMAKE_TOOLCHAIN_FILE=~/opt/Retro68-build/toolchain/m68k-apple-macos/cmake/retro68.toolchain.cmake -G "Unix Makefiles"
   cmake --build build/mac
   ```
+- **`cmake --build build/mac --target RETROWP` does NOT produce a
+  runnable app** -- and fails silently rather than erroring.
+  `add_application(NAME ...)` defines *two* targets: `NAME`, which
+  compiles and links `NAME.code.bin`, and `NAME_APPL`, which runs the
+  `Rez` packaging step that turns it into the `.APPL` plus its
+  `.rsrc`/`.finf` sidecars. Only `--target NAME_APPL` (or the default
+  `all`) regenerates what actually ships -- the **code lives in the
+  resource fork**, and the data-fork `.APPL` is a 0-byte file, so a
+  stale `.rsrc` looks completely normal on disk. Building the bare
+  `NAME` target reports "[100%] Built target RETROWP" and leaves an
+  arbitrarily old `.rsrc/NAME.APPL` in place for the CI scripts to copy.
+  Cost a full round of T157 verification: four interactive BasiliskII
+  runs "reproduced" a bug that had already been fixed, because every one
+  of them booted an 8-hour-old build. Timestamp the `.rsrc` sidecar, not
+  the `.code.bin`, when a change appears not to take effect on target.
 - `add_application(target source.c [CONSOLE])`: omitting `CONSOLE`
   produces a plain GUI-less app with no auto stdio window; passing
   `CONSOLE` links Retro68's console library (auto stdio window, but see
@@ -826,6 +841,36 @@ selection is now carried by the text itself (`> ` selected, two spaces
 otherwise, in `platform/common/help_view.c`). That also fixed the same
 defect on Atari, which thresholds `0xC0` to white and had therefore never
 shown help selection at all.
+
+### Cursor marker: column and vertical anchor (T157)
+
+`draw_document`'s caret was `SetRect(r.left + 2, y - ascent_px, r.left + 5,
+y + 2)`. Two independent defects in that one rect:
+
+- **Column ignored.** `r.left + 2` is a hardcoded left margin. The guard
+  above it picks the correct *line*, but nothing ever derived an x from
+  the cursor's run/offset, so the caret sat at column 0 wherever the
+  cursor actually was. Found while functionally testing this backend:
+  `/quit` moved the cursor to the right paragraph, but the caret drew at
+  that paragraph's start while the match was near the end of its second
+  display line -- it read as a broken *search*, not a misplaced marker.
+- **Anchored to the wrong edge.** `y` is the line's TOP (the draw loop
+  derives the baseline as `y + ascent_px`), but `y - ascent_px .. y + 2`
+  is the correct span measured from a BASELINE. The caret was painted a
+  full ascent above the line it marked -- a bar floating in the gap
+  between paragraphs. Only visible once the column was right and it
+  stopped being confusable with a window border.
+
+The column now comes from `wp_line_cursor_x_twips` (`engine/src/justify.c`),
+a shared, host-tested fragment walk living next to
+`wp_justify_space_extra_twips` for the same reason that one exists: it is
+paint-loop support every backend needs, and re-deriving it per backend is
+exactly how three of the four got it wrong (Amiga has both of the above
+defects verbatim; Atari paints no caret at all; only DOS is correct, and
+only because a fixed-cell font makes the column a pure byte count with no
+measuring). It takes the line's own justify slack so a JUSTIFY line's
+stretched gaps are counted the same way the paint loop's `extra_twips`
+advance counts them.
 
 ### Verified on-target
 
