@@ -16,6 +16,7 @@ KICKSTART_ROM="$AMIGA_FIXTURE/kick31.rom"
 
 make amiga-engine-check
 make amiga-smoke
+make amiga-app
 
 # NOT `run_amiga_smoke_once ...; STATUS=$?` -- under `set -e`, a bare
 # statement (not an if/while condition) that returns non-zero kills the
@@ -39,4 +40,24 @@ if [ "$STATUS" -ne 0 ]; then
 fi
 
 rm -rf "$(dirname "$LOG")"
+
+# T158: AMISMOKE passing proves the engine/selfchecks work, NOT that the
+# real app runs -- it passed 3/3 while RETROWP crashed on ~17 of 18
+# boots. Boot the real thing too.
+if run_amiga_app_once "$KICKSTART_ROM" 1; then
+    APP_STATUS=0
+else
+    APP_STATUS=$AMIGA_APP_STATUS
+fi
+
+echo "--- RETROWP app gate ---"
+cat "$AMIGA_APP_LOG"
+
+if [ "$APP_STATUS" -ne 0 ]; then
+    echo "AMIGA CI: FAILED (interactive app did not come up cleanly)"
+    rm -rf "$(dirname "$AMIGA_APP_LOG")"
+    exit 1
+fi
+rm -rf "$(dirname "$AMIGA_APP_LOG")"
+
 echo "AMIGA CI: PASSED"

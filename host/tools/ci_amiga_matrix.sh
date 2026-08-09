@@ -52,6 +52,7 @@ kick-3.1-a500:$AMIGA_FIXTURE/kick31.rom"
 
 make amiga-engine-check
 make amiga-smoke
+make amiga-app
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -74,17 +75,58 @@ while IFS= read -r entry; do
 
     echo "=== $label ($rom) ==="
     OFFSET=$((OFFSET + 1))
+    ENTRY_OK=1
     if run_amiga_smoke_once "$rom" "$OFFSET"; then
+        :
+    else
+        echo "FAIL: $label (AMISMOKE)"
+        echo "--- AMISMOKE log ---"
+        cat "$AMIGA_CI_LOG"
+        ENTRY_OK=0
+    fi
+    rm -rf "$(dirname "$AMIGA_CI_LOG")"
+
+    # T158: AMISMOKE never opens a MUI window, so on its own it cannot
+    # tell a working app from one that dies during its first paint --
+    # this matrix passed 3/3 while RETROWP crashed on ~17 of 18 boots.
+    # Boot the real app against this same Kickstart.
+    #
+    # Only 3.1 for now, and NOT because the other two are inconvenient:
+    # the first run of this gate found that the interactive app does not
+    # open its window at all under Kickstart 2.04 or 2.05 (no crash --
+    # the illegal-instruction count stays at Kickstart's own single
+    # MOVEC probe -- it simply never appears; a real screenshot at 90s
+    # shows a booted Workbench with no RetroWP window). AMISMOKE passes
+    # on all three, so that gap had never been visible before. Tracked
+    # separately; gating on it here would make this matrix permanently
+    # red and tell us nothing new each run (task #164). Same "excluded with a real
+    # reason, stated out loud, not silently skipped" treatment this
+    # script already gives Kickstart 3.0 above.
+    case "$label" in
+    kick-3.1-*)
+        OFFSET=$((OFFSET + 1))
+        if run_amiga_app_once "$rom" "$OFFSET"; then
+            :
+        else
+            echo "FAIL: $label (RETROWP app gate)"
+            echo "--- RETROWP app gate ---"
+            cat "$AMIGA_APP_LOG"
+            ENTRY_OK=0
+        fi
+        rm -rf "$(dirname "$AMIGA_APP_LOG")"
+        ;;
+    *)
+        echo "SKIP: $label RETROWP app gate -- app does not open a window on this Kickstart (known, tracked as task #164)"
+        ;;
+    esac
+
+    if [ "$ENTRY_OK" -eq 1 ]; then
         echo "PASS: $label"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        echo "FAIL: $label"
-        echo "--- AMISMOKE log ---"
-        cat "$AMIGA_CI_LOG"
         FAIL_COUNT=$((FAIL_COUNT + 1))
         FAILED_LABELS="$FAILED_LABELS $label"
     fi
-    rm -rf "$(dirname "$AMIGA_CI_LOG")"
 done <<ROMEOF
 $ROMS
 ROMEOF

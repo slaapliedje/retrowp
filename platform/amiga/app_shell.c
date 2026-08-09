@@ -1815,6 +1815,50 @@ static const char *menu_shortcut_for(const wp_action *act)
     return (slot[0] != '\0') ? slot : (const char *)0;
 }
 
+
+/* -- CI liveness hook (T158) ------------------------------------------
+   ci_amiga_matrix.sh used to boot only AMISMOKE, a headless selfcheck
+   binary that never opens a MUI Application/Window at all. That is not
+   a theoretical gap: it passed 3/3 across three Kickstarts while this
+   very app crashed on ~17 of 18 boots with zero user input (T151, a
+   stack overflow during the first paint). Selfchecks cannot prove an
+   app runs.
+
+   So CI now boots the REAL app, and needs a host-visible "I got up"
+   signal. Both paths are gated on a trigger file the CI script copies
+   in beforehand, mirroring the fixture's own S/Startup-Sequence
+   convention ("IF EXISTS SYS:RETROWP", "IF EXISTS SYS:AMISMOKE") --
+   a normal interactive run never has it, so this is a no-op then and
+   leaves nothing behind on a real user's disk.
+
+   The sentinel is written AFTER the window is confirmed open, which is
+   after MUI has run this app's own Setup/AskMinMax/Draw methods -- so
+   it genuinely attests that the whole startup path completed, which is
+   exactly the path T151 was dying in. The app then keeps running
+   normally rather than quitting, so a crash that happens LATER still
+   shows up in the emulator's own illegal-instruction count, which the
+   CI script checks separately. */
+#define WP_AMIGA_CI_TRIGGER  "SYS:RETROWP_CI"
+#define WP_AMIGA_CI_ALIVE    "SYS:retrowp_ci_alive"
+
+static wp_bool amiga_ci_mode(void)
+{
+    plat_file *f;
+
+    if (plat_file_open(WP_AMIGA_CI_TRIGGER, PLAT_FILE_READ, &f) != WP_OK) return WP_FALSE;
+    plat_file_close(f);
+    return WP_TRUE;
+}
+
+static void amiga_ci_write_alive(void)
+{
+    plat_file *f;
+
+    if (plat_file_open(WP_AMIGA_CI_ALIVE, PLAT_FILE_WRITE, &f) != WP_OK) return;
+    plat_file_write(f, (const u8 *)"alive\n", 6);
+    plat_file_close(f);
+}
+
 static Object *build_menustrip(void)
 {
     static const wp_menu_group groups[] = {
@@ -2019,6 +2063,11 @@ void app_shell_run(void)
     if (open) {
         ULONG sigs = 0;
         LONG id;
+
+        /* Window open means MUI has already run Setup/AskMinMax/Draw on
+           this app's custom class -- the whole startup path CI needs to
+           attest. See amiga_ci_mode's own comment. */
+        if (amiga_ci_mode()) amiga_ci_write_alive();
 
         for (;;) {
             id = (LONG)DoMethod(g_app, MUIM_Application_NewInput, &sigs);

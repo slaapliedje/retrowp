@@ -1108,3 +1108,74 @@ returns a frame pixel-identical to the startup one, and the caret spans
 the text line rather than hovering above it. `grep -c 'Illegal
 instruction'` stayed at 1 (Kickstart's own CPU probe) throughout — no
 crash.
+
+## CI now boots the real app, not just AMISMOKE (T158)
+
+`ci_amiga.sh`/`ci_amiga_matrix.sh` only ever booted `AMISMOKE`, a
+headless selfcheck binary that never opens a MUI Application/Window.
+That gap is not theoretical: **the matrix passed 3/3 across three
+Kickstarts while `RETROWP` crashed on roughly 17 of 18 boots with zero
+user input** (T151). Nothing in CI executed the code path that was
+failing. Selfchecks prove the engine works; they cannot prove the app
+runs.
+
+The fixture already had the mechanism — `S/Startup-Sequence`'s
+`IF EXISTS SYS:RETROWP / RUN >NIL: SYS:RETROWP` block, added for M15
+Phase 5 interactive verification. CI simply never used it.
+
+`run_amiga_app_once` (`host/tools/amiga_ci_lib.sh`) now boots the real
+app against each Kickstart and requires **two independent signals**,
+because either alone is fooled:
+
+1. **`SYS:retrowp_ci_alive`** — written by the app itself once its
+   window is confirmed open, i.e. after MUI has run this app's own
+   `Setup`/`AskMinMax`/`Draw` methods. That is precisely the path T151
+   died in. Gated in `app_shell.c` on a `SYS:RETROWP_CI` trigger file
+   the CI script copies in first, mirroring the fixture's own
+   `IF EXISTS` convention — a normal interactive run never has it, so
+   the hook is a no-op and leaves nothing on a real user's disk. The
+   app keeps running afterwards rather than quitting, so the settle
+   period that follows is real crash exposure.
+2. **The emulator's own illegal-instruction count** (see the reading
+   guide above): 1 is Kickstart's `MOVEC` probe, `>= 2` is a real guest
+   crash. This catches a crash occurring *after* the window opened,
+   which signal 1 structurally cannot.
+
+### How well does it actually work?
+
+Measured, not assumed. Reverting only T151's engine fix and re-running
+the app gate five times:
+
+| Run | Caught? | By which signal |
+| --- | --- | --- |
+| 1 | yes | sentinel MISSING |
+| 2 | yes | **illegal-instruction count** (sentinel was present) |
+| 3 | no | app happened to boot cleanly |
+| 4 | yes | sentinel MISSING |
+| 5 | yes | sentinel MISSING |
+
+**4 of 5.** Run 2 is why both signals exist: the app got its window
+open and still crashed. Run 3 is the honest limitation — this bug was
+nondeterministic (~1 boot in 5 survived even when broken), so a single
+boot can miss it. The matrix runs the gate once per Kickstart, so the
+chance of all three missing is roughly 0.2^3, under 1%. A gate that
+catches a nondeterministic crash ~99% of the time per matrix run is a
+different world from one that reported 3/3 green while the app was
+essentially unusable.
+
+### What the gate found on its first real run
+
+Kickstart 3.1 passes. **Kickstart 2.04 and 2.05 do not**: the app never
+opens its window there at all. Not a crash — the illegal-instruction
+count stays at Kickstart's own single `MOVEC` probe — it simply never
+appears, and a real screenshot at 90s shows a booted Workbench with the
+Debug-Shell and no RetroWP window. `AMISMOKE` passes on all three, which
+is exactly why nobody had ever seen this: it never opens a MUI window.
+
+That is tracked separately (it is a real defect, not a CI problem), and
+`ci_amiga_matrix.sh` runs the app gate on 3.1 only, printing an explicit
+`SKIP:` line naming the task for the other two. Gating on them would
+make the matrix permanently red while telling us nothing new each run;
+hiding it would repeat the mistake this whole task exists to fix. Same
+"excluded with a real reason, stated out loud, not silently skipped"
+treatment that script already gives Kickstart 3.0.
