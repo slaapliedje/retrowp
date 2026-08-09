@@ -2349,3 +2349,86 @@ to distrust the one gate that has actually caught real regressions here.
 **Until `-MMD -MP` lands: clean-build (`rm -rf build bin`) after any
 shared-header change, and treat a failure that appears immediately after
 a header edit as suspect until a clean build reproduces it.**
+
+## The caret: this backend never drew one (T162)
+
+`paint_document` rendered every laid-out line of every paragraph and the
+vi-mode status bar, and drew **no cursor marker at all**. Not a
+misplaced one -- there was no `is_cursor_para` guard, no `v_bar` for a
+caret, nothing anywhere in the function. Found while fixing the Mac
+caret (T157) by checking whether this backend had the same defect before
+copying its approach. It had a bigger one.
+
+The obvious cost is that you cannot see where typed text will land. The
+less obvious one matters more: it made every cursor-related defect here
+**structurally invisible to screenshot verification** -- which is the
+technique that actually caught the menu bug (Bug 3 above) and the Mac
+caret bug, both of which passed every selfcheck first. A backend that
+draws no caret cannot fail a caret screenshot.
+
+State across the four backends when this was found:
+
+| Backend | Caret |
+| --- | --- |
+| DOS | correct -- but only because a fixed-cell font makes the column a pure byte count (`cursor_col_in_line`), no measuring |
+| Mac | hardcoded to the left margin, and anchored an ascent too high (fixed, T157) |
+| Amiga | the same two defects verbatim (T161, blocked on its startup crash) |
+| Atari | **none at all** |
+
+### What was added
+
+Column from `wp_line_cursor_x_twips` (`engine/src/justify.c`, added by
+T157 -- see `docs/layout.md`), fed the same `extra_twips` the fragment
+walk above it uses, so a JUSTIFY line's stretched gaps count identically
+in the caret and in the glyphs. Two details specific to this backend:
+
+- **Height comes from the line's own `height_twips`, not `ascent_px`.**
+  `ascent_px` is carried across loop iterations from whichever run last
+  opened a font, so on an empty paragraph -- a blank line, or a
+  brand-new document -- nothing in the fragment walk ever sets it and
+  the caret would collapse to a stub. Spanning the line box is also
+  simply the more honest definition. (Mac still uses `ascent + 2` and
+  therefore still carries that dependency -- reachable there only by
+  opening a file whose very first line is blank, since no "New document"
+  action exists in the registry at all. Filed, not fixed here.)
+- **Drawn through `plat_fill_rect`**, not a raw `vsf_color`/`v_bar`
+  pair, so it goes through the same colour abstraction as every other
+  fill; black resolves via `rgb_to_vdi_color`'s own 384 threshold.
+  Nothing extra is needed for the AES: `redraw_window` already brackets
+  the whole call in `wind_update`/`graf_mouse(M_OFF)`, and a caret drawn
+  outside that bracket would corrupt the save-under buffer -- exactly
+  the mouse-droppings failure documented in Bug 2 above.
+
+2px wide rather than Mac's 3: ST Low is only 320px across, so a caret is
+a visibly larger share of a character cell here, and 2px still reads
+clearly at ST High's 640x400.
+
+### Verified on-target
+
+`wp_atari_layout_selfcheck` gained a caret bar, so this is gated in CI
+rather than screenshot-only. It can't hand-compute real advance widths
+(the same limit the JUSTIFY bar next to it has), so it asserts the
+relations the paint loop depends on: the caret is 0 at a line's first
+byte, exactly the line's measured width at its last, never leaves that
+range, and advances strictly monotonically in between. It checks line 0
+of a paragraph that **wrapped**, so "0 at the line's start" is a real
+claim about the line's origin rather than something a paragraph-relative
+measurement would satisfy by accident. Confirmed to fail against a
+stubbed `wp_line_cursor_x_twips` -- on real hardware under Hatari, not
+just on the host.
+
+Real screenshots under Hatari (EmuTOS 512k, med-res, 2x zoom, so 16px
+per character), keyboard only -- no mouse, so none of the Hatari
+relative-vs-absolute pointer trouble applies:
+
+| Keys | Cursor offset | Expected x | Measured |
+| --- | --- | --- | --- |
+| `gg` then `w` | 5 (`is`) | 80 | 82 |
+| `w` | 8 (`RetroWP`) | 128 | 130 |
+| `w` | 15 (`,`) | 240 | 242 |
+
+`0` returns a frame pixel-identical to document-start, and the startup
+frame shows the caret immediately after `of GEM.` -- this backend loads
+with the cursor at document END (see T160's cross-backend
+inconsistency), so even the very first frame is a non-trivial caret
+position that a left-margin-pinned caret would visibly fail.

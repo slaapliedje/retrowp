@@ -921,6 +921,25 @@ static i32 atari_align_offset_twips(u8 align, i32 content_width_twips, i32 line_
     return 0;
 }
 
+/* Caret width. 2px, not Mac's 3: ST Low is only 320px wide, so a caret
+   is a visibly larger share of a character cell here than on a 512px
+   Mac screen, and 2px still reads clearly at ST High's 640x400. */
+#define WP_ATARI_CARET_W_PX 2
+
+/* Byte-identical to platform/mac/app_shell.c's, platform/amiga/
+   app_shell.c's and platform/dos/app_shell.c's -- a line owns a
+   half-open (run, offset) range, and the cursor is on it when it falls
+   inside. Four copies of eight lines is deliberate: it is the only
+   piece of the caret logic that is NOT shared through
+   wp_line_cursor_x_twips, because it needs no measuring at all. */
+static wp_bool line_contains_pos(const wp_line *line, u32 run, u32 offset)
+{
+    if (run < line->start_run || run > line->end_run) return WP_FALSE;
+    if (run == line->start_run && offset < line->start_offset) return WP_FALSE;
+    if (run == line->end_run && offset > line->end_offset) return WP_FALSE;
+    return WP_TRUE;
+}
+
 static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 {
     atari_gc gc;
@@ -944,12 +963,34 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
             wp_paragraph_layout *layout = (wp_paragraph_layout *)para->layout;
             const wp_para_style *pstyle = wp_document_pstyle_get(&g_doc, para->style);
             u8 align = (pstyle != NULL) ? pstyle->align : WP_ALIGN_LEFT;
+            wp_bool is_cursor_para =
+                ((*wp_keymap_cursor(&g_ctx)).section == si &&
+                 (*wp_keymap_cursor(&g_ctx)).paragraph == pi) ? WP_TRUE : WP_FALSE;
+            u32 cursor_line_index = 0;
 
             if (layout == NULL) continue;
+
+            /* Which of this paragraph's display lines the cursor sits on.
+               The last line is the fallback rather than the first: a
+               cursor one past the final character (where it lands after
+               every insertion) is outside every line's half-open range,
+               and end-of-document is where it spends most of its time. */
+            if (is_cursor_para && layout->line_count > 0) {
+                cursor_line_index = layout->line_count - 1;
+                for (li = 0; li < layout->line_count; li++) {
+                    if (line_contains_pos(&layout->lines[li],
+                                           (*wp_keymap_cursor(&g_ctx)).run,
+                                           (*wp_keymap_cursor(&g_ctx)).offset)) {
+                        cursor_line_index = li;
+                        break;
+                    }
+                }
+            }
 
             for (li = 0; li < layout->line_count; li++) {
                 wp_line *line = &layout->lines[li];
                 i32 x_px = area.g_x;
+                i32 line_origin_px;
                 i32 extra_twips;
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
@@ -966,6 +1007,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                    via the per-fragment walk below (T13.2). */
                 x_px += atari_twips_to_px_x(
                     atari_align_offset_twips(align, g_content_width_twips, line->width_twips));
+                line_origin_px = x_px;   /* the fragment walk below advances x_px past it */
 
                 /* M15 T15.6: an image paragraph's single line has no run
                    bytes to fragment (wp_line_next_fragment already returns
@@ -1088,6 +1130,51 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 
                     x_px += atari_twips_to_px_x(frag_width_twips);
                     if (frag.is_space) x_px += atari_twips_to_px_x(extra_twips);
+                }
+
+                /* T162: this backend drew NO caret at all -- it rendered
+                   the document and the vi-mode status bar and left the
+                   cursor entirely invisible, on the one target that gets
+                   the most real interactive testing (and the 1MB
+                   baseline, CLAUDE.md rule 5). Beyond the obvious "you
+                   cannot see where typed text will land", it meant every
+                   cursor-related defect here was structurally invisible
+                   to screenshot verification, which is how T144's menu
+                   bug and T157's caret bug were both actually caught.
+
+                   Column via the shared, host-tested wp_line_cursor_x_
+                   twips (engine/src/justify.c), fed the same extra_twips
+                   the fragment walk above used, so a JUSTIFY line's
+                   stretched gaps count identically in both.
+
+                   Height comes from the LINE's own height_twips, not
+                   ascent_px: ascent_px is carried across loop iterations
+                   from whichever run last opened a font, so on an empty
+                   paragraph (a blank line, or a brand-new document)
+                   nothing in the fragment walk ever sets it and the
+                   caret would collapse to a stub. The line box is also
+                   simply the more honest thing for a caret to span.
+
+                   Drawn through plat_fill_rect rather than a raw
+                   vsf_color/v_bar pair so it goes through the same
+                   colour abstraction as every other fill (the image
+                   fallback above uses it too); black resolves via
+                   rgb_to_vdi_color's own 384 threshold. Nothing extra is
+                   needed for the AES: redraw_window already brackets
+                   this whole call in wind_update/graf_mouse(M_OFF) -- a
+                   caret drawn outside that bracket would corrupt the
+                   save-under buffer (see redraw_window's own comment). */
+                if (is_cursor_para && li == cursor_line_index) {
+                    i32 caret_x_px = line_origin_px + atari_twips_to_px_x(
+                        wp_line_cursor_x_twips(&g_doc, para, line,
+                                                (*wp_keymap_cursor(&g_ctx)).run,
+                                                (*wp_keymap_cursor(&g_ctx)).offset,
+                                                extra_twips));
+                    i32 caret_h_px = atari_twips_to_px_y(line->height_twips);
+
+                    if (caret_h_px < 1) caret_h_px = 1;
+                    plat_fill_rect((plat_gc *)&gc, caret_x_px, y_px,
+                                    WP_ATARI_CARET_W_PX, caret_h_px, 0, 0, 0);
                 }
 
                 y_px += atari_twips_to_px_y(line->height_twips);
@@ -2546,6 +2633,42 @@ wp_bool wp_atari_layout_selfcheck(void)
     for (i = 0; ok && i < layout->line_count; i++) {
         if (layout->lines[i].width_twips <= 0) ok = WP_FALSE;
         if (layout->lines[i].width_twips > content_width_twips) ok = WP_FALSE;
+    }
+
+    /* T162: the caret column, measured with this machine's REAL font.
+       Bound by the same limit the JUSTIFY bar below has -- exact advance
+       widths can't be hand-computed here -- so this asserts the
+       relations paint_document actually depends on instead of pixel
+       values: the caret is at 0 on a line's first byte, at exactly that
+       line's measured width on its last, never leaves that range, and
+       advances strictly monotonically in between.
+
+       The monotonic bar is the one that matters. A caret pinned to the
+       left margin -- what this backend shipped before T162, and what Mac
+       (T157) and Amiga (T161) each shipped -- returns 0 for every offset
+       and fails on the very first step. Deliberately checks line 0 of a
+       paragraph that wrapped, so "0 at the line's start" is a real claim
+       about the LINE's origin, not one that a paragraph-relative
+       measurement would satisfy by accident. */
+    if (ok && layout->lines[0].start_run == layout->lines[0].end_run) {
+        const wp_line *l0 = &layout->lines[0];
+        i32 prev_x = -1;
+        u32 off;
+
+        if (wp_line_cursor_x_twips(&doc, para, l0, l0->start_run, l0->start_offset, 0) != 0) {
+            ok = WP_FALSE;
+        }
+        if (ok && wp_line_cursor_x_twips(&doc, para, l0, l0->end_run, l0->end_offset, 0)
+                   != l0->width_twips) {
+            ok = WP_FALSE;
+        }
+        for (off = l0->start_offset; ok && off <= l0->end_offset; off++) {
+            i32 x = wp_line_cursor_x_twips(&doc, para, l0, l0->start_run, off, 0);
+
+            if (x < 0 || x > l0->width_twips) ok = WP_FALSE;
+            if (x <= prev_x) ok = WP_FALSE;
+            prev_x = x;
+        }
     }
 
     /* T13.2: real per-word JUSTIFY needs a real font's exact advance
