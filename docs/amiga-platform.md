@@ -1058,3 +1058,53 @@ Reverting only the engine change and rebuilding reproduced faults again
 (3 of 6 boots), confirming the causal link rather than inferring it.
 A real screenshot shows the MUI window open with the sample document
 rendered.
+
+## The caret: wrong column and wrong vertical anchor (T161)
+
+`editor_draw` painted the cursor marker with
+
+```c
+RectFill(gc.rp, _mleft(obj), (LONG)(y - ascent_px),
+         _mleft(obj) + 1, (LONG)(y + 1));
+```
+
+Two independent defects, both shared verbatim with the Mac backend
+before T157 fixed them there — the direct consequence of three backends
+each re-deriving caret placement instead of sharing it.
+
+- **The column was never computed.** `_mleft(obj)` is the object's
+  hardcoded left edge. The guard above it picked the right *line*, but
+  nothing ever derived an x from the cursor's run/offset, so the caret
+  sat at column 0 wherever the cursor really was.
+- **The vertical anchor was off by an ascent.** `y` is the line's TOP
+  (the draw loop derives its baseline as `y + ascent_px`), but
+  `(y - ascent_px)..(y + 1)` is the correct span measured from a
+  BASELINE. The caret floated in the gap above the line it marked.
+
+The column now comes from `wp_line_cursor_x_twips` (`engine/src/
+justify.c`, added by T157 — see `docs/layout.md`), fed the same
+`extra_twips` the fragment walk uses, so a JUSTIFY line's stretched gaps
+count identically in the caret and in the glyphs. Height comes from the
+line's own `height_twips` rather than `ascent_px`, matching Atari
+(T162): `ascent_px` is carried across loop iterations from whichever run
+last opened a font, so on an empty paragraph nothing sets it and the
+caret would collapse to a stub.
+
+Note `amiga_twips_to_px_x` is `(twips * dpi_x) / 1440` and therefore not
+exact, unlike Mac's plain `/20` — converting the accumulated total once
+can land a pixel off from summing per-fragment pixel widths. That is
+narrower than the caret itself; see the helper's header comment.
+
+### Verified on-target
+
+Interactively under amiberry — possible at all only because T151 stopped
+the app crashing at startup. Real screenshots across
+`w`/`w`/`w`/`$`/`0` on `"RetroWP on Amiga (M9 T9.1b)"`: the caret's
+changed-pixel bounding box grows 52 -> 68 -> 103 -> 159 px for cursor
+offsets 8, 11, 17 and end-of-line, i.e. ~6.1-6.5 px per character with
+the wider capitals early on, exactly as a proportional screen font
+should. `w` three times lands it on the `(` of `(M9 T9.1b)`, `0`
+returns a frame pixel-identical to the startup one, and the caret spans
+the text line rather than hovering above it. `grep -c 'Illegal
+instruction'` stayed at 1 (Kickstart's own CPU probe) throughout — no
+crash.

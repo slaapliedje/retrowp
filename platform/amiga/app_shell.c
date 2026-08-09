@@ -1522,12 +1522,14 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
             for (li = 0; li < layout->line_count && y <= _mbottom(obj); li++) {
                 wp_line *line = &layout->lines[li];
                 i32 x_px = _mleft(obj) + WP_EDITOR_LEFT_MARGIN_PX;
+                i32 line_origin_px;
                 i32 extra_twips;
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
 
                 x_px += amiga_twips_to_px_x(
                     amiga_align_offset_twips(align, content_width_twips, line->width_twips));
+                line_origin_px = x_px;   /* the fragment walk below advances x_px past it */
 
                 /* M15 T15.6: an image paragraph's single line has no run
                    bytes to fragment -- paint its real indexed-bitmap
@@ -1655,10 +1657,44 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                     if (frag.is_space) x_px += amiga_twips_to_px_x(extra_twips);
                 }
 
+                /* T161: two independent defects in this one rect, both
+                   shared verbatim with the Mac backend before T157 fixed
+                   them there.
+
+                   The COLUMN was never computed -- _mleft(obj) is the
+                   object's hardcoded left edge, so while the guard picked
+                   the right LINE, the caret sat at column 0 no matter
+                   where the cursor actually was. It now comes from the
+                   shared, host-tested wp_line_cursor_x_twips
+                   (engine/src/justify.c), fed the same extra_twips the
+                   fragment walk above used so a JUSTIFY line's stretched
+                   gaps count identically in the caret and in the glyphs.
+
+                   The VERTICAL ANCHOR was off by an ascent: y is the
+                   line's TOP (the draw loop derives its baseline as
+                   y + ascent_px), but (y - ascent_px)..(y + 1) is the
+                   span you want measured from a BASELINE, so the caret
+                   was painted a full ascent above the line it marked.
+                   Height now comes from the LINE's own height_twips
+                   rather than ascent_px -- ascent_px is carried across
+                   loop iterations from whichever run last opened a font,
+                   so on an empty paragraph nothing in the fragment walk
+                   ever sets it and the caret would collapse to a stub.
+                   Same choice platform/atari/app_shell.c makes (T162);
+                   Mac still uses ascent + 2 and still carries that
+                   dependency (filed separately). */
                 if (is_cursor_para && li == cursor_line_index) {
+                    i32 caret_x_px = line_origin_px + amiga_twips_to_px_x(
+                        wp_line_cursor_x_twips(&g_amiga_doc, para, line,
+                                                (*wp_keymap_cursor(&g_ctx)).run,
+                                                (*wp_keymap_cursor(&g_ctx)).offset,
+                                                extra_twips));
+                    i32 caret_h_px = amiga_twips_to_px_y(line->height_twips);
+
+                    if (caret_h_px < 1) caret_h_px = 1;
                     SetAPen(gc.rp, (UBYTE)gc.dri->dri_Pens[FILLPEN]);
-                    RectFill(gc.rp, _mleft(obj), (LONG)(y - ascent_px),
-                             _mleft(obj) + 1, (LONG)(y + 1));
+                    RectFill(gc.rp, caret_x_px, (LONG)y,
+                             caret_x_px + 1, (LONG)(y + caret_h_px - 1));
                 }
 
                 y += amiga_twips_to_px_y(line->height_twips);
