@@ -1402,6 +1402,48 @@ static i32 amiga_font_line_height_px(i32 size_twips)
     return h_px;
 }
 
+/* The vi-mode status/mode line for the EDITOR window (T159).
+
+   platform/common/statusline.c was already linked and working on this
+   backend -- but only for the help pager's hint bar below. The editor
+   itself never painted one, so an Amiga user typing ":" or "/" got no
+   echo of the command and no indication of which vi mode they were in,
+   while all three other backends showed both. That is also what would
+   have made find/replace impossible to verify visually here.
+
+   On the #156 hazard (the shared component's 0xC0 background becoming
+   an illegible 50%% dither on Mac's 1-bit screen): checked rather than
+   assumed. draw_amiga.c's rgb_to_pen thresholds at the same 384 but
+   resolves to the window's own DrawInfo pens -- 0xC0 (luminance 576)
+   gives BACKGROUNDPEN and the black text gives TEXTPEN. Real theme
+   pens, no dither, legible by construction at any screen depth. */
+#define WP_AMIGA_STATUSLINE_SIZE_TWIPS 160
+
+static void paint_status_line_amiga(amiga_gc *gc, Object *obj, i32 bar_h_px)
+{
+    plat_font *font;
+    wp_vi_status_view view;
+    char mode_buf[40];
+
+    if (!g_ctx.doc_loaded || bar_h_px <= 0) return;
+
+    if (plat_font_open((const u8 *)"", 0, WP_AMIGA_STATUSLINE_SIZE_TWIPS, 0, &font) != WP_OK) {
+        return;
+    }
+    /* wp_keymap_get_status_view folds the Command-line buffer into its
+       one composed mode string and leaves pending_count/pending_cmd at
+       0/NULL -- the same documented, shared gap every other backend
+       has, not something introduced here. */
+    wp_keymap_get_status_view(&g_ctx, mode_buf, (u32)sizeof(mode_buf), &view);
+
+    wp_statusline_paint((plat_gc *)gc, font,
+                         (i32)_mleft(obj),
+                         (i32)(_mbottom(obj) - bar_h_px + 1),
+                         (i32)(_mright(obj) - _mleft(obj) + 1),
+                         bar_h_px, &view);
+    plat_font_close(font);
+}
+
 /* Paints the help pager full-object (replacing the document body
    entirely while g_help_active is set -- see editor_draw's own check)
    plus a small fixed hint bar along the bottom, reusing
@@ -1471,6 +1513,8 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     i32 y;
     i32 content_width_px;
     i32 content_width_twips;
+    i32 bar_h_px;
+    i32 doc_bottom;
     plat_font *font = NULL;
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
@@ -1525,11 +1569,21 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     gc.dri = _dri(obj);
     GetAttr(MUIA_Window_Screen, g_win, (ULONG *)&gc.screen);
 
+    /* Reserve the status bar before laying out the body, so document
+       lines stop above it rather than being painted under it -- the
+       same shape platform/atari/app_shell.c's redraw_window uses
+       (doc_area.g_h = work.g_h - bar_h_px). A degenerately short object
+       drops the bar entirely rather than handing the body a negative
+       height. */
+    bar_h_px = amiga_font_line_height_px(WP_AMIGA_STATUSLINE_SIZE_TWIPS);
+    if (bar_h_px > (i32)(_mbottom(obj) - _mtop(obj) + 1)) bar_h_px = 0;
+    doc_bottom = (i32)_mbottom(obj) - bar_h_px;
+
     y = _mtop(obj) + WP_EDITOR_TOP_MARGIN_PX;
-    for (si = 0; si < g_amiga_doc.section_count && y <= _mbottom(obj); si++) {
+    for (si = 0; si < g_amiga_doc.section_count && y <= doc_bottom; si++) {
         wp_section *sec = wp_document_section_get(&g_amiga_doc, si);
 
-        for (pi = 0; pi < sec->para_count && y <= _mbottom(obj); pi++) {
+        for (pi = 0; pi < sec->para_count && y <= doc_bottom; pi++) {
             wp_paragraph *para = wp_section_paragraph_get(sec, pi);
             wp_paragraph_layout *layout = (wp_paragraph_layout *)para->layout;
             const wp_para_style *pstyle = wp_document_pstyle_get(&g_amiga_doc, para->style);
@@ -1552,7 +1606,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                 }
             }
 
-            for (li = 0; li < layout->line_count && y <= _mbottom(obj); li++) {
+            for (li = 0; li < layout->line_count && y <= doc_bottom; li++) {
                 wp_line *line = &layout->lines[li];
                 i32 x_px = _mleft(obj) + WP_EDITOR_LEFT_MARGIN_PX;
                 i32 line_origin_px;
@@ -1736,6 +1790,8 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     }
 
     if (font != NULL) plat_font_close(font);
+
+    paint_status_line_amiga(&gc, obj, bar_h_px);
     return 0;
 }
 

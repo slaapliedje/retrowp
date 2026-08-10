@@ -1256,3 +1256,46 @@ the sample document rendered and the caret on the first line.
 open there, so File Open/Save report that the requester is unavailable.
 The editor itself is fully usable; only the native file dialogs are
 missing. Tracked separately rather than left as a surprise.
+
+## The editor finally has a status line (T159)
+
+`platform/common/statusline.c` was already linked and working on this
+backend — but only for the help pager's hint bar. The **editor** window
+never painted one, so an Amiga user typing `:` or `/` got no echo of the
+command and no indication of which vi mode they were in, while all three
+other backends showed both. It is now wired into `editor_draw` the same
+way the other backends do it: reserve a bar at the bottom, shrink the
+document area by its height (`doc_bottom = _mbottom(obj) - bar_h_px`, the
+shape `platform/atari/app_shell.c`'s `redraw_window` already uses), paint
+the body, then paint the bar last.
+
+**On the T156 hazard** — the shared component's `0xC0` background became
+an illegible 50% dither on Mac's 1-bit screen, so the task rightly asked
+what it does here. Checked rather than assumed: `draw_amiga.c`'s
+`rgb_to_pen` thresholds at the same 384 but resolves to the window's own
+`DrawInfo` pens, so `0xC0` (luminance 576) gives `BACKGROUNDPEN` and the
+black text gives `TEXTPEN`. Real theme pens, no dither, legible by
+construction at any screen depth. Nothing to fix.
+
+### Verified on-target
+
+Under amiberry, driving real keys and diffing frames:
+
+| Action | Result |
+| --- | --- |
+| startup | bar reads `NORMAL` |
+| `i` | changes to `INSERT` (25x11 px differ, only in the bar) |
+| `Escape` | frame **pixel-identical** to the startup frame |
+| `/` | bar changes — command line active |
+| `m` | label grows by exactly one character (30x12 -> 35x12 px) |
+| `:` | reads `COMMAND :` |
+
+Crops confirm the text itself: `SEARCH /m` and `COMMAND :`.
+
+One frame in an earlier run showed a completely blank bar after a burst
+of `xdotool type`-injected keys. Re-running with `xdotool key` for every
+keystroke was correct at every step, so the status line itself is sound —
+but an empty label is only reachable through
+`wp_vimode_get_status_text`'s `default:` branch, i.e. a mode value
+outside `wp_vimode_mode`, so it is recorded as a task rather than waved
+off as emulator noise.
