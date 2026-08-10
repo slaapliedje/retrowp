@@ -1391,3 +1391,36 @@ The amiberry window lands at a different position on different boots
 locate the window per run rather than hardcoding a crop offset — two
 crops during this work were mis-aimed by exactly this and briefly looked
 like a rendering bug.
+
+## Screenshot assertions under amiberry must SETTLE first
+
+This cost two convincing fake bugs in a row, so it is worth stating
+plainly: **amiberry refreshes its host window progressively for roughly
+1-2 seconds after guest activity.** A screenshot taken inside that
+window shows only part of the emulated screen.
+
+Proven, with zero input after a single Escape keypress:
+
+| capture | vs. the frame before the keypress |
+| --- | --- |
+| +1s | 321x314 px differ — most of the document "missing" |
+| +2s, +4s, +8s, +16s | **pixel-identical** |
+
+The document comes back on its own. Independently confirmed from the
+app's side by instrumenting the paint loop: every repaint painted all 8
+paragraphs and all 8 lines with zero font-open failures, including the
+repaints that looked truncated. **There is no paint bug** — on this
+backend or any other.
+
+The rule: **do not sleep a fixed amount and capture.** Capture
+repeatedly until two consecutive frames are identical, then assert —
+the same discipline `host/tools/afros_redraw_check.py` already applies
+to ARAnyM (`wait_settled`). Probes here used `sleep 2`, right on the
+boundary, which is exactly why the same operation looked fine in some
+runs and catastrophic in others.
+
+Compounding it: **the amiberry window lands at a different position on
+different boots** (x=154 in one run, x=177 in another), so a fixed crop
+offset can also silently point at empty background. A fixed sleep plus a
+fixed crop is a reliable way to invent a bug that does not exist. Locate
+the window per run, and settle before asserting.
