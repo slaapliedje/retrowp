@@ -1299,3 +1299,44 @@ but an empty label is only reachable through
 `wp_vimode_get_status_text`'s `default:` branch, i.e. a mode value
 outside `wp_vimode_mode`, so it is recorded as a task rather than waved
 off as emulator noise.
+
+### Why file dialogs don't work on 2.04/2.05: the fixture, not the code
+
+T164 left `File Open`/`Save` reporting "requester unavailable" on
+Kickstart 2.04/2.05. Investigated, and the answer is that no real
+machine has this problem.
+
+Measured on target rather than inferred — the app's own
+`OpenLibrary("asl.library", 37)` was instrumented and its result read
+off the host-visible `DH0:`:
+
+| | Kickstart 2.04 | Kickstart 3.1 |
+| --- | --- | --- |
+| `OpenLibrary("asl.library", 37)` | **NULL** | non-NULL |
+| `graphics.library` version | 37.35 | 40.24 |
+
+The fixture's `asl.library` is **version 46.15** (`$VER: asl 46.15
+(23.9.2018)`) — an AmigaOS 3.9/4.x-era build. It cannot open against a
+1991 V37 ROM. The fixture pairs a 2018-era Workbench/MUI install with a
+1991 Kickstart, which is a combination **no real Amiga ever had**: a
+genuine 2.04 machine runs Workbench 2.04, whose own `asl.library` is
+v37 and opens normally.
+
+So this is a fixture artifact, not a defect in this backend. It is
+recorded rather than fixed, deliberately:
+
+- The app already degrades correctly (T164) — it runs, and only the
+  native file dialogs are unavailable, with a requester that says so.
+- No period-correct `asl.library` exists on this machine to test the
+  obvious fixture fix: every copy found is 46.15 or 50.7.
+- The alternative — a typed-path fallback window — is real new MUI UI
+  code (`MUI_Request` is buttons-only, so it needs its own window and
+  nested event loop) on a toolkit that is itself under reconsideration.
+  Worth doing if an ASL-less configuration ever turns out to matter in
+  practice; not worth pre-building for a configuration that only exists
+  in this test fixture.
+
+The useful takeaway for the CI matrix: **2.04/2.05 coverage proves the
+app boots, lays out, paints and takes input on a V37 ROM** — which is
+what T164 fixed and what the T158 gate now guards. It does not, and
+cannot, cover file I/O through ASL.
