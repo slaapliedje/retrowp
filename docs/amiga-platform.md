@@ -1340,3 +1340,54 @@ The useful takeaway for the CI matrix: **2.04/2.05 coverage proves the
 app boots, lays out, paints and takes input on a V37 ROM** — which is
 what T164 fixed and what the T158 gate now guards. It does not, and
 cannot, cover file I/O through ASL.
+
+## Functional testing: what works, and the mouse limit (T147)
+
+With the startup crash fixed (T151) and a status line to read (T159),
+the Amiga backend could finally be exercised interactively. Results,
+all from real keystrokes against the real app under amiberry:
+
+**Working, verified by screenshot:** startup/layout/paint/input on all
+three Kickstarts; vi mode switching (`i` -> INSERT, Escape -> a
+pixel-identical frame back to NORMAL); the caret tracking its column;
+and **find** — `/menu` + Return moves the caret to exactly the `menu`
+in "with a working menu,".
+
+**Broken, filed separately:** `:s/old/new/` substitute does not replace
+and loses text at the document end; and the vi status label renders
+empty while the command line is active, even though the buffered
+command executes correctly.
+
+### amiberry does not track the absolute host pointer
+
+Measured, because the task rightly refused to let a test be built on an
+assumption. Warping to (300,200) and then (620,430) moved the emulated
+pointer only within a **137x134 px** box, and a following relative move
+produced an identically-sized change. So amiberry matches neither
+BasiliskII (plain `xdotool mousemove` + click works) nor a cleanly
+driven relative device.
+
+The practical consequence: **Save and Load remain untested.** Both go
+through `run_asl_file_requester`, so they need the ASL requester driven
+by mouse, and coordinate-targeted clicking is not viable as things
+stand. Three routes worth trying later, in order of promise: amiberry's
+own `input.*` configuration for an absolute mouse mode or a
+keyboard-mouse equivalent to Hatari's Alt+Arrow; driving the requester's
+string gadget by Tab/Return alone; or asserting the save/load machinery
+*below* the picker from AMISMOKE (`format_txt_export` +
+`plat_file_open`/`write`/`read`, diffing the bytes on the host, since
+`DH0:` is a real host directory). The third is a genuinely useful test
+but must be labelled as not covering the picker, rather than passed off
+as "save works".
+
+Format (bold/italic/size/alignment) is likewise untested — it is
+menu-reachable, which needs either the mouse or MUI's right-Amiga
+shortcuts, whose host-key mapping under amiberry is unestablished.
+
+### The window moves between boots
+
+The amiberry window lands at a different position on different boots
+(x=154 in one run, x=177 in another). Any screenshot assertion must
+locate the window per run rather than hardcoding a crop offset — two
+crops during this work were mis-aimed by exactly this and briefly looked
+like a rendering bug.
