@@ -774,7 +774,15 @@ static void do_file_open(void)
     u32 size, read_len;
     u8 *buf;
 
-    if (!prompt_for_filename("Open: ", path, (u32)sizeof(path))) return;
+    /* T172: an ex command may already have named the file (":w foo" /
+       ":e foo"), in which case the native picker is skipped entirely --
+       that is the whole point: never leave the keyboard to name a file.
+       Everything below this line is unchanged and already path-driven,
+       including format selection by extension, so ":w notes.rtf" saves
+       RTF exactly as picking that name in the requester would. */
+    if (!wp_keymap_take_pending_path(path, (u32)sizeof(path))) {
+        if (!prompt_for_filename("Open: ", path, (u32)sizeof(path))) return;
+    }
 
     if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) return;
     if (plat_file_size(f, &size) != WP_OK) { plat_file_close(f); return; }
@@ -797,7 +805,15 @@ static void do_file_save(void)
     u8 *buf;
 
     if (!g_ctx.doc_loaded) return;
-    if (!prompt_for_filename("Save: ", path, (u32)sizeof(path))) return;
+    /* T172: an ex command may already have named the file (":w foo" /
+       ":e foo"), in which case the native picker is skipped entirely --
+       that is the whole point: never leave the keyboard to name a file.
+       Everything below this line is unchanged and already path-driven,
+       including format selection by extension, so ":w notes.rtf" saves
+       RTF exactly as picking that name in the requester would. */
+    if (!wp_keymap_take_pending_path(path, (u32)sizeof(path))) {
+        if (!prompt_for_filename("Save: ", path, (u32)sizeof(path))) return;
+    }
 
     format_txt_export(&g_doc, NULL, 0, &needed);
     buf = (u8 *)mem_alloc(needed);
@@ -1132,6 +1148,14 @@ static wp_bool dos_dispatch_key(void)
         do_file_save();
         return WP_TRUE;
     case WP_KEYMAP_RESULT_ACTION:
+        /* T172: an ex command may have named a file (":w foo", ":e foo").
+           invoke_action carries no payload -- a menu pick has nothing to
+           say beyond "the user chose Open" -- so the name is parked here
+           and collected by do_file_open/do_file_save below. Set on every
+           ACTION outcome, not just the file ones: the helper ignores an
+           empty name, and take_ always clears, so a name can never leak
+           into a later unrelated File > Open. */
+        wp_keymap_set_pending_path(outcome.path, (u32)outcome.path_len);
         invoke_action((wp_action_id)outcome.action_id);
         if (outcome.action_id == (u8)WP_ACT_FILE_QUIT) return WP_TRUE;
         return WP_FALSE;

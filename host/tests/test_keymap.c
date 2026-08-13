@@ -1,6 +1,7 @@
 #include <string.h>
 #include "test.h"
 #include "app_ctx.h"
+#include "actions.h"   /* T172: the outcome carries a wp_action_id */
 
 static void build_doc_with_text(wp_document *doc, const char *text)
 {
@@ -150,6 +151,91 @@ void test_keymap_get_status_view_reports_vi_mode_label(void)
     ASSERT_TRUE(view.mode_label_utf8 != NULL);
     ASSERT_TRUE(view.mode_label_len > 0);
     ASSERT_TRUE(strstr((const char *)view.mode_label_utf8, "NORMAL") != NULL);
+
+    wp_keymap_free(&ctx);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* T172: an ex-command filename must survive the vi arm -> outcome hop.
+   The engine already proves the parse (test_vimode.c); this proves the
+   value actually reaches a backend, which is the part that would fail
+   silently -- a backend receiving path_len 0 just opens its native
+   picker and looks like it works. */
+static wp_keymap_outcome run_ex_keys(wp_app_ctx *ctx, const char *script)
+{
+    wp_keymap_outcome outcome;
+    const char *p;
+
+    outcome.kind = (u8)WP_KEYMAP_RESULT_NONE;
+    outcome.action_id = 0;
+    outcome.inserted_char = WP_FALSE;
+    outcome.path_len = 0;
+
+    for (p = script; *p != '\0'; p++) outcome = wp_keymap_feed_key(ctx, key_char(*p), 0);
+    {
+        wp_key_event enter;
+        enter.codepoint = 0;
+        enter.special = (u16)WP_KEY_ENTER;
+        enter.mods = 0;
+        enter._pad = 0;
+        outcome = wp_keymap_feed_key(ctx, enter, 0);
+    }
+    return outcome;
+}
+
+static wp_bool outcome_path_is(const wp_keymap_outcome *o, const char *expect)
+{
+    u32 i, n = 0;
+
+    while (expect[n] != '\0') n++;
+    if ((u32)o->path_len != n) return WP_FALSE;
+    for (i = 0; i < n; i++) {
+        if (o->path[i] != (u8)expect[i]) return WP_FALSE;
+    }
+    return WP_TRUE;
+}
+
+void test_keymap_ex_filename_reaches_outcome(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_keymap_outcome outcome;
+
+    build_doc_with_text(&doc, "Hello");
+    wp_undo_journal_init(&journal);
+    wp_app_ctx_init(&ctx, WP_KEYMAP_VI, &doc, &journal);
+
+    outcome = run_ex_keys(&ctx, ":w C:\\OUT.TXT");
+    ASSERT_EQ_U32(outcome.kind, (u32)WP_KEYMAP_RESULT_ACTION);
+    ASSERT_EQ_U32(outcome.action_id, (u32)WP_ACT_FILE_SAVE);
+    ASSERT_TRUE(outcome_path_is(&outcome, "C:\\OUT.TXT"));
+
+    /* ":e name" is a File > Open with the picker skipped. */
+    outcome = run_ex_keys(&ctx, ":e C:\\IN.TXT");
+    ASSERT_EQ_U32(outcome.kind, (u32)WP_KEYMAP_RESULT_ACTION);
+    ASSERT_EQ_U32(outcome.action_id, (u32)WP_ACT_FILE_OPEN);
+    ASSERT_TRUE(outcome_path_is(&outcome, "C:\\IN.TXT"));
+
+    /* Bare ":e" is still a File > Open, just with no name -- which is
+       exactly what a menu pick looks like, so backends need no new case. */
+    outcome = run_ex_keys(&ctx, ":e");
+    ASSERT_EQ_U32(outcome.kind, (u32)WP_KEYMAP_RESULT_ACTION);
+    ASSERT_EQ_U32(outcome.action_id, (u32)WP_ACT_FILE_OPEN);
+    ASSERT_EQ_U32((u32)outcome.path_len, 0u);
+
+    /* ":wq name" returns the early-return SAVE_QUIT kind and must STILL
+       carry the name -- the early return is the easy place to drop it. */
+    outcome = run_ex_keys(&ctx, ":wq C:\\BYE.TXT");
+    ASSERT_EQ_U32(outcome.kind, (u32)WP_KEYMAP_RESULT_SAVE_QUIT);
+    ASSERT_TRUE(outcome_path_is(&outcome, "C:\\BYE.TXT"));
+
+    /* Bare ":w" leaves no path: backends must keep raising their picker. */
+    outcome = run_ex_keys(&ctx, ":w");
+    ASSERT_EQ_U32(outcome.kind, (u32)WP_KEYMAP_RESULT_ACTION);
+    ASSERT_EQ_U32(outcome.action_id, (u32)WP_ACT_FILE_SAVE);
+    ASSERT_EQ_U32((u32)outcome.path_len, 0u);
 
     wp_keymap_free(&ctx);
     wp_undo_journal_free(&journal);

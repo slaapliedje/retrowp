@@ -1535,3 +1535,31 @@ including a filed defect that never existed.
 Until it is settled, any interactive `:s` test on any backend should
 move the cursor deliberately first, or use `:%s`, rather than relying on
 where boot happened to leave it.
+
+## Settle before the terminating Return, not just before assertions (T172)
+
+A refinement of the settle rule, learned by getting it wrong once more.
+
+Driving `:w SYS:OUT.TXT` with keys 0.35s apart and then pressing Return
+immediately, the save silently did not happen -- no file appeared, and
+the status bar showed only `COMMAND :w S`. Adding the settle wait before
+Return made the identical sequence work: a real 307-byte file on the
+host, full document text with paragraph breaks intact.
+
+So the app was still working through the injected keys when Return
+arrived, and Return executed a partially-typed command line. The screen
+was a truthful report of that, not a stale frame -- amiberry was drawing
+what the app had actually consumed so far.
+
+The rule this sharpens: **settling is not only for reading, it is for
+sequencing.** Anything that COMMITS a command -- Return on an ex command,
+a menu pick, a dialog's OK -- must wait for the app to have caught up
+with the keys already sent, or it commits something the user never typed.
+Waiting only before screenshots leaves this failure wide open, and it
+fails in the most confusing possible way: no crash, no error, an
+apparently correct sequence, and nothing happens.
+
+This is the same underlying fact `docs/atari-platform.md` records for
+Hatari ("fast synthetic input outruns the app"), just with a sharper
+consequence -- there it garbled a repaint, here it silently dropped a
+save.

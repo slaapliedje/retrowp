@@ -1552,11 +1552,19 @@ static void do_file_open(void)
     u32 size, read_len;
     u8 *buf;
 
-    /* "*.*" (not "*.TXT") so RTF/ODT files are visible too -- see
-       str_ends_with_ci above for how the format is actually picked. */
-    strcpy(path, "C:\\*.*");
-    fname[0] = '\0';
-    if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
+    /* T172: an ex command may already have named the file (":w foo" /
+       ":e foo"), in which case the native picker is skipped entirely --
+       that is the whole point: never leave the keyboard to name a file.
+       Everything below this line is unchanged and already path-driven,
+       including format selection by extension, so ":w notes.rtf" saves
+       RTF exactly as picking that name in the requester would. */
+    if (!wp_keymap_take_pending_path(fullpath, (u32)sizeof(fullpath))) {
+        /* "*.*" (not "*.TXT") so RTF/ODT files are visible too -- see
+           str_ends_with_ci above for how the format is actually picked. */
+        strcpy(path, "C:\\*.*");
+        fname[0] = '\0';
+        if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
+    }
 
     if (str_ends_with_ci(fullpath, ".ODT")) {
         do_odt_open(fullpath);
@@ -1595,9 +1603,17 @@ static void do_file_save(void)
 
     if (!g_ctx.doc_loaded) return;
 
-    strcpy(path, "C:\\*.*");
-    strcpy(fname, "UNTITLED.TXT");
-    if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
+    /* T172: an ex command may already have named the file (":w foo" /
+       ":e foo"), in which case the native picker is skipped entirely --
+       that is the whole point: never leave the keyboard to name a file.
+       Everything below this line is unchanged and already path-driven,
+       including format selection by extension, so ":w notes.rtf" saves
+       RTF exactly as picking that name in the requester would. */
+    if (!wp_keymap_take_pending_path(fullpath, (u32)sizeof(fullpath))) {
+        strcpy(path, "C:\\*.*");
+        strcpy(fname, "UNTITLED.TXT");
+        if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
+    }
 
     if (str_ends_with_ci(fullpath, ".ODT")) {
         do_odt_pdf_save(fullpath, (u8)WP_ATARI_FORMAT_ODT);
@@ -3844,6 +3860,14 @@ wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key, short kstate
         do_file_save();
         return WP_TRUE;
     case WP_KEYMAP_RESULT_ACTION:
+        /* T172: an ex command may have named a file (":w foo", ":e foo").
+           invoke_action carries no payload -- a menu pick has nothing to
+           say beyond "the user chose Open" -- so the name is parked here
+           and collected by do_file_open/do_file_save below. Set on every
+           ACTION outcome, not just the file ones: the helper ignores an
+           empty name, and take_ always clears, so a name can never leak
+           into a later unrelated File > Open. */
+        wp_keymap_set_pending_path(outcome.path, (u32)outcome.path_len);
         invoke_action(window_handle, vdi, (wp_action_id)outcome.action_id);
         break;
     default:

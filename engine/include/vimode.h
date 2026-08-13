@@ -37,7 +37,15 @@ typedef enum {
 
 #define WP_VIMODE_CMDLINE_MAX    128
 #define WP_VIMODE_SEARCH_MAX     128
-#define WP_VIMODE_ACTION_ARG_MAX 8
+/* Big enough for a real native path on every target this project builds
+   for, none of which has a long one: "C:\FILENAME.TXT" (Atari/DOS 8.3),
+   "DH0:filename.txt" (Amiga), "Unix:FILENAME.TXT" (Mac ExtFS). 64 keeps
+   wp_vimode_action cheap to return by value -- it is returned from
+   wp_vimode_feed_key on every keystroke, and the Amiga's 4096-byte stack
+   is the tightest of any backend. A path that does not fit is rejected
+   outright rather than silently truncated: a truncated path names the
+   WRONG FILE, which on a save is data loss. */
+#define WP_VIMODE_ACTION_ARG_MAX 64
 
 /* Fully transparent struct (direct field access), matching this
    codebase's existing convention throughout (wp_document/
@@ -103,16 +111,24 @@ typedef struct {
 
 typedef enum {
     WP_VIACTION_NONE = 0,
-    WP_VIACTION_SAVE,       /* ':w' -- caller saves via its own path/format/Save-As logic */
+    WP_VIACTION_SAVE,       /* ':w' [name] -- caller saves via its own path/format/Save-As logic */
     WP_VIACTION_QUIT,       /* ':q' -- caller closes; this module has no dirty/unsaved-changes concept */
-    WP_VIACTION_SAVE_QUIT,  /* ':wq' or ':x' */
+    WP_VIACTION_SAVE_QUIT,  /* ':wq' [name] or ':x' [name] */
+    WP_VIACTION_OPEN,       /* ':e' [name] -- caller loads; bare ':e' means "ask me how"
+                                (the backend raises its own native picker), exactly as
+                                bare ':w' already means "save however you normally would" */
     WP_VIACTION_BEEP        /* invalid ex-command, or an unrecognized Normal-mode key -- cosmetic */
 } wp_vimode_action_kind;
 
 typedef struct {
     u8  kind;                          /* wp_vimode_action_kind */
-    u8  arg[WP_VIMODE_ACTION_ARG_MAX]; /* reserved, unused this pass -- no ex-command arguments
-                                           (e.g. ":w filename") are parsed yet, see docs/vimode.md */
+    u8  arg[WP_VIMODE_ACTION_ARG_MAX]; /* the ex-command's filename argument, NOT NUL-terminated
+                                           (arg_len gives the length; 0 means none was given).
+                                           Only meaningful for SAVE/SAVE_QUIT/OPEN. The bytes are
+                                           passed through verbatim -- this module has no idea what
+                                           a path looks like on any target, and must not: the
+                                           backend resolves "C:\FOO.TXT" / "DH0:foo" / "Unix:FOO"
+                                           itself, the same division of labor plat_file_open has. */
     u32 arg_len;
 } wp_vimode_action;
 

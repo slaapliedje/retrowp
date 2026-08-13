@@ -431,6 +431,16 @@ void test_vimode_ex_command_save_quit(void)
     action = feed_key_special(&vs, WP_KEY_ENTER);
     ASSERT_TRUE(action.kind == WP_VIACTION_BEEP);
 
+    /* T172: the bare forms above must keep meaning exactly what they
+       meant before filename arguments existed -- an argument is opt-in,
+       never a change to an existing command's behavior. Asserted right
+       here rather than in a separate test so a regression shows up
+       against the original expectations, not beside them. */
+    feed_keys(&vs, ":w");
+    action = feed_key_special(&vs, WP_KEY_ENTER);
+    ASSERT_TRUE(action.kind == WP_VIACTION_SAVE);
+    ASSERT_TRUE(action.arg_len == 0);
+
     wp_vimode_free(&vs);
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
@@ -912,4 +922,149 @@ void test_vimode_no_leaks(void)
     wp_document_free(&doc);
 
     ASSERT_EQ_U32(mem_host_live_count(), 0);
+}
+
+/* ------------------------------------------------------------------ */
+/* T172: ex-command filename arguments (":w name", ":e name")          */
+/* ------------------------------------------------------------------ */
+
+static wp_vimode_action run_ex(wp_vimode_state *vs, const char *cmdline)
+{
+    feed_keys(vs, cmdline);
+    return feed_key_special(vs, WP_KEY_ENTER);
+}
+
+static wp_bool arg_equals(const wp_vimode_action *a, const char *expect)
+{
+    u32 i, n = 0;
+
+    while (expect[n] != '\0') n++;
+    if (a->arg_len != n) return WP_FALSE;
+    for (i = 0; i < n; i++) {
+        if (a->arg[i] != (u8)expect[i]) return WP_FALSE;
+    }
+    return WP_TRUE;
+}
+
+void test_vimode_ex_save_with_filename(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    wp_vimode_action action;
+
+    build_doc_two_paras(&doc, "", "");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    action = run_ex(&vs, ":w C:\\FOO.TXT");
+    ASSERT_TRUE(action.kind == WP_VIACTION_SAVE);
+    ASSERT_TRUE(arg_equals(&action, "C:\\FOO.TXT"));
+
+    /* ":wq" and ":x" are the same action and must carry the name too --
+       a writer who types ":wq notes.txt" is naming a file, not quitting
+       without saving it. */
+    action = run_ex(&vs, ":wq DH0:notes.txt");
+    ASSERT_TRUE(action.kind == WP_VIACTION_SAVE_QUIT);
+    ASSERT_TRUE(arg_equals(&action, "DH0:notes.txt"));
+
+    action = run_ex(&vs, ":x Unix:NOTES.TXT");
+    ASSERT_TRUE(action.kind == WP_VIACTION_SAVE_QUIT);
+    ASSERT_TRUE(arg_equals(&action, "Unix:NOTES.TXT"));
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_ex_open_command(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    wp_vimode_action action;
+
+    build_doc_two_paras(&doc, "", "");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    action = run_ex(&vs, ":e C:\\NOTES.TXT");
+    ASSERT_TRUE(action.kind == WP_VIACTION_OPEN);
+    ASSERT_TRUE(arg_equals(&action, "C:\\NOTES.TXT"));
+
+    /* Bare ":e" is legal and means "open however you normally would" --
+       the backend raises its own native picker, exactly as bare ":w"
+       already means "save however you normally would". It must NOT beep. */
+    action = run_ex(&vs, ":e");
+    ASSERT_TRUE(action.kind == WP_VIACTION_OPEN);
+    ASSERT_TRUE(action.arg_len == 0);
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_ex_filename_edge_cases(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    wp_vimode_action action;
+    u32 i;
+
+    build_doc_two_paras(&doc, "", "");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    /* Extra separating spaces are a typo, not a different filename. */
+    action = run_ex(&vs, ":w    spaced.txt");
+    ASSERT_TRUE(action.kind == WP_VIACTION_SAVE);
+    ASSERT_TRUE(arg_equals(&action, "spaced.txt"));
+
+    /* Trailing spaces likewise -- a name with a trailing blank is almost
+       certainly not what was meant, and on 8.3 targets cannot exist. */
+    action = run_ex(&vs, ":w trail.txt   ");
+    ASSERT_TRUE(action.kind == WP_VIACTION_SAVE);
+    ASSERT_TRUE(arg_equals(&action, "trail.txt"));
+
+    /* Whitespace only after the command is the bare command. */
+    action = run_ex(&vs, ":w   ");
+    ASSERT_TRUE(action.kind == WP_VIACTION_SAVE);
+    ASSERT_TRUE(action.arg_len == 0);
+
+    /* ":q" takes no argument. Real vim rejects ":q foo" rather than
+       quietly ignoring the tail, and so does this -- someone who typed
+       ":q report.txt" plainly meant something else. */
+    action = run_ex(&vs, ":q report.txt");
+    ASSERT_TRUE(action.kind == WP_VIACTION_BEEP);
+
+    /* An over-long path is REJECTED, never truncated: a truncated path
+       names a different file, and on a save that is silent data loss. */
+    feed_keys(&vs, ":w ");
+    for (i = 0; i < (u32)WP_VIMODE_ACTION_ARG_MAX + 1; i++) feed_keys(&vs, "a");
+    action = feed_key_special(&vs, WP_KEY_ENTER);
+    ASSERT_TRUE(action.kind == WP_VIACTION_BEEP);
+    ASSERT_TRUE(action.arg_len == 0);
+
+    /* Exactly at the cap still works -- an off-by-one here would reject
+       a legal path. */
+    feed_keys(&vs, ":w ");
+    for (i = 0; i < (u32)WP_VIMODE_ACTION_ARG_MAX; i++) feed_keys(&vs, "b");
+    action = feed_key_special(&vs, WP_KEY_ENTER);
+    ASSERT_TRUE(action.kind == WP_VIACTION_SAVE);
+    ASSERT_TRUE(action.arg_len == (u32)WP_VIMODE_ACTION_ARG_MAX);
+
+    /* An unknown command with an argument is still unknown -- the
+       argument parsing must not make ":bogus foo" look valid. */
+    action = run_ex(&vs, ":bogus foo.txt");
+    ASSERT_TRUE(action.kind == WP_VIACTION_BEEP);
+
+    /* A command word that merely STARTS with a valid one is not that
+       command: ":we foo" is not ":w". */
+    action = run_ex(&vs, ":we foo.txt");
+    ASSERT_TRUE(action.kind == WP_VIACTION_BEEP);
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
 }

@@ -107,6 +107,9 @@ void test_vimode_cw_undoes_as_one_step(void);
 void test_vimode_visual_mode_delete(void);
 void test_vimode_visual_line_mode_delete_spans_paragraphs(void);
 void test_vimode_ex_command_save_quit(void);
+void test_vimode_ex_save_with_filename(void);
+void test_vimode_ex_open_command(void);
+void test_vimode_ex_filename_edge_cases(void);
 void test_vimode_search_forward(void);
 void test_vimode_search_backward(void);
 void test_vimode_n_and_capital_n_respect_search_direction(void);
@@ -279,6 +282,7 @@ void test_keymap_init_selects_vi_and_seeds_cursor_at_doc_start(void);
 void test_keymap_feed_key_moves_cursor_through_vi_arm(void);
 void test_keymap_feed_key_insert_reports_inserted_char(void);
 void test_keymap_feed_key_quit_reports_quit_kind(void);
+void test_keymap_ex_filename_reaches_outcome(void);
 void test_keymap_get_status_view_reports_vi_mode_label(void);
 
 /* test_search.c (M11) */
@@ -590,6 +594,9 @@ static const test_case g_cases[] = {
     { "vimode_visual_mode_delete", test_vimode_visual_mode_delete },
     { "vimode_visual_line_mode_delete_spans_paragraphs", test_vimode_visual_line_mode_delete_spans_paragraphs },
     { "vimode_ex_command_save_quit", test_vimode_ex_command_save_quit },
+    { "vimode_ex_save_with_filename", test_vimode_ex_save_with_filename },
+    { "vimode_ex_open_command", test_vimode_ex_open_command },
+    { "vimode_ex_filename_edge_cases", test_vimode_ex_filename_edge_cases },
     { "vimode_search_forward", test_vimode_search_forward },
     { "vimode_search_backward", test_vimode_search_backward },
     { "vimode_n_and_capital_n_respect_search_direction", test_vimode_n_and_capital_n_respect_search_direction },
@@ -754,6 +761,7 @@ static const test_case g_cases[] = {
     { "keymap_feed_key_moves_cursor_through_vi_arm", test_keymap_feed_key_moves_cursor_through_vi_arm },
     { "keymap_feed_key_insert_reports_inserted_char", test_keymap_feed_key_insert_reports_inserted_char },
     { "keymap_feed_key_quit_reports_quit_kind", test_keymap_feed_key_quit_reports_quit_kind },
+    { "keymap_ex_filename_reaches_outcome", test_keymap_ex_filename_reaches_outcome },
     { "keymap_get_status_view_reports_vi_mode_label", test_keymap_get_status_view_reports_vi_mode_label },
 
     { "help_doc_parses_single_node", test_help_doc_parses_single_node },

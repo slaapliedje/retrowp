@@ -378,7 +378,8 @@ context, a different mechanism from undo-stack replay; deferred
 regardless of the undo-grouping work done here. Macros (`q`/`@`), named
 registers (`"a` through `"z` -- only one unnamed register exists),
 marks, jumplist (Ctrl-O/Ctrl-I). Ex-command arguments and ranges beyond
-`:s`'s own leading `%` (`:1,5d`, `:w filename`). Regex search/substitute
+`:s`'s own leading `%` (`:1,5d`) -- but NOT `:w filename`, which is
+implemented, see the Ex commands section. Regex search/substitute
 and case-insensitive plain search were both closed by M11
 (`wp_document_find_text`'s `ignore_case` parameter; `/`/`?`/`:s` all
 byte-literal, no regex) -- **still** genuinely deferred: regex itself
@@ -391,3 +392,56 @@ payoff. Column-preserving `j`/`k` (virtual-column memory across ragged
 paragraph lengths). Cross-section paragraph merge/delete (matches
 `docs/editing.md`'s own scope limit). Full vim on-character caret
 parity (a confirmed, deliberate scope decision, not a gap -- see above).
+
+### Ex commands with a filename (`:w name`, `:e name`) -- T172
+
+`:w`, `:wq` and `:x` each take an optional filename, and `:e` exists as
+the open counterpart. The point is ergonomic and it is the point of this
+whole project: **a writer never has to leave the keyboard to name a
+file.** Before this, three of the four backends could only name a file
+through a mouse-driven native picker -- GEM's `fsel_input`, the ASL
+requester, Standard File. (DOS was already keyboard-only, via a numbered
+text prompt; it was the model here, not the laggard.)
+
+Bare forms keep their exact previous meaning. `:w` still means "save
+however you normally would", and `:e` likewise means "open however you
+normally would" -- the backend raises its own native picker, which is
+precisely what a File > Open menu pick already looks like, so no backend
+needed a new case for it.
+
+Parsing rules, all covered by host tests:
+
+- The command word is the leading run of letters; one or more spaces
+  separate it from the argument; the rest is the filename verbatim.
+  Leading and trailing spaces are stripped.
+- No quoting or escaping. None of this project's targets needs it (8.3
+  on Atari/DOS; neither AmigaDOS nor an ExtFS share needs a quoted name
+  for the filenames this app produces).
+- `:q` takes no argument. `:q foo` is **rejected**, matching real vim's
+  own `E488 trailing characters` rather than quietly ignoring the tail --
+  someone who typed `:q report.txt` plainly meant something else.
+- A path longer than `WP_VIMODE_ACTION_ARG_MAX` (64) is **rejected, never
+  truncated**. A truncated path names a different file, and on a save
+  that is silent data loss.
+- A command word that merely starts with a valid one is not that command:
+  `:we foo` is not `:w`.
+
+The engine passes the bytes through and has no idea what a path looks
+like on any target, deliberately: the backend resolves `C:\FOO.TXT`,
+`DH0:foo.txt` or `Unix:FOO.TXT` itself, the same division of labor
+`plat_file_open` already has.
+
+Because the supplied name simply replaces what the picker would have
+returned, everything downstream is unchanged -- including format
+selection by extension. `:w notes.rtf` saves RTF, and `:w notes.odt`
+routes through the offload gateway, exactly as choosing those names in
+the requester would.
+
+**Verified on target, keyboard only, no mouse anywhere** (Atari under
+Hatari, EmuTOS): `:w C:\OUT.TXT` produced a real 233-byte file on the
+host filesystem containing the full document text, and `:e C:\MARKER.TXT`
+loaded a file the host had written, displaying its distinctive content.
+Both are genuine end-to-end assertions on real bytes, not screenshot
+readings -- and that byte-level check is exactly what the Atari and Amiga
+functional-testing tasks could not do before, because naming a file
+needed a mouse the CI harness cannot reliably drive.

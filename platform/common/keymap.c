@@ -75,6 +75,7 @@ static wp_keymap_outcome feed_key_vi(wp_app_ctx *ctx, wp_key_event ev, u8 raw_sh
 
     outcome.kind = (u8)WP_KEYMAP_RESULT_NONE;
     outcome.action_id = 0;
+    outcome.path_len = 0;
     outcome.inserted_char = WP_FALSE;
 
     mode_before = wp_vimode_get_mode(&ctx->km.vi);
@@ -89,6 +90,18 @@ static wp_keymap_outcome feed_key_vi(wp_app_ctx *ctx, wp_key_event ev, u8 raw_sh
         outcome.inserted_char = WP_TRUE;
     }
 
+    /* T172: carry an ex command's filename argument straight through.
+       Copied unconditionally before the switch so every file-touching
+       outcome below gets it without repeating this; actions that cannot
+       take a name (QUIT, BEEP) simply never have a nonzero arg_len,
+       because vimode.c rejects ":q foo" outright rather than dropping
+       the tail. */
+    if (action.arg_len > 0 && action.arg_len <= (u32)WP_VIMODE_ACTION_ARG_MAX) {
+        u32 i;
+        for (i = 0; i < action.arg_len; i++) outcome.path[i] = action.arg[i];
+        outcome.path_len = (u8)action.arg_len;
+    }
+
     switch ((wp_vimode_action_kind)action.kind) {
     case WP_VIACTION_QUIT:
         outcome.kind = (u8)WP_KEYMAP_RESULT_QUIT;
@@ -97,6 +110,14 @@ static wp_keymap_outcome feed_key_vi(wp_app_ctx *ctx, wp_key_event ev, u8 raw_sh
     case WP_VIACTION_SAVE_QUIT:
         outcome.kind = (u8)WP_KEYMAP_RESULT_SAVE_QUIT;
         return outcome;
+    case WP_VIACTION_OPEN:
+        /* Same shape as SAVE below, including the deliberate `break`
+           rather than a return. Bare ":e" arrives here with path_len 0,
+           which every backend already knows how to handle -- it is
+           exactly what a File > Open menu pick looks like. */
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FILE_OPEN;
+        break;
     case WP_VIACTION_SAVE:
         /* Original code called do_file_save() directly here, THEN still
            fell through to the shortcut-fallback check below (a plain
@@ -156,6 +177,7 @@ static wp_keymap_outcome feed_key_ws(wp_app_ctx *ctx, wp_key_event ev)
 
     outcome.kind = (u8)WP_KEYMAP_RESULT_NONE;
     outcome.action_id = 0;
+    outcome.path_len = 0;
     outcome.inserted_char = will_insert;
 
     switch (action) {
@@ -221,6 +243,7 @@ static wp_keymap_outcome feed_key_em(wp_app_ctx *ctx, wp_key_event ev)
 
     outcome.kind = (u8)WP_KEYMAP_RESULT_NONE;
     outcome.action_id = 0;
+    outcome.path_len = 0;
     outcome.inserted_char = will_insert;
 
     switch (action) {
@@ -287,6 +310,7 @@ static wp_keymap_outcome feed_key_wp5(wp_app_ctx *ctx, wp_key_event ev)
 
     outcome.kind = (u8)WP_KEYMAP_RESULT_NONE;
     outcome.action_id = 0;
+    outcome.path_len = 0;
     outcome.inserted_char = will_insert;
 
     switch (action) {
@@ -343,6 +367,7 @@ static wp_keymap_outcome feed_key_mw(wp_app_ctx *ctx, wp_key_event ev)
 
     outcome.kind = (u8)WP_KEYMAP_RESULT_NONE;
     outcome.action_id = 0;
+    outcome.path_len = 0;
     outcome.inserted_char = will_insert;
 
     switch (action) {
@@ -474,4 +499,58 @@ void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,
     out->pending_count = 0;
     out->pending_cmd_utf8 = NULL;
     out->pending_cmd_len = 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* T172: the pending ex-command filename                               */
+/* ------------------------------------------------------------------ */
+
+/* Every backend routes both menu picks and keystroke outcomes through
+   one invoke_action(action_id) dispatcher, which by design carries no
+   payload -- a menu pick has nothing to say beyond "the user chose
+   Open". Rather than thread a path parameter through that dispatcher on
+   four backends (and past every non-file action that would have to
+   ignore it), a keystroke that named a file parks the name here and the
+   backend's own do_file_open/do_file_save collects it.
+
+   Lives in platform/common, not four times over, because all four
+   backends have the identical seam: each builds a `fullpath` -- from its
+   native picker -- and everything downstream of that point (format
+   detection by extension, load, save) is already path-driven and needs
+   no change at all. Supplying the path is simply skipping the picker.
+
+   Single-slot and consume-once BY DESIGN: it is written immediately
+   before invoke_action and cleared the moment it is read, so a name can
+   never survive to be picked up by a later, unrelated File > Open from
+   the menu. Reading it always clears it, even when the caller then
+   decides not to use it. */
+static char    g_pending_path[WP_VIMODE_ACTION_ARG_MAX + 1];
+static wp_bool g_pending_path_set = WP_FALSE;
+
+void wp_keymap_set_pending_path(const u8 *path, u32 len)
+{
+    u32 i;
+
+    g_pending_path_set = WP_FALSE;
+    if (path == NULL || len == 0 || len > (u32)WP_VIMODE_ACTION_ARG_MAX) return;
+
+    for (i = 0; i < len; i++) g_pending_path[i] = (char)path[i];
+    g_pending_path[len] = '\0';
+    g_pending_path_set = WP_TRUE;
+}
+
+wp_bool wp_keymap_take_pending_path(char *out, u32 out_cap)
+{
+    u32 i;
+
+    if (!g_pending_path_set) return WP_FALSE;
+    g_pending_path_set = WP_FALSE;   /* consumed, whatever happens below */
+
+    if (out == NULL || out_cap == 0) return WP_FALSE;
+    for (i = 0; g_pending_path[i] != '\0' && i + 1 < out_cap; i++) out[i] = g_pending_path[i];
+    out[i] = '\0';
+    /* A path that would not fit the caller's buffer is refused outright
+       rather than handed back truncated -- a truncated path names a
+       different file, and on a save that is silent data loss. */
+    return (wp_bool)(g_pending_path[i] == '\0');
 }

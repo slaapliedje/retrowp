@@ -80,6 +80,21 @@ typedef struct {
                                 cursor -- lets the caller keep stamping style_flags onto
                                 the new run generically (see apply_current_style_to_run_at's
                                 own callers), replacing a per-scheme mode-aware check. */
+    /* T172: the filename from an ex command that carried one (":w name",
+       ":e name", ":wq name"), NOT NUL-terminated -- path_len is 0 when no
+       name was given, which means "do what you have always done", i.e.
+       raise this backend's own native file picker.
+
+       Carried by value here rather than as a pointer into vi state
+       precisely because that state is transient: cmdline_buf is cleared
+       on leaving COMMAND mode, so a pointer would dangle by the time a
+       backend got round to using it. It is also NOT put on wp_app_ctx,
+       which has a hard sizeof ceiling asserted by test_keymap.c.
+
+       Only ever set for the vi arm; every other keymap scheme leaves it
+       0, since none of them has an ex command line. */
+    u8      path[WP_VIMODE_ACTION_ARG_MAX];
+    u8      path_len;
 } wp_keymap_outcome;
 
 /* doc/journal are borrowed, same convention wp_vimode_init already uses.
@@ -120,6 +135,20 @@ wp_keymap_outcome wp_keymap_feed_key(struct wp_app_ctx *ctx, wp_key_event ev,
    individual .section/.paragraph/.run/.offset field writes during
    editing). */
 wp_pos *wp_keymap_cursor(struct wp_app_ctx *ctx);
+
+/* T172: parks the filename from an ex command (":w name" / ":e name")
+   for the backend's own do_file_open/do_file_save to collect, since
+   every backend's invoke_action(action_id) dispatcher carries no
+   payload. Call set_ immediately before dispatching the outcome's
+   action; take_ returns WP_FALSE when no name is pending, which means
+   "raise the native picker exactly as before".
+
+   Single-slot and consume-once: take_ always clears, so a name can never
+   leak into a later unrelated File > Open. take_ also returns WP_FALSE
+   (having still cleared) if the path would not fit out_cap -- refusing
+   beats handing back a truncated path that names the wrong file. */
+void    wp_keymap_set_pending_path(const u8 *path, u32 len);
+wp_bool wp_keymap_take_pending_path(char *out, u32 out_cap);
 
 /* Writes a NUL-terminated mode/status string into buf (truncated to fit
    buf_cap), then fills the rest of *out the same way every existing

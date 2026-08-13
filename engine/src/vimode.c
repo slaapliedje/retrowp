@@ -678,20 +678,95 @@ static wp_vimode_action feed_visual(wp_vimode_state *vs, wp_key_event key)
 /* Command-line mode (':' and '/')                                     */
 /* ------------------------------------------------------------------ */
 
+/* Splits an ex command line into its leading command word and an
+   optional filename argument. Returns the command word's length; the
+   argument (if any) is reported through the arg_off and arg_len
+   out-params, with both leading and trailing spaces stripped.
+
+   Deliberately simple: the command word is the leading run of letters,
+   the separator is one or more spaces, and everything after it is the
+   argument verbatim. No quoting, no escaping -- none of this project's
+   targets has a path where that matters (8.3 on Atari/DOS, and neither
+   AmigaDOS nor an ExtFS share needs a quoted name for the filenames
+   this app produces). */
+static u32 split_ex_command(const u8 *buf, u32 len, u32 *arg_off, u32 *arg_len)
+{
+    u32 word = 0;
+    u32 i;
+
+    while (word < len && ((buf[word] >= 'a' && buf[word] <= 'z') ||
+                          (buf[word] >= 'A' && buf[word] <= 'Z'))) {
+        word++;
+    }
+
+    i = word;
+    while (i < len && buf[i] == ' ') i++;
+    *arg_off = i;
+
+    while (len > i && buf[len - 1] == ' ') len--;
+    *arg_len = (len > i) ? (len - i) : 0;
+
+    return word;
+}
+
+static wp_bool ex_word_is(const u8 *buf, u32 word_len, const char *lit)
+{
+    u32 i;
+
+    for (i = 0; i < word_len; i++) {
+        if (lit[i] == '\0' || buf[i] != (u8)lit[i]) return WP_FALSE;
+    }
+    return (wp_bool)(lit[word_len] == '\0');
+}
+
+/* Recognizes ':w', ':q', ':x', ':wq' and ':e', each of the file-touching
+   ones optionally followed by a filename (M-keyboard-ergonomics work:
+   naming a file without reaching for the mouse, which on three of the
+   four backends is otherwise only possible through a mouse-driven native
+   file picker -- see docs/vimode.md).
+
+   Bare forms keep their exact previous meaning: ':w' still means "save
+   however you normally would", and ':e' likewise means "open however you
+   normally would", i.e. the backend raises its own native picker. */
 static wp_vimode_action execute_ex_command(wp_vimode_state *vs)
 {
     wp_vimode_action action;
+    u32 word_len, arg_off, arg_len;
+    const u8 *buf = vs->cmdline_buf;
 
     action.kind = (u8)WP_VIACTION_BEEP;
     action.arg_len = 0;
 
-    if (vs->cmdline_len == 1 && vs->cmdline_buf[0] == 'w') action.kind = (u8)WP_VIACTION_SAVE;
-    else if (vs->cmdline_len == 1 && vs->cmdline_buf[0] == 'q') action.kind = (u8)WP_VIACTION_QUIT;
-    else if (vs->cmdline_len == 1 && vs->cmdline_buf[0] == 'x') action.kind = (u8)WP_VIACTION_SAVE_QUIT;
-    else if (vs->cmdline_len == 2 && vs->cmdline_buf[0] == 'w' && vs->cmdline_buf[1] == 'q') {
-        action.kind = (u8)WP_VIACTION_SAVE_QUIT;
+    word_len = split_ex_command(buf, vs->cmdline_len, &arg_off, &arg_len);
+    if (word_len == 0) return action;
+
+    if (ex_word_is(buf, word_len, "w"))       action.kind = (u8)WP_VIACTION_SAVE;
+    else if (ex_word_is(buf, word_len, "q"))  action.kind = (u8)WP_VIACTION_QUIT;
+    else if (ex_word_is(buf, word_len, "x"))  action.kind = (u8)WP_VIACTION_SAVE_QUIT;
+    else if (ex_word_is(buf, word_len, "wq")) action.kind = (u8)WP_VIACTION_SAVE_QUIT;
+    else if (ex_word_is(buf, word_len, "e"))  action.kind = (u8)WP_VIACTION_OPEN;
+    else return action;
+
+    if (arg_len == 0) return action;
+
+    /* ':q' takes no argument -- real vim rejects ":q foo" (E488 trailing
+       characters) rather than quietly ignoring it, and so does this.
+       Silently dropping it would be worse here than anywhere: the user
+       who typed ":q somefile" plainly meant something else. */
+    if (action.kind == (u8)WP_VIACTION_QUIT) {
+        action.kind = (u8)WP_VIACTION_BEEP;
+        return action;
     }
 
+    /* Reject rather than truncate. A truncated path names a DIFFERENT
+       file, and on ':w' that is silent data loss. */
+    if (arg_len > (u32)WP_VIMODE_ACTION_ARG_MAX) {
+        action.kind = (u8)WP_VIACTION_BEEP;
+        return action;
+    }
+
+    memcpy(action.arg, buf + arg_off, arg_len);
+    action.arg_len = arg_len;
     return action;
 }
 
