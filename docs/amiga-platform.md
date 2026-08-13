@@ -1424,3 +1424,114 @@ different boots** (x=154 in one run, x=177 in another), so a fixed crop
 offset can also silently point at empty background. A fixed sleep plus a
 fixed crop is a reliable way to invent a bug that does not exist. Locate
 the window per run, and settle before asserting.
+
+## The settle rule has now caught three fake bugs (T166)
+
+`docs/amiga-platform.md`'s screenshot rule -- capture repeatedly until
+two consecutive frames are byte-identical, then assert -- was written
+after two fake bugs in T167. A third has now been retracted by it.
+
+T166 reported that the vi status label rendered **empty** while the
+command line was active: pressing `/` then `m,e,n,u` left the bar blank,
+even though the find itself executed correctly on Return. It looked
+airtight. The report had explicitly ruled out the crop offset (the
+baseline frame showed `NORMAL` clearly at the *same* pixel offset in the
+*same* boot), ruled out the input method (every key sent individually
+via `xdotool key` with 0.35-0.5s gaps), and ruled out "the command line
+is broken" (the search worked). From there, source reading narrowed it
+hard: `wp_vimode_get_status_text` returns a non-empty string for every
+value in `wp_vimode_mode`, and empty **only** from its `default:`
+branch -- so `vs->mode` had to be holding a value outside the enum,
+pointing at either memory corruption of the vi state or a wrong-moment
+read of it from inside the `editor_draw` MUI callback.
+
+All of that was reasoning on top of one bad measurement. Re-run with
+settled captures, the bar reads correctly at every single step:
+
+    baseline       -> NORMAL
+    after "/"      -> SEARCH /
+    after m,e,n,u  -> SEARCH /menu
+    after Return   -> NORMAL
+
+(Confirmed by cropping and 4x-magnifying the bar in each settled frame,
+not by eyeballing a full-screen shot.)
+
+The tell, in hindsight: the baseline frame was captured after a long
+quiet period and had fully refreshed, while every frame that looked
+broken was captured 0.6-2s after a keystroke -- mid-refresh. "The same
+bar renders fine in the baseline frame at the same offset" felt like it
+eliminated a rendering artifact. It did the opposite: it was the
+artifact's own signature.
+
+Two things worth carrying forward:
+
+- A ruled-out list is only as good as the measurement under it. Every
+  exclusion in that report was individually correct and the conclusion
+  was still wrong, because none of them questioned the capture itself.
+- This retraction also killed the leading hypothesis for the substitute
+  no-op (T167), which had been filed as probably sharing a root cause.
+  Rendering `SEARCH /menu` can only happen through the
+  `WP_VIMODE_COMMAND` branch, so `vs->mode` is provably legal and
+  correct at paint time. The vi state is fine.
+
+## The substitute "no-op" was a test error, not a defect (T167)
+
+Filed, re-scoped twice, and finally retracted. `:s/old/new/` works
+correctly on this backend. The final wrong diagnosis was not a capture
+artifact like the others -- it was a test-design mistake, which is worth
+recording separately because it defeated a harness that had by then been
+made rigorous.
+
+Typing `:s/menu/ZORK/` on a freshly-booted Amiga genuinely does nothing.
+Not because substitute is broken, but because **`:s` without a leading
+`%` scopes to the current paragraph only** (`engine/src/vimode.c:934`:
+`start_para = whole_section ? 0 : vs->cursor.paragraph`), and this
+backend sets the initial cursor to `wp_pos_doc_start`
+(`platform/amiga/app_shell.c:304`) -- paragraph 0, `"RetroWP on Amiga
+(M9 T9.1b)"`, which contains no "menu". The command correctly found no
+match and changed nothing. That behaviour matches real vim, and
+`docs/vimode.md`'s Substitute section had documented it all along.
+
+Move the cursor first and it works:
+
+    /menu           + Return   -> caret moves to the paragraph with "menu"
+    :s/menu/ZORK/   + Return   -> "...with a working ZORK", relaid out
+
+### The read-back that cornered it
+
+Driving the command one key at a time and settling before reading the
+status bar after **every** keystroke gave an unambiguous trace:
+
+    NORMAL -> COMMAND : -> :s -> :s/ -> :s/m -> :s/menu -> :s/menu/
+           -> :s/menu/Z -> :s/menu/ZORK -> :s/menu/ZORK/ -> NORMAL
+
+Every keystroke arrives, in order, intact. That eliminated key delivery
+outright and, as a free side effect, killed the standing suspicion that
+`translate_rawkey` mangles shifted characters -- `ZORK` arrives uppercase
+and correct. This technique is cheap and worth reaching for early on any
+backend with a status line: it turns "the command didn't work" into
+"the command arrived intact and then didn't work", which are very
+different bugs.
+
+### Why the cross-backend comparison misled
+
+The Mac had been recorded (T150) as running `:s/quit/QUIT/` successfully,
+which made the feature look sound and this backend look broken. But
+T150's own written procedure ran `/quit` **first**, moving the cursor
+onto the paragraph containing the word. The comparison that felt most
+decisive was comparing two different procedures. A cross-backend result
+is only evidence if the procedure is identical -- and here the procedure
+difference was recorded in the very note being cited.
+
+### Consequence for the cursor-start-position task
+
+That task -- Atari/DOS start at doc END, Amiga/Mac at doc START -- is no
+longer a theoretical portability concern. Because `:s` acts on the
+current paragraph, **the identical keystrokes operate on a different
+paragraph depending on the backend**. This episode is what that costs in
+practice: four emulator boots and three successive wrong diagnoses,
+including a filed defect that never existed.
+
+Until it is settled, any interactive `:s` test on any backend should
+move the cursor deliberately first, or use `:%s`, rather than relying on
+where boot happened to leave it.
