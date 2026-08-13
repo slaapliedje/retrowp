@@ -2432,3 +2432,27 @@ frame shows the caret immediately after `of GEM.` -- this backend loads
 with the cursor at document END (see T160's cross-backend
 inconsistency), so even the very first frame is a non-trivial caret
 position that a left-margin-pinned caret would visibly fail.
+
+## `SERIALTST.PRG`/`CONVERTST.PRG` had not linked for a long time (T168)
+
+`make atari-serial-smoke` and `make atari-convert-smoke` both failed at
+link with ~15 undefined references (`wp_help_view_init`,
+`wp_help_doc_parse`, `wp_keymap_cursor`, `wp_config_load`,
+`wp_app_ctx_init`, ...). Both rules listed `ATARI_PLATFORM_OBJ`,
+`ATARI_ENGINE_OBJ`, `ATARI_TRANSPORT_OBJ` and `ATARI_SERVICES_OBJ` but
+**not `ATARI_COMMON_OBJ`**, which `RETROWP.PRG` and `SMOKE.PRG` both
+have. `ATARI_PLATFORM_OBJ` contains `app_shell.o`, which has referenced
+`platform/common` symbols ever since M8.5 introduced the help viewer,
+keymap and app context -- so these two rules went stale then and stayed
+broken.
+
+The cost was not the build error, which nobody was hitting, but what it
+took down with it: `ci_atari_serial.sh` and `ci_atari_convert_serial.sh`
+each begin with those `make` targets under `set -e`, so **M6 T6.3's and
+M7 T7.4c's on-target proof that the offload protocol survives real
+RS-232 had not been runnable at all**. Both gates pass again with the
+one-word fix, including the newer flow-control assertions
+(`serial:<device>:<baud>[:<flow>]`, `tcp:` correctly `WP_UNSUPPORTED`).
+
+Rule for anything added later: a `.PRG` that links `ATARI_PLATFORM_OBJ`
+needs `ATARI_COMMON_OBJ` too.

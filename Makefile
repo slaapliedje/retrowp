@@ -255,10 +255,20 @@ $(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o
 # lays out text), which needs metrics_atari.c/draw_atari.c's VDI calls
 # -- so this still needs the full platform/atari object set and -lgem,
 # same as RETROWP.PRG/SMOKE.PRG. Only the source file differs.
+#
+# ATARI_COMMON_OBJ is required for the same reason, and its absence here
+# was a real, silent rot: ATARI_PLATFORM_OBJ contains app_shell.o, which
+# has referenced platform/common symbols (help viewer, keymap, config,
+# app context) since M8.5 added them -- so this rule and CONVERTST.PRG's
+# below stopped linking then and stayed broken, taking ci_atari_serial.sh
+# and ci_atari_convert_serial.sh down with them (both `make` these
+# targets first, under `set -e`). RETROWP.PRG and SMOKE.PRG list it and
+# were never affected. Any future .PRG linking ATARI_PLATFORM_OBJ needs
+# ATARI_COMMON_OBJ too.
 $(ATARI_BUILD)/serialsmoke/%.o: host/tools/%.c | $(ATARI_BUILD)/serialsmoke
 	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Ioffload/transport -c $< -o $@
 
-$(ATARI_BIN)/SERIALTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialsmoke/atari_serial_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
+$(ATARI_BIN)/SERIALTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialsmoke/atari_serial_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
 # M7 T7.4c: same shape as SERIALTST.PRG, proving CONVERT_IMPORT/EXPORT
@@ -266,7 +276,7 @@ $(ATARI_BIN)/SERIALTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialsmoke/ata
 $(ATARI_BUILD)/convertsmoke/%.o: host/tools/%.c | $(ATARI_BUILD)/convertsmoke
 	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Ioffload/transport -c $< -o $@
 
-$(ATARI_BIN)/CONVERTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/convertsmoke/atari_convert_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
+$(ATARI_BIN)/CONVERTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/convertsmoke/atari_convert_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
 # The multitasking-AES redraw prober (host/tools/atari_wmredraw_probe.c).
