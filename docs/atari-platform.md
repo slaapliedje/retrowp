@@ -2456,3 +2456,61 @@ one-word fix, including the newer flow-control assertions
 
 Rule for anything added later: a `.PRG` that links `ATARI_PLATFORM_OBJ`
 needs `ATARI_COMMON_OBJ` too.
+
+## The matrix booted `SMOKE.PRG` and nothing else (T169)
+
+`SMOKE.PRG` links the same engine but never installs a menu bar, never
+opens a window and never runs the paint loop. An app completely broken
+for a user passed 6/6. This is the same gap T158 found on the Amiga,
+where the app gate that closed it found two real defects (T164) on its
+first run.
+
+`run_atari_app_once` (`host/tools/atari_ci_lib.sh`) now boots the real
+`RETROWP.PRG` against every TOS image, asserting **three independent
+signals, none of which parses a screenshot**:
+
+1. `C:\RETROWP.ALV` appears -- menu bar installed, window open, sample
+   document laid out, event loop reached.
+2. its event **count advances** after real injected keystrokes -- still
+   scheduling, still reading the keyboard. Deliberately not a log grep:
+   Hatari does not report a guest CPU fault in any greppable form the
+   way amiberry does, and a wedged event loop raises no exception for
+   any log to record.
+3. its **painted-fragment count is nonzero** -- the paint loop actually
+   put document text on screen. Signals 1 and 2 both pass for an app
+   that comes up, paints its chrome and then shows an empty page; the
+   DOS backend was found doing exactly that (T171) while this gate was
+   being built, which is why this third signal exists at all.
+
+The app writes the marker only when a `C:\RETROWP.CI` trigger file
+exists, so a real user's boot never touches the disk for it. The GEMDOS
+`--harddrive` directory is a real host directory, so both markers are
+read straight off the host with no emulator cooperation. 8.3 names are
+mandatory -- a longer name is silently truncated by GEMDOS and the host
+then polls forever for a file that never appears.
+
+**Both failure modes were verified, not assumed.** Substituting
+`SMOKE.PRG` for `RETROWP.PRG` fails on signal 1 (`sentinel MISSING`);
+disabling the in-loop heartbeat fails on signal 2 (`sentinel present`,
+count `0 -> 0`). A gate nobody has watched fail is not a gate.
+
+### Harness trap: poll for the marker's CONTENT, never its existence
+
+The first version of this gate polled with `find -iname RETROWP.ALV` and
+reported `sentinel MISSING` on a perfectly healthy app whose window,
+menu bar and marker file were all demonstrably present. `find` sees the
+file the instant `fopen(..., "wb")` creates it -- **before** `fwrite`
+and `fclose` have put any digits in it. The gate won that race, read an
+empty file, and concluded the app never started.
+
+Poll until the marker parses as a number. That is self-synchronising
+and needs no sleep-and-hope anywhere. The same applies to the DOS and
+Mac gates, which share the contract.
+
+Two related bounds worth keeping: the poll deadline is **wall-clock**,
+not an iteration count (each pass spawns `find`/`awk`, so an iteration
+is not a fixed unit of time -- "1500 iterations" silently meant anywhere
+from 150s to 250s depending on host load), and Hatari is **not** wrapped
+in `timeout` when backgrounded, because `$!` would then be `timeout`'s
+PID and the `kill -9` would reap the wrapper while orphaning a real
+Hatari process per matrix entry.

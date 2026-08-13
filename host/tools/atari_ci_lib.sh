@@ -100,3 +100,177 @@ run_atari_smoke_once() {
 
     return "$ATARI_CI_STATUS"
 }
+
+# ---------------------------------------------------------------------
+# T169: boot the REAL RETROWP.PRG, not SMOKE.PRG.
+#
+# SMOKE.PRG links the same engine but never installs a menu bar, never
+# opens a window and never runs the paint loop, so an app that is
+# completely broken for a user still passes the matrix above. That is
+# not hypothetical: the identical gap on the Amiga (T158) was hiding two
+# real defects (T164) that its own app gate found on its first run.
+#
+# TWO INDEPENDENT SIGNALS, neither of which parses a screenshot:
+#   1. RETROWP.ALV appears  -> the app installed its menu bar, opened its
+#      window, laid out the sample document and reached its event loop.
+#   2. its event COUNT advances after real injected keystrokes -> the app
+#      is still scheduling and still reading the keyboard N seconds
+#      later. This is what catches a crash or a wedge AFTER the first
+#      paint, and it is deliberately not a log grep: Hatari does not
+#      report a guest CPU fault in any greppable form the way amiberry
+#      does, and a hung event loop raises no exception to report anyway.
+#   3. its PAINTED-FRAGMENT count is nonzero -> the paint loop actually
+#      put document text on the screen. Signals 1 and 2 both pass for an
+#      app that comes up, paints its chrome and then shows an empty
+#      page; the DOS backend was found doing exactly that while this
+#      gate was being built, which is why this third signal exists.
+#
+# The GEMDOS --harddrive directory is a real host directory, so both
+# markers are read directly off the host filesystem with no emulator
+# cooperation. TOS uppercases 8.3 names, hence the case-insensitive
+# lookup below rather than a hardcoded filename.
+#
+# Usage: run_atari_app_once <tos-image-path> <display-offset> [machine]
+# Sets: ATARI_APP_STATUS (0 = pass), ATARI_APP_LOG (caller owns cleanup)
+WP_ATARI_APP_SETTLE_SECS="${WP_ATARI_APP_SETTLE_SECS:-6}"
+
+# The marker's payload is "<events> <painted_fragments>". $2 selects
+# which field; empty output means "no usable marker yet".
+_atari_ci_field() {
+    _acf="$(find "$1" -maxdepth 1 -iname 'RETROWP.ALV' 2>/dev/null | head -1)"
+    [ -n "$_acf" ] || { echo ""; return; }
+    awk -v n="$2" 'NF >= 2 { print $n; found = 1; exit } END { if (!found) print "" }' "$_acf"
+}
+
+_atari_ci_alive_count()   { _atari_ci_field "$1" 1; }
+_atari_ci_painted_count() { _atari_ci_field "$1" 2; }
+
+run_atari_app_once() {
+    _tos_image="$1"
+    _offset="$2"
+    _machine="${3:-st}"
+    _scratch="$(mktemp -d)"
+    _xvfb_display=":$((97 + ($$ + _offset) % 400))"
+
+    Xvfb "$_xvfb_display" -screen 0 1280x800x24 >"$_scratch/xvfb.log" 2>&1 &
+    _xvfb_pid=$!
+    _xvfb_lock="/tmp/.X${_xvfb_display#:}-lock"
+    _xvfb_wait=0
+    while [ ! -e "$_xvfb_lock" ]; do
+        _xvfb_wait=$((_xvfb_wait + 1))
+        if [ "$_xvfb_wait" -gt 50 ]; then
+            kill "$_xvfb_pid" 2>/dev/null; wait "$_xvfb_pid" 2>/dev/null
+            ATARI_APP_STATUS=1
+            ATARI_APP_LOG="$_scratch/xvfb.log"
+            return 1
+        fi
+        sleep 0.1
+    done
+
+    mkdir -p "$_scratch/c_drive"
+    cp bin/atari/RETROWP.PRG "$_scratch/c_drive/RETROWP.PRG"
+    echo "ci" > "$_scratch/c_drive/RETROWP.CI"
+
+    # Backgrounded, not `timeout`-wrapped-and-waited like the smoke run:
+    # the real app never exits on its own, so this polls for the markers
+    # and kills it itself. Deliberately NOT wrapped in `timeout` -- $!
+    # would then be timeout's PID, and the kill -9 below would reap the
+    # wrapper while leaving a real Hatari process orphaned on the host
+    # once per matrix entry. The poll loops below are already bounded,
+    # so the kill is reached on every path anyway.
+    HOME="$_scratch" DISPLAY="$_xvfb_display" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
+        hatari \
+        --natfeats on \
+        --tos "$_tos_image" \
+        --machine "$_machine" \
+        --memsize 1 \
+        --fast-boot yes \
+        --monitor rgb --tos-res med --zoom 2 --statusbar no --borders no \
+        --confirm-quit no \
+        --sound off \
+        --conout 2 \
+        --harddrive "$_scratch/c_drive" \
+        --auto RETROWP.PRG \
+        >"$_scratch/stdout.log" 2>"$_scratch/stderr.log" &
+    _hatari_pid=$!
+
+    # Same 150s class of budget run_atari_smoke_once documents: a real
+    # TOS ROM's POST plus GEM startup, not a tight bound.
+    # Polls for the marker's CONTENT, never its mere existence. `find`
+    # sees the file the instant fopen(...,"wb") creates it, which is
+    # before fwrite/fclose have put the digits in -- an existence poll
+    # wins that race often enough to read an empty file and conclude the
+    # app never started, which is exactly the false failure this gate is
+    # supposed to be immune to. Requiring a digit makes the check
+    # self-synchronising with no sleep-and-hope anywhere.
+    #
+    # Bounded by wall clock rather than an iteration count: each pass
+    # spawns find/head/tr, so an iteration is not a fixed unit of time
+    # and "1500 iterations" silently meant anywhere from 150s to 250s
+    # depending on host load.
+    _deadline=$(( $(date +%s) + 150 ))
+    while [ -z "$(_atari_ci_alive_count "$_scratch/c_drive")" ]; do
+        [ "$(date +%s)" -ge "$_deadline" ] && break
+        sleep 0.1
+    done
+
+    _count_before="$(_atari_ci_alive_count "$_scratch/c_drive")"
+    _alive=0
+    _responsive=0
+    _rendered=0
+
+    if [ -n "$_count_before" ]; then
+        _alive=1
+
+        _wid="$(DISPLAY="$_xvfb_display" xdotool search --name -i 'hatari' 2>/dev/null | head -1)"
+        [ -n "$_wid" ] && DISPLAY="$_xvfb_display" xdotool windowfocus "$_wid" 2>/dev/null
+        sleep 1
+
+        # Motion keys only -- this gate must not mutate the document, so
+        # a later assertion (or a human reading the screenshot) still
+        # sees the untouched sample. ~150ms apart: faster synthetic input
+        # outruns the app under Hatari and proves nothing (see T148).
+        for _k in Right Right Left Escape; do
+            DISPLAY="$_xvfb_display" xdotool key --delay 150 "$_k" 2>/dev/null
+            sleep 0.4
+        done
+
+        sleep "$WP_ATARI_APP_SETTLE_SECS"
+        # Read AFTER the settle, not before: on the Atari the first
+        # document paint happens in response to the first redraw EVENT,
+        # i.e. inside the event loop, so the marker written just before
+        # that loop legitimately still reads 0 painted fragments. Only a
+        # post-keystroke read means "has this app ever painted text".
+        _count_after="$(_atari_ci_alive_count "$_scratch/c_drive")"
+        _painted="$(_atari_ci_painted_count "$_scratch/c_drive")"
+        [ -n "$_painted" ] && [ "$_painted" -gt 0 ] 2>/dev/null && _rendered=1
+        if [ -n "$_count_after" ] && [ "$_count_after" -gt "$_count_before" ] 2>/dev/null; then
+            _responsive=1
+        fi
+    fi
+
+    DISPLAY="$_xvfb_display" import -window root "$_scratch/screen.png" 2>/dev/null || true
+
+    kill -9 "$_hatari_pid" 2>/dev/null; wait "$_hatari_pid" 2>/dev/null
+    kill "$_xvfb_pid" 2>/dev/null; wait "$_xvfb_pid" 2>/dev/null
+
+    ATARI_APP_LOG="$_scratch/app.log"
+    {
+        echo "window-open sentinel: $([ "$_alive" -eq 1 ] && echo present || echo MISSING)"
+        echo "event count before keys: ${_count_before:-<none>}"
+        echo "event count after keys:  ${_count_after:-<none>}"
+        echo "still responsive: $([ "$_responsive" -eq 1 ] && echo yes || echo NO)"
+        echo "painted text fragments: ${_painted:-<none>}"
+        echo "rendered document: $([ "$_rendered" -eq 1 ] && echo yes || echo 'NO -- app came up but painted an EMPTY page')"
+        echo "screenshot: $_scratch/screen.png"
+        echo "--- hatari stderr ---"
+        cat "$_scratch/stderr.log" 2>/dev/null
+    } > "$ATARI_APP_LOG"
+
+    if [ "$_alive" -eq 1 ] && [ "$_responsive" -eq 1 ] && [ "$_rendered" -eq 1 ]; then
+        ATARI_APP_STATUS=0
+        return 0
+    fi
+    ATARI_APP_STATUS=1
+    return 1
+}

@@ -37,6 +37,7 @@ tos-2.06-megaste:/usr/share/hatari/tos206us.img:megaste
 
 make atari-engine-check
 make atari-smoke
+make atari
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -57,17 +58,40 @@ for entry in $IMAGES; do
 
     echo "=== $label ($image, --machine $machine) ==="
     OFFSET=$((OFFSET + 1))
+    ENTRY_OK=1
     if run_atari_smoke_once "$image" "$OFFSET" "$machine"; then
+        :
+    else
+        echo "FAIL: $label (SMOKE.PRG, Hatari exit $ATARI_CI_STATUS)"
+        echo "--- full log ---"
+        cat "$ATARI_CI_LOG"
+        ENTRY_OK=0
+    fi
+    rm -rf "$(dirname "$ATARI_CI_LOG")"
+
+    # T169: SMOKE.PRG never installs a menu bar, never opens a window and
+    # never runs the paint loop, so on its own it cannot tell a working
+    # app from one that is completely broken for a user. The identical
+    # gap on the Amiga (T158) was hiding two real defects. Boot the real
+    # RETROWP.PRG against this same TOS image.
+    OFFSET=$((OFFSET + 1))
+    if run_atari_app_once "$image" "$OFFSET" "$machine"; then
+        :
+    else
+        echo "FAIL: $label (RETROWP app gate)"
+        echo "--- RETROWP app gate ---"
+        cat "$ATARI_APP_LOG"
+        ENTRY_OK=0
+    fi
+    rm -rf "$(dirname "$ATARI_APP_LOG")"
+
+    if [ "$ENTRY_OK" -eq 1 ]; then
         echo "PASS: $label"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        echo "FAIL: $label (Hatari exit $ATARI_CI_STATUS)"
-        echo "--- full log ---"
-        cat "$ATARI_CI_LOG"
         FAIL_COUNT=$((FAIL_COUNT + 1))
         FAILED_LABELS="$FAILED_LABELS $label"
     fi
-    rm -rf "$(dirname "$ATARI_CI_LOG")"
 done
 
 echo "=================================="

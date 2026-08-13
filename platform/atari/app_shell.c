@@ -172,6 +172,14 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_HELP_BOX,      -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  2, 15, 1 }
 };
 
+/* T169: how many text fragments the paint loop has actually drawn since
+   startup. Reported through the CI marker so the gate can require the
+   app to have rendered REAL DOCUMENT CONTENT, not merely to be alive --
+   the signal that catches an app which comes up, paints its chrome and
+   then shows an empty page. That is not hypothetical: the DOS backend
+   was found doing exactly this while this gate was being built. */
+static u32 g_atari_painted_frags;
+
 static char g_text_desk[]  = " Desk ";
 static char g_text_file[]  = " File ";
 static char g_text_edit[]  = " Edit ";
@@ -1124,6 +1132,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                     plat_measure_text(font, bytes + frag.byte_start, frag_len, &frag_width_twips);
 
                     if (!frag.is_space) {
+                        g_atari_painted_frags++;
                         plat_draw_text((plat_gc *)&gc, font, x_px, y_px + ascent_px,
                                         bytes + frag.byte_start, frag_len, 0, 0, 0);
                     }
@@ -4156,6 +4165,83 @@ fail:
     return WP_FALSE;
 }
 
+/* ------------------------------------------------------------------
+   CI hook (T169). Mirrors platform/amiga/app_shell.c's own amiga_ci_*
+   pair -- the gate that found T164 -- but with one deliberate upgrade.
+   The Amiga version writes a one-shot "alive" marker and then leaves
+   "did it survive?" to grepping amiberry's log for illegal-instruction
+   lines. That works there only because amiberry happens to log CPU
+   faults in a greppable form; Hatari, BasiliskII and DOSBox each report
+   faults differently (or not at all), so log-grepping does not port.
+
+   Instead the marker carries a DECIMAL EVENT COUNT that this app
+   rewrites every time it completes an event-loop pass. The host gate
+   reads it, injects a few harmless keystrokes, and requires the count
+   to ADVANCE. That is a strictly stronger claim than "no fault was
+   logged": it proves the app is still scheduling, still reading the
+   keyboard, and still returning to its loop -- a hang inside a paint or
+   a wedged event loop fails it, and neither of those raises a CPU
+   exception for any log to record. It is also emulator-agnostic, so
+   the identical contract ports to the Mac and DOS backends.
+
+   Everything here is inert unless the trigger file exists, so a real
+   user's boot never touches the disk for this. 8.3 names throughout
+   (RETROWP.CI / RETROWP.ALV) -- a longer name is silently truncated by
+   GEMDOS and the host would then poll for a file that never appears. */
+#define WP_ATARI_CI_TRIGGER  "C:\\RETROWP.CI"
+#define WP_ATARI_CI_ALIVE    "C:\\RETROWP.ALV"
+
+static wp_bool g_atari_ci_active = WP_FALSE;
+static u32     g_atari_ci_events = 0;
+
+static wp_bool atari_ci_mode(void)
+{
+    plat_file *f;
+
+    if (plat_file_open(WP_ATARI_CI_TRIGGER, PLAT_FILE_READ, &f) != WP_OK) return WP_FALSE;
+    plat_file_close(f);
+    return WP_TRUE;
+}
+
+/* Deliberately no sprintf: this backend already avoids it everywhere
+   else (see platform/common/statusline.c's own no-sprintf discipline),
+   and pulling in stdio for a CI marker would be a real size cost on a
+   1MB target for something a user never runs. */
+static u32 atari_ci_decimal(char *out, u32 cap, u32 v)
+{
+    char rev[12];
+    u32 rlen = 0, len = 0, i;
+
+    if (v == 0) { if (cap > 0) out[len++] = '0'; return len; }
+    while (v > 0 && rlen < (u32)sizeof(rev)) { rev[rlen++] = (char)('0' + (v % 10)); v /= 10; }
+    for (i = 0; i < rlen && len < cap; i++) out[len++] = rev[rlen - 1 - i];
+    return len;
+}
+
+/* Marker payload is "<events> <painted_fragments>\n" -- two numbers, so
+   the host can require BOTH that the app is still processing events and
+   that its paint loop actually put document text on screen.
+
+   Deliberately no sprintf: this backend avoids it everywhere else (see
+   platform/common/statusline.c's own no-sprintf discipline), and pulling
+   stdio in for a CI marker would be a real size cost on a 1MB target for
+   something a user never runs. */
+static void atari_ci_write_alive(void)
+{
+    char buf[16];
+    u32 len;
+    plat_file *f;
+
+    if (plat_file_open(WP_ATARI_CI_ALIVE, PLAT_FILE_WRITE, &f) != WP_OK) return;
+    len = atari_ci_decimal(buf, (u32)sizeof(buf), g_atari_ci_events);
+    plat_file_write(f, (const u8 *)buf, len);
+    plat_file_write(f, (const u8 *)" ", 1);
+    len = atari_ci_decimal(buf, (u32)sizeof(buf), g_atari_painted_frags);
+    plat_file_write(f, (const u8 *)buf, len);
+    plat_file_write(f, (const u8 *)"\n", 1);
+    plat_file_close(f);
+}
+
 void app_shell_run(void)
 {
     short work_in[11];
@@ -4247,6 +4333,13 @@ void app_shell_run(void)
         load_sample_document(atari_px_to_twips_x((i32)work.g_w));
     }
 
+    /* Written only after the menu bar is installed, the window is open,
+       and the sample document is laid out -- so its mere existence is
+       the "the app really came up" signal, exactly what AMISMOKE-style
+       smoke tests cannot attest. See atari_ci_mode's own comment. */
+    g_atari_ci_active = atari_ci_mode();
+    if (g_atari_ci_active) atari_ci_write_alive();
+
     quit = WP_FALSE;
     while (!quit) {
         events = evnt_multi(MU_MESAG | MU_KEYBD, 1, 1, 1,
@@ -4259,6 +4352,12 @@ void app_shell_run(void)
         }
         if (!quit && (events & MU_KEYBD)) {
             quit = wp_dispatch_key(window_handle, vdi_handle, mkey, mkstate);
+        }
+        /* Heartbeat, after dispatch rather than before: a dispatch that
+           crashes or wedges must NOT be able to bump the count first. */
+        if (g_atari_ci_active && !quit) {
+            g_atari_ci_events++;
+            atari_ci_write_alive();
         }
     }
 

@@ -961,3 +961,50 @@ designed around rather than silently assumed away. A real on-target
 rendering bug (`plat_fill_rect` ignoring its own requested color) was
 found by testing the help pager, not by inspection, and fixed at the
 seam it belonged to.
+
+## Real-app CI gate (T169)
+
+`ci_mac_matrix.sh` booted `mac_smoke.APPL` and nothing else -- the same
+smoke-only gap T158 found on the Amiga, where closing it surfaced two
+real defects (T164) on the first run. `run_mac_app_once`
+(`host/tools/mac_ci_lib.sh`) now boots the real `RETROWP.APPL` against
+both ROMs, asserting the three signals the Atari gate documents in full
+(startup marker, event count advancing under injected keystrokes,
+painted-fragment count nonzero).
+
+It reuses the fixture's existing permanent Startup-Items launcher
+unchanged: whatever is copied onto the ExtFS share as `CI_TARGET.APPL`
+is auto-launched with zero Finder interaction. The only difference from
+the smoke gate is which app gets copied there. Markers use
+`Unix:RETROWP.CI` / `Unix:RETROWP.ALV` -- a fully-qualified colon path
+resolves to the named volume regardless of `vRefNum` (see
+`platform/mac/file_mac.c`), so they land directly in a host directory.
+
+The gate builds `--target RETROWP_APPL`, never bare `RETROWP`. The bare
+target skips Rez, leaving a stale resource fork -- where all the code
+lives -- so the gate would silently boot a previous build and pass
+vacuously. This is the same trap that cost four misleading runs during
+T157 and is already documented above.
+
+### BasiliskII needs a real click before it delivers keys
+
+The gate initially failed on signal 2 alone: window open, document
+rendering with 50 painted fragments, but the event count frozen at
+`2 -> 2`. `xdotool windowfocus` on the BasiliskII window was not enough
+-- **BasiliskII only starts delivering keystrokes to the guest after a
+real click inside its window.** X focus alone leaves the app deaf, and
+an alive-but-deaf app is indistinguishable from a wedged one if the gate
+only watches an event counter.
+
+The click lands on the RetroWP window's **title bar**, not its content
+area: a content click would move the document caret, and this gate must
+leave the document exactly as it found it. That coordinate is stable
+without any window-manager assumptions -- the emulated screen is pinned
+to 512x384 at the root's top-left by the prefs file, and `app_shell_run`
+opens the window at a fixed Toolbox rect `(40,60)-(520,340)`. Combined
+with BasiliskII tracking the absolute host pointer (unlike ARAnyM, and
+unlike amiberry -- see T150), a plain `mousemove` to a computed point is
+reliable here in a way it is not on the other two emulators.
+
+With the click added: `2 -> 11` events, 250 painted fragments, 2/2 ROMs
+green.

@@ -152,3 +152,215 @@ EOF
     MAC_CI_STATUS=1
     return 1
 }
+
+# ---------------------------------------------------------------------
+# T169: boot the REAL RETROWP.APPL, not mac_smoke.APPL.
+#
+# mac_smoke.APPL links the same engine but never draws a menu bar, never
+# opens a window and never runs the paint loop, so an app that is
+# completely broken for a user still passes the matrix. The identical
+# gap on the Amiga (T158) was hiding two real defects (T164).
+#
+# THREE INDEPENDENT SIGNALS, none of which parses a screenshot:
+#   1. Unix:RETROWP.ALV appears -> the app drew its menu bar, opened its
+#      window and reached its WaitNextEvent loop.
+#   2. its event COUNT advances after real injected keystrokes -> still
+#      scheduling and still reading the keyboard. BasiliskII reports a
+#      wedged guest no better than DOSBox does, so this is the only way
+#      to see that.
+#   3. its PAINTED-FRAGMENT count is nonzero -> the paint loop actually
+#      put document text on screen. Signals 1 and 2 both pass for an app
+#      that comes up, paints its chrome and shows an empty page -- the
+#      DOS backend was found doing exactly that (T171) while this gate
+#      was being built.
+#
+# Reuses the fixture's existing permanent Startup-Items launcher exactly
+# as run_mac_smoke_once does: whatever is copied to the ExtFS share as
+# CI_TARGET.APPL is auto-launched with zero Finder interaction. The only
+# difference is WHICH app is copied there.
+#
+# MUST copy from the RETROWP_APPL build target, never the bare RETROWP
+# one: `cmake --build --target RETROWP` skips Rez, so the .rsrc fork
+# (where all the code lives) is left stale and the gate would silently
+# boot a previous build -- a real trap that cost four misleading runs
+# during T157, see docs/mac-platform.md.
+#
+# Usage: run_mac_app_once <rom-path> <display-offset> <modelid> <cpu>
+# Sets: MAC_APP_STATUS (0 = pass), MAC_APP_LOG (caller owns cleanup)
+WP_MAC_APP_SETTLE_SECS="${WP_MAC_APP_SETTLE_SECS:-6}"
+
+# The marker's payload is "<events> <painted_fragments>". $2 selects
+# which field; empty output means "no usable marker yet".
+_mac_ci_field() {
+    _macf="$(find "$1" -maxdepth 1 -iname 'RETROWP.ALV' 2>/dev/null | head -1)"
+    [ -n "$_macf" ] || { echo ""; return; }
+    awk -v n="$2" 'NF >= 2 { print $n; found = 1; exit } END { if (!found) print "" }' "$_macf"
+}
+
+_mac_ci_alive_count()   { _mac_ci_field "$1" 1; }
+_mac_ci_painted_count() { _mac_ci_field "$1" 2; }
+
+_mac_ci_cleanup_share() {
+    rm -f "$1/RETROWP.ALV" "$1/.finf/RETROWP.ALV" \
+          "$1/RETROWP.CI" "$1/.finf/RETROWP.CI" \
+          "$1/CI_TARGET.APPL" "$1/.rsrc/CI_TARGET.APPL" "$1/.finf/CI_TARGET.APPL" \
+          "$1/launcher_fsspec_fail.txt" "$1/.finf/launcher_fsspec_fail.txt" \
+          "$1/launcher_launch_fail.txt" "$1/.finf/launcher_launch_fail.txt"
+}
+
+run_mac_app_once() {
+    _rom="$1"
+    _offset="$2"
+    _modelid="$3"
+    _cpu="$4"
+    _shared="$MAC_FIXTURE/shared"
+    _scratch="$(mktemp -d)"
+    _boot_img="$_scratch/boot.img"
+    _xvfb_display=":$((97 + ($$ + _offset) % 400))"
+
+    cp "$MAC_FIXTURE/boot_template.img" "$_boot_img"
+    _mac_ci_cleanup_share "$_shared"
+    cp build/mac/RETROWP.APPL       "$_shared/CI_TARGET.APPL"
+    cp build/mac/.rsrc/RETROWP.APPL "$_shared/.rsrc/CI_TARGET.APPL"
+    cp build/mac/.finf/RETROWP.APPL "$_shared/.finf/CI_TARGET.APPL"
+    echo "ci" > "$_shared/RETROWP.CI"
+
+    cat > "$_scratch/prefs" <<EOF
+disk $_boot_img
+extfs $_shared
+screen win/512/384
+rom $_rom
+bootdrive 0
+bootdriver 0
+ramsize 33554432
+modelid $_modelid
+cpu $_cpu
+fpu true
+nocdrom true
+nosound true
+nogui true
+jit false
+keyboardtype 5
+idlewait true
+EOF
+
+    Xvfb "$_xvfb_display" -screen 0 1024x768x24 >"$_scratch/xvfb.log" 2>&1 &
+    _xvfb_pid=$!
+    _xvfb_lock="/tmp/.X${_xvfb_display#:}-lock"
+    _xvfb_wait=0
+    while [ ! -e "$_xvfb_lock" ]; do
+        _xvfb_wait=$((_xvfb_wait + 1))
+        if [ "$_xvfb_wait" -gt 50 ]; then
+            kill "$_xvfb_pid" 2>/dev/null; wait "$_xvfb_pid" 2>/dev/null
+            _mac_ci_cleanup_share "$_shared"
+            MAC_APP_STATUS=1
+            MAC_APP_LOG="$_scratch/xvfb.log"
+            return 1
+        fi
+        sleep 0.1
+    done
+
+    env HOME="$_scratch" DISPLAY="$_xvfb_display" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
+        "$MAC_BASILISK_BIN" --config "$_scratch/prefs" \
+        >"$_scratch/basilisk.log" 2>&1 &
+    _basilisk_pid=$!
+
+    # Same "this computer may not have been shut down properly" dialog
+    # run_mac_smoke_once documents -- dismissed exactly the way the
+    # dialog itself instructs, with Return, never a guessed click.
+    sleep 8
+    DISPLAY="$_xvfb_display" xdotool key Return 2>/dev/null
+    sleep 1
+    DISPLAY="$_xvfb_display" xdotool key Return 2>/dev/null
+
+    # Polls the marker's CONTENT, never its mere existence -- see
+    # host/tools/atari_ci_lib.sh for the create-before-write race this
+    # avoids. Wall-clock bounded, not iteration bounded.
+    _deadline=$(( $(date +%s) + 120 ))
+    while [ -z "$(_mac_ci_alive_count "$_shared")" ]; do
+        if [ -f "$_shared/launcher_fsspec_fail.txt" ] || \
+           [ -f "$_shared/launcher_launch_fail.txt" ]; then break; fi
+        [ "$(date +%s)" -ge "$_deadline" ] && break
+        sleep 0.1
+    done
+
+    _count_before="$(_mac_ci_alive_count "$_shared")"
+    _alive=0
+    _responsive=0
+    _rendered=0
+
+    if [ -n "$_count_before" ]; then
+        _alive=1
+
+        # The window name is "Basilisk II", with a space -- an
+        # xdotool search for "BasiliskII" matches nothing (a real
+        # dead-end hit during T157). Without an explicit focus the
+        # injected keys reach no window at all under bare Xvfb and the
+        # app looks wedged when it is merely deaf.
+        _wid="$(DISPLAY="$_xvfb_display" xdotool search --name -i 'basilisk' 2>/dev/null | head -1)"
+        [ -n "$_wid" ] && DISPLAY="$_xvfb_display" xdotool windowfocus "$_wid" 2>/dev/null
+
+        # X focus alone is not enough: BasiliskII only starts delivering
+        # keys to the guest after a real click inside its window. The
+        # click lands on the RetroWP window's TITLE BAR, not its content
+        # area -- a content click would move the document caret, and
+        # this gate must leave the document exactly as it found it.
+        # BasiliskII tracks the ABSOLUTE host pointer (unlike ARAnyM and
+        # unlike amiberry -- see T150 and the project memory), so a plain
+        # mousemove to a computed coordinate is reliable here. The
+        # emulated screen is pinned to 512x384 at the root's top-left by
+        # this prefs file, and the window is opened at a fixed Toolbox
+        # rect (40,60)-(520,340) by app_shell_run, so the title bar sits
+        # at a stable spot -- nothing here depends on where a window
+        # manager chose to put anything.
+        DISPLAY="$_xvfb_display" xdotool mousemove 280 50 2>/dev/null
+        sleep 0.3
+        DISPLAY="$_xvfb_display" xdotool click 1 2>/dev/null
+        sleep 1
+
+        # Motion keys only -- this gate must not mutate the document.
+        for _k in Right Right Left Escape; do
+            DISPLAY="$_xvfb_display" xdotool key "$_k" 2>/dev/null
+            sleep 0.4
+        done
+        sleep "$WP_MAC_APP_SETTLE_SECS"
+        # Read AFTER the settle: the first document paint happens in
+        # response to an update EVENT, i.e. inside the event loop, so a
+        # marker written just before that loop legitimately still reads
+        # 0 painted fragments.
+        _count_after="$(_mac_ci_alive_count "$_shared")"
+        _painted="$(_mac_ci_painted_count "$_shared")"
+        [ -n "$_count_after" ] && [ "$_count_after" -gt "$_count_before" ] 2>/dev/null && _responsive=1
+        [ -n "$_painted" ] && [ "$_painted" -gt 0 ] 2>/dev/null && _rendered=1
+    fi
+
+    DISPLAY="$_xvfb_display" import -window root "$_scratch/screen.png" 2>/dev/null || true
+
+    kill -9 "$_basilisk_pid" 2>/dev/null; wait "$_basilisk_pid" 2>/dev/null
+    kill "$_xvfb_pid" 2>/dev/null; wait "$_xvfb_pid" 2>/dev/null
+
+    MAC_APP_LOG="$_scratch/app.log"
+    {
+        echo "window-open sentinel: $([ "$_alive" -eq 1 ] && echo present || echo MISSING)"
+        if [ -f "$_shared/launcher_fsspec_fail.txt" ]; then
+            echo "  (launcher could not resolve Unix:CI_TARGET.APPL)"
+        elif [ -f "$_shared/launcher_launch_fail.txt" ]; then
+            echo "  (launcher's own LaunchApplication call failed)"
+        fi
+        echo "event count before keys: ${_count_before:-<none>}"
+        echo "event count after keys:  ${_count_after:-<none>}"
+        echo "still responsive: $([ "$_responsive" -eq 1 ] && echo yes || echo NO)"
+        echo "painted text fragments: ${_painted:-<none>}"
+        echo "rendered document: $([ "$_rendered" -eq 1 ] && echo yes || echo 'NO -- app came up but painted an EMPTY page')"
+        echo "screenshot: $_scratch/screen.png"
+    } > "$MAC_APP_LOG"
+
+    _mac_ci_cleanup_share "$_shared"
+
+    if [ "$_alive" -eq 1 ] && [ "$_responsive" -eq 1 ] && [ "$_rendered" -eq 1 ]; then
+        MAC_APP_STATUS=0
+        return 0
+    fi
+    MAC_APP_STATUS=1
+    return 1
+}

@@ -125,6 +125,16 @@ static wp_app_ctx        g_ctx;
 static WindowPtr         g_win;
 static wp_bool           g_quit;
 
+/* T169: how many text fragments the paint loop has actually drawn since
+   startup. Reported through the CI marker so the gate can require the
+   app to have rendered REAL DOCUMENT CONTENT, not merely to be alive --
+   the signal that catches an app which comes up, paints its chrome and
+   then shows an empty page. That is not hypothetical: the DOS backend
+   was found doing exactly this while this gate was being built. */
+static u32               g_mac_painted_frags;
+static wp_bool           g_mac_ci_active;
+static u32               g_mac_ci_events;
+
 /* Raw ASCII byte for the current keystroke, in the SAME byte space
    actions.h's shortcut_ascii documents (printable ASCII, or a Ctrl-
    letter control code 0x01-0x1A) -- set by translate_mac_key, passed
@@ -1251,6 +1261,7 @@ static void draw_document(WindowPtr w)
                     plat_measure_text(font, bytes + frag.byte_start, frag_len, &frag_width_twips);
 
                     if (!frag.is_space) {
+                        g_mac_painted_frags++;
                         plat_draw_text((plat_gc *)&gc, font, x_px, y + ascent_px,
                                         bytes + frag.byte_start, frag_len, 0, 0, 0);
                     }
@@ -1311,6 +1322,59 @@ static void draw_document(WindowPtr w)
    MakeNewWindow (Samples/WDEF/wdefshell.c), which builds a real
    document window the identical resource-free way. */
 
+/* ------------------------------------------------------------------
+   CI hook (T169) -- identical contract to platform/atari/app_shell.c's
+   and platform/dos/app_shell.c's own pairs; see the Atari file for why
+   the marker carries a heartbeat COUNT plus a painted-fragment count
+   rather than being a one-shot "alive" file.
+
+   "Unix:<name>" resolves to the ExtFS share regardless of vRefNum (see
+   platform/mac/file_mac.c's own comment, confirmed empirically during
+   M12 Phase 0), which is a real host directory -- so both markers are
+   read straight off the host filesystem, the same channel
+   host/tools/mac/smoke.c's own mac_smoke.out already uses.
+
+   Inert unless the trigger file exists. */
+#define WP_MAC_CI_TRIGGER  "Unix:RETROWP.CI"
+#define WP_MAC_CI_ALIVE    "Unix:RETROWP.ALV"
+
+static wp_bool mac_ci_mode(void)
+{
+    plat_file *f;
+
+    if (plat_file_open(WP_MAC_CI_TRIGGER, PLAT_FILE_READ, &f) != WP_OK) return WP_FALSE;
+    plat_file_close(f);
+    return WP_TRUE;
+}
+
+static u32 mac_ci_decimal(char *out, u32 cap, u32 v)
+{
+    char rev[12];
+    u32 rlen = 0, len = 0, i;
+
+    if (v == 0) { if (cap > 0) out[len++] = '0'; return len; }
+    while (v > 0 && rlen < (u32)sizeof(rev)) { rev[rlen++] = (char)('0' + (v % 10)); v /= 10; }
+    for (i = 0; i < rlen && len < cap; i++) out[len++] = rev[rlen - 1 - i];
+    return len;
+}
+
+/* Marker payload is "<events> <painted_fragments>\n". */
+static void mac_ci_write_alive(void)
+{
+    char buf[16];
+    u32 len;
+    plat_file *f;
+
+    if (plat_file_open(WP_MAC_CI_ALIVE, PLAT_FILE_WRITE, &f) != WP_OK) return;
+    len = mac_ci_decimal(buf, (u32)sizeof(buf), g_mac_ci_events);
+    plat_file_write(f, (const u8 *)buf, len);
+    plat_file_write(f, (const u8 *)" ", 1);
+    len = mac_ci_decimal(buf, (u32)sizeof(buf), g_mac_painted_frags);
+    plat_file_write(f, (const u8 *)buf, len);
+    plat_file_write(f, (const u8 *)"\n", 1);
+    plat_file_close(f);
+}
+
 void app_shell_run(void)
 {
     Rect winRect;
@@ -1360,6 +1424,11 @@ void app_shell_run(void)
                        documentProc, (WindowPtr) -1L, true, 0);
     if (g_win == NULL) return;
     SetPort(g_win);
+
+    /* Written after the menu bar is drawn and the window is open, so
+       its existence really does mean "the app came up". */
+    g_mac_ci_active = mac_ci_mode();
+    if (g_mac_ci_active) mac_ci_write_alive();
 
     g_quit = WP_FALSE;
     for (;;) {
@@ -1413,6 +1482,14 @@ void app_shell_run(void)
         }
         if (g_ctx.quit_requested) g_quit = WP_TRUE;
         if (g_quit) break;
+
+        /* After dispatch, never before: a dispatch that crashes or
+           wedges must not get to bump the count first. WaitNextEvent
+           returns on a null event too, so this counts real events only. */
+        if (g_mac_ci_active && e.what != nullEvent) {
+            g_mac_ci_events++;
+            mac_ci_write_alive();
+        }
     }
 
     if (g_ctx.doc_loaded) {

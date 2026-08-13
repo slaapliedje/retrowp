@@ -43,6 +43,13 @@
 #define DOS_STATUS_ROW    (DOS_SCREEN_ROWS - 1)
 #define DOS_DOC_BOTTOM_ROW (DOS_STATUS_ROW - 1)
 
+/* T169: how many text fragments the paint loop has actually drawn since
+   startup. Reported through the CI marker so the gate can require the
+   app to have rendered REAL DOCUMENT CONTENT, not merely to be alive --
+   the signal that catches an app which comes up, paints its chrome, and
+   shows an empty page. Costs one increment per drawn fragment. */
+static u32 g_dos_painted_frags;
+
 #define DOS_ATTR_NORMAL   0x07  /* light gray on black -- the standard default */
 #define DOS_ATTR_TITLE    0x70  /* black on light gray -- reads as a title bar */
 
@@ -438,13 +445,13 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
             u32 li;
 
             if (layout == NULL) continue;
-
             for (li = 0; li < layout->line_count && row <= bottom_row; li++) {
                 wp_line *line = &layout->lines[li];
                 int col;
                 i32 extra_twips;
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
+
 
                 col = dos_twips_to_col(
                     (align == WP_ALIGN_CENTER || align == WP_ALIGN_RIGHT)
@@ -525,6 +532,7 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                     }
 
                     if (frag_len > 0 && font != NULL && !frag.is_space) {
+                        g_dos_painted_frags++;
                         plat_draw_text(gc, font, col, row, bytes + frag.byte_start, frag_len,
                                         0xAA, 0xAA, 0xAA);
                     }
@@ -1134,6 +1142,63 @@ static wp_bool dos_dispatch_key(void)
     }
 }
 
+/* ------------------------------------------------------------------
+   CI hook (T169) -- identical contract to platform/atari/app_shell.c's
+   atari_ci_* pair, see that file's comment for why the marker carries a
+   heartbeat COUNT rather than being a one-shot "alive" file: a count
+   the host can watch advance proves the app is still scheduling and
+   still reading the keyboard, which no amount of emulator-log grepping
+   can, and DOSBox reports a wedged guest even less than Hatari does.
+
+   Inert unless the trigger file exists, so a real user's run never
+   touches the disk for this. 8.3 names throughout. */
+#define WP_DOS_CI_TRIGGER  "C:\\RETROWP.CI"
+#define WP_DOS_CI_ALIVE    "C:\\RETROWP.ALV"
+
+static wp_bool g_dos_ci_active = WP_FALSE;
+static u32     g_dos_ci_events = 0;
+
+static wp_bool dos_ci_mode(void)
+{
+    plat_file *f;
+
+    if (plat_file_open(WP_DOS_CI_TRIGGER, PLAT_FILE_READ, &f) != WP_OK) return WP_FALSE;
+    plat_file_close(f);
+    return WP_TRUE;
+}
+
+/* No sprintf, matching this file's own existing dos_append_decimal /
+   statusline.c discipline. */
+static u32 dos_ci_decimal(char *out, u32 cap, u32 v)
+{
+    char rev[12];
+    u32 rlen = 0, len = 0, i;
+
+    if (v == 0) { if (cap > 0) out[len++] = '0'; return len; }
+    while (v > 0 && rlen < (u32)sizeof(rev)) { rev[rlen++] = (char)('0' + (v % 10)); v /= 10; }
+    for (i = 0; i < rlen && len < cap; i++) out[len++] = rev[rlen - 1 - i];
+    return len;
+}
+
+/* Marker payload is "<events> <painted_fragments>\n" -- two numbers, so
+   the host can require BOTH that the app is still processing events and
+   that its paint loop actually put document text on screen. */
+static void dos_ci_write_alive(void)
+{
+    char buf[16];
+    u32 len;
+    plat_file *f;
+
+    if (plat_file_open(WP_DOS_CI_ALIVE, PLAT_FILE_WRITE, &f) != WP_OK) return;
+    len = dos_ci_decimal(buf, (u32)sizeof(buf), g_dos_ci_events);
+    plat_file_write(f, (const u8 *)buf, len);
+    plat_file_write(f, (const u8 *)" ", 1);
+    len = dos_ci_decimal(buf, (u32)sizeof(buf), g_dos_painted_frags);
+    plat_file_write(f, (const u8 *)buf, len);
+    plat_file_write(f, (const u8 *)"\n", 1);
+    plat_file_close(f);
+}
+
 void app_shell_run(void)
 {
     wp_bool quit = WP_FALSE;
@@ -1154,9 +1219,22 @@ void app_shell_run(void)
     load_sample_document(dos_col_to_twips(DOS_SCREEN_COLS));
 
     redraw_screen();
+
+    /* After the sample document is loaded AND the first full screen is
+       painted -- so the marker's existence really does mean "the app
+       came up", not merely "main() was entered". */
+    g_dos_ci_active = dos_ci_mode();
+    if (g_dos_ci_active) dos_ci_write_alive();
+
     while (!quit) {
         quit = dos_dispatch_key();
         redraw_screen();
+        /* After dispatch and repaint, never before: a dispatch or paint
+           that crashes or wedges must not get to bump the count first. */
+        if (g_dos_ci_active && !quit) {
+            g_dos_ci_events++;
+            dos_ci_write_alive();
+        }
     }
 
     if (g_ctx.doc_loaded) {

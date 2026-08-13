@@ -38,6 +38,7 @@ svga_s3:svga_s3"
 
 make dos-engine-check
 make dos-smoke
+make dos
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -56,18 +57,39 @@ while IFS= read -r entry; do
 
     echo "=== $label (--machine $machine) ==="
     OFFSET=$((OFFSET + 1))
+    ENTRY_OK=1
     if run_dos_smoke_once "$OFFSET" "$machine"; then
-        echo "PASS: $label"
         cat "$DOS_CI_LOG"
-        PASS_COUNT=$((PASS_COUNT + 1))
     else
-        echo "FAIL: $label"
+        echo "FAIL: $label (SMOKE.EXE)"
         echo "--- DOS_CI.OUT ---"
         cat "$DOS_CI_LOG"
+        ENTRY_OK=0
+    fi
+    rm -rf "$(dirname "$DOS_CI_LOG")"
+
+    # T169: SMOKE.EXE never enters text mode, never paints a screen and
+    # never reads a key, so on its own it cannot tell a working app from
+    # one that is completely broken for a user. Boot the real
+    # RETROWP.EXE against this same machine profile.
+    OFFSET=$((OFFSET + 1))
+    if run_dos_app_once "$OFFSET" "$machine"; then
+        :
+    else
+        echo "FAIL: $label (RETROWP app gate)"
+        echo "--- RETROWP app gate ---"
+        cat "$DOS_APP_LOG"
+        ENTRY_OK=0
+    fi
+    rm -rf "$(dirname "$DOS_APP_LOG")"
+
+    if [ "$ENTRY_OK" -eq 1 ]; then
+        echo "PASS: $label"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
         FAIL_COUNT=$((FAIL_COUNT + 1))
         FAILED_LABELS="$FAILED_LABELS $label"
     fi
-    rm -rf "$(dirname "$DOS_CI_LOG")"
 done <<MACHINEEOF
 $MACHINES
 MACHINEEOF

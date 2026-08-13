@@ -26,6 +26,12 @@ make build/generated/help_retrowp.h >/dev/null
 
 cmake -S host/tools/mac -B build/mac -DCMAKE_TOOLCHAIN_FILE="$MAC_RETRO68_TOOLCHAIN" -G "Unix Makefiles" >/dev/null
 cmake --build build/mac >/dev/null
+# Explicit, even though the default target already covers it: T169's app
+# gate boots build/mac/.rsrc/RETROWP.APPL, and the RETROWP_APPL target is
+# the one that runs Rez. Building bare RETROWP leaves a stale resource
+# fork and the gate would silently boot a previous build -- the real trap
+# documented in docs/mac-platform.md.
+cmake --build build/mac --target RETROWP_APPL >/dev/null
 
 mkdir -p bin/mac/.rsrc bin/mac/.finf
 cp build/mac/mac_smoke.APPL bin/mac/mac_smoke.APPL
@@ -58,18 +64,39 @@ while IFS= read -r entry; do
 
     echo "=== $label ($rom, modelid=$modelid cpu=$cpu) ==="
     OFFSET=$((OFFSET + 1))
+    ENTRY_OK=1
     if run_mac_smoke_once "$rom" "$OFFSET" "$modelid" "$cpu"; then
-        echo "PASS: $label"
         cat "$MAC_CI_LOG"
-        PASS_COUNT=$((PASS_COUNT + 1))
     else
-        echo "FAIL: $label"
+        echo "FAIL: $label (mac_smoke)"
         echo "--- mac_smoke log ---"
         cat "$MAC_CI_LOG"
+        ENTRY_OK=0
+    fi
+    rm -rf "$(dirname "$MAC_CI_LOG")"
+
+    # T169: mac_smoke never draws a menu bar, never opens a window and
+    # never runs the paint loop, so on its own it cannot tell a working
+    # app from one that is completely broken for a user. Boot the real
+    # RETROWP.APPL against this same ROM.
+    OFFSET=$((OFFSET + 1))
+    if run_mac_app_once "$rom" "$OFFSET" "$modelid" "$cpu"; then
+        :
+    else
+        echo "FAIL: $label (RETROWP app gate)"
+        echo "--- RETROWP app gate ---"
+        cat "$MAC_APP_LOG"
+        ENTRY_OK=0
+    fi
+    rm -rf "$(dirname "$MAC_APP_LOG")"
+
+    if [ "$ENTRY_OK" -eq 1 ]; then
+        echo "PASS: $label"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
         FAIL_COUNT=$((FAIL_COUNT + 1))
         FAILED_LABELS="$FAILED_LABELS $label"
     fi
-    rm -rf "$(dirname "$MAC_CI_LOG")"
 done <<ROMEOF
 $ROMS
 ROMEOF

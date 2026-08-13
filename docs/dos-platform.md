@@ -387,3 +387,62 @@ targets, with Hercules's real, structural incompatibility confirmed and
 honestly excluded rather than silently skipped. `engine/`/`services/`
 remain untouched by this milestone, the same portability proof M9/M12
 each gave for Amiga/Mac.
+
+## Real-app CI gate, and the empty-page defect it found (T169, T171)
+
+`ci_dos_matrix.sh` booted `SMOKE.EXE` and nothing else. That binary
+links the same engine but never enters text mode, never paints a screen
+and never reads a key, so an app completely broken for a user passed
+3/3. `run_dos_app_once` (`host/tools/dos_ci_lib.sh`) now boots the real
+`RETROWP.EXE` against every machine profile, asserting the same three
+signals the Atari gate documents in full (startup marker, event count
+advancing under injected keystrokes, painted-fragment count nonzero).
+
+Two DOS-specific notes:
+
+- The gate cannot use `--exit` the way `run_dos_smoke_once` does: the
+  real app never returns, so DOSBox is backgrounded and killed once the
+  signals are read.
+- The mounted `C:` is a live host-directory passthrough, so both markers
+  are read straight off the host with no shared-folder setup -- the same
+  property that made `DOS_CI.OUT` work for the smoke gate.
+
+### What it found immediately: the document body is never painted
+
+On its first real run the gate went red on **all three** machine
+profiles (`cga`, `ega`, `svga_s3`) with:
+
+    startup sentinel: present
+    still responsive: yes
+    painted text fragments: 0
+    rendered document: NO -- app came up but painted an EMPTY page
+
+The app draws its title bar and its `NORMAL` status line and responds to
+every keystroke, but the document body is blank. `docs/screenshots/
+dos.png`, this project's own committed reference shot, shows the sample
+paragraph rendering correctly -- so this is a regression from a state
+that once worked, not a limitation.
+
+Confirmed **on pristine HEAD** (`git checkout HEAD -- platform/dos/
+app_shell.c`, rebuilt, booted), with no CI trigger file present so the
+gate's own hook is inert, and with no keystrokes injected. It is not an
+artifact of the new gate and not a screenshot-timing artifact.
+
+Temporary paint-loop counters reported through the marker file gave:
+
+    para=1  line=0  draw=0  fontfail=0  paratotal=1  width=11520
+
+The whole document has exactly **one** paragraph (every other backend's
+sample has several), that paragraph has a layout object with **zero**
+lines, and the paint loop itself is healthy -- it is reached, opens
+fonts without failure, and simply has nothing to walk. The column width
+is correct at 80 x 144 twips. So the fault is upstream of painting, in
+document construction or relayout. Tracked as its own task; note that
+`relayout_document` is called as `relayout_document(g_content_width_
+twips)`, passing the same global it then assigns, so its `width_changed`
+test is always false and it relies entirely on `layout == NULL` or
+`layout_dirty` -- a paragraph with a non-NULL but empty layout and a
+clear dirty flag would be skipped forever, which matches `line=0`.
+
+The smoke half of every profile still passes. That is exactly the point:
+`SMOKE.EXE` cannot see any of this.
