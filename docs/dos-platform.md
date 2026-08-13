@@ -446,3 +446,57 @@ clear dirty flag would be skipped forever, which matches `line=0`.
 
 The smoke half of every profile still passes. That is exactly the point:
 `SMOKE.EXE` cannot see any of this.
+
+## Memory model escalated to `-ml` (large) — and why (T171)
+
+The DOS build's memory model has moved once per real, measured failure,
+never for headroom:
+
+| model | why it was abandoned |
+|---|---|
+| `-ms` small | the full engine overflowed the single 64KB **code** segment by ~16KB at the very first real link |
+| `-mm` medium | far code fixed that, and it held until the **data** side ran out too — see below |
+| `-ml` large | far, multi-segment data; the heap draws on conventional memory |
+
+### What forced the move to large
+
+Medium model keeps all static data, the heap and the stack inside one
+64KB `DGROUP`. Once `RETROWP.EXE` also carried the generated help
+document, measurement on a real DOSBox boot showed only **8192 bytes**
+of heap obtainable — while `engine/src/linebreak.c`'s token buffer asks
+for **512 x ~28 = ~14KB** in a single block.
+
+That buffer used to live on the stack. It moved to the heap when the
+Amiga's 4096-byte stack forced it there (T151). So a fix for one
+backend became a regression on another: every `wp_paragraph_relayout`
+call returned `WP_NOMEM`, every paragraph laid out to **zero lines**,
+and the app painted a blank page while looking perfectly healthy in
+every other respect -- window chrome drawn, keystrokes handled, no
+crash, no error.
+
+Measured before and after the switch, through the CI marker file:
+
+```
+-mm : biggestfree=8192   relayout rc=2 (WP_NOMEM)  lines=0  painted=0
+-ml : biggestfree=32768  relayout rc=0 (WP_OK)     lines=4  painted=42
+```
+
+The fix is a build-flag change and nothing else -- `platform/dos/
+app_shell.c` is byte-identical across it. That is only possible because
+the engine makes no pointer-size assumptions, which is a standing
+`CLAUDE.md` rule rather than luck; large model makes every data pointer
+far, and nothing in the portable code noticed.
+
+### The lesson worth keeping
+
+**A per-backend resource fix can be a cross-backend regression, and the
+two constraints here are in direct opposition:** the Amiga cannot afford
+14KB on the *stack*, and DOS medium model could not afford 14KB on the
+*heap*. Nothing in the host test suite could see either one -- both are
+properties of a real target's memory layout, not of the logic.
+
+What caught it was T169's app gate booting the real `RETROWP.EXE` and
+asserting a nonzero painted-fragment count. `SMOKE.EXE` passed
+throughout, on all three machine profiles, because it never lays out a
+document for display. A gate that only proves the binary starts would
+have shipped this.

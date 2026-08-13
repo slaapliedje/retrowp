@@ -502,16 +502,27 @@ $(MAC_BUILD)/engine $(MAC_BUILD)/transport $(MAC_BUILD)/services:
 # otherwise). DOS_BUILD is deliberately its own tree, mirroring every
 # other cross-target's own *_BUILD separation.
 #
-# Memory model is -mm (medium: far/multi-segment code, near/single-
-# segment data), not -ms (small: both near/single-segment) -- found
-# directly, not assumed: linking the FULL engine (every format importer/
-# exporter, all five keybinding schemes) under -ms overflowed the
-# small model's one 64KB code segment by ~16KB at the very first real
-# link attempt. Medium model's per-function far calls/multiple code
-# segments solve that; the document model's own data isn't yet large
-# enough to need far data pointers too (that would be -ml, large model,
-# a real escalation this project would rather avoid unless something
-# concrete forces it).
+# Memory model is -ml (large: far/multi-segment code AND far/multi-
+# segment data). The progression here was forced, one step at a time,
+# never chosen for headroom:
+#   -ms (small) overflowed the one 64KB code segment by ~16KB at the
+#       very first real link of the full engine (every format importer/
+#       exporter, all five keybinding schemes).
+#   -mm (medium) fixed that with far calls, and held until the DATA side
+#       ran out too. Medium keeps all static data, the heap and the stack
+#       inside a single 64KB DGROUP -- and once RETROWP.EXE also carried
+#       the generated help document, only ~8KB of heap was left. That is
+#       smaller than linebreak.c's 14KB token buffer (512 tokens), which
+#       moved from stack to heap when the Amiga's 4KB stack forced it
+#       there. Every wp_paragraph_relayout call then returned WP_NOMEM,
+#       so every paragraph laid out to ZERO lines and the app painted a
+#       blank page while looking perfectly healthy otherwise (T171).
+#   -ml (large) puts data in far, multi-segment memory, so the heap draws
+#       on conventional memory instead of the DGROUP leftovers.
+# This is exactly the "unless something concrete forces it" escalation
+# this comment used to reserve, and the token buffer is what forced it.
+# The engine makes no pointer-size assumptions (a CLAUDE.md rule), which
+# is what makes the switch a build-flag change rather than a port.
 # ---------------------------------------------------------------------
 
 DOS_TOOLROOT ?= $(HOME)/opt/watcom
@@ -545,8 +556,8 @@ define dos_depfix
 tr ' ' '\n' < $(1) | sed -n 's/^\(.*\.h\)$$/\1:/p' >> $(1)
 endef
 
-DOS_STRICT_CFLAGS  = -0 -mm -bt=dos -za -zastd=c89 -we -wx
-DOS_RELAXED_CFLAGS = -0 -mm -bt=dos -wx
+DOS_STRICT_CFLAGS  = -0 -ml -bt=dos -za -zastd=c89 -we -wx
+DOS_RELAXED_CFLAGS = -0 -ml -bt=dos -wx
 # engine/include first, deliberately: Watcom's own h/ ships a same-
 # named endian.h (OS/2-oriented) that shadowed this project's real
 # engine/include/endian.h when searched first, producing bizarre
@@ -618,7 +629,7 @@ $(DOS_BUILD)/smoke/%.o: host/tools/%.c | $(DOS_BUILD)/smoke
 	@$(call dos_depfix,$(@:.o=.d))
 
 $(DOS_BIN)/SMOKE.EXE: $(DOS_PLATFORM_OBJ) $(DOS_BUILD)/smoke/dos_smoke.o $(DOS_ENGINE_OBJ) $(DOS_COMMON_OBJ) $(DOS_TRANSPORT_OBJ) $(DOS_SERVICES_OBJ) | $(DOS_BIN)
-	env $(DOS_ENV) $(DOSLINK) -0 -mm -bt=dos -k32768 $^ -fe=$@
+	env $(DOS_ENV) $(DOSLINK) -0 -ml -bt=dos -k32768 $^ -fe=$@
 
 .PHONY: dos-smoke
 dos-smoke: $(DOS_BIN)/SMOKE.EXE
@@ -644,7 +655,7 @@ $(DOS_BUILD)/app/%.o: platform/dos/%.c | $(DOS_BUILD)/app
 	@$(call dos_depfix,$(@:.o=.d))
 
 $(DOS_BIN)/RETROWP.EXE: $(DOS_PLATFORM_OBJ) $(DOS_BUILD)/app/main.o $(DOS_ENGINE_OBJ) $(DOS_COMMON_OBJ) $(DOS_TRANSPORT_OBJ) $(DOS_SERVICES_OBJ) | $(DOS_BIN)
-	env $(DOS_ENV) $(DOSLINK) -0 -mm -bt=dos -k32768 $^ -fe=$@
+	env $(DOS_ENV) $(DOSLINK) -0 -ml -bt=dos -k32768 $^ -fe=$@
 
 $(DOS_BUILD)/engine $(DOS_BUILD)/transport $(DOS_BUILD)/services $(DOS_BUILD)/common $(DOS_BUILD)/smoke $(DOS_BUILD)/app $(DOS_BIN):
 	mkdir -p $@
