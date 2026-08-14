@@ -16,6 +16,25 @@
 #define WP_DIALOG_MAX_OPTIONS 9
 #define WP_DIALOG_OBJ_COUNT   (WP_DIALOG_MAX_OPTIONS + 4) /* root, title, options..., OK, Cancel */
 
+/* The root G_BOX's ob_spec is NOT a pointer. For G_BOX/G_IBOX/G_BOXCHAR
+   the low 16 bits are a packed color word and bits 23-16 are a signed
+   border thickness (Atari Compendium p.6.18) -- only G_BUTTON/G_STRING/
+   G_TITLE put a char* there. This used to be NULL, which is a perfectly
+   legal encoding meaning: thickness 0 (no border), and a color word of
+   all zeroes = pattern IP_HOLLOW with the transparent bit clear, i.e.
+   an unfilled, borderless box. The dialog therefore never erased the
+   document underneath it and drew its text straight over the page --
+   which is what the "vertical stripes" corruption in the screenshots
+   actually was, not a video-mode fault.
+
+   Built out per that same table: border black (bits 15-12), text black
+   (bits 11-8), opaque (bit 7), IP_SOLID (bits 6-4), interior white
+   (bits 3-0), thickness 2. gemlib spells the AES color constants
+   G_WHITE/G_BLACK, not the Compendium's bare WHITE/BLACK. */
+#define WP_DIALOG_BOX_SPEC \
+    (0x00020000L | ((long)G_BLACK << 12) | ((long)G_BLACK << 8) | 0x0080L | \
+     ((long)IP_SOLID << 4) | (long)G_WHITE)
+
 static OBJECT g_dialog_tree[WP_DIALOG_OBJ_COUNT];
 static char   g_dialog_title_buf[40];
 static char   g_dialog_option_bufs[WP_DIALOG_MAX_OPTIONS][32];
@@ -80,6 +99,22 @@ static wp_status build_dialog_tree(const u8 *title_utf8, u32 title_len,
 
     if (option_count == 0 || option_count > WP_DIALOG_MAX_OPTIONS) return WP_RANGE;
 
+    /* A caller with no meaningful default (or a stale one) must not
+       leave the tree with zero selected radio buttons -- see
+       plat_dialog_choice's own out_index handling below. */
+    if (default_index >= option_count) default_index = 0;
+
+    /* Wipe the whole array, not just the objects this call populates.
+       g_dialog_tree is static and every dialog reuses it at a DIFFERENT
+       size, so a 7-option Font Size followed by a 2-option Dictate would
+       otherwise leave object 10 carrying the previous call's OF_LASTOB
+       while the new tree ends at object 5. The AES stops its linear scan
+       at the first OF_LASTOB it finds, so it would have walked objects
+       6..10 -- stale ones belonging to a dialog that is no longer on
+       screen. This also clears leftover OS_SELECTED from a previous
+       run's buttons. */
+    memset(g_dialog_tree, 0, sizeof(g_dialog_tree));
+
     /* Real character cell size for the current resolution -- the same
        call app_shell_run() already makes for the screen-width check
        (see the "80 column" startup warning), here used for real this
@@ -106,10 +141,24 @@ static wp_status build_dialog_tree(const u8 *title_utf8, u32 title_len,
         w = (short)(((short)strlen(g_dialog_option_bufs[i]) + 6) * char_w);
         if (w > content_w) content_w = w;
     }
-    if (content_w < 16 * char_w) content_w = (short)(16 * char_w);
+    /* The floor is set by the BUTTON ROW, not by a round number. OK sits
+       at 2 chars in and is 8 wide (right edge 10); Cancel is 8 wide with
+       its right edge 2 from the far side, i.e. its left edge is at
+       content_w - 10. Anything under 22 chars overlaps them, and the old
+       floor of 16 did exactly that -- the two buttons printed on top of
+       each other as "Q Cancel", swallowing OK, on every dialog whose
+       title and options were short. Format > Alignment, whose widest
+       string is "Alignment" (13 with padding), hit it every time. */
+    if (content_w < 22 * char_w) content_w = (short)(22 * char_w);
 
     set_obj(root, -1, title_obj, cancel_obj, G_BOX, OF_NONE, OS_OUTLINED, NULL,
             0, 0, content_w, 0 /* height finalized below, once y is known */);
+    /* Assigned through .index (the union's long member) rather than
+       through set_obj's char* parameter, because for a G_BOX this field
+       is a packed value and not a pointer at all -- see
+       WP_DIALOG_BOX_SPEC. set_obj keeps its char* signature since every
+       OTHER object in this tree really does store a string there. */
+    g_dialog_tree[root].ob_spec.index = WP_DIALOG_BOX_SPEC;
 
     y = (short)(char_h / 2);
     set_obj(title_obj, first_option, -1, -1, G_STRING, OF_NONE, OS_NORMAL,
@@ -123,24 +172,50 @@ static wp_status build_dialog_tree(const u8 *title_utf8, u32 title_len,
 
         set_obj(obj, next, -1, -1, G_BUTTON, (unsigned short)(OF_SELECTABLE | OF_RBUTTON), state,
                 g_dialog_option_bufs[i], (short)(2 * char_w), y, (short)(content_w - 4 * char_w), char_h);
-        y = (short)(y + char_h);
+        /* Pitch is height + 2, not height. A G_BUTTON is drawn with a
+           border ON its own bounds, so rows stacked at exactly char_h
+           share edges and the neighbouring border cuts through the
+           glyphs -- clearly visible on a real 640x200 screenshot, where
+           char_h is 8 and a line of 8-pixel text leaves no room. */
+        y = (short)(y + char_h + 2);
     }
     y = (short)(y + char_h / 2);
 
     set_obj(ok_obj, cancel_obj, -1, -1, G_BUTTON,
             (unsigned short)(OF_SELECTABLE | OF_DEFAULT | OF_EXIT), OS_NORMAL,
             g_dialog_ok_buf, (short)(2 * char_w), y, (short)(8 * char_w), char_h);
+    /* OF_LASTOB on the final object of the ARRAY. The Compendium marks
+       this "(Required!)" (p.6.16) and it was simply absent here: the AES
+       determines a tree's extent by scanning for it, so without it
+       objc_draw/form_do ran off the end of g_dialog_tree into whatever
+       BSS follows -- which is g_dialog_title_buf and g_dialog_option_bufs,
+       label text reinterpreted as OBJECT structs.
+
+       This is the identical defect #134 found in the hand-built menu
+       tree, where OF_LASTOB sat on the wrong object and hid every
+       dropdown past it. wp_menu_tree_selfcheck gained a whole-array
+       "exactly one, and it is the final object" assertion then; this
+       tree, built by different code, never got the same guard. It has
+       one now -- see wp_atari_dialog_selfcheck. */
     set_obj(cancel_obj, root, -1, -1, G_BUTTON,
-            (unsigned short)(OF_SELECTABLE | OF_EXIT), OS_NORMAL,
+            (unsigned short)(OF_SELECTABLE | OF_EXIT | OF_LASTOB), OS_NORMAL,
             g_dialog_cancel_buf, (short)(content_w - 10 * char_w), y, (short)(8 * char_w), char_h);
 
     g_dialog_tree[root].ob_height = (short)(y + char_h + char_h / 2);
 
+    /* form_center() positions the root itself; the x/y/w/h it hands back
+       are deliberately NOT the object's own. "These values take into
+       account negative borders, outlining, and shadowing. This is meant
+       to provide a suitable clipping rectangle for objc_draw()"
+       (Compendium p.6.80). This used to copy them back into the root's
+       ob_x/ob_y/ob_width/ob_height, which -- because this dialog carries
+       OS_OUTLINED -- moved the box up and left by the outline allowance
+       and grew it by twice that, while the children stayed where they
+       were, since their coordinates are relative to the root. So the
+       frame no longer matched its own contents. They are used below for
+       exactly what they are for: form_dial's reserved area and
+       objc_draw's clip rectangle. */
     form_center(g_dialog_tree, out_cx, out_cy, out_cw, out_ch);
-    g_dialog_tree[root].ob_x = *out_cx;
-    g_dialog_tree[root].ob_y = *out_cy;
-    g_dialog_tree[root].ob_width = *out_cw;
-    g_dialog_tree[root].ob_height = *out_ch;
 
     *out_first_option = first_option;
     *out_ok_obj = ok_obj;
@@ -171,11 +246,41 @@ wp_status plat_dialog_choice(plat_window *parent,
     form_dial(FMD_START, cx, cy, 0, 0, cx, cy, cw, ch);
     objc_draw(g_dialog_tree, 0, MAX_DEPTH, cx, cy, cw, ch);
 
-    chosen_obj = (short)(form_do(g_dialog_tree, first_option) & 0x7FFF);
+    /* 0, NOT first_option. This is the bus error (#177). form_do's second
+       argument is "the object index ... of the edit cursor (the object
+       must be flagged as EDITABLE). If the form has no text editable
+       fields, you should use 0" (Compendium p.6.81). This form has no
+       editable fields at all -- every object is a G_BUTTON or G_STRING --
+       so passing first_option pointed the AES at object 2 and told it to
+       start text editing there. The AES duly read that object's ob_spec
+       as a TEDINFO*, but on a G_BUTTON ob_spec is a plain char* to the
+       label, so te_ptext (TEDINFO's first field, itself a char*) came
+       back as the first four BYTES OF THE LABEL, and dereferencing that
+       faulted.
+
+       Which is why the reported fault address was literally the label
+       text: Format > Alignment's first option is "Left", and the crash
+       was "Bus Error reading at address $4c656674" -- 'L','e','f','t'.
+       Font Size would have read $38207074 ("8 pt"). */
+    chosen_obj = (short)(form_do(g_dialog_tree, 0) & 0x7FFF);
+
+    /* Deselect the EXIT button the user struck before the area under the
+       dialog is restored, so it is not left drawn inverted (the
+       Compendium's own do_dialog example does exactly this). */
+    if (chosen_obj >= 0 && chosen_obj < WP_DIALOG_OBJ_COUNT) {
+        g_dialog_tree[chosen_obj].ob_state &= (unsigned short)~OS_SELECTED;
+    }
 
     form_dial(FMD_FINISH, cx, cy, 0, 0, cx, cy, cw, ch);
 
     if (out_cancelled) *out_cancelled = (wp_bool)(chosen_obj == cancel_obj);
+    /* Always write a defined index. The scan below finds nothing if no
+       radio button is selected, and callers index straight into their own
+       option arrays with the result (act_format_align does aligns[chosen])
+       -- so leaving it untouched would hand them an uninitialised
+       subscript. default_index is the honest fallback: it is what the
+       dialog was showing as selected. */
+    if (out_index) *out_index = (default_index < option_count) ? default_index : 0;
     if (chosen_obj != cancel_obj && out_index) {
         for (i = 0; i < option_count; i++) {
             if (g_dialog_tree[first_option + i].ob_state & OS_SELECTED) {
@@ -241,9 +346,92 @@ wp_bool wp_atari_dialog_selfcheck(void)
     cur = g_dialog_tree[0].ob_head;
     for (steps = 0; steps < WP_DIALOG_OBJ_COUNT; steps++) {
         if (cur == g_dialog_tree[0].ob_tail) {
-            return (wp_bool)(g_dialog_tree[cur].ob_next == 0);
+            if (g_dialog_tree[cur].ob_next != 0) return WP_FALSE;
+            break;
         }
         cur = g_dialog_tree[cur].ob_next;
     }
-    return WP_FALSE; /* did not terminate within a bounded number of steps */
+    if (steps >= WP_DIALOG_OBJ_COUNT) return WP_FALSE; /* did not terminate */
+
+    /* --- #177: the three things that made this tree crash the AES ---
+
+       Everything above proves index arithmetic, which is what this
+       selfcheck was built for and which was never wrong. The defects
+       that actually bus-errored the machine were in the OBJECT CONTENTS,
+       so they lived entirely outside what was being checked. Asserted
+       here as invariants of the tree rather than of any one caller. */
+
+    /* 1. Exactly one OF_LASTOB, on the final object. Same whole-array
+          form wp_menu_tree_selfcheck uses, and for the same reason: the
+          AES stops scanning there, so "somewhere" is not good enough. */
+    {
+        short lastob_count = 0;
+        for (i = 0; i < (u32)WP_DIALOG_OBJ_COUNT; i++) {
+            if (g_dialog_tree[i].ob_flags & OF_LASTOB) lastob_count++;
+        }
+        if (lastob_count != 1) return WP_FALSE;
+        if ((g_dialog_tree[cancel_obj].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    }
+
+    /* 2. No object is EDITABLE, which is what makes form_do(tree, 0)
+          the correct call. If a future editable field is ever added
+          here, this fires and forces form_do's second argument to be
+          revisited deliberately instead of silently faulting again. */
+    for (i = 0; i < (u32)WP_DIALOG_OBJ_COUNT; i++) {
+        if (g_dialog_tree[i].ob_flags & OF_EDITABLE) return WP_FALSE;
+    }
+
+    /* 3. The root box carries a real packed color word, not a pointer
+          and not zero -- an opaque, solid-filled interior, so the dialog
+          erases the document behind it. */
+    if (g_dialog_tree[0].ob_spec.index != WP_DIALOG_BOX_SPEC) return WP_FALSE;
+    if ((g_dialog_tree[0].ob_spec.index & 0x0080L) == 0) return WP_FALSE; /* opaque */
+
+    /* 4. OK and Cancel do not overlap, and both sit inside the box.
+          Caught on a real screenshot, not here, because nothing was
+          checking geometry -- the two buttons were drawing on top of
+          each other and OK was unreadable. Every object's coordinates
+          are relative to the root, so this is pure arithmetic and needs
+          no AES call. */
+    {
+        short ok_l = g_dialog_tree[ok_obj].ob_x;
+        short ok_r = (short)(ok_l + g_dialog_tree[ok_obj].ob_width);
+        short ca_l = g_dialog_tree[cancel_obj].ob_x;
+        short ca_r = (short)(ca_l + g_dialog_tree[cancel_obj].ob_width);
+
+        if (ok_l < 0 || ca_l < 0) return WP_FALSE;
+        if (ok_r > ca_l) return WP_FALSE;                        /* overlap */
+        if (ca_r > g_dialog_tree[0].ob_width) return WP_FALSE;   /* off the box */
+    }
+
+    /* 5. Rebuild SMALLER and re-assert. g_dialog_tree is static and
+          shared, so a 2-option dialog following this 7-option one must
+          not inherit the bigger tree's OF_LASTOB at object 10 -- the AES
+          would scan five stale objects past the real end. This is the
+          regression that a per-call "set LASTOB on cancel_obj" alone
+          would NOT catch. */
+    {
+        static const char *const two_c[] = { "Speak now", "Cancel" };
+        const u8 *two[2];
+        u32 two_lens[2];
+        short f2, ok2, cancel2;
+        short lastob_count = 0;
+
+        for (i = 0; i < 2; i++) {
+            two[i] = (const u8 *)two_c[i];
+            two_lens[i] = (u32)strlen(two_c[i]);
+        }
+        if (build_dialog_tree((const u8 *)"Dictate", 7, two, two_lens, 2, 0,
+                               &f2, &ok2, &cancel2, &cx, &cy, &cw, &ch) != WP_OK) {
+            return WP_FALSE;
+        }
+        if (cancel2 != 5) return WP_FALSE;   /* first_option(2) + 2 options + OK */
+        for (i = 0; i < (u32)WP_DIALOG_OBJ_COUNT; i++) {
+            if (g_dialog_tree[i].ob_flags & OF_LASTOB) lastob_count++;
+        }
+        if (lastob_count != 1) return WP_FALSE;
+        if ((g_dialog_tree[cancel2].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    }
+
+    return WP_TRUE;
 }
