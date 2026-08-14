@@ -74,4 +74,19 @@ typedef struct {
 
 const fixtures_image *fixtures_image_get(void);
 
+/* One canned OFFLOAD_DICTATE transcript (T174). Like fixtures_image_get
+   and unlike THESAURUS/SPELL_CHECK/GRAMMAR_CHECK/CHAT, there is nothing
+   to look UP: a DICTATE request carries only max_duration_s/flags/
+   language, never any text to match on. So this returns a fixed
+   transcript unconditionally, purely to give test_offload.c
+   deterministic wire-level coverage of the op's encoding, its
+   capability gating, and the insert-at-cursor path that consumes it.
+
+   Real transcription correctness is proven separately, against the real
+   whisper_gateway.py, which needs a whisper.cpp build and a model this
+   mock deliberately has neither of -- the same split M15 already drew
+   between this file's canned IMAGE checkerboard and the genuine Pillow
+   decode host/tests/test_image_convert.c exercises. */
+const char *fixtures_dictate_transcript(u32 *out_len);
+
 #endif /* WP_GATEWAY_FIXTURES_H */

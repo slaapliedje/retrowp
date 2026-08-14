@@ -166,7 +166,7 @@ int main(int argc, char **argv)
         caps.protocol_version = WIRE_VERSION;
         caps.ops_supported = (1uL << OFFLOAD_SPELL_CHECK) | (1uL << OFFLOAD_THESAURUS) |
                              (1uL << OFFLOAD_GRAMMAR_CHECK) | (1uL << OFFLOAD_CHAT) |
-                             (1uL << OFFLOAD_IMAGE);
+                             (1uL << OFFLOAD_IMAGE) | (1uL << OFFLOAD_DICTATE);
         caps.max_payload_bytes = 4096;
         strncpy((char *)caps.gateway_name, "mock-gateway", sizeof(caps.gateway_name) - 1);
 
@@ -275,6 +275,26 @@ int main(int argc, char **argv)
                                                       img->packed_pixels, img->packed_len,
                                                       resp_payload, sizeof(resp_payload));
                 status = (u8)OFFLOAD_OK;
+            } else if (req_hdr.op == OFFLOAD_DICTATE) {
+                /* A DICTATE request is exactly 4 bytes (max_duration_s,
+                   flags, language[2]) -- rejecting anything shorter here
+                   rather than answering anyway is what gives the host
+                   tests a way to prove the client encodes the request
+                   correctly, since the canned transcript itself is
+                   returned unconditionally and would otherwise hide a
+                   malformed request entirely. */
+                if (word_len < 4) {
+                    status = (u8)OFFLOAD_ERR;
+                } else {
+                    u32 transcript_len;
+                    const char *transcript = fixtures_dictate_transcript(&transcript_len);
+
+                    if (transcript_len <= sizeof(resp_payload)) {
+                        memcpy(resp_payload, transcript, transcript_len);
+                        resp_len = transcript_len;
+                        status = (u8)OFFLOAD_OK;
+                    }
+                }
             }
 
             gw_send_frame(ctx.write_fd, WIRE_MSG_RESPONSE, req_hdr.op, status, req_hdr.seq,

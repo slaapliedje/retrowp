@@ -3191,10 +3191,12 @@ wp_bool wp_atari_chat_selfcheck(void)
        host/tests/test_image_convert.c and the CI matrix's real
        screenshot verification, not by this function. */
     memset(&caps, 0, sizeof(caps));
-    caps.ops_supported = (1uL << OFFLOAD_THESAURUS) | (1uL << OFFLOAD_CHAT) | (1uL << OFFLOAD_IMAGE);
+    caps.ops_supported = (1uL << OFFLOAD_THESAURUS) | (1uL << OFFLOAD_CHAT) | (1uL << OFFLOAD_IMAGE) |
+                         (1uL << OFFLOAD_DICTATE);
 
     if (!offload_caps_supports(&caps, OFFLOAD_CHAT)) ok = WP_FALSE;
     if (!offload_caps_supports(&caps, OFFLOAD_IMAGE)) ok = WP_FALSE;
+    if (!offload_caps_supports(&caps, OFFLOAD_DICTATE)) ok = WP_FALSE;
     if (!offload_caps_supports(&caps, OFFLOAD_THESAURUS)) ok = WP_FALSE;
     if (offload_caps_supports(&caps, OFFLOAD_GRAMMAR_CHECK)) ok = WP_FALSE;
 
@@ -3755,6 +3757,16 @@ static void invoke_backend_action(short window_handle, VdiHdl vdi, wp_action_id 
     case WP_ACT_TOOLS_GRAMMARCHECK: do_grammar_check(); break;
     case WP_ACT_TOOLS_CHAT:        do_chat(); break;
     case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
+    case WP_ACT_TOOLS_DICTATE:
+        /* Two lines, because everything after bringing the link up is
+           portable -- see wp_action_dictate's own comment in
+           platform/common/actions.h. */
+        if (!ensure_offload()) {
+            form_alert(1, FA_ERROR "[No offload device available.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");
+        } else {
+            (void)wp_action_dictate(&g_ctx);
+        }
+        break;
     default: break;
     }
 }
@@ -3938,6 +3950,19 @@ static wp_bool action_exempt_from_menu(wp_action_id id)
     /* Ctrl+G only, by design -- see actions.c's own comment on why this
        one stays off the hand-built OBJECT tree. */
     case WP_ACT_TOOLS_INSERTIMAGE:
+        return WP_TRUE;
+    /* Ctrl+D only, same reasoning as Insert Image above: this backend's
+       OBJECT tree is hand-built, and editing it has twice produced real
+       regressions (see docs/atari-platform.md). Amiga and Mac build
+       their Tools menus dynamically from the registry, so both show
+       "Dictate" automatically -- only this backend needs the exemption,
+       and the action stays fully reachable by its shortcut.
+
+       For dictation specifically the keystroke IS the intended route:
+       the feature exists so a writer can speak a sentence without
+       leaving the keyboard, which a mouse-driven menu pick would
+       defeat. */
+    case WP_ACT_TOOLS_DICTATE:
         return WP_TRUE;
     default:
         return WP_FALSE;

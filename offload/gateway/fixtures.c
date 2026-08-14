@@ -147,3 +147,15 @@ const fixtures_image *fixtures_image_get(void)
 {
     return &k_image;
 }
+
+/* Deliberately contains a space, a period and mixed case: the value of
+   this fixture is that it proves dictated text survives the wire and
+   lands at the cursor as-is, and a single lowercase word would prove
+   none of that. */
+static const char k_dictate_transcript[] = "The quick brown fox jumps over the lazy dog.";
+
+const char *fixtures_dictate_transcript(u32 *out_len)
+{
+    *out_len = (u32)strlen(k_dictate_transcript);
+    return k_dictate_transcript;
+}

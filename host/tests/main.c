@@ -459,6 +459,9 @@ void test_offload_capabilities_advertise_chat_but_not_convert_import(void);
 void test_offload_unsupported_op_reports_unsupported(void);
 void test_offload_capabilities_advertise_image(void);
 void test_offload_image_returns_canned_fixture_bitmap(void);
+void test_offload_capabilities_advertise_dictate(void);
+void test_offload_dictate_returns_canned_transcript(void);
+void test_offload_dictate_rejects_malformed_request(void);
 void test_offload_corrupt_response_is_rejected(void);
 void test_offload_timeout_on_delayed_gateway(void);
 void test_offload_gateway_dies_before_responding(void);
@@ -907,6 +910,9 @@ static const test_case g_cases[] = {
     { "offload_unsupported_op_reports_unsupported", test_offload_unsupported_op_reports_unsupported },
     { "offload_capabilities_advertise_image", test_offload_capabilities_advertise_image },
     { "offload_image_returns_canned_fixture_bitmap", test_offload_image_returns_canned_fixture_bitmap },
+    { "offload_capabilities_advertise_dictate", test_offload_capabilities_advertise_dictate },
+    { "offload_dictate_returns_canned_transcript", test_offload_dictate_returns_canned_transcript },
+    { "offload_dictate_rejects_malformed_request", test_offload_dictate_rejects_malformed_request },
     { "offload_corrupt_response_is_rejected", test_offload_corrupt_response_is_rejected },
     { "offload_timeout_on_delayed_gateway", test_offload_timeout_on_delayed_gateway },
     { "offload_gateway_dies_before_responding", test_offload_gateway_dies_before_responding },

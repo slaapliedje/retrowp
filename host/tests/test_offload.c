@@ -372,6 +372,95 @@ void test_offload_image_returns_canned_fixture_bitmap(void)
     gateway_stop(&gw);
 }
 
+/* T174: OFFLOAD_DICTATE, answered from fixtures.c's single canned
+   transcript (fixtures_dictate_transcript) -- deterministic, wire-level
+   coverage of the op's request encoding, its response shape and its
+   capability advertisement, with no whisper.cpp build, no 142MB model
+   and no microphone anywhere near `make test`.
+
+   Real transcription correctness is deliberately NOT proven here. It is
+   proven against the real whisper_gateway.py on the actual Pi (see
+   docs/formats/offload-protocol.md's OFFLOAD_DICTATE section) -- the
+   same split M15 drew between this file's canned IMAGE checkerboard and
+   test_image_convert.c's genuine Pillow decode. The difference is that
+   Pillow is pip-installable on any host, so its real test can live in
+   `make test`; a whisper model plus a capture device cannot, which is
+   an honest limit on what this suite can assert rather than a gap in
+   what was verified. */
+void test_offload_capabilities_advertise_dictate(void)
+{
+    gateway_handle gw;
+    offload_capabilities caps;
+
+    ASSERT_TRUE(gateway_start(NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    ASSERT_TRUE(offload_query(&caps) == WP_OK);
+    ASSERT_TRUE((caps.ops_supported & (1uL << OFFLOAD_DICTATE)) != 0);
+
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+void test_offload_dictate_returns_canned_transcript(void)
+{
+    gateway_handle gw;
+    offload_request req;
+    offload_response resp;
+    static const char k_expected[] = "The quick brown fox jumps over the lazy dog.";
+    /* max_duration_s=15, flags=0x01 (trim trailing silence),
+       language="en" -- the whole request, exactly 4 bytes. The audio
+       never travels, which is what keeps this op viable at 9600 baud. */
+    static const u8 req_payload[] = { 15, 0x01, 'e', 'n' };
+
+    ASSERT_TRUE(gateway_start(NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    req.op = OFFLOAD_DICTATE;
+    req.payload = req_payload;
+    req.payload_len = (u32)sizeof(req_payload);
+    req.timeout_ms = 2000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+
+    /* The response payload IS the transcript: no header, no length
+       prefix, just UTF-8 -- so a backend can hand it straight to
+       wp_edit_insert_text without an intermediate decode step. */
+    ASSERT_EQ_U32(resp.result_len, (u32)strlen(k_expected));
+    ASSERT_MEM_EQ(resp.result, k_expected, resp.result_len);
+
+    offload_response_free(&resp);
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+void test_offload_dictate_rejects_malformed_request(void)
+{
+    gateway_handle gw;
+    offload_request req;
+    offload_response resp;
+    /* Three bytes: one short of the fixed 4-byte request. The canned
+       transcript is returned unconditionally otherwise, so without this
+       check a client that encoded the request wrongly would still see a
+       perfectly good transcript come back and the bug would ship. */
+    static const u8 short_payload[] = { 15, 0x01, 'e' };
+
+    ASSERT_TRUE(gateway_start(NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    req.op = OFFLOAD_DICTATE;
+    req.payload = short_payload;
+    req.payload_len = (u32)sizeof(short_payload);
+    req.timeout_ms = 2000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_ERR);
+    ASSERT_EQ_U32(resp.result_len, 0);
+
+    offload_response_free(&resp);
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
 void test_offload_corrupt_response_is_rejected(void)
 {
     gateway_handle gw;

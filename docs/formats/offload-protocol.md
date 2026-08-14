@@ -342,6 +342,62 @@ monochrome target -- `offload/gateway/image_gateway.py`).
   graphics -- see `docs/dos-platform.md`; DOS still performs the real
   round trip and shows a bracketed text placeholder instead).
 
+### `OFFLOAD_DICTATE` (T174)
+
+Speech to text. The editor says "listen"; the gateway records on **its
+own** microphone, transcribes locally, and returns UTF-8.
+
+**The audio never crosses the link.** This is the entire reason the op is
+viable on a 1MB Atari ST over a 9600-baud serial line, and it is worth
+stating explicitly because the obvious design — capture on the target,
+send PCM to be transcribed — is not merely slower, it is impossible
+here: 16kHz mono S16_LE is 32000 bytes/second, roughly 17x more than
+19200 baud can carry, so a real-time capture stream could never keep up
+no matter how the framing were arranged. Putting the microphone on the
+gateway side turns an unbounded audio stream into a 4-byte request and a
+few hundred bytes of reply.
+
+Request payload (fixed, 4 bytes):
+
+```
+  off  size  field
+  0    1     max_duration_s   1..60; 0 means "gateway default" (15)
+  1    1     flags            bit0 = TRIM_SILENCE (stop early once
+                              trailing silence follows detected speech)
+                              bits 1-7 reserved, must be 0
+  2    2     language         two ASCII letters, e.g. "en";
+                              0x0000 = auto-detect
+```
+
+Response payload: **the UTF-8 transcript itself**, with no header and no
+length prefix — the frame's own length field already delimits it. A
+backend hands the bytes straight to `wp_edit_insert_text` with no
+intermediate decode step.
+
+`status = OFFLOAD_OK` with an **empty** payload is a normal, expected
+outcome meaning "listened, heard nothing" — not an error. The caller
+inserts nothing and says so on the status line. Distinguishing this from
+`OFFLOAD_ERR` matters: silence is the single most likely outcome of a
+mis-aimed push-to-talk, and treating it as a failure would train the
+writer to distrust a feature that is working correctly.
+
+`OFFLOAD_ERR` is reserved for a genuinely failed request: a payload
+shorter than 4 bytes, a non-ASCII language field, or a transcription
+process that died or timed out.
+
+Sizing: a dictated sentence is on the order of 100 bytes, and even a
+sustained minute of speech lands in the low thousands — far under
+`OFFLOAD_MAX_RESPONSE_PAYLOAD` (32768). No `wire.h`/`caps_codec.h`
+change was needed for this op, the same as `OFFLOAD_IMAGE`.
+
+Deliberately out of scope in this pass, stated rather than implied: no
+streaming/partial transcripts (one request, one complete answer); no
+speaker diarization; no punctuation or formatting commands ("new
+paragraph", "comma"); no push-to-talk *stop* signal from the target,
+because the protocol is strictly request/response and a second op would
+be needed — `TRIM_SILENCE` exists precisely so the writer does not have
+to sit out the full timeout after every sentence.
+
 ### Any other op
 
 The mock gateway responds `RESPONSE` with `status = OFFLOAD_UNSUPPORTED`

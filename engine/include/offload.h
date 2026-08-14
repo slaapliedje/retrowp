@@ -16,11 +16,18 @@ typedef enum {
     OFFLOAD_CONVERT_IMPORT,  /* ODT/other bytes -> internal model */
     OFFLOAD_CONVERT_EXPORT,  /* internal model -> ODT/PDF bytes */
     OFFLOAD_CHAT,            /* freeform assist (optional) */
-    OFFLOAD_IMAGE            /* source image bytes -> a small palette-
+    OFFLOAD_IMAGE,           /* source image bytes -> a small palette-
                                  indexed bitmap matched to the requesting
                                  target's own color ceiling (M15); see
                                  docs/formats/offload-protocol.md's
                                  OFFLOAD_IMAGE section for the wire shape */
+    OFFLOAD_DICTATE          /* listen on the GATEWAY's own microphone ->
+                                 UTF-8 text (T174). The audio never crosses
+                                 the link: the request is 4 fixed bytes and
+                                 the response is just the transcript, which
+                                 is why this stays comfortable even at 9600
+                                 baud. See docs/formats/offload-protocol.md's
+                                 OFFLOAD_DICTATE section for the wire shape */
 } offload_op;
 
 typedef enum {

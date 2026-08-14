@@ -1,6 +1,8 @@
 #include <string.h>
 #include "actions.h"
+#include "app_ctx.h"
 #include "format_txt.h"
+#include "offload.h"
 
 /* ------------------------------------------------------------------ */
 /* Portable handlers                                                    */
@@ -139,6 +141,134 @@ static wp_status act_file_quit(wp_app_ctx *ctx)
 /* The registry                                                         */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* Dictation (T174)                                                     */
+/* ------------------------------------------------------------------ */
+
+#define WP_DICTATE_MAX_DURATION_S     15u
+#define WP_DICTATE_FLAG_TRIM_SILENCE  0x01u
+/* Generous on purpose: this one call covers the writer speaking (up to
+   max_duration_s) AND the gateway transcribing afterwards. Measured on
+   the real Pi 5, ggml-base.en runs at ~4x realtime with roughly 1.5s of
+   model load per request, so 15s of speech lands well inside this --
+   but a cold, busy or slower gateway must not look like a hang. */
+#define WP_DICTATE_TIMEOUT_MS         120000uL
+
+/* A one-button plat_dialog_choice, used as a message box. There is no
+   plat_dialog_message in platform.h (see its own comment: no free-text
+   variant exists because nothing needed one), and adding one just for
+   this would be a new required primitive on all four backends. A single
+   "OK" option is the honest way to say something with what already
+   exists everywhere. */
+static void dictate_message(wp_app_ctx *ctx, const char *title)
+{
+    const u8 *labels[1];
+    u32 lens[1];
+    wp_bool cancelled;
+    u32 chosen;
+
+    labels[0] = (const u8 *)"OK";
+    lens[0] = 2;
+    (void)plat_dialog_choice(ctx->window, (const u8 *)title, (u32)strlen(title),
+                              labels, lens, 1, 0, &cancelled, &chosen);
+}
+
+wp_status wp_action_dictate(wp_app_ctx *ctx)
+{
+    static const char *const k_go[] = { "Speak now", "Cancel" };
+    const u8 *labels[2];
+    u32 lens[2];
+    offload_capabilities caps;
+    offload_request req;
+    offload_response resp;
+    u8 payload[4];
+    wp_pos *cursor;
+    wp_pos new_pos;
+    wp_bool cancelled;
+    u32 chosen;
+    u32 i;
+    wp_status st;
+
+    if (ctx == NULL || !ctx->doc_loaded) return WP_ERR;
+
+    if (!offload_available()) {
+        dictate_message(ctx, "Dictate: no offload device connected");
+        return WP_ERR;
+    }
+
+    /* CAPS pre-check BEFORE building a request, not submit-and-hope --
+       T8.3 CHAT's discipline. A gateway with no microphone or no model
+       clears the DICTATE bit, so this answers immediately instead of
+       recording into a void for 15 seconds first. */
+    if (offload_query(&caps) != WP_OK ||
+        (caps.ops_supported & (1uL << (u32)OFFLOAD_DICTATE)) == 0) {
+        dictate_message(ctx, "This gateway doesn't offer Dictate");
+        return WP_UNSUPPORTED;
+    }
+
+    /* The writer needs to know WHEN to start talking, and the request
+       blocks for as long as it records. Dismissing this dialog is that
+       signal. Leading silence costs nothing -- TRIM_SILENCE only ends
+       the recording on silence that FOLLOWS detected speech -- so the
+       round-trip delay between dismissing and the microphone opening is
+       harmless, which is what makes this simple approach honest rather
+       than merely convenient. */
+    for (i = 0; i < 2; i++) {
+        labels[i] = (const u8 *)k_go[i];
+        lens[i] = (u32)strlen(k_go[i]);
+    }
+    st = plat_dialog_choice(ctx->window,
+                             (const u8 *)"Dictate: speak after OK",
+                             (u32)strlen("Dictate: speak after OK"),
+                             labels, lens, 2, 0, &cancelled, &chosen);
+    if (st != WP_OK) return st;
+    if (cancelled || chosen != 0) return WP_OK;
+
+    payload[0] = (u8)WP_DICTATE_MAX_DURATION_S;
+    payload[1] = (u8)WP_DICTATE_FLAG_TRIM_SILENCE;
+    payload[2] = (u8)'e';
+    payload[3] = (u8)'n';
+
+    req.op = OFFLOAD_DICTATE;
+    req.payload = payload;
+    req.payload_len = 4u;
+    req.timeout_ms = (u32)WP_DICTATE_TIMEOUT_MS;
+
+    if (offload_submit(&req, &resp) != WP_OK) {
+        dictate_message(ctx, "Dictation failed or timed out");
+        return WP_ERR;
+    }
+    if (resp.status != OFFLOAD_OK) {
+        offload_response_free(&resp);
+        dictate_message(ctx, "The gateway couldn't transcribe that");
+        return WP_ERR;
+    }
+    /* Empty payload with OFFLOAD_OK is "listened, heard nothing" -- a
+       normal outcome, NOT an error (docs/formats/offload-protocol.md).
+       Saying so plainly matters: silence is the likeliest result of a
+       mistimed start, and reporting it as a failure would teach the
+       writer to distrust a feature that worked correctly. */
+    if (resp.result_len == 0) {
+        offload_response_free(&resp);
+        dictate_message(ctx, "Heard nothing -- nothing inserted");
+        return WP_OK;
+    }
+
+    /* Dictated text is just text: no new engine concept, no new content
+       type, the same call a typed character takes. edit.c marks the
+       paragraph layout_dirty, and every backend relayouts dirty
+       paragraphs before its next paint, so nothing here needs to reach
+       for a per-backend relayout it could not call portably anyway. */
+    cursor = wp_keymap_cursor(ctx);
+    st = wp_edit_insert_text(ctx->doc, ctx->journal, *cursor,
+                              resp.result, resp.result_len, &new_pos);
+    if (st == WP_OK) *cursor = new_pos;
+    offload_response_free(&resp);
+
+    if (st != WP_OK) dictate_message(ctx, "Couldn't insert the dictated text");
+    return st;
+}
+
 const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_FILE_OPEN,         WP_MENU_FILE,   "Open",           "Ctrl+O", 0x0F, NULL, NULL },
     { WP_ACT_FILE_SAVE,         WP_MENU_FILE,   "Save",           "Ctrl+S", 0x13, NULL, NULL },
@@ -165,6 +295,19 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
        redundant with (but harmless alongside) their own dynamically-
        built Tools menu already showing this entry automatically. */
     { WP_ACT_TOOLS_INSERTIMAGE, WP_MENU_TOOLS,  "Insert Image",   "Ctrl+G", 0x07, NULL, NULL },
+    /* T174: Ctrl+D, for the same reasons Insert Image took a real
+       shortcut above -- no Atari OBJECT tree edit needed, and DOS can
+       reach it at all. 0x04 was free across the whole table, and
+       vi-mode claims NO control codes whatsoever (see docs/vimode.md:
+       every plain-letter vi command requires an UNMODIFIED key
+       precisely so the Ctrl space stays available to app actions), so
+       this is reachable from the default keymap rather than menu-only.
+
+       Dictation earning a keystroke rather than living in a menu is the
+       whole point of the feature: the writer speaks a sentence without
+       moving a hand to the mouse. A Tools menu entry reached by mouse
+       would defeat the ergonomics it exists to serve. */
+    { WP_ACT_TOOLS_DICTATE,     WP_MENU_TOOLS,  "Dictate",        "Ctrl+D", 0x04, NULL, NULL },
     { WP_ACT_HELP_CONTENTS,     WP_MENU_HELP,   "Contents",       "F1",     0,    NULL, NULL },
     /* Two more entry points into the SAME help document, not new content:
        docs/help/retrowp.help already carries a node per topic, and the

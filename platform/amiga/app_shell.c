@@ -1130,6 +1130,13 @@ static void invoke_backend_action(wp_action_id id)
     case WP_ACT_TOOLS_GRAMMARCHECK: do_grammar_check(); break;
     case WP_ACT_TOOLS_CHAT:         do_chat(); break;
     case WP_ACT_TOOLS_INSERTIMAGE:  do_insert_image(); break;
+    case WP_ACT_TOOLS_DICTATE:
+        if (!ensure_offload()) {
+            show_message("Dictate", "No offload device available (tried " WP_AMIGA_OFFLOAD_ENDPOINT ").");
+        } else {
+            (void)wp_action_dictate(&g_ctx);
+        }
+        break;
     default:
         /* Spellcheck is still not implemented here: it's a LOCAL,
            file-based dictionary feature (services/spell -- no offload
@@ -2619,9 +2626,11 @@ wp_bool wp_amiga_image_selfcheck(void)
     u32 sec_idx, para_idx;
 
     memset(&caps, 0, sizeof(caps));
-    caps.ops_supported = (1uL << OFFLOAD_THESAURUS) | (1uL << OFFLOAD_CHAT) | (1uL << OFFLOAD_IMAGE);
+    caps.ops_supported = (1uL << OFFLOAD_THESAURUS) | (1uL << OFFLOAD_CHAT) | (1uL << OFFLOAD_IMAGE) |
+                         (1uL << OFFLOAD_DICTATE);
 
     if (!offload_caps_supports(&caps, OFFLOAD_IMAGE)) ok = WP_FALSE;
+    if (!offload_caps_supports(&caps, OFFLOAD_DICTATE)) ok = WP_FALSE;
     if (!offload_caps_supports(&caps, OFFLOAD_CHAT)) ok = WP_FALSE;
     if (offload_caps_supports(&caps, OFFLOAD_GRAMMAR_CHECK)) ok = WP_FALSE;
 

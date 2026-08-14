@@ -632,6 +632,15 @@ static void invoke_backend_action(wp_action_id id)
     case WP_ACT_EDIT_CUT:      do_edit_cut(); break;
     case WP_ACT_EDIT_PASTE:    do_edit_paste(); break;
     case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
+    case WP_ACT_TOOLS_DICTATE:
+        /* This backend has no message-dialog helper of its own -- every
+           do_insert_image error path above just returns silently. That
+           is exactly why the portable wp_action_dictate reports through
+           plat_dialog_choice (dialog_mac.c) instead of a native alert:
+           Dictate gets real feedback on Mac without this file growing
+           an alert mechanism the rest of it doesn't have. */
+        if (ensure_offload()) (void)wp_action_dictate(&g_ctx);
+        break;
     default:
         /* Every other Tools action (Spellcheck/Thesaurus/Grammar/Chat)
            remains out of scope -- offload-dependent features beyond
@@ -1832,9 +1841,10 @@ wp_bool wp_mac_image_selfcheck(void)
     u32 sec_idx, para_idx;
 
     memset(&caps, 0, sizeof(caps));
-    caps.ops_supported = (1uL << OFFLOAD_IMAGE);
+    caps.ops_supported = (1uL << OFFLOAD_IMAGE) | (1uL << OFFLOAD_DICTATE);
 
     if (!offload_caps_supports(&caps, OFFLOAD_IMAGE)) ok = WP_FALSE;
+    if (!offload_caps_supports(&caps, OFFLOAD_DICTATE)) ok = WP_FALSE;
     if (offload_caps_supports(&caps, OFFLOAD_CHAT)) ok = WP_FALSE;
 
     /* M15 Phase 5: position/size assertion -- an image paragraph must

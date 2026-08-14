@@ -39,6 +39,7 @@ typedef enum {
     WP_ACT_TOOLS_GRAMMARCHECK,
     WP_ACT_TOOLS_CHAT,
     WP_ACT_TOOLS_INSERTIMAGE,
+    WP_ACT_TOOLS_DICTATE,
     WP_ACT_HELP_CONTENTS,
     WP_ACT_HELP_KEYS,
     WP_ACT_HELP_FORMAT,
@@ -96,6 +97,25 @@ extern const wp_action g_wp_actions[WP_ACT_COUNT];
 
 const wp_action *wp_action_find(wp_action_id id);
 const wp_action *wp_action_find_by_shortcut(u8 ascii);
+
+/* T174 Dictate: the whole action, portable, in ONE place rather than
+   four near-identical per-backend copies.
+
+   It is not registered as a .handler in the table above (it stays
+   handler == NULL, a backend-supplied action) for one reason: the
+   offload link's endpoint string is genuinely per-target -- "serial:
+   aux:9600" on Atari/Amiga, "serial:modem:9600" on Mac, "serial:0:9600"
+   on DOS -- and each backend already owns that in its own lazy
+   ensure_offload(). So a backend's invoke_backend_action does exactly
+   two things for WP_ACT_TOOLS_DICTATE: bring the link up its own way,
+   then call this. Everything after that -- the CAPS pre-check, the
+   request, the round trip, both dialogs, the insert at the cursor -- is
+   identical on every target and lives here.
+
+   Requires an already-connected link: returns WP_ERR (after telling the
+   user) if offload_available() is false, rather than trying to open one
+   itself. */
+wp_status wp_action_dictate(struct wp_app_ctx *ctx);
 
 /* Maps a WP_ACT_HELP_* action to the help-document node it opens, e.g.
    WP_ACT_HELP_KEYS -> "Normal". Returns NULL (and leaves *len alone) for
