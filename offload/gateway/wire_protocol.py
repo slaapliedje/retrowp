@@ -20,10 +20,13 @@ gap.
 """
 
 import argparse
+import fcntl
 import os
 import select
 import socket
+import stat
 import struct
+import termios
 import time
 
 WIRE_MAGIC0 = 0x57
@@ -104,14 +107,59 @@ def read_frame(read_fd, timeout_s):
     return {'type': msg_type, 'op': op, 'status': status, 'seq': seq}, payload
 
 
-def open_fifo_rdwr(path):
+def open_fifo_rdwr(path, baud=None):
     """O_RDWR, not O_RDONLY/O_WRONLY -- avoids the classic named-FIFO
     open-blocks-until-peer-connects deadlock (same trick
     gw_common.c's gw_open_fifo_rdwr and platform/host/transport_host.c's
-    pipe: backend already rely on)."""
+    pipe: backend already rely on).
+
+    When `path` is a real serial device rather than a FIFO, the port is
+    ALSO configured here (raw, 8N1, CLOCAL, no flow control) at `baud`.
+    Without that this returned an fd carrying whatever line settings the
+    device happened to be left with -- so a gateway served correctly
+    over a FIFO but depended on an external `stty` having been run first
+    to work over an actual cable. Configuring it here makes serial mode
+    self-contained, which is what the Atari-over-real-RS232 path needs."""
     if not os.path.exists(path):
         os.mkfifo(path, 0o600)
-    return os.open(path, os.O_RDWR)
+        return os.open(path, os.O_RDWR)
+
+    if not stat.S_ISCHR(os.stat(path).st_mode):
+        return os.open(path, os.O_RDWR)
+
+    # A tty: O_NONBLOCK during open so it cannot stall on carrier, then
+    # cleared once the line is configured with CLOCAL.
+    fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    if baud is not None:
+        speed = getattr(termios, 'B%d' % baud, None)
+        if speed is None:
+            raise GatewayError('unsupported baud: %s' % baud)
+        iflag, oflag, cflag, lflag, ispeed, ospeed, cc = termios.tcgetattr(fd)
+        cc = list(cc)
+        # VMIN=1: block until at least one byte. NOT VMIN=0, which lets
+        # read() return zero bytes on a quiet line -- and read_exact()
+        # below treats a zero-byte read as 'peer closed', so the gateway
+        # would tear itself down on an idle wire. select() already
+        # supplies every deadline here, so a blocking read is safe and
+        # can never spuriously report EOF.
+        #
+        # This is the same bug as `stty min 0 time 10` making `cat` exit
+        # at EOF, which cost hours on the serial link earlier today. Same
+        # root cause, different language: VMIN=0 makes "no data" and "end
+        # of stream" indistinguishable to a caller reading a stream.
+        cc[termios.VMIN] = 1
+        cc[termios.VTIME] = 0
+        termios.tcsetattr(fd, termios.TCSANOW, [
+            0,                                              # iflag: no IXON/ICRNL
+            0,                                              # oflag: no ONLCR
+            termios.CS8 | termios.CREAD | termios.CLOCAL,   # cflag: 8N1, ignore DCD
+            0,                                              # lflag: no ICANON/ECHO
+            speed, speed, cc,
+        ])
+        termios.tcflush(fd, termios.TCIOFLUSH)
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
+    return fd
 
 
 def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, handle_request):
@@ -154,6 +202,9 @@ def parse_gateway_args(description=None, extra_args=None):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('--serial-rx')
     parser.add_argument('--serial-tx')
+    parser.add_argument('--serial-baud', type=int, default=None,
+                        help='line speed when --serial-rx/--serial-tx name a '
+                              'real tty rather than a FIFO (ignored for FIFOs)')
     parser.add_argument('--hello-timeout-ms', type=int, default=5000)
     if extra_args:
         for name_tuple, kwargs in extra_args:
@@ -172,8 +223,16 @@ def run_gateway_with_args(args, handle_request, ops_supported, gateway_name):
     first, the same convention host/tests/gateway_harness.c and
     mock_gateway.c already share), then hands off to serve()."""
     if args.serial_rx and args.serial_tx:
-        rx_fd = open_fifo_rdwr(args.serial_rx)
-        tx_fd = open_fifo_rdwr(args.serial_tx)
+        baud = getattr(args, 'serial_baud', None)
+        rx_fd = open_fifo_rdwr(args.serial_rx, baud)
+        # A single bidirectional tty is ONE fd used both ways -- opening
+        # the same device twice would give two independent line
+        # disciplines fighting over one UART. FIFO mode keeps two, since
+        # there the rx and tx paths are genuinely separate files.
+        if args.serial_tx == args.serial_rx and stat.S_ISCHR(os.stat(args.serial_rx).st_mode):
+            tx_fd = rx_fd
+        else:
+            tx_fd = open_fifo_rdwr(args.serial_tx, baud)
         print('serial', flush=True)
         return serve(rx_fd, tx_fd, args.hello_timeout_ms, ops_supported, gateway_name, handle_request)
 

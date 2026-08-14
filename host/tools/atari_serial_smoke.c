@@ -13,8 +13,10 @@
    see ci_atari_serial.sh for how that's coordinated. Pass/fail via the
    same NF_STDERR/NF_EXIT trap atari_smoke.c uses. */
 
+#include <stddef.h>     /* NULL, for the plat_transport handles below */
 #include "offload.h"
 #include "wire.h"
+#include "platform.h"
 
 __attribute__((noipa))
 static long nf_get_id(const char *name)
@@ -83,6 +85,47 @@ int main(void)
     nf_log("ATARI SERIAL SMOKE: starting\r\n");
 
     check(!offload_available(), "offload_available() false before offload_init");
+
+    /* Endpoint parsing, including the optional 4th ":<flow>" field and the
+       backward-compatibility rules around it. Deliberately BEFORE the
+       handshake: offload_init()'s own open() re-runs Rsconf and so resets
+       whatever configuration these leave behind.
+
+       Note what is and is not covered here. This proves the endpoint
+       PARSES and that Rsconf accepts the result -- it cannot prove
+       hardware handshaking works, because Hatari's emulated RS-232 has no
+       CTS line to assert. FLOW_HARD on a real machine with a real
+       RTS/CTS cable remains untested by CI, by necessity. */
+    {
+        plat_transport *tp = NULL;
+
+        check(plat_transport_open("serial:aux:9600", 1000, &tp) == WP_OK,
+              "endpoint with no flow field opens (defaults to none)");
+        if (tp) { plat_transport_close(tp); tp = NULL; }
+
+        check(plat_transport_open("serial:aux:9600:hard", 1000, &tp) == WP_OK,
+              "endpoint with :hard parses and opens");
+        if (tp) { plat_transport_close(tp); tp = NULL; }
+
+        check(plat_transport_open("serial:aux:19200:both", 1000, &tp) == WP_OK,
+              "19200 (the Rsconf ceiling) with :both parses and opens");
+        if (tp) { plat_transport_close(tp); tp = NULL; }
+
+        check(plat_transport_open("serial:a:b:9600", 1000, &tp) == WP_OK,
+              "device containing a colon still parses as before");
+        if (tp) { plat_transport_close(tp); tp = NULL; }
+
+        check(plat_transport_open("serial:aux:9600:bogus", 1000, &tp) != WP_OK,
+              "unrecognised flow keyword is rejected");
+        check(plat_transport_open("serial:aux:38400", 1000, &tp) != WP_OK,
+              "baud above the Rsconf ceiling is rejected");
+        check(plat_transport_open("serial:aux:99999999999999999999", 1000, &tp) != WP_OK,
+              "absurdly long baud digit run is rejected without overflow");
+        check(plat_transport_open("serial::9600", 1000, &tp) != WP_OK,
+              "empty device is rejected");
+        check(plat_transport_open("tcp:1.2.3.4:9000", 1000, &tp) == WP_UNSUPPORTED,
+              "tcp: endpoint is WP_UNSUPPORTED, not silently accepted");
+    }
 
     check(offload_init("serial:aux:9600") == WP_OK,
           "offload_init(serial:aux:9600) handshake succeeded");

@@ -7,8 +7,9 @@
 ## Transport
 
 The protocol is transport-agnostic: it runs identically over `pipe:`
-(host self-test), `tcp:host:port` (host, and the mock gateway), and a
-future `serial:device:baud` (Atari RS232, M6.3 -- not yet implemented).
+(host self-test), `tcp:host:port` (host, and the mock gateway), and
+`serial:device:baud[:flow]` (Atari RS232 over the AUX BIOS device,
+implemented in T6.3; `flow` is none|soft|hard|both, default none).
 Framing, CRC, and payload shapes below never change based on transport;
 only `plat_transport_open`'s endpoint string does. See
 `engine/include/platform.h` and `offload/transport/wire.h` for where this

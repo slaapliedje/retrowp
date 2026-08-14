@@ -209,7 +209,10 @@ wp_status plat_dialog_choice(plat_window *parent,
    socket, pipe, or serial port itself. Each backend interprets `endpoint`
    by prefix and owns everything past that:
      platform/host:  "pipe:<path>", "tcp:<host>:<port>"
-     platform/atari (future): "serial:<device>:<baud>", "tcp:<host>:<port>"
+     platform/atari: "serial:<device>:<baud>[:<flow>]", <flow> being one
+                     of none|soft|hard|both and defaulting to none.
+                     "tcp:" is WP_UNSUPPORTED there -- plain TOS has no
+                     sockets; see docs/atari-platform.md.
    Swapping transports for a new target means implementing these four
    functions again -- no change to offload.h, offload_client.c, or
    offload/transport is required. */

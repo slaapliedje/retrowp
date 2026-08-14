@@ -13,23 +13,41 @@
    confirmed. `endpoint` prefixes other than "serial:" (including
    "tcp:") are WP_UNSUPPORTED here, honestly, not silently accepted. */
 
-/* endpoint format: "serial:<device>:<baud>" (platform.h's own doc
-   comment already establishes this convention). <device> is currently
-   unused/unvalidated beyond "non-empty" -- the ST has exactly one
-   serial port (AUX), so there is nothing to select, but the field is
+/* endpoint format: "serial:<device>:<baud>[:<flow>]" (platform.h's own
+   doc comment already establishes the first three fields). <device> is
+   currently unused/unvalidated beyond "non-empty" -- the ST has exactly
+   one serial port (AUX), so there is nothing to select, but the field is
    kept in the endpoint string for forward compatibility with the
-   pipe:/tcp: endpoints' shape. */
-static wp_bool parse_baud(const char *s, short *out_idx)
+   pipe:/tcp: endpoints' shape.
+
+   BAUD CEILING. 19200 is not a limit this file invented: it is the top
+   of Rsconf()'s speed table (BAUD_19200 == 0 in mint/ostruct.h, and the
+   XBIOS #15 documentation lists exactly 0=19200 .. 15=50). On the ST
+   that ceiling is the MFP 68901's timer-D baud generator. Machines with
+   an SCC (Z85C30 -- Mega STE, TT, Falcon) can drive the line far faster,
+   but not through this BIOS entry point: reaching those rates needs
+   either HSMODEM (which extends the BIOS with additional speed indices)
+   or direct SCC register programming (WR12/WR13 time constants), both of
+   which are machine-specific and outside the plain-TOS baseline this
+   backend targets. So the table below is complete and correct for the
+   interface actually being used; a faster link is a separate piece of
+   work, not a missing case here. */
+static wp_bool parse_baud(const char *s, const char *end, short *out_idx)
 {
     long value = 0;
     wp_bool any_digit = WP_FALSE;
 
-    while (*s >= '0' && *s <= '9') {
+    while (s < end && *s >= '0' && *s <= '9') {
         value = value * 10 + (long)(*s - '0');
+        /* Bail the moment we exceed the fastest supported rate. Besides
+           rejecting junk early, this bounds `value` so a long digit run
+           cannot overflow a 32-bit long (signed overflow is undefined,
+           and the previous unbounded loop could reach it). */
+        if (value > 19200L) return WP_FALSE;
         s++;
         any_digit = WP_TRUE;
     }
-    if (!any_digit || *s != '\0') return WP_FALSE;
+    if (!any_digit || s != end) return WP_FALSE;
 
     switch (value) {
     case 19200: *out_idx = BAUD_19200; return WP_TRUE;
@@ -52,6 +70,41 @@ static wp_bool parse_baud(const char *s, short *out_idx)
     }
 }
 
+/* Optional 4th endpoint field. OPT-IN ON PURPOSE, and the default stays
+   "none" (i.e. exactly the previous behaviour): a great many retro
+   serial rigs are wired with a 3-wire cable (TX/RX/GND only). On such a
+   cable CTS is never asserted, so with FLOW_HARD selected Bcostat()
+   never reports ready and every plat_transport_write would time out --
+   a silent default of "hard" would turn a working link into a dead one.
+   The caller has to say it wants handshaking, and is thereby asserting
+   the cable actually carries RTS/CTS.
+
+   Worth it where the cable does: FLOW_NONE with a polled BIOS AUX device
+   has no way to push back on a fast sender, which is survivable for this
+   protocol's short CRC-framed request/response traffic (a dropped byte
+   costs one frame, and wire.c resyncs) but not for sustained bulk. */
+static wp_bool parse_flow(const char *s, short *out_flow)
+{
+    if (strcmp(s, "none") == 0) { *out_flow = FLOW_NONE; return WP_TRUE; }
+    if (strcmp(s, "soft") == 0) { *out_flow = FLOW_SOFT; return WP_TRUE; }
+    if (strcmp(s, "hard") == 0) { *out_flow = FLOW_HARD; return WP_TRUE; }
+    if (strcmp(s, "both") == 0) { *out_flow = FLOW_BOTH; return WP_TRUE; }
+    return WP_FALSE;
+}
+
+/* strrchr() bounded by an explicit end, since the fields of the endpoint
+   are not individually NUL-terminated and C89 has no strndup to lean on. */
+static const char *last_colon_before(const char *s, const char *end)
+{
+    const char *found = NULL;
+    const char *p;
+
+    for (p = s; p < end; p++) {
+        if (*p == ':') found = p;
+    }
+    return found;
+}
+
 /* AUX is a single global BIOS device -- no per-open state beyond a
    non-NULL handle is strictly needed, but a real (trivial) allocation
    keeps this backend symmetric with plat_transport_close's mem_free
@@ -66,7 +119,9 @@ wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
     atari_transport *t;
     const char *rest;
     const char *colon;
+    const char *baud_end;
     short baud_idx;
+    short flow;
 
     WP_UNUSED(connect_timeout_ms); /* Rsconf takes effect immediately --
                                        there is no connection handshake
@@ -75,21 +130,35 @@ wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
     if (strncmp(endpoint, "serial:", 7) != 0) return WP_UNSUPPORTED;
     rest = endpoint + 7;
 
+    /* The trailing field is consumed as <flow> ONLY if it actually spells
+       a flow keyword. That keeps every previously valid endpoint parsing
+       to the identical result -- including a <device> containing colons,
+       which the old strrchr() form accepted ("serial:a:b:9600" still
+       means device "a:b", baud 9600, and not a device "a" with a bogus
+       flow of "9600"). */
+    flow = FLOW_NONE;
+    baud_end = rest + strlen(rest);
     colon = strrchr(rest, ':');
-    if (colon == NULL || colon == rest || colon[1] == '\0') return WP_ERR;
-    if (!parse_baud(colon + 1, &baud_idx)) return WP_ERR;
+    if (colon != NULL && parse_flow(colon + 1, &flow)) {
+        baud_end = colon;
+    }
+
+    colon = last_colon_before(rest, baud_end);
+    if (colon == NULL || colon == rest) return WP_ERR; /* need a non-empty <device> */
+    if (!parse_baud(colon + 1, baud_end, &baud_idx)) return WP_ERR;
 
     t = (atari_transport *)mem_alloc((u32)sizeof(atari_transport));
     if (t == NULL) return WP_NOMEM;
     t->opened = WP_TRUE;
 
-    /* 8N1, async /16 clock, receiver enabled, no flow control.
+    /* 8N1, async /16 clock, receiver enabled, flow control as requested
+       by the endpoint (FLOW_NONE unless asked otherwise).
        RS_INQUIRE (-1) for tsr/scr means "leave unchanged" -- the same
        -1-means-inquire/no-change idiom mint/ostruct.h uses consistently
        elsewhere (SERIAL_NOCHANGE, DISK_NOCHANGE, PRT_INQUIRE, ...);
        there is no documented transmit-side bit list on this system to
        set explicitly (docs/atari-platform.md). */
-    Rsconf(baud_idx, FLOW_NONE,
+    Rsconf(baud_idx, flow,
            (short)(RS_8BITS | RS_1STOP | RS_CLK16),
            RS_RECVENABLE,
            (short)RS_INQUIRE, (short)RS_INQUIRE);
