@@ -15,6 +15,7 @@
 #include <gem.h>
 #include "types.h"
 #include "app_shell_internal.h"
+#include "metrics_atari_internal.h"   /* wp_atari_font_selfcheck */
 
 /* GCC can prove the string-pointer argument is unused by the asm's
    output and eliminate the caller's push of it entirely (confirmed via
@@ -143,6 +144,9 @@ int main(void)
 
     check(wp_atari_layout_selfcheck(),
           "VDI-fed relayout wraps to >1 line, no line exceeds its column");
+
+    check(wp_atari_font_selfcheck(),
+          "body-text font cell is text-shaped in MICRONS on this screen mode");
 
     check(wp_atari_file_clipboard_selfcheck(),
           "plat_file_* and plat_clipboard_* round-trip a fixture byte-identical");

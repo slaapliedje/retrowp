@@ -82,6 +82,14 @@ void atari_select_font(VdiHdl vdi, const atari_font *f);
    every draw -- a fresh v_opnvwk handle starts with neither. */
 void atari_ensure_gdos_fonts(VdiHdl vdi);
 
+/* Asserts the font picked for real body sizes is text-shaped in PHYSICAL
+   units on the current screen -- the invariant ST Medium was violating
+   (a 12pt document drawn in a cell 4.4x taller than wide). Lives with
+   the metrics code rather than in app_shell.c's selfchecks because it
+   needs the micron figures and the discovered size table, both private
+   to metrics_atari.c. */
+wp_bool wp_atari_font_selfcheck(void);
+
 /* plat_gc for this backend: a real window's VDI handle plus the AES
    window handle it belongs to (needed for wind_get_grect-based clipping
    during redraw). Callers (app_shell.c) construct one directly -- there

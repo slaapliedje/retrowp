@@ -28,6 +28,29 @@ static i32 g_dpi_x = ATARI_ASSUMED_DPI;
 static i32 g_dpi_y = ATARI_ASSUMED_DPI;
 static i32 g_num_colors = 2; /* conservative (mono) until queried */
 
+/* Real pixel size in microns, kept alongside the derived DPI because
+   font selection below compares PHYSICAL cell dimensions and doing that
+   from an already-rounded integer DPI throws away the precision that
+   makes the comparison meaningful at these tiny sizes. */
+static i32 g_px_um_x = 25400L / ATARI_ASSUMED_DPI;
+static i32 g_px_um_y = 25400L / ATARI_ASSUMED_DPI;
+
+/* The distinct fonts this workstation can actually produce, discovered
+   once by sweeping vst_point (see build_font_table). Six entries is the
+   real count on stock TOS/EmuTOS; the cap is generous for a GDOS that
+   offers more. */
+#define ATARI_MAX_FONT_SIZES 24
+typedef struct {
+    short pt;      /* the vst_point argument that selects this cell */
+    short cell_w;
+    short cell_h;
+} atari_font_size;
+
+static atari_font_size g_font_sizes[ATARI_MAX_FONT_SIZES];
+static short g_font_size_count = 0;
+
+static void build_font_table(void);
+
 static wp_status ensure_metrics_vdi(void)
 {
     short work_in[11];
@@ -53,11 +76,11 @@ static wp_status ensure_metrics_vdi(void)
        by zero or silently truncate to a 0 DPI. */
     if (work_out[3] > 0) {
         dpi = 25400L / (i32)work_out[3];
-        if (dpi > 0) g_dpi_x = dpi;
+        if (dpi > 0) { g_dpi_x = dpi; g_px_um_x = (i32)work_out[3]; }
     }
     if (work_out[4] > 0) {
         dpi = 25400L / (i32)work_out[4];
-        if (dpi > 0) g_dpi_y = dpi;
+        if (dpi > 0) { g_dpi_y = dpi; g_px_um_y = (i32)work_out[4]; }
     }
 
     /* work_out[13]: number of colors this device supports (standard
@@ -68,8 +91,133 @@ static wp_status ensure_metrics_vdi(void)
     if (work_out[13] > 0) g_num_colors = (i32)work_out[13];
 
     atari_ensure_gdos_fonts(g_metrics_vdi);
+    build_font_table();
 
     return WP_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* Picking a font by PHYSICAL size, not by VDI's declared point size    */
+/* ------------------------------------------------------------------ */
+
+/* Why this exists at all.
+ *
+ * vst_point()'s point-size -> font mapping is IDENTICAL in every screen
+ * mode. Measured directly on EmuTOS, sweeping 1..48pt in both:
+ *
+ *     ST Medium 640x200          ST High 640x400
+ *      1pt -> cell  6x6           1pt -> cell  6x6
+ *      9pt -> cell  8x8           9pt -> cell  8x8
+ *     10pt -> cell  8x16         10pt -> cell  8x16
+ *     16pt -> cell 12x12         16pt -> cell 12x12
+ *     18pt -> cell 16x16         18pt -> cell 16x16
+ *     20pt -> cell 16x32         20pt -> cell 16x32
+ *
+ * Byte-for-byte the same table. But the PIXELS are not: Medium reports
+ * 169x372 microns (pixels 2.2x taller than wide), High reports 372x372
+ * (square). So VDI's declared point sizes are only meaningful on a
+ * square-pixel device, and taking them at face value -- which this file
+ * did, passing size_twips/20 straight to vst_point -- picks a font by a
+ * number that does not describe the screen it is about to be drawn on.
+ *
+ * Concretely, the bug that prompted this: a 12pt document in Medium got
+ * cell 8x16, which at 169x372 microns is 1352 x 5952 -- a glyph cell
+ * 4.4x taller than wide, against GEM's own chrome in the same mode,
+ * which uses 8x8 (2.2x). Document text rendered at double the height it
+ * should be and looked stretched. The identical cell in High is
+ * 2976x5952, a perfectly normal 1:2 text cell, which is why this only
+ * ever looked wrong in Medium.
+ *
+ * So: choose by real physical dimensions, using the per-axis micron
+ * figures the workstation already reports. Two filters, in order:
+ *
+ *   1. Reject cells whose PHYSICAL shape is not text-shaped -- height
+ *      between 1.6x and 3.0x the width. This is what actually excludes
+ *      8x16 in Medium (4.4x) and 12x12 in High (1.0x), without either
+ *      mode being special-cased anywhere.
+ *   2. Among the survivors take the one whose physical height is
+ *      nearest the requested size.
+ *
+ * The bounds are deliberately wide. They are not trying to express a
+ * typographic ideal; they only have to separate "a cell meant for this
+ * pixel aspect" from "a cell meant for the other one", and the two
+ * groups sit at 2.2x and 4.4x (Medium) or 1.0x and 2.0x (High) -- far
+ * apart, with 1.6/3.0 comfortably between them either way. */
+#define ATARI_ASPECT_MIN_10  16   /* height >= 1.6 * width  */
+#define ATARI_ASPECT_MAX_10  30   /* height <= 3.0 * width  */
+
+static void build_font_table(void)
+{
+    short pt;
+    short charw, charh, cellw, cellh;
+    short prev_w = -1, prev_h = -1;
+
+    g_font_size_count = 0;
+
+    /* 1..48pt covers every distinct cell stock TOS can produce with room
+       to spare (the largest, 16x32, appears at 20pt). Consecutive
+       duplicates are skipped, so the table holds one entry per distinct
+       cell together with the LOWEST point size that selects it. */
+    for (pt = 1; pt <= 48 && g_font_size_count < ATARI_MAX_FONT_SIZES; pt++) {
+        vst_point(g_metrics_vdi, pt, &charw, &charh, &cellw, &cellh);
+        if (cellw == prev_w && cellh == prev_h) continue;
+        if (cellw <= 0 || cellh <= 0) continue;
+        prev_w = cellw;
+        prev_h = cellh;
+        g_font_sizes[g_font_size_count].pt = pt;
+        g_font_sizes[g_font_size_count].cell_w = cellw;
+        g_font_sizes[g_font_size_count].cell_h = cellh;
+        g_font_size_count++;
+    }
+}
+
+/* Returns the vst_point argument whose resulting cell best matches
+   size_twips physically. Falls back to the plain points conversion if
+   the table is somehow empty, so this can never return something
+   vst_point would reject. */
+static short pick_point_size(i32 size_twips)
+{
+    i32 target_um;
+    i32 best_delta = 0;
+    short best_pt = 0;
+    short i;
+    short pass;
+
+    if (g_font_size_count == 0) {
+        short pt = (short)(size_twips / 20);
+        return (pt < 1) ? (short)1 : pt;
+    }
+
+    /* twips -> microns: 1440 twips and 25400 microns to the inch, i.e.
+       x * 635 / 36. Kept as one multiply-then-divide so a small size
+       does not round to nothing. */
+    target_um = (size_twips * 635L) / 36L;
+
+    /* pass 0 applies the aspect filter; pass 1 repeats without it, so a
+       device whose every cell fails (some future GDOS, a printer) still
+       gets the nearest height rather than nothing at all. */
+    for (pass = 0; pass < 2 && best_pt == 0; pass++) {
+        for (i = 0; i < g_font_size_count; i++) {
+            i32 phys_w = (i32)g_font_sizes[i].cell_w * g_px_um_x;
+            i32 phys_h = (i32)g_font_sizes[i].cell_h * g_px_um_y;
+            i32 delta;
+
+            if (pass == 0) {
+                if (phys_h * 10L < phys_w * ATARI_ASPECT_MIN_10) continue;
+                if (phys_h * 10L > phys_w * ATARI_ASPECT_MAX_10) continue;
+            }
+
+            delta = phys_h - target_um;
+            if (delta < 0) delta = -delta;
+
+            if (best_pt == 0 || delta < best_delta) {
+                best_delta = delta;
+                best_pt = g_font_sizes[i].pt;
+            }
+        }
+    }
+
+    return best_pt;
 }
 
 void atari_ensure_gdos_fonts(VdiHdl vdi)
@@ -158,13 +306,76 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
     f = (atari_font *)mem_alloc((u32)sizeof(atari_font));
     if (f == NULL) return WP_NOMEM;
 
-    pt = (short)(size_twips / 20);
+    /* NOT size_twips/20. point_size holds the vst_point ARGUMENT that
+       yields the right physical cell on this screen, which is not the
+       document's point size except by coincidence -- see pick_point_size
+       for the measurements. Every consumer (atari_select_font,
+       plat_font_metrics_get, draw_atari.c) already treats this field as
+       "what to hand vst_point", so nothing downstream changes. */
+    pt = pick_point_size(size_twips);
     if (pt < 1) pt = 1;
     f->point_size = pt;
     f->style_flags = style_flags;
 
     *out = (plat_font *)f;
     return WP_OK;
+}
+
+/* Proves the font actually chosen for body text is shaped like text ON
+   THIS SCREEN, which is precisely what was wrong before: in ST Medium a
+   12pt document resolved to cell 8x16 = 1352 x 5952 microns, a glyph
+   cell 4.4x taller than wide, and nothing anywhere noticed. The existing
+   layout selfcheck could not have caught it -- it asserts wrapping is
+   internally consistent, and wrapping stayed perfectly consistent while
+   every glyph was being drawn at double height.
+
+   Deliberately expressed in MICRONS, not pixels. A pixel-space
+   assertion is unfalsifiable here: cell 8x16 is 1:2 in pixels in every
+   mode, which reads as correct on paper and is exactly the reasoning
+   that let this through. The physical figures are what differ between
+   Medium and High, so they are what the check has to use.
+
+   CI boots Medium (--tos-res med, host/tools/atari_ci_lib.sh), so this
+   runs in the mode that was broken. */
+wp_bool wp_atari_font_selfcheck(void)
+{
+    static const i32 sizes[] = { 160, 240, 480 };  /* 8pt, 12pt, 24pt */
+    u32 i;
+
+    if (ensure_metrics_vdi() != WP_OK) return WP_FALSE;
+
+    /* The sweep must have found something, and every entry must be
+       usable -- an empty table silently sends pick_point_size down its
+       points-conversion fallback, i.e. straight back to the old bug. */
+    if (g_font_size_count <= 0) return WP_FALSE;
+    if (g_px_um_x <= 0 || g_px_um_y <= 0) return WP_FALSE;
+
+    for (i = 0; i < (u32)g_font_size_count; i++) {
+        if (g_font_sizes[i].cell_w <= 0 || g_font_sizes[i].cell_h <= 0) return WP_FALSE;
+        if (g_font_sizes[i].pt <= 0) return WP_FALSE;
+    }
+
+    for (i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        plat_font *pf;
+        atari_font *af;
+        short charw, charh, cellw, cellh;
+        i32 phys_w, phys_h;
+
+        if (plat_font_open(NULL, 0, sizes[i], 0, &pf) != WP_OK) return WP_FALSE;
+        af = (atari_font *)pf;
+        vst_point(g_metrics_vdi, af->point_size, &charw, &charh, &cellw, &cellh);
+        plat_font_close(pf);
+
+        if (cellw <= 0 || cellh <= 0) return WP_FALSE;
+
+        phys_w = (i32)cellw * g_px_um_x;
+        phys_h = (i32)cellh * g_px_um_y;
+
+        if (phys_h * 10L < phys_w * ATARI_ASPECT_MIN_10) return WP_FALSE;
+        if (phys_h * 10L > phys_w * ATARI_ASPECT_MAX_10) return WP_FALSE;
+    }
+
+    return WP_TRUE;
 }
 
 void plat_font_close(plat_font *f)
