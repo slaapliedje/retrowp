@@ -49,6 +49,14 @@ typedef struct {
 static atari_font_size g_font_sizes[ATARI_MAX_FONT_SIZES];
 static short g_font_size_count = 0;
 
+/* The AES's own character cell for this screen mode -- 8x8 in ST Medium,
+   8x16 in ST High, straight from graf_handle. This is the font GEM draws
+   every menu, title and dialog in, so it is the machine's own answer to
+   "what does normal text look like here", and pick_point_size anchors
+   the document's default body size to it. */
+static short g_sys_cell_w = 0;
+static short g_sys_cell_h = 0;
+
 static void build_font_table(void);
 
 static wp_status ensure_metrics_vdi(void)
@@ -60,7 +68,10 @@ static wp_status ensure_metrics_vdi(void)
 
     if (g_metrics_vdi != 0) return WP_OK;
 
-    handle = graf_handle(&dummy, &dummy, &dummy, &dummy);
+    {
+        short box_w, box_h;
+        handle = graf_handle(&g_sys_cell_w, &g_sys_cell_h, &box_w, &box_h);
+    }
     for (dummy = 0; dummy < 10; dummy++) work_in[dummy] = 1;
     work_in[10] = 2; /* raster coordinates */
     v_opnvwk(work_in, &handle, work_out);
@@ -171,13 +182,47 @@ static void build_font_table(void)
     }
 }
 
-/* Returns the vst_point argument whose resulting cell best matches
-   size_twips physically. Falls back to the plain points conversion if
-   the table is somehow empty, so this can never return something
-   vst_point would reject. */
+/* The document's own default body size (docmodel.c: default_cs.size_twips
+   = 240, 12pt). Not exported by any engine header, so it is restated
+   here as what it is used for: the size that should come out looking
+   like the machine's normal text, i.e. the anchor the scale below is
+   pinned to. */
+#define ATARI_REFERENCE_BODY_TWIPS 240
+
+/* Returns the vst_point argument whose cell best matches size_twips on
+   THIS screen.
+ *
+ * The target is expressed relative to the AES system cell rather than in
+ * absolute physical units, and that choice is worth stating plainly
+ * because the obvious alternative is wrong in practice.
+ *
+ * Matching absolute physical height is more "correct" in the abstract: a
+ * 12pt line really is 4233 microns, and in Medium the cell nearest that
+ * is 12x12. But the ST's whole font inventory is six cells, and pinning
+ * 12pt to 12x12 yields 53 columns across a 640-pixel screen in a mode
+ * whose native text grid is 80. GEM's own chrome runs at 8x8 there. A
+ * word processor that gives you 53 columns on an 80-column screen, in a
+ * font a third larger than everything else on the desktop, is not more
+ * correct for being arithmetically defensible.
+ *
+ * So the reference body size is defined to BE the system cell, and other
+ * sizes scale from it. 12pt lands on 8x8 in Medium (80 columns) and 8x16
+ * in High (80 columns) -- matching what the AES itself uses in each mode,
+ * which is the same answer GEM reaches and the reason both look right.
+ * Relative sizing survives: 8pt still comes out smaller and 24pt still
+ * comes out roughly twice the body size, so the Font Size dialog keeps
+ * meaning something.
+ *
+ * The physical aspect filter still applies on top, and is still what
+ * stops Medium from picking a cell built for square pixels -- the
+ * original defect. Scaling changed WHICH text-shaped cell gets chosen;
+ * it did not reintroduce the possibility of choosing a wrong-shaped one.
+ *
+ * Falls back to the plain points conversion only if the sweep found
+ * nothing, so this can never return something vst_point would reject. */
 static short pick_point_size(i32 size_twips)
 {
-    i32 target_um;
+    i32 target_px_h;
     i32 best_delta = 0;
     short best_pt = 0;
     short i;
@@ -188,10 +233,18 @@ static short pick_point_size(i32 size_twips)
         return (pt < 1) ? (short)1 : pt;
     }
 
-    /* twips -> microns: 1440 twips and 25400 microns to the inch, i.e.
-       x * 635 / 36. Kept as one multiply-then-divide so a small size
-       does not round to nothing. */
-    target_um = (size_twips * 635L) / 36L;
+    /* Target cell height in device pixels, scaled from the system cell.
+       g_sys_cell_h is whatever the AES reports for this mode (8 in
+       Medium, 16 in High), so this needs no per-mode knowledge. */
+    if (g_sys_cell_h > 0) {
+        target_px_h = ((i32)g_sys_cell_h * size_twips) / ATARI_REFERENCE_BODY_TWIPS;
+    } else {
+        /* No usable system cell: fall back to real physical height,
+           twips -> microns -> pixels (1440 twips / 25400 microns per
+           inch, i.e. x * 635 / 36). */
+        target_px_h = ((size_twips * 635L) / 36L) / (g_px_um_y > 0 ? g_px_um_y : 1);
+    }
+    if (target_px_h < 1) target_px_h = 1;
 
     /* pass 0 applies the aspect filter; pass 1 repeats without it, so a
        device whose every cell fails (some future GDOS, a printer) still
@@ -207,7 +260,7 @@ static short pick_point_size(i32 size_twips)
                 if (phys_h * 10L > phys_w * ATARI_ASPECT_MAX_10) continue;
             }
 
-            delta = phys_h - target_um;
+            delta = (i32)g_font_sizes[i].cell_h - target_px_h;
             if (delta < 0) delta = -delta;
 
             if (best_pt == 0 || delta < best_delta) {
@@ -234,28 +287,48 @@ void atari_ensure_gdos_fonts(VdiHdl vdi)
     if (vq_gdos() != 0) vst_load_fonts(vdi, 0);
 }
 
+/* Round to nearest, not toward zero.
+ *
+ * These conversions are applied per-component and then summed, so a
+ * consistent downward bias accumulates into a whole pixel. Found from a
+ * screenshot: with the 8x8 font, ascent 6px + descent 1px + leading 1px
+ * became 127 + 21 + 21 = 169 twips, and 169 twips back is 7.98 pixels,
+ * which truncated to 7. Lines were therefore set a pixel tighter than
+ * the font's own cell and every line clipped the tops of the one below.
+ * Three truncations of at most one twip each, compounding into a visible
+ * rendering fault. Rounding gives 8, which is exactly the cell.
+ *
+ * Negative inputs round symmetrically rather than toward negative
+ * infinity, so a coordinate and its negation stay mirror images. */
+static i32 scale_round(i32 v, i32 num, i32 den)
+{
+    if (den <= 0) return 0;
+    if (v >= 0) return (v * num + den / 2) / den;
+    return -((((-v) * num) + den / 2) / den);
+}
+
 i32 atari_twips_to_px_x(i32 twips)
 {
     ensure_metrics_vdi();
-    return (twips * g_dpi_x) / 1440;
+    return scale_round(twips, g_dpi_x, 1440);
 }
 
 i32 atari_twips_to_px_y(i32 twips)
 {
     ensure_metrics_vdi();
-    return (twips * g_dpi_y) / 1440;
+    return scale_round(twips, g_dpi_y, 1440);
 }
 
 i32 atari_px_to_twips_x(i32 px)
 {
     ensure_metrics_vdi();
-    return (px * 1440) / g_dpi_x;
+    return scale_round(px, 1440, g_dpi_x);
 }
 
 i32 atari_px_to_twips_y(i32 px)
 {
     ensure_metrics_vdi();
-    return (px * 1440) / g_dpi_y;
+    return scale_round(px, 1440, g_dpi_y);
 }
 
 i32 atari_screen_max_colors(void)
@@ -407,7 +480,24 @@ wp_status plat_font_metrics_get(plat_font *f, plat_font_metrics *out)
     out->ascent = atari_px_to_twips_y((i32)distances[3]);
     out->descent = atari_px_to_twips_y((i32)distances[1]);
     if (out->descent < 0) out->descent = 0;
-    out->leading = 0;
+
+    /* Leading is whatever the font's own CELL has left over above
+       ascent+descent, not a hardcoded 0.
+     *
+     * linebreak.c computes line height as ascent + descent + leading, so
+     * returning 0 made consecutive baselines land ascent+descent apart
+     * while the glyphs themselves occupy a full cell. For the 8x8 font
+     * that is 6+1 = 7 against a cell of 8: every line overlapped the one
+     * above by a pixel and the tops of the glyphs were clipped. It went
+     * unnoticed while the 8x16 font was being chosen, because there
+     * 11+2 = 13 fits inside a 16-pixel cell with room to spare.
+     *
+     * cellh is the pitch the font was designed to be set at, so the
+     * remainder is exactly the leading it expects. */
+    {
+        i32 gap = (i32)cellh - ((i32)distances[3] + (i32)distances[1]);
+        out->leading = (gap > 0) ? atari_px_to_twips_y(gap) : 0;
+    }
     return WP_OK;
 }
 

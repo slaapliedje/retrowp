@@ -2772,9 +2772,24 @@ wp_bool wp_atari_memory_budget_selfcheck(long *free_before_out,
         "The quick brown fox jumps over the lazy dog while the portable "
         "word processor engine proves it can handle real documents.\n";
     const u32 para_len = (u32)strlen(para_text);
-    const u32 para_count = 60; /* ~7.5KB of source text -- comfortably
-                                   multi-page at a real page size, and
-                                   comfortably small next to 1MB. */
+    const u32 para_count = 200; /* ~24KB of source text. Was 60 (~7.5KB),
+                                    which stopped being multi-page the
+                                    moment body text got smaller: picking
+                                    the 8x8 cell instead of 8x16 in ST
+                                    Medium roughly doubled the lines that
+                                    fit on an 11in page (about 47 -> 76),
+                                    and 60 paragraphs then landed on ONE
+                                    page, failing this check's own
+                                    page_count >= 2 assertion.
+
+                                    That was a stale fixture, not a
+                                    regression -- but it shows the old
+                                    margin was thin enough that a font
+                                    change could cross it silently. 200
+                                    paragraphs is ~3 pages even at the
+                                    smallest cell this backend will
+                                    choose, and still trivial next to
+                                    1MB. */
     u8 *big_text;
     u32 big_len, i;
     wp_document doc;
