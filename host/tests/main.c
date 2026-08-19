@@ -99,6 +99,10 @@ void test_vimode_count_prefix_motion(void);
 void test_vimode_dw_deletes_word(void);
 void test_vimode_dw_does_not_eat_paragraph_break(void);
 void test_vimode_dd_deletes_whole_line(void);
+void test_vimode_count_dd_deletes_multiple_lines(void);
+void test_vimode_d_count_motion_deletes_multiple_lines(void);
+void test_vimode_count_dd_undoes_as_one_step(void);
+void test_vimode_dollar_deletes_to_end_of_line(void);
 void test_vimode_dd_on_last_paragraph_merges_upward(void);
 void test_vimode_yy_p_duplicates_line_below(void);
 void test_vimode_cw_change_word(void);
@@ -589,6 +593,10 @@ static const test_case g_cases[] = {
     { "vimode_dw_deletes_word", test_vimode_dw_deletes_word },
     { "vimode_dw_does_not_eat_paragraph_break", test_vimode_dw_does_not_eat_paragraph_break },
     { "vimode_dd_deletes_whole_line", test_vimode_dd_deletes_whole_line },
+    { "vimode_count_dd_deletes_multiple_lines", test_vimode_count_dd_deletes_multiple_lines },
+    { "vimode_d_count_motion_deletes_multiple_lines", test_vimode_d_count_motion_deletes_multiple_lines },
+    { "vimode_count_dd_undoes_as_one_step", test_vimode_count_dd_undoes_as_one_step },
+    { "vimode_dollar_deletes_to_end_of_line", test_vimode_dollar_deletes_to_end_of_line },
     { "vimode_dd_on_last_paragraph_merges_upward", test_vimode_dd_on_last_paragraph_merges_upward },
     { "vimode_yy_p_duplicates_line_below", test_vimode_yy_p_duplicates_line_below },
     { "vimode_cw_change_word", test_vimode_cw_change_word },

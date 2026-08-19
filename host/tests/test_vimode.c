@@ -65,6 +65,30 @@ static void build_doc_two_paras(wp_document *doc, const char *p0, const char *p1
     ASSERT_TRUE(wp_paragraph_run_add(para, span, doc->default_cstyle, &run_idx) == WP_OK);
 }
 
+/* Builds a section of `count` one-run paragraphs, for the multi-line
+   operator cases below -- build_doc_two_paras cannot express "delete
+   three of these and check two survive". */
+static void build_doc_paras(wp_document *doc, const char *const *texts, u32 count)
+{
+    u32 sec_idx, para_idx, i;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_span span;
+    u16 run_idx;
+
+    ASSERT_TRUE(wp_document_init(doc) == WP_OK);
+    ASSERT_TRUE(wp_document_section_add(doc, &sec_idx) == WP_OK);
+    sec = wp_document_section_get(doc, sec_idx);
+
+    for (i = 0; i < count; i++) {
+        ASSERT_TRUE(wp_section_paragraph_add(sec, &para_idx) == WP_OK);
+        para = wp_section_paragraph_get(sec, para_idx);
+        ASSERT_TRUE(wp_strpool_append(&doc->strings, (const u8 *)texts[i],
+                                       (u32)strlen(texts[i]), &span) == WP_OK);
+        ASSERT_TRUE(wp_paragraph_run_add(para, span, doc->default_cstyle, &run_idx) == WP_OK);
+    }
+}
+
 static void dump_para_text(wp_document *doc, u32 index, char *out)
 {
     wp_section *sec = wp_document_section_get(doc, 0);
@@ -190,6 +214,123 @@ void test_vimode_dw_does_not_eat_paragraph_break(void)
     ASSERT_EQ_STR(buf, "");
     dump_para_text(&doc, 1, buf);
     ASSERT_EQ_STR(buf, "World");
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* COUNTED OPERATORS. dd and dw were already covered; the counted forms
+   were not, and they are a different code path: the count reaching
+   apply_linewise_current_lines is effective_op_count * effective_count,
+   so "3dd", "d3d" and even "1d3d" all have to arrive at the same three
+   lines. Worth pinning down precisely because the multiplication makes
+   a plausible-looking off-by-one silently delete the wrong amount. */
+void test_vimode_count_dd_deletes_multiple_lines(void)
+{
+    static const char *const texts[5] = { "One", "Two", "Three", "Four", "Five" };
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    wp_section *sec;
+    char buf[64];
+
+    build_doc_paras(&doc, texts, 5);
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+    sec = wp_document_section_get(&doc, 0);
+
+    feed_keys(&vs, "3dd");
+
+    ASSERT_EQ_U32(sec->para_count, 2);
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "Four");
+    dump_para_text(&doc, 1, buf);
+    ASSERT_EQ_STR(buf, "Five");
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* The count AFTER the operator, applied to a motion rather than to a
+   doubled operator: d2j is "delete this line and the two below". */
+void test_vimode_d_count_motion_deletes_multiple_lines(void)
+{
+    static const char *const texts[5] = { "One", "Two", "Three", "Four", "Five" };
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    wp_section *sec;
+    char buf[64];
+
+    build_doc_paras(&doc, texts, 5);
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+    sec = wp_document_section_get(&doc, 0);
+
+    feed_keys(&vs, "d2j");
+
+    ASSERT_EQ_U32(sec->para_count, 2);
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "Four");
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* A multi-line delete must undo as ONE step, not as three. Insert
+   sessions and cw already have this guarantee pinned by their own tests
+   (see test_vimode_insert_session_undoes_as_one_step); a counted delete
+   is the same promise and would be just as annoying to get wrong --
+   three presses of u to walk back one command teaches the writer not to
+   trust undo. */
+void test_vimode_count_dd_undoes_as_one_step(void)
+{
+    static const char *const texts[4] = { "One", "Two", "Three", "Four" };
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    wp_section *sec;
+    char buf[64];
+
+    build_doc_paras(&doc, texts, 4);
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+    sec = wp_document_section_get(&doc, 0);
+
+    feed_keys(&vs, "3dd");
+    ASSERT_EQ_U32(sec->para_count, 1);
+
+    feed_keys(&vs, "u");
+
+    ASSERT_EQ_U32(sec->para_count, 4);
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "One");
+    dump_para_text(&doc, 3, buf);
+    ASSERT_EQ_STR(buf, "Four");
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_vimode_dollar_deletes_to_end_of_line(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    char buf[64];
+
+    build_doc_two_paras(&doc, "keep this", "Second");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    feed_keys(&vs, "llllld$");
+
+    dump_para_text(&doc, 0, buf);
+    ASSERT_EQ_STR(buf, "keep ");
 
     wp_vimode_free(&vs);
     wp_undo_journal_free(&journal);
