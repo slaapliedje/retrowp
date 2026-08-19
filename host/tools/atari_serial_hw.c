@@ -149,20 +149,52 @@ static void report_machine(void)
    Bconmap decides which one every Bconin/Bconout/Rsconf call below
    actually talks to. A correct cable on the wrong port is
    indistinguishable from a broken one. */
+/* The device NUMBERS are shared across machines but the NAMES are not,
+   and printing the wrong machine's name is actively misleading. Straight
+   from the Compendium's serial-port-mapping table (p.4.17):
+
+       Device   Mega ST             TT030              Falcon030
+         6      Modem 1 (ST MFP)    Modem 1 (ST MFP)   --  (absent)
+         7      Modem 2 (SCC B)     Modem 2 (SCC B)    Modem (SCC B)
+         8      Serial/LAN (SCC A)  Serial 1 (TT MFP)  LAN (SCC A)
+         9      --                  Serial 2/LAN(SCCA) --  (absent)
+
+   A Falcon has NO device 6: there is no ST-MFP serial port on it, and
+   its single DB9 is device 7, named just "Modem". Reporting that as
+   "Modem 2" -- the Mega ST/TT name -- reads as "you are on the second
+   port of a machine that only has one", which sent a real bring-up
+   looking for a port that does not exist. Labelled per machine now. */
 static void report_bconmap(void)
 {
-    long old;
+    long dev;
+    long mch = 0;
+    int is_falcon;
+
+    cookie(0x5F4D4348L /* _MCH */, &mch);
+    is_falcon = ((mch >> 16) == 3);
 
     say("\r\n--- aux: mapping ---\r\n");
     say("  Bconmap(-1) -> ");
-    old = Bconmap(-1);
-    say_num(old);
-    switch (old) {
-    case 0:  say("  (Bconmap unavailable -- ST-style single port)"); break;
-    case 6:  say("  (ST-compatible MFP / Modem 1)");                 break;
-    case 7:  say("  (Modem 2, SCC channel B)");                      break;
-    case 8:  say("  (Serial/LAN, SCC channel A)");                   break;
-    default: say("  (see XBIOS serial port mapping)");               break;
+    dev = Bconmap(-1);
+    say_num(dev);
+
+    if (is_falcon) {
+        switch (dev) {
+        case 0:  say("  (Bconmap unavailable)");                          break;
+        case 6:  say("  (?! device 6 does not exist on a Falcon)");       break;
+        case 7:  say("  (Modem, SCC channel B -- the DB9 on the back,");
+                 say("\r\n                 and the Falcon's ONLY serial port)"); break;
+        case 8:  say("  (LAN, SCC channel A -- NOT the DB9)");            break;
+        default: say("  (unexpected on a Falcon)");                       break;
+        }
+    } else {
+        switch (dev) {
+        case 0:  say("  (Bconmap unavailable -- ST-style single port)"); break;
+        case 6:  say("  (Modem 1, ST MFP)");                             break;
+        case 7:  say("  (Modem 2, SCC channel B)");                      break;
+        case 8:  say("  (Serial/LAN, SCC channel A)");                   break;
+        default: say("  (see XBIOS serial port mapping)");               break;
+        }
     }
     say("\r\n");
 }
