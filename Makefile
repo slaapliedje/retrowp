@@ -290,13 +290,28 @@ $(ATARI_BUILD)/redrawprobe/%.o: host/tools/%.c | $(ATARI_BUILD)/redrawprobe
 $(ATARI_BIN)/WMREDRAW.PRG: $(ATARI_BUILD)/redrawprobe/atari_wmredraw_probe.o | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
-$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/common $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BUILD)/convertsmoke $(ATARI_BUILD)/redrawprobe $(ATARI_BIN):
+$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/common $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BUILD)/serialhw $(ATARI_BUILD)/convertsmoke $(ATARI_BUILD)/redrawprobe $(ATARI_BIN):
 	mkdir -p $@
 
-.PHONY: atari atari-smoke atari-serial-smoke atari-convert-smoke atari-wmredraw-probe
+.PHONY: atari atari-smoke atari-serial-smoke atari-serial-hw atari-convert-smoke atari-wmredraw-probe
 atari: $(ATARI_BIN)/RETROWP.PRG
 
 atari-smoke: $(ATARI_BIN)/SMOKE.PRG
+
+# SERHW.PRG: the REAL-HARDWARE serial diagnostic. Same object set as
+# SERIALTST.PRG, but its source uses no Native Features at all -- see
+# host/tools/atari_serial_hw.c for why that distinction is load-bearing
+# (0x7300 is an illegal instruction on a real 68030, so every other
+# smoke binary in this project would crash the machine on launch).
+# Not part of any CI gate: it needs a real cable and a real gateway,
+# which is exactly the thing CI cannot supply.
+$(ATARI_BUILD)/serialhw/%.o: host/tools/%.c | $(ATARI_BUILD)/serialhw
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Ioffload/transport -c $< -o $@
+
+$(ATARI_BIN)/SERHW.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialhw/atari_serial_hw.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
+	$(ATARICC) $^ -o $@ -lgem
+
+atari-serial-hw: $(ATARI_BIN)/SERHW.PRG
 
 atari-serial-smoke: $(ATARI_BIN)/SERIALTST.PRG
 
