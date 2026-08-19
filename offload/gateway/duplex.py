@@ -53,7 +53,8 @@ if loopback_probe(fd):
     sys.exit(2)
 
 print('  loopback check passed (nothing echoed)', flush=True)
-print('  listening, and pinging "PI->ATARI" every 2s', flush=True)
+print('  listening, and streaming "PI->ATARI" continuously', flush=True)
+print('  -> the HAT TX LED should be flickering solidly RIGHT NOW', flush=True)
 
 t0 = time.monotonic()
 end = t0 + secs
@@ -64,9 +65,14 @@ pings = 0
 while time.monotonic() < end:
     now = time.monotonic()
     if now >= next_ping:
-        os.write(fd, b'PI->ATARI ping %d\r\n' % pings)
+        # A near-continuous stream, not an occasional blink. The HAT has
+        # a TX LED, and a 2-second blink is easy to miss while looking at
+        # a board from an angle; a solid flicker is unmistakable. Being
+        # able to SEE the signal reach the driver chip rules out the
+        # whole software stack in one glance.
+        os.write(fd, b'PI->ATARI ping %d ' % pings)
         pings += 1
-        next_ping = now + 2.0
+        next_ping = now + 0.05
     r, _, _ = select.select([fd], [], [], 0.25)
     if not r:
         continue
