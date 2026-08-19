@@ -36,6 +36,16 @@ from wire_protocol import open_fifo_rdwr  # noqa: E402
 # XON/XOFF in the first place.
 PATTERN = bytes(range(0, 256))
 
+# A SEPARATE, much larger payload for the timing figure, because 256
+# bytes cannot measure a fast line. At 115200 the transfer itself is 22ms
+# and the select/read loop's own overhead is comparable, so the first
+# version of this script reported 19200 running at 9600's throughput and
+# 115200 at a third of its rate -- an artifact that reads exactly like a
+# misconfigured port. 8 KiB puts every rate in this range at 99-100% of
+# theoretical, which is what makes a genuine shortfall visible.
+THROUGHPUT_BYTES = 8192
+THROUGHPUT_PATTERN = bytes((i * 7 + 3) & 0xFF for i in range(THROUGHPUT_BYTES))
+
 
 def drain(fd, timeout=0.4):
     while True:
@@ -47,6 +57,28 @@ def drain(fd, timeout=0.4):
                 return
         except OSError:
             return
+
+
+def echo(fd, payload, baud):
+    """Write payload, read it back, return (bytes_got, elapsed)."""
+    drain(fd)
+    t0 = time.monotonic()
+    os.write(fd, payload)
+
+    got = b''
+    deadline = t0 + 5.0 + len(payload) * 12.0 / baud
+    while len(got) < len(payload):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        r, _, _ = select.select([fd], [], [], remaining)
+        if not r:
+            break
+        chunk = os.read(fd, len(payload) - len(got))
+        if not chunk:
+            break
+        got += chunk
+    return got, time.monotonic() - t0
 
 
 def run(path, baud, flow):
@@ -63,7 +95,7 @@ def run(path, baud, flow):
         os.write(fd, PATTERN)
 
         got = b''
-        deadline = t0 + 5.0 + len(PATTERN) * 10.0 / baud
+        deadline = t0 + 5.0 + len(PATTERN) * 12.0 / baud
         while len(got) < len(PATTERN):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -78,9 +110,28 @@ def run(path, baud, flow):
         elapsed = time.monotonic() - t0
 
         if got == PATTERN:
-            print('OK  %d/%d bytes in %.2fs (%.0f B/s)'
-                  % (len(got), len(PATTERN), elapsed,
-                     len(got) / elapsed if elapsed else 0))
+            # All 256 byte values survived. Now measure on a payload big
+            # enough for the number to mean something -- on a FRESH fd.
+            #
+            # Not merely tidy: a preceding rtscts run with CTS low leaves
+            # its bytes stuck in the output buffer, and measuring after
+            # that on a carried-over descriptor reported each rate at the
+            # PREVIOUS one's throughput (19200 as 960 B/s, 115200 as 1920)
+            # -- a clean, plausible, entirely wrong number that looks
+            # exactly like a misconfigured port. Reopening isolates each
+            # measurement from whatever the last configuration left
+            # behind.
+            os.close(fd)
+            time.sleep(0.2)
+            fd = open_fifo_rdwr(path, baud, flow)
+            big, big_el = echo(fd, THROUGHPUT_PATTERN, baud)
+            if big == THROUGHPUT_PATTERN and big_el > 0:
+                rate = len(big) / big_el
+                print('OK  all 256 byte values, %.0f B/s (%.0f%% of theoretical)'
+                      % (rate, 100.0 * rate / (baud / 10.0)))
+            else:
+                print('OK  all 256 byte values, throughput pass returned %d/%d'
+                      % (len(big), len(THROUGHPUT_PATTERN)))
             return True
 
         missing = sorted(set(PATTERN) - set(got))
