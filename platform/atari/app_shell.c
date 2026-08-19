@@ -948,6 +948,44 @@ static wp_bool line_contains_pos(const wp_line *line, u32 run, u32 offset)
     return WP_TRUE;
 }
 
+/* Paints a white strip, clipped by whatever vs_clip the caller set.
+   Factored out because the repaint now clears in several small places
+   instead of one big one -- see paint_document's own comment. */
+static void fill_white_strip(VdiHdl vdi, i32 x, i32 y, i32 w, i32 h)
+{
+    short pxy[4];
+
+    if (w <= 0 || h <= 0) return;
+    pxy[0] = (short)x;
+    pxy[1] = (short)y;
+    pxy[2] = (short)(x + w - 1);
+    pxy[3] = (short)(y + h - 1);
+    vsf_interior(vdi, FIS_SOLID);
+    vsf_color(vdi, G_WHITE);
+    v_bar(vdi, pxy);
+}
+
+/* CLEARS AS IT DRAWS, rather than being handed an already-blanked area.
+   This is why: redraw_window used to blank the entire work area with one
+   v_bar and then repaint every visible line on top. That is right for a
+   real WM_REDRAW, but it also ran on EVERY KEYSTROKE, so deleting a
+   single character blanked and repainted the whole window. On real
+   hardware the result is a full-screen white flash per keypress --
+   reported from a Falcon030 as "the update refresh when deleting
+   characters... it is awful", and it is: the cost is not redrawing the
+   text (a two-line document is nothing to redraw) but the whole-window
+   white frame the eye sees in between.
+
+   Clearing each line's own strip immediately before drawing that line
+   keeps every white interval down to one line's height and one line's worth
+   of time, so there is never a frame in which the document is missing.
+   The strip spans the full width on purpose: it has to erase whatever
+   the PREVIOUS contents of that line were, which after a delete is
+   wider than what is about to be drawn.
+
+   Everything below the last line still needs erasing in one go -- that
+   is where lines that no longer exist used to be, and nothing draws
+   over them. */
 static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 {
     atari_gc gc;
@@ -958,7 +996,10 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     wp_bool have_font = WP_FALSE;
     i32 ascent_px = 0;
 
-    if (!g_ctx.doc_loaded) return;
+    if (!g_ctx.doc_loaded) {
+        fill_white_strip(vdi, area.g_x, area.g_y, area.g_w, area.g_h);
+        return;
+    }
 
     gc.vdi = vdi;
     gc.window_handle = window_handle;
@@ -1004,6 +1045,13 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                 wp_line_fragment frag;
 
                 if (y_px > area.g_y + area.g_h) break;
+
+                /* Erase this line's strip right before drawing it (see
+                   this function's own comment). Full width, because the
+                   text being replaced may have been longer than the text
+                   about to be drawn -- a delete is exactly that case. */
+                fill_white_strip(vdi, area.g_x, y_px, area.g_w,
+                                  atari_twips_to_px_y(line->height_twips));
 
                 /* Alignment never changes where lines BREAK (both engine
                    relayout and this paint pass use the same
@@ -1190,6 +1238,12 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
             }
         }
     }
+
+    /* Below the last line: where deleted lines used to be. Nothing in
+       the loop above draws here, so without this a document that got
+       shorter would keep showing its own ghost. */
+    fill_white_strip(vdi, area.g_x, y_px, area.g_w,
+                      (area.g_y + area.g_h) - y_px);
 
     if (font != NULL) plat_font_close(font);
 }
@@ -3449,9 +3503,12 @@ static void redraw_window(short window_handle, VdiHdl vdi)
         pxy[2] = (short)(r.g_x + r.g_w - 1);
         pxy[3] = (short)(r.g_y + r.g_h - 1);
         vs_clip(vdi, 1, pxy);
-        vsf_interior(vdi, FIS_SOLID);
-        vsf_color(vdi, G_WHITE);
-        v_bar(vdi, pxy);
+        /* No whole-area v_bar here any more: paint_document clears each
+           line's strip as it draws it, which removes the full-screen
+           white flash this used to produce on every keystroke while
+           still erasing everything that needs erasing. The clip
+           rectangle above still bounds all of it, so a partial AES
+           redraw repaints exactly its own rectangle as before. */
         paint_document(window_handle, vdi, doc_area);
         wind_get_grect(window_handle, WF_NEXTXYWH, &r);
     }
