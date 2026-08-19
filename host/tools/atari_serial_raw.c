@@ -98,15 +98,42 @@ int main(void)
      * ours, and it explains a Falcon that times out every write while
      * the identical code works on every ST. Run both rather than
      * reasoning about it: the two differ by one register bit. */
-    for (pass = 0; pass < 2; pass++) {
-        short tsr = (pass == 0) ? (short)RS_INQUIRE : (short)RS_RECVENABLE;
-
-        say(pass == 0 ? "--- TX pass A: tsr untouched (what the transport does today)\r\n"
-                      : "--- TX pass B: tsr bit0 set (transmitter explicitly enabled)\r\n");
-
-        Rsconf(BAUD_9600, FLOW_NONE,
-               (short)(RS_8BITS | RS_1STOP | RS_CLK16), RS_RECVENABLE,
-               tsr, (short)RS_INQUIRE);
+    for (pass = 0; pass < 3; pass++) {
+        switch (pass) {
+        case 0:
+            say("--- TX pass A: tsr untouched (what the transport does today)\r\n");
+            Rsconf(BAUD_9600, FLOW_NONE,
+                   (short)(RS_8BITS | RS_1STOP | RS_CLK16), RS_RECVENABLE,
+                   (short)RS_INQUIRE, (short)RS_INQUIRE);
+            break;
+        case 1:
+            say("--- TX pass B: tsr bit0 set (transmitter explicitly enabled)\r\n");
+            Rsconf(BAUD_9600, FLOW_NONE,
+                   (short)(RS_8BITS | RS_1STOP | RS_CLK16), RS_RECVENABLE,
+                   (short)RS_RECVENABLE, (short)RS_INQUIRE);
+            break;
+        default:
+            /* Pass C: touch NOTHING but baud and flow.
+             *
+             * ucr/rsr/tsr are MFP 68901 register bit patterns. On a
+             * Falcon aux: is the SCC (Z85C30), an entirely different
+             * chip, so those values are at best meaningless there and at
+             * worst set something harmful -- the SCC's Auto Enables bit
+             * gates the transmitter on CTS, which is exactly the shape
+             * of a Bcostat that never reports ready.
+             *
+             * RS_INQUIRE for all three means "read and leave unmodified"
+             * (Compendium p.4.90), so TOS's own boot-time configuration
+             * stands and we set only the two things we actually have an
+             * opinion about. If this pass transmits while A and B do
+             * not, the transport has been mis-initialising the port on
+             * every SCC-based machine since it was written. */
+            say("--- TX pass C: baud+flow ONLY, registers untouched (RS_INQUIRE)\r\n");
+            Rsconf(BAUD_9600, FLOW_NONE,
+                   (short)RS_INQUIRE, (short)RS_INQUIRE,
+                   (short)RS_INQUIRE, (short)RS_INQUIRE);
+            break;
+        }
 
         sent = 0;
         notready = 0;
