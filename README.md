@@ -176,6 +176,26 @@ python3 offload/gateway/image_gateway.py   # Pillow-backed image downconvert
 fixture gateway used by the host test suite and every backend's own
 transport selfcheck.
 
+### Hardware for the offload side
+
+**Optional.** The engine is fully functional with no offload device
+attached. If you do want one, the verified setup is a Raspberry Pi with
+an RS-232 HAT, a full-handshake null modem cable, and a USB microphone
+for dictation:
+
+| Part | Used here |
+| --- | --- |
+| Single-board computer | Raspberry Pi 5 |
+| RS-232 level shifter | byte2bot Pi Serial Modem HAT (DB9, MAX3232) |
+| Cable | DB9 null modem, female–female, full handshake |
+| Microphone | TONOR TC-777 USB (any mic `arecord -l` can see) |
+| Speech model | whisper.cpp + `ggml-base.en.bin` |
+
+[`docs/hardware.md`](docs/hardware.md) has the cable pinout, the Pi 5
+UART and `pinctrl` gotchas, signal levels, the Atari/MiNT serial traps,
+and the two on-target diagnostic tools — most of it learned the
+expensive way on real machines.
+
 ## Documentation
 
 - [`docs/document-model.md`](docs/document-model.md) — the single source
@@ -189,5 +209,7 @@ transport selfcheck.
   wire protocol.
 - [`docs/*-platform.md`](docs) — per-backend bring-up notes, real bugs
   found, and every emulator-specific gotcha.
+- [`docs/hardware.md`](docs/hardware.md) — the offload box: parts, cable
+  pinout, UART setup, and the serial gotchas that cost real time.
 - [`docs/milestones.md`](docs/milestones.md) — the complete task-by-task
   build history, M0 through M15.
