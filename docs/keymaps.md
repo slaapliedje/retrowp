@@ -127,6 +127,56 @@ against building a shared registry ahead of need:
 modules ahead of need and it was never built ("format_txt is still
 called directly by name everywhere").
 
+## vi (the default)
+
+Reference table for the scheme `keymap=vi` selects, which is also the
+default when the config file is absent or unreadable. The design
+rationale — why motions operate on logical paragraphs rather than wrapped
+lines, and why the caret is an insertion point rather than vim's
+on-character block — lives in [`vimode.md`](vimode.md); this is the
+binding list.
+
+Every plain-letter command requires an UNMODIFIED key. vi-mode claims no
+control codes at all, precisely so the Ctrl space stays free for the
+application actions in the table above.
+
+| Command | Key(s) |
+|---|---|
+| Char left / right | `h` / `l` |
+| Paragraph up / down | `k` / `j` |
+| Word forward (punct-aware / whitespace-only) | `w` / `W` |
+| Word back (punct-aware / whitespace-only) | `b` / `B` |
+| Word end (punct-aware / whitespace-only) | `e` / `E` |
+| Line start / first non-blank / line end | `0` / `^` / `$` |
+| Paragraph block back / forward | `{` / `}` |
+| Document start / end | `gg` / `G` |
+| Go to paragraph N | `N gg` or `N G` |
+| Repeat a motion N times | `N` before the motion, e.g. `3j` |
+| Insert before / after cursor | `i` / `a` |
+| Insert at line start / end | `I` / `A` |
+| Open line below / above | `o` / `O` |
+| Leave Insert mode | `Esc` |
+| Delete char under cursor | `x` |
+| Delete line | `dd` |
+| Delete N lines | `N dd` (e.g. `3dd`) |
+| Delete over a motion | `d` + motion (e.g. `dw`, `d$`, `d2j`) |
+| Change over a motion | `c` + motion (e.g. `cw`) |
+| Yank line / over a motion | `yy` / `y` + motion |
+| Put after / before | `p` / `P` |
+| Undo / redo | `u` / `Ctrl+R` |
+| Visual / Visual Line mode | `v` / `V` |
+| Search forward / backward | `/` / `?` |
+| Next / previous match | `n` / `N` |
+| Substitute in paragraph | `:s/old/new/` |
+| Substitute everywhere | `:%s/old/new/` |
+| Substitute flags | `g` all in paragraph, `i` ignore case, `c` confirm |
+| Save / save as | `:w` / `:w name` |
+| Open a file | `:e name` |
+| Quit / save and quit | `:q` / `:x` or `:wq` |
+
+A counted operator multiplies both counts: `2d3d` and `6dd` delete the
+same six lines. A multi-line delete undoes as ONE step.
+
 ## WordStar (Phase 1)
 
 The "diamond" cursor cluster (`^S`/`^D` char, `^E`/`^X` line/paragraph,

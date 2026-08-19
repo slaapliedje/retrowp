@@ -211,5 +211,8 @@ expensive way on real machines.
   found, and every emulator-specific gotcha.
 - [`docs/hardware.md`](docs/hardware.md) — the offload box: parts, cable
   pinout, UART setup, and the serial gotchas that cost real time.
+- Keyboard reference cards — `make keycards` writes one printable card
+  per keybinding scheme to `build/generated/keycards/`, generated from
+  `docs/keymaps.md` and the action registry so they cannot drift.
 - [`docs/milestones.md`](docs/milestones.md) — the complete task-by-task
   build history, M0 through M15.

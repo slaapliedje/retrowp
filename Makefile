@@ -156,6 +156,22 @@ $(BUILD)/gen_help_guide: host/tools/gen_help_guide.c $(BUILD)/platform_common/he
 $(GENERATED)/retrowp.guide: docs/help/retrowp.help $(BUILD)/gen_help_guide | $(GENERATED)
 	$(BUILD)/gen_help_guide docs/help/retrowp.help $@ "RetroWP Help"
 
+# Printable keyboard reference cards, one per keybinding scheme -- the
+# strip that used to sit above the function keys. Generated, never hand
+# written, from the two files the app itself is built from: docs/
+# keymaps.md's own reference tables and platform/common/actions.c's
+# g_wp_actions[]. A hand-typed card is wrong the first time somebody
+# adds a binding, and a card you cannot trust is worse than none.
+#
+# Python, unlike gen_help_header/gen_help_guide above. Those are C so
+# they can link the real engine parsers; there is no engine parser for
+# Markdown, so that reason does not apply here.
+.PHONY: keycards
+keycards: $(GENERATED)/keycards/index.html
+
+$(GENERATED)/keycards/index.html: host/tools/gen_keycard.py docs/keymaps.md platform/common/actions.c | $(GENERATED)
+	python3 host/tools/gen_keycard.py . $(GENERATED)/keycards
+
 .PHONY: help-guide
 help-guide: $(GENERATED)/retrowp.guide
 
