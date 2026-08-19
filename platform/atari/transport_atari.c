@@ -2,6 +2,8 @@
 #include <string.h>
 #include <mint/osbind.h>
 #include <mint/ostruct.h>
+#include <mint/mintbind.h>
+#include <mint/dcntl.h>
 #include "platform.h"
 
 /* Real RS-232 transport (T6.3) over the ST's AUX BIOS device (DEV_AUX=1,
@@ -119,13 +121,81 @@ static const char *last_colon_before(const char *s, const char *end)
     return found;
 }
 
-/* AUX is a single global BIOS device -- no per-open state beyond a
-   non-NULL handle is strictly needed, but a real (trivial) allocation
-   keeps this backend symmetric with plat_transport_close's mem_free
-   and every other backend's opaque-handle convention. */
+/* Under plain TOS, AUX is a single global BIOS device and no per-open
+   state beyond a non-NULL handle is strictly needed. Under MiNT there
+   IS real state: an open file handle on a device node, which must be
+   carried to every read/write and closed on the way out.
+
+   WHY THE NODE EXISTS AT ALL. On a real Falcon030 under FreeMiNT, the
+   BIOS path simply does not transmit. Measured on the machine: aux: is
+   Bconmap device 7, Bconin over it receives perfectly (255 bytes of a
+   known pattern, decoded clean), and Bconout over the SAME device moves
+   zero bytes while Bcostat reports not-ready 31806, 36126 and 36072
+   times across three different Rsconf configurations. Those three
+   numbers landing within 1% of each other is the tell: MiNT intercepts
+   the BIOS serial calls and routes them through its own driver, and
+   Rsconf never reaches the state that driver is gating on -- so all
+   three "different" configurations were the same no-op.
+
+   Opening the device node instead and calling Fwrite moved 9863 bytes
+   in six seconds on that same machine, with 9865 arriving at the far
+   end (the extra two being unrelated boot noise already on the wire).
+   Same port, same cable, same baud -- only the path through the OS
+   differs.
+
+   This was NOT a handshake problem, though it spent a long time looking
+   like one. TIOCMGET on the node reports CTS=1: the wiring is good and
+   the handshake is satisfied. Anything in this file's history implying
+   a cable fault is superseded by that measurement. */
 typedef struct {
     wp_bool opened;
+    short   fd;        /* MiNT device-node handle, or -1 for the BIOS path */
 } atari_transport;
+
+#define ATARI_NO_NODE ((short)-1)
+
+/* Candidate device nodes, most-likely first, tried only after any path
+   given in the endpoint's own <device> field.
+
+   Probed rather than assumed, and both the bare and u:-prefixed spellings
+   are listed, because on the real Falcon "/dev/modem2" did NOT open while
+   "u:/dev/modem2" did. Naming has never been uniform across MiNT versions
+   and kernel serial drivers, and guessing here has already cost this
+   project real time once (a device 6 that does not exist on this machine
+   at all). */
+static const char *const atari_serial_nodes[] = {
+    "u:/dev/modem2", "/dev/modem2",
+    "u:/dev/modem1", "/dev/modem1",
+    "u:/dev/serial2", "/dev/serial2",
+    "u:/dev/serial1", "/dev/serial1",
+    (const char *)0
+};
+
+/* Opens one candidate and confirms it is really MiNT's serial driver
+   rather than something that merely happens to open.
+
+   TIOCMGET is the confirmation, and it is a deliberate choice: it is the
+   modem-status ioctl, so a node that answers it is unambiguously a
+   serial device with MiNT's driver behind it. u:/dev/aux, for instance,
+   opens perfectly well on the Falcon and then returns -32 here -- taking
+   it would have put us straight back on the path that does not
+   transmit. */
+static short open_serial_node(const char *path)
+{
+    long h;
+    long bits = 0;
+
+    if (path == (const char *)0 || *path == '\0') return ATARI_NO_NODE;
+
+    h = Fopen(path, 2);          /* read/write */
+    if (h < 0) return ATARI_NO_NODE;
+
+    if (Fcntl((short)h, (long)&bits, TIOCMGET) < 0) {
+        Fclose((short)h);
+        return ATARI_NO_NODE;
+    }
+    return (short)h;
+}
 
 wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
                                plat_transport **out)
@@ -164,6 +234,7 @@ wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
     t = (atari_transport *)mem_alloc((u32)sizeof(atari_transport));
     if (t == NULL) return WP_NOMEM;
     t->opened = WP_TRUE;
+    t->fd = ATARI_NO_NODE;
 
     /* 8N1, async /16 clock, receiver enabled, flow control as requested
        by the endpoint (FLOW_NONE unless asked otherwise).
@@ -176,6 +247,41 @@ wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
            (short)(RS_8BITS | RS_1STOP | RS_CLK16),
            RS_RECVENABLE,
            (short)RS_INQUIRE, (short)RS_INQUIRE);
+
+    /* Rsconf above is kept EXACTLY as it was, and runs on every machine
+       including the ones that then go on to use a device node. It is
+       what configures the hardware (baud, word shape, flow) and it is
+       the only configuration path that exists under plain TOS. The node,
+       when one is found, changes only how bytes are moved afterwards --
+       it is not an alternative way to configure the port, and deciding
+       baud twice through two different layers is exactly the kind of
+       half-applied state this file has been bitten by before.
+
+       Preferring a caller-named path lets an endpoint address a
+       specific port on a machine with more than one ("serial:u:/dev/
+       modem1:9600"), which the <device> field previously had no effect
+       at all on. A device that is not a path keeps its old meaning of
+       "ignored", so every endpoint that worked before still parses and
+       behaves identically. */
+    {
+        int i;
+        char devbuf[64];
+        u32 devlen = (u32)(colon - rest);
+
+        if (devlen > 0 && devlen < (u32)sizeof(devbuf)) {
+            wp_bool looks_like_path = WP_FALSE;
+            for (i = 0; i < (int)devlen; i++) {
+                devbuf[i] = rest[i];
+                if (rest[i] == '/') looks_like_path = WP_TRUE;
+            }
+            devbuf[devlen] = '\0';
+            if (looks_like_path) t->fd = open_serial_node(devbuf);
+        }
+
+        for (i = 0; t->fd == ATARI_NO_NODE && atari_serial_nodes[i] != (const char *)0; i++) {
+            t->fd = open_serial_node(atari_serial_nodes[i]);
+        }
+    }
 
     *out = (plat_transport *)t;
     return WP_OK;
@@ -193,14 +299,38 @@ wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
 wp_status plat_transport_read(plat_transport *t, u8 *out, u32 out_cap,
                                u32 timeout_ms, u32 *out_len)
 {
+    atari_transport *at = (atari_transport *)t;
     u32 deadline;
     u32 n = 0;
 
-    WP_UNUSED(t);
     if (out_len) *out_len = 0;
     if (out_cap == 0) return WP_OK;
 
     deadline = plat_ticks_ms() + timeout_ms;
+
+    /* Node path: Finstat is the non-blocking "how many bytes are
+       waiting" poll, so Fread is only ever asked for bytes that are
+       already there and can never block past the caller's deadline.
+       That matters more than it looks: a bare Fread on a tty would
+       block indefinitely, which platform.h's contract forbids and which
+       would hang the UI -- the exact failure the offload rules call out
+       ("Timeouts never hang the UI"). */
+    if (at != NULL && at->fd != ATARI_NO_NODE) {
+        long avail, got;
+
+        for (;;) {
+            avail = Finstat(at->fd);
+            if (avail > 0) break;
+            if (avail < 0) return WP_ERR;
+            if (plat_ticks_ms() >= deadline) return WP_TIMEOUT;
+        }
+        if (avail > (long)out_cap) avail = (long)out_cap;
+        got = Fread(at->fd, avail, out);
+        if (got < 0) return WP_ERR;
+        if (out_len) *out_len = (u32)got;
+        return WP_OK;
+    }
+
     while (Bconstat(DEV_AUX) == 0) {
         if (plat_ticks_ms() >= deadline) return WP_TIMEOUT;
     }
@@ -220,9 +350,34 @@ wp_status plat_transport_read(plat_transport *t, u8 *out, u32 out_cap,
 wp_status plat_transport_write(plat_transport *t, const u8 *data, u32 len,
                                 u32 timeout_ms)
 {
+    atari_transport *at = (atari_transport *)t;
     u32 i;
 
-    WP_UNUSED(t);
+    /* Node path: Fwrite may legitimately accept fewer bytes than asked
+       when the driver's output buffer is full, so loop on progress. The
+       deadline is refreshed whenever bytes actually move, which keeps
+       the per-byte budget of the BIOS path below rather than imposing
+       one flat timeout on an arbitrarily long frame. A write that
+       returns 0 repeatedly is genuinely stalled, and only that runs the
+       clock down. */
+    if (at != NULL && at->fd != ATARI_NO_NODE) {
+        u32 done = 0;
+        u32 deadline = plat_ticks_ms() + timeout_ms;
+
+        while (done < len) {
+            long w = Fwrite(at->fd, (long)(len - done), data + done);
+
+            if (w < 0) return WP_ERR;
+            if (w == 0) {
+                if (plat_ticks_ms() >= deadline) return WP_TIMEOUT;
+                continue;
+            }
+            done += (u32)w;
+            deadline = plat_ticks_ms() + timeout_ms;
+        }
+        return WP_OK;
+    }
+
     for (i = 0; i < len; i++) {
         u32 deadline = plat_ticks_ms() + timeout_ms;
 
@@ -236,5 +391,8 @@ wp_status plat_transport_write(plat_transport *t, const u8 *data, u32 len,
 
 void plat_transport_close(plat_transport *t)
 {
+    atari_transport *at = (atari_transport *)t;
+
+    if (at != NULL && at->fd != ATARI_NO_NODE) Fclose(at->fd);
     mem_free(t);
 }

@@ -76,6 +76,16 @@ static void say_num(long v)
     say(&buf[i + 1]);
 }
 
+static void say_hex2(unsigned char v)
+{
+    static const char d[] = "0123456789ABCDEF";
+    char b[3];
+    b[0] = d[(v >> 4) & 0xF];
+    b[1] = d[v & 0xF];
+    b[2] = '\0';
+    say(b);
+}
+
 static long read_hz200(void) { return *(volatile long *)0x4BAL; }
 static long ticks(void) { return Supexec(read_hz200); }
 
@@ -108,7 +118,7 @@ static void report_lines(long bits)
 int main(void)
 {
     static const char pattern[] = "RETROWP-SERMINT-0123456789\r\n";
-    long bits, rc, t_end, wrote, accepted;
+    long bits, rc, t_end, wrote, accepted, rx_total = 0;
     short fd = -1;
     const char *chosen = (const char *)0;
     int i;
@@ -177,9 +187,70 @@ int main(void)
     say("    bytes accepted by Fwrite : "); say_num(accepted); say("\r\n");
     say("    Foutstat after           : "); say_num(Foutstat(fd)); say("\r\n\r\n");
 
+    /* ---- read back through the SAME device node ----
+     *
+     * Proving the write path is only half of it. If the transport is
+     * going to abandon Bconin for this node too, the read path has to
+     * be proven on target first, because there is a specific way it can
+     * fail that would look fine in every host test: MiNT's tty layer
+     * doing CANONICAL line processing. In canonical mode Finstat
+     * reports nothing until a newline arrives, so a binary frame with
+     * no 0x0A in it would sit in the driver forever and every read
+     * would time out. The mint headers in the cross toolchain carry no
+     * sgttyb definition to settle this from the desk, so settle it on
+     * the machine.
+     *
+     * Finstat + Fread(exactly what is available) is deliberately the
+     * same shape the transport will use, so a pass here is evidence
+     * about the real code path and not about a simplified stand-in. */
+    say("--- RX test: Finstat + Fread on the SAME node, 15 seconds\r\n");
+    say("    (the far end should be streaming continuously)\r\n");
+    {
+        unsigned char rxbuf[64];
+        long avail, got, total = 0, polls = 0, first_len = 0;
+        unsigned char first[32];
+        long vmin = -1;
+
+        rc = Fcntl(fd, (long)&vmin, TIOCGVMIN);
+        say("    TIOCGVMIN -> rc "); say_num(rc);
+        say(" value "); say_num(vmin); say("\r\n");
+
+        t_end = ticks() + 15L * 200L;
+        while (ticks() < t_end) {
+            polls++;
+            avail = Finstat(fd);
+            if (avail <= 0) continue;
+            if (avail > (long)sizeof(rxbuf)) avail = (long)sizeof(rxbuf);
+            got = Fread(fd, avail, rxbuf);
+            if (got <= 0) continue;
+            if (first_len == 0) {
+                first_len = (got > 32) ? 32 : got;
+                for (i = 0; i < (int)first_len; i++) first[i] = rxbuf[i];
+            }
+            total += got;
+        }
+        say("    Finstat polls : "); say_num(polls); say("\r\n");
+        say("    bytes read    : "); say_num(total); say("\r\n");
+        if (first_len > 0) {
+            say("    first bytes   : ");
+            for (i = 0; i < (int)first_len; i++) {
+                say_hex2(first[i]); say(" ");
+            }
+            say("\r\n    as text       : ");
+            for (i = 0; i < (int)first_len; i++) {
+                char c[2];
+                c[0] = (first[i] >= 32 && first[i] < 127) ? (char)first[i] : '.';
+                c[1] = '\0';
+                say(c);
+            }
+            say("\r\n");
+        }
+        rx_total = total;
+    }
+
     bits = 0;
     rc = Fcntl(fd, (long)&bits, TIOCMGET);
-    say("--- handshake lines after the write attempt\r\n");
+    say("\r\n--- handshake lines after the write attempt\r\n");
     if (rc >= 0) report_lines(bits);
 
     say("\r\n=== READ THIS ===\r\n");
@@ -195,6 +266,15 @@ int main(void)
     if (accepted > 0) {
         say("Fwrite MOVED BYTES where Bconout could not: use the device\r\n");
         say("node on MiNT systems, not the BIOS aux: path.\r\n");
+    }
+    if (rx_total > 0) {
+        say("Fread ALSO works on this node -- the node is raw enough for\r\n");
+        say("binary frames, so the transport can use it for BOTH\r\n");
+        say("directions and drop the BIOS path entirely under MiNT.\r\n");
+    } else {
+        say("Fread got NOTHING. Either the far end was silent, or this\r\n");
+        say("node is line-buffered -- do NOT move the read path to it\r\n");
+        say("until that is distinguished.\r\n");
     }
 
     Fclose(fd);
