@@ -70,6 +70,7 @@ int main(void)
     long t_end, sent = 0, notready = 0, got = 0;
     long start;
     int i;
+    int pass;
     short key_pressed = 0;
 
     say("\033E");
@@ -80,35 +81,54 @@ int main(void)
     say_num(Bconmap(-1));
     say("\r\n");
 
-    /* 9600, no flow control, 8N1. Lowest common denominator on purpose:
-       if anything works at all it should work here, and FLOW_NONE means
-       a missing CTS cannot be the reason nothing leaves. */
-    Rsconf(BAUD_9600, FLOW_NONE,
-           (short)(RS_8BITS | RS_1STOP | RS_CLK16), RS_RECVENABLE,
-           (short)RS_INQUIRE, (short)RS_INQUIRE);
-    say("  configured 9600 8N1, no flow control\r\n\r\n");
+    /* ---- Phase 1: transmit, A/B on the TSR transmitter-enable bit ----
+     *
+     * This is the experiment the whole program exists for.
+     *
+     * plat_transport_open passes tsr = RS_INQUIRE (-1), which Rsconf
+     * documents as "read and leave unmodified" (Compendium p.4.90). Bit
+     * 0x01 of tsr is the TRANSMITTER enable, so the transport enables
+     * the receiver and never touches the transmitter. On an ST that is
+     * harmless -- TOS has already enabled the MFP's transmitter by the
+     * time any program runs -- but the Falcon's port is an SCC reached
+     * through the same BIOS call, and nothing guarantees the same
+     * starting state there.
+     *
+     * If pass B sends bytes and pass A does not, that is the bug, it is
+     * ours, and it explains a Falcon that times out every write while
+     * the identical code works on every ST. Run both rather than
+     * reasoning about it: the two differ by one register bit. */
+    for (pass = 0; pass < 2; pass++) {
+        short tsr = (pass == 0) ? (short)RS_INQUIRE : (short)RS_RECVENABLE;
 
-    /* ---- Phase 1: transmit ---- */
-    say("--- TX: sending for 10 seconds ---\r\n");
-    say("  Watch the far end for \"RETROWP-SERRAW\".\r\n");
-    start = ticks();
-    t_end = start + 10L * 200L;     /* _hz_200 ticks at 200Hz */
-    while (ticks() < t_end) {
-        for (i = 0; pattern[i] != '\0'; i++) {
-            if (Bcostat(AUX_DEV) == 0) {
-                notready++;
-                continue;           /* transmitter busy; skip, keep counting */
+        say(pass == 0 ? "--- TX pass A: tsr untouched (what the transport does today)\r\n"
+                      : "--- TX pass B: tsr bit0 set (transmitter explicitly enabled)\r\n");
+
+        Rsconf(BAUD_9600, FLOW_NONE,
+               (short)(RS_8BITS | RS_1STOP | RS_CLK16), RS_RECVENABLE,
+               tsr, (short)RS_INQUIRE);
+
+        sent = 0;
+        notready = 0;
+        start = ticks();
+        t_end = start + 6L * 200L;      /* _hz_200 ticks at 200Hz */
+        while (ticks() < t_end) {
+            for (i = 0; pattern[i] != '\0'; i++) {
+                if (Bcostat(AUX_DEV) == 0) {
+                    notready++;
+                    continue;
+                }
+                Bconout(AUX_DEV, (short)(unsigned char)pattern[i]);
+                sent++;
             }
-            Bconout(AUX_DEV, (short)(unsigned char)pattern[i]);
-            sent++;
         }
+        say("    bytes sent via Bconout : "); say_num(sent);     say("\r\n");
+        say("    Bcostat said NOT ready : "); say_num(notready); say("\r\n");
     }
-    say("  bytes handed to Bconout : "); say_num(sent);    say("\r\n");
-    say("  Bcostat said NOT ready  : "); say_num(notready); say("\r\n");
+    say("\r\n");
     if (sent == 0) {
-        say("  *** nothing could be sent at all -- the BIOS never reported\r\n");
-        say("      the transmitter ready. Something else owns this port,\r\n");
-        say("      or aux: is not the connector the cable is on.\r\n");
+        say("  *** pass B sent nothing either -- the transmitter never came\r\n");
+        say("      ready even when explicitly enabled. Not the TSR bit.\r\n");
     }
     say("\r\n");
 
@@ -128,11 +148,23 @@ int main(void)
         if (Cconis() != 0) { Cconin(); key_pressed = 1; break; }
     }
     say("\r\n  bytes received: "); say_num(got); say("\r\n");
-    if (got == 0) {
-        say("  *** nothing arrived. Combined with the TX count above:\r\n");
-        say("      TX>0 and RX=0  -> our transmit works, their->our path\r\n");
-        say("                        is broken (RX wiring, or crossover).\r\n");
-        say("      TX=0 and RX=0  -> the port itself is not reachable.\r\n");
+    if (got == 0 && sent > 0) {
+        say("  *** we transmitted but received nothing.\r\n");
+        say("      Now check the FAR END's receive count too, because the\r\n");
+        say("      two cases look identical from here and need opposite\r\n");
+        say("      fixes:\r\n");
+        say("        far end DID receive us -> only the return path is\r\n");
+        say("            broken: their TX, or our RX pin.\r\n");
+        say("        far end received NOTHING either -> both TX lines are\r\n");
+        say("            transmitting into the other's TX. The number of\r\n");
+        say("            crossovers between the two machines is wrong --\r\n");
+        say("            two DTEs need exactly ONE. A null-modem cable AND\r\n");
+        say("            a swap-jumpered adapter is two, which cancels to a\r\n");
+        say("            straight-through and is indistinguishable from a\r\n");
+        say("            dead cable. So is zero crossovers.\r\n");
+    } else if (got == 0) {
+        say("  *** nothing sent and nothing arrived -- the port itself is\r\n");
+        say("      not reachable.\r\n");
     }
 
     if (!key_pressed) {
