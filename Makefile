@@ -293,7 +293,7 @@ $(ATARI_BIN)/WMREDRAW.PRG: $(ATARI_BUILD)/redrawprobe/atari_wmredraw_probe.o | $
 $(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/common $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BUILD)/serialhw $(ATARI_BUILD)/convertsmoke $(ATARI_BUILD)/redrawprobe $(ATARI_BIN):
 	mkdir -p $@
 
-.PHONY: atari atari-smoke atari-serial-smoke atari-serial-hw atari-serial-raw atari-convert-smoke atari-wmredraw-probe
+.PHONY: atari atari-smoke atari-serial-smoke atari-serial-hw atari-serial-raw atari-serial-mint atari-convert-smoke atari-wmredraw-probe
 atari: $(ATARI_BIN)/RETROWP.PRG
 
 atari-smoke: $(ATARI_BIN)/SMOKE.PRG
@@ -319,6 +319,17 @@ $(ATARI_BIN)/SERRAW.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialhw/atari_ser
 	$(ATARICC) $^ -o $@ -lgem
 
 atari-serial-raw: $(ATARI_BIN)/SERRAW.PRG
+
+# SERMINT.PRG: reads the handshake lines from the ATARI's own side via
+# MiNT's TIOCMGET, for when SERRAW has narrowed the fault to "transmit
+# is gated" but cannot say whether CTS is actually arriving. Answers
+# with software what would otherwise need a multimeter inside an open
+# machine. MiNT-only by construction -- it says so and exits cleanly
+# when the ioctl is unavailable.
+$(ATARI_BIN)/SERMINT.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialhw/atari_serial_mint.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
+	$(ATARICC) $^ -o $@ -lgem
+
+atari-serial-mint: $(ATARI_BIN)/SERMINT.PRG
 
 atari-serial-smoke: $(ATARI_BIN)/SERIALTST.PRG
 
