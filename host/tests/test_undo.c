@@ -501,3 +501,99 @@ void test_undo_split_merge_no_leaks(void)
 
     ASSERT_EQ_U32(mem_host_live_count(), 0);
 }
+
+/* ------------------------------------------------------------------ */
+/* The unsaved-changes flag                                             */
+/* ------------------------------------------------------------------ */
+
+/* The boundary that makes this flag mean anything: a document that came
+   out of an IMPORTER is not modified -- it is exactly the file it was
+   built from -- while a document a user has edited is. Importers use the
+   raw structural functions; user edits go through the journaled
+   wp_edit_* family. Get this backwards and either every freshly opened
+   file nags on exit, or real unsaved work is discarded without a word. */
+void test_document_import_is_not_modified(void)
+{
+    static const char text[] = "Imported from disk.\n";
+    wp_document doc;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)text, (u32)(sizeof(text) - 1), &doc) == WP_OK);
+    ASSERT_TRUE(wp_document_is_modified(&doc) == WP_FALSE);
+
+    wp_document_free(&doc);
+}
+
+void test_journaled_edit_marks_document_modified(void)
+{
+    static const char text[] = "Hello\n";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_pos at;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)text, (u32)(sizeof(text) - 1), &doc) == WP_OK);
+    wp_undo_journal_init(&journal);
+    ASSERT_TRUE(wp_document_is_modified(&doc) == WP_FALSE);
+
+    at.section = 0; at.paragraph = 0; at.run = 0; at.offset = 0;
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, at, (const u8 *)"X", 1, NULL) == WP_OK);
+    ASSERT_TRUE(wp_document_is_modified(&doc) == WP_TRUE);
+
+    /* A save makes it match disk again... */
+    wp_document_mark_saved(&doc);
+    ASSERT_TRUE(wp_document_is_modified(&doc) == WP_FALSE);
+
+    /* ...and the next edit dirties it again. */
+    at.section = 0; at.paragraph = 0; at.run = 0; at.offset = 0;
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, at, (const u8 *)"Y", 1, NULL) == WP_OK);
+    ASSERT_TRUE(wp_document_is_modified(&doc) == WP_TRUE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* A rejected undo changed nothing, so it must not dirty a clean
+   document -- otherwise pressing u on a freshly opened file would invent
+   unsaved changes out of nothing and prompt on the way out. */
+void test_failed_undo_does_not_mark_modified(void)
+{
+    static const char text[] = "Untouched.\n";
+    wp_document doc;
+    wp_undo_journal journal;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)text, (u32)(sizeof(text) - 1), &doc) == WP_OK);
+    wp_undo_journal_init(&journal);
+
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_ERR);   /* nothing to undo */
+    ASSERT_TRUE(wp_document_is_modified(&doc) == WP_FALSE);
+
+    ASSERT_TRUE(wp_edit_redo(&doc, &journal) == WP_ERR);   /* nothing to redo */
+    ASSERT_TRUE(wp_document_is_modified(&doc) == WP_FALSE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* A real undo DOES mark modified, even though it may have landed back on
+   exactly what is saved. Documented conservatism, pinned so nobody
+   "fixes" it into silence without deciding to: the journal has no record
+   of which node was the save point. */
+void test_real_undo_marks_modified(void)
+{
+    static const char text[] = "Hello\n";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_pos at;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)text, (u32)(sizeof(text) - 1), &doc) == WP_OK);
+    wp_undo_journal_init(&journal);
+
+    at.section = 0; at.paragraph = 0; at.run = 0; at.offset = 0;
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, at, (const u8 *)"X", 1, NULL) == WP_OK);
+    wp_document_mark_saved(&doc);
+
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_TRUE(wp_document_is_modified(&doc) == WP_TRUE);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}

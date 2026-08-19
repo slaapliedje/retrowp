@@ -362,6 +362,10 @@ void test_undo_delete_all_cases_then_undo_redo(void);
 void test_undo_new_edit_clears_redo(void);
 void test_undo_empty_journal_returns_error(void);
 void test_undo_no_leaks(void);
+void test_document_import_is_not_modified(void);
+void test_journaled_edit_marks_document_modified(void);
+void test_failed_undo_does_not_mark_modified(void);
+void test_real_undo_marks_modified(void);
 void test_undo_fuzz_n_ops_then_n_undos_restores_original(void);
 void test_undo_split_paragraph_then_undo_then_redo(void);
 void test_undo_merge_paragraph_then_undo_then_redo(void);
@@ -827,6 +831,10 @@ static const test_case g_cases[] = {
     { "undo_new_edit_clears_redo", test_undo_new_edit_clears_redo },
     { "undo_empty_journal_returns_error", test_undo_empty_journal_returns_error },
     { "undo_no_leaks", test_undo_no_leaks },
+    { "document_import_is_not_modified", test_document_import_is_not_modified },
+    { "journaled_edit_marks_document_modified", test_journaled_edit_marks_document_modified },
+    { "failed_undo_does_not_mark_modified", test_failed_undo_does_not_mark_modified },
+    { "real_undo_marks_modified", test_real_undo_marks_modified },
     { "undo_fuzz_n_ops_then_n_undos_restores_original", test_undo_fuzz_n_ops_then_n_undos_restores_original },
     { "undo_split_paragraph_then_undo_then_redo", test_undo_split_paragraph_then_undo_then_redo },
     { "undo_merge_paragraph_then_undo_then_redo", test_undo_merge_paragraph_then_undo_then_redo },

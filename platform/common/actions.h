@@ -139,4 +139,11 @@ wp_status wp_action_dictate(struct wp_app_ctx *ctx);
    the real parsed document so a rename cannot drift past unnoticed. */
 const char *wp_action_help_node(wp_action_id id, u32 *len);
 
+/* Asks the writer before their unsaved work is thrown away. WP_TRUE
+   means "go ahead"; a clean document says so without any dialog. Every
+   path that replaces or abandons the current document -- New, Open,
+   Quit -- must gate on this. See the implementation for why Cancel is
+   the default and why a failed dialog answers "no". */
+wp_bool wp_action_confirm_discard(struct wp_app_ctx *ctx);
+
 #endif /* WP_ACTIONS_H */

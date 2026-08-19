@@ -15,6 +15,54 @@
    (this app still has no cursor-independent selection model for plain
    typing; see docs/atari-platform.md's Format controls section, a
    design carried over unchanged from before M8.5). */
+/* "You have unsaved changes -- really discard them?"
+ *
+ * Returns WP_TRUE only when it is safe to throw the current document
+ * away. Every caller that is about to replace or abandon the document
+ * (New, Open, Quit) must gate on this.
+ *
+ * Three deliberate choices about which way it fails:
+ *   - A clean document returns WP_TRUE immediately, with no dialog. A
+ *     prompt on every Quit trains people to dismiss it unread, which is
+ *     how a warning stops working.
+ *   - "Cancel" is the DEFAULT selection, not "Discard". This dialog
+ *     appears in front of someone who did not expect it; the keystroke
+ *     they fire off reflexively must be the one that keeps their work.
+ *   - If plat_dialog_choice itself fails, the answer is WP_FALSE --
+ *     refuse to discard. A backend that cannot ask must not assume
+ *     permission.
+ *
+ * Lives here rather than per-backend so all four ask the same question
+ * with the same default; a backend only has to remember to call it. */
+wp_bool wp_action_confirm_discard(wp_app_ctx *ctx)
+{
+    static const char *const k_opts[] = { "Discard changes", "Cancel" };
+    static const char k_msg[] = "Unsaved changes will be lost.";
+    const u8 *labels[2];
+    u32 lens[2];
+    wp_bool cancelled = WP_FALSE;
+    u32 chosen = 1;
+    u32 i;
+
+    if (ctx == NULL || ctx->doc == NULL) return WP_TRUE;
+    if (!ctx->doc_loaded) return WP_TRUE;
+    if (!wp_document_is_modified(ctx->doc)) return WP_TRUE;
+
+    for (i = 0; i < 2u; i++) {
+        labels[i] = (const u8 *)k_opts[i];
+        lens[i] = (u32)strlen(k_opts[i]);
+    }
+
+    if (plat_dialog_choice(ctx->window, (const u8 *)k_msg,
+                            (u32)(sizeof(k_msg) - 1),
+                            labels, lens, 2u, 1u,
+                            &cancelled, &chosen) != WP_OK) {
+        return WP_FALSE;
+    }
+    if (cancelled) return WP_FALSE;
+    return (chosen == 0u) ? WP_TRUE : WP_FALSE;
+}
+
 /* File > New: replace the document with a single empty paragraph.
  *
  * Portable rather than per-backend, so all four get it from one place --
@@ -45,6 +93,7 @@ static wp_status act_file_new(wp_app_ctx *ctx)
     const wp_para_style *def_ps;
 
     if (ctx == NULL || ctx->doc == NULL || ctx->journal == NULL) return WP_ERR;
+    if (!wp_action_confirm_discard(ctx)) return WP_OK;   /* the writer said no */
 
     if (wp_document_init(&fresh) != WP_OK) return WP_NOMEM;
     if (wp_document_section_add(&fresh, &sec_idx) != WP_OK) {
@@ -79,6 +128,7 @@ static wp_status act_file_new(wp_app_ctx *ctx)
     if (def_ps != NULL) ctx->align = def_ps->align;
 
     ctx->doc_loaded = WP_TRUE;
+    wp_document_mark_saved(ctx->doc);   /* empty and untouched, not "unsaved work" */
     return WP_OK;
 }
 
@@ -202,6 +252,12 @@ static wp_status act_edit_copy(wp_app_ctx *ctx)
 
 static wp_status act_file_quit(wp_app_ctx *ctx)
 {
+    /* Quitting throws the document away just as surely as New does, so
+       it asks the same question. Returning WP_OK on a refusal is
+       deliberate: the writer answered, the action did what they asked
+       (nothing), and reporting an error would make a backend show a
+       failure message on top of a dialog they just dismissed. */
+    if (!wp_action_confirm_discard(ctx)) return WP_OK;
     ctx->quit_requested = WP_TRUE;
     return WP_OK;
 }

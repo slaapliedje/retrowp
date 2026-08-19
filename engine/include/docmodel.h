@@ -150,6 +150,20 @@ typedef struct {
 
     wp_str title;   /* pool ref; 0 = unset */
     wp_str author;  /* pool ref; 0 = unset */
+
+    /* Set by every JOURNALED edit (the wp_edit_* family in undo.c),
+       cleared by wp_document_mark_saved. Deliberately NOT set by the raw
+       structural functions -- those are what importers build a document
+       out of, and a freshly imported document is not "modified", it is
+       exactly what is on disk.
+
+       Conservative by design: undoing back to the last saved state still
+       reports modified, because the journal has no notion of which node
+       was the save point and a pointer to one could dangle when redo
+       history is discarded. The failure that matters is not warning when
+       there ARE unsaved changes; warning once too often costs a
+       keystroke, losing someone's work does not. */
+    u8 modified;
 } wp_document;
 
 /* -- M2 (editing) shells --------------------------------------------- */
@@ -208,6 +222,13 @@ typedef struct wp_op {
    style (registered at table index 1 -- index 0 is always the reserved
    sentinel). default_cstyle/default_pstyle are set to those handles. */
 wp_status wp_document_init(wp_document *doc);
+
+/* The unsaved-changes flag above. mark_saved is called after a
+   successful save, and after a load or a New -- all three make the
+   in-memory document match what a file holds (or holds nothing, for
+   New). */
+wp_bool   wp_document_is_modified(const wp_document *doc);
+void      wp_document_mark_saved(wp_document *doc);
 void      wp_document_free(wp_document *doc);
 
 /* -- Style table management (T1.1) ------------------------------------- */

@@ -911,6 +911,12 @@ static void replace_document(wp_document *new_doc, i32 content_width_twips)
 
     def_ps = wp_document_pstyle_get(&g_doc, g_doc.default_pstyle);
     g_ctx.align = def_ps->align;
+
+    /* Every load path -- Open, the startup sample, Paste -- lands here,
+       and none of them leaves unsaved WORK behind: the document now
+       matches the thing it was built from. Marking clean here rather
+       than in each caller means a new load path cannot forget. */
+    wp_document_mark_saved(&g_doc);
 }
 
 static void set_document_from_text(const u8 *utf8, u32 len, i32 content_width_twips)
@@ -1643,6 +1649,11 @@ static void do_file_open(void)
     u32 size, read_len;
     u8 *buf;
 
+    /* Opening replaces the whole document, so it asks before discarding
+       unsaved work -- BEFORE the file picker, so the writer is not made
+       to choose a file and only then told they cannot have it. */
+    if (!wp_action_confirm_discard(&g_ctx)) return;
+
     /* T172: an ex command may already have named the file (":w foo" /
        ":e foo"), in which case the native picker is skipped entirely --
        that is the whole point: never leave the keyboard to name a file.
@@ -1729,6 +1740,11 @@ static void do_file_save(void)
         if (plat_file_open(fullpath, PLAT_FILE_WRITE, &f) == WP_OK) {
             plat_file_write(f, buf, needed);
             plat_file_close(f);
+            /* Only now is the document really on disk. Marking it clean
+               any earlier -- on entry, or after export but before the
+               write -- would have a failed save quietly convince the app
+               there was nothing left to lose. */
+            wp_document_mark_saved(&g_doc);
         }
     }
     mem_free(buf);

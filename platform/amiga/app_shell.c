@@ -308,6 +308,9 @@ static void set_document_from_text(const u8 *utf8, u32 len)
     wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id, &g_amiga_doc, &g_amiga_journal);
     (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_start(&g_amiga_doc);
     g_ctx.doc_loaded = WP_TRUE;
+    /* Every load path lands here, and none leaves unsaved WORK behind:
+       the document now matches the thing it was built from. */
+    wp_document_mark_saved(&g_amiga_doc);
     /* No "document is new" flag to set: every paragraph format_txt_import
        just built has layout == NULL, which relayout_document already
        treats as needing a rebuild -- see g_content_width_twips's comment. */
@@ -369,6 +372,11 @@ static void do_file_open(void)
     u32 size, read_len;
     u8 *buf;
 
+    /* Opening replaces the whole document, so it asks before discarding
+       unsaved work -- BEFORE the picker, so the writer is not made to
+       choose a file and only then told they cannot have it. */
+    if (!wp_action_confirm_discard(&g_ctx)) return;
+
     /* T172: an ex command may already have named the file (":w foo" /
        ":e foo"), in which case the native picker is skipped entirely --
        that is the whole point: never leave the keyboard to name a file.
@@ -417,6 +425,10 @@ static void do_file_save(void)
         if (plat_file_open(fullpath, PLAT_FILE_WRITE, &f) == WP_OK) {
             plat_file_write(f, buf, needed);
             plat_file_close(f);
+            /* Only now is the document really on disk. Marking it clean
+               any earlier would let a failed save quietly convince the
+               app there was nothing left to lose. */
+            wp_document_mark_saved(&g_amiga_doc);
         }
     }
     mem_free(buf);

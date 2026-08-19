@@ -215,6 +215,7 @@ wp_status wp_document_init(wp_document *doc)
     doc->section_capacity = 0;
     doc->title = 0;
     doc->author = 0;
+    doc->modified = 0;
 
     st = wp_strpool_init(&doc->strings);
     if (st != WP_OK) return st;
@@ -239,6 +240,16 @@ wp_status wp_document_init(wp_document *doc)
     }
 
     return WP_OK;
+}
+
+wp_bool wp_document_is_modified(const wp_document *doc)
+{
+    return (doc != NULL && doc->modified != 0) ? WP_TRUE : WP_FALSE;
+}
+
+void wp_document_mark_saved(wp_document *doc)
+{
+    if (doc != NULL) doc->modified = 0;
 }
 
 void wp_document_free(wp_document *doc)

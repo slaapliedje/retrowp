@@ -42,6 +42,21 @@ static void clear_redo(wp_undo_journal *journal)
     journal->redo_top = NULL;
 }
 
+/* What every journaled edit does once it has actually succeeded: drop
+   the redo history a new edit invalidates, and record that the document
+   no longer matches whatever is on disk.
+
+   Setting the flag HERE rather than in the raw structural functions is
+   the whole distinction. The raw functions are what importers build a
+   document out of, and a freshly imported document is not modified -- it
+   is exactly the file it came from. Only a user edit dirties it, and a
+   user edit is precisely a journaled one. */
+static void commit_edit(wp_document *doc, wp_undo_journal *journal)
+{
+    clear_redo(journal);
+    doc->modified = 1;
+}
+
 wp_status wp_edit_insert_text(wp_document *doc, wp_undo_journal *journal, wp_pos pos,
                                const u8 *utf8, u32 len, wp_pos *out_pos)
 {
@@ -66,7 +81,7 @@ wp_status wp_edit_insert_text(wp_document *doc, wp_undo_journal *journal, wp_pos
     op->style_before = 0;     /* unused for this kind */
     op->style_after = 0;
 
-    clear_redo(journal);
+    commit_edit(doc, journal);
     op->next = journal->undo_top;
     journal->undo_top = op;
 
@@ -130,7 +145,7 @@ wp_status wp_edit_delete_range(wp_document *doc, wp_undo_journal *journal,
     op->style_before = style;
     op->style_after = case_tag;
 
-    clear_redo(journal);
+    commit_edit(doc, journal);
     op->next = journal->undo_top;
     journal->undo_top = op;
 
@@ -195,7 +210,7 @@ wp_status wp_edit_split_paragraph(wp_document *doc, wp_undo_journal *journal,
     op->style_before = 0;
     op->style_after = 0;
 
-    clear_redo(journal);
+    commit_edit(doc, journal);
     op->next = journal->undo_top;
     journal->undo_top = op;
 
@@ -239,7 +254,7 @@ wp_status wp_edit_merge_paragraph(wp_document *doc, wp_undo_journal *journal,
                                             paragraph on undo */
     op->style_after = 0;
 
-    clear_redo(journal);
+    commit_edit(doc, journal);
     op->next = journal->undo_top;
     journal->undo_top = op;
 
@@ -290,7 +305,7 @@ wp_status wp_edit_insert_image(wp_document *doc, wp_undo_journal *journal,
     op->style_before = (u16)handle;  /* the registered image handle */
     op->style_after = 0;
 
-    clear_redo(journal);
+    commit_edit(doc, journal);
     op->next = journal->undo_top;
     journal->undo_top = op;
 
@@ -653,6 +668,18 @@ wp_status wp_edit_undo(wp_document *doc, wp_undo_journal *journal)
 
     if (journal->undo_top == NULL) return WP_ERR;
 
+    /* Conservative: an undo or a redo may well land the document
+       back on exactly what is saved on disk, but the journal has no
+       record of WHICH node was the save point, and a pointer to one
+       could dangle the moment redo history is discarded. So any
+       journal movement counts as modified. The cost is a warning the
+       writer did not strictly need; the alternative failure is losing
+       their work silently. Set only AFTER the nothing-to-do early
+       return: a rejected undo changed nothing and must not dirty a
+       clean document. */
+    doc->modified = 1;
+
+
     do {
         op = journal->undo_top;
         journal->undo_top = op->next;
@@ -685,6 +712,18 @@ wp_status wp_edit_redo(wp_document *doc, wp_undo_journal *journal)
     wp_status st = WP_OK;
 
     if (journal->redo_top == NULL) return WP_ERR;
+
+    /* Conservative: an undo or a redo may well land the document
+       back on exactly what is saved on disk, but the journal has no
+       record of WHICH node was the save point, and a pointer to one
+       could dangle the moment redo history is discarded. So any
+       journal movement counts as modified. The cost is a warning the
+       writer did not strictly need; the alternative failure is losing
+       their work silently. Set only AFTER the nothing-to-do early
+       return: a rejected undo changed nothing and must not dirty a
+       clean document. */
+    doc->modified = 1;
+
 
     do {
         op = journal->redo_top;
