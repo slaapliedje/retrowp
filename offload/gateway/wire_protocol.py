@@ -26,6 +26,7 @@ import select
 import socket
 import stat
 import struct
+import sys
 import termios
 import time
 
@@ -228,6 +229,11 @@ def parse_gateway_args(description=None, extra_args=None):
     parser.add_argument('--serial-baud', type=int, default=None,
                         help='line speed when --serial-rx/--serial-tx name a '
                               'real tty rather than a FIFO (ignored for FIFOs)')
+    parser.add_argument('--serial-once', action='store_true',
+                        help='serve a single handshake then exit. The default '
+                             'over serial is to serve forever -- see '
+                             'run_gateway_with_args for why one-shot is wrong '
+                             'on a line with no connection boundary.')
     parser.add_argument('--serial-flow', choices=('none', 'rtscts'), default='none',
                         help='hardware flow control on a real tty. Must match the '
                              'other end: the Atari endpoint\'s 4th field '
@@ -264,7 +270,34 @@ def run_gateway_with_args(args, handle_request, ops_supported, gateway_name):
         else:
             tx_fd = open_fifo_rdwr(args.serial_tx, baud, flow)
         print('serial', flush=True)
-        return serve(rx_fd, tx_fd, args.hello_timeout_ms, ops_supported, gateway_name, handle_request)
+
+        # SERVE FOREVER, unless explicitly told otherwise.
+        #
+        # serve() returns as soon as one handshake fails or one peer goes
+        # quiet, which is right for TCP -- accept() gives a real
+        # connection boundary there. A serial line has no such boundary.
+        # The peer can reboot, retry, or probe at the wrong baud, and
+        # none of that means "stop serving".
+        #
+        # Concretely, this was found while planning a real-hardware bring
+        # up: SERHW.PRG sweeps four baud/flow combinations in one run, so
+        # the first mismatched attempt makes read_frame see garbage,
+        # raises, and USED TO EXIT THE GATEWAY -- leaving the remaining
+        # three attempts talking to a process that was no longer there
+        # and reporting a dead link. A one-shot gateway turns "three of
+        # these four configurations were never actually tested" into
+        # "nothing works", which is the worst kind of wrong answer.
+        if getattr(args, 'serial_once', False):
+            return serve(rx_fd, tx_fd, args.hello_timeout_ms, ops_supported, gateway_name, handle_request)
+
+        cycle = 0
+        while True:
+            cycle += 1
+            print('serial: waiting for HELLO (cycle %d)' % cycle,
+                  file=sys.stderr, flush=True)
+            rc = serve(rx_fd, tx_fd, args.hello_timeout_ms, ops_supported,
+                       gateway_name, handle_request)
+            print('serial: session ended rc=%d' % rc, file=sys.stderr, flush=True)
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
