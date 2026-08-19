@@ -137,10 +137,10 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_DESK_DUMMY5,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  5, 20, 1 },
     { WP_MENU_OBJ_DESK_DUMMY6,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  6, 20, 1 },
     { WP_MENU_OBJ_DESK_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  7, 20, 1 },
-    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_OPEN,   WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE    , OS_NORMAL,   {0}, 6,  0, 8,  3 },
-    { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 8,  1 },
-    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 8,  1 },
-    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 8,  1 },
+    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_NEW,    WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE    , OS_NORMAL,   {0}, 6,  0, 8,  4 },
+    { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 8,  1 },
+    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 8,  1 },
+    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  3, 8,  1 },
     { WP_MENU_OBJ_TOOLS_BOX,     WP_MENU_OBJ_EDIT_CUT,    WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE    , OS_NORMAL,   {0}, 12, 0, 8,  3 },
     { WP_MENU_OBJ_EDIT_COPY,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 8,  1 },
     { WP_MENU_OBJ_EDIT_PASTE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 8,  1 },
@@ -169,7 +169,12 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_DROPDOWNS,     WP_MENU_OBJ_HELP_CONTENTS, WP_MENU_OBJ_HELP_FORMAT, G_BOX, OF_NONE,     OS_NORMAL,   {0}, 33, 0, 15, 3 },
     { WP_MENU_OBJ_HELP_KEYS,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 15, 1 },
     { WP_MENU_OBJ_HELP_FORMAT,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 15, 1 },
-    { WP_MENU_OBJ_HELP_BOX,      -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  2, 15, 1 }
+    { WP_MENU_OBJ_HELP_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 15, 1 },
+    /* File > New, appended (see WP_MENU_OBJ_FILE_NEW). It is the FIRST
+       child of the File box, so its ob_next is Open, not the box -- only
+       the LAST sibling in a chain wraps back to its parent. OF_LASTOB
+       lives here now, on the final array entry, and nowhere else. */
+    { WP_MENU_OBJ_FILE_OPEN,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  0, 8,  1 }
 };
 
 /* T169: how many text fragments the paint loop has actually drawn since
@@ -184,6 +189,7 @@ static char g_text_desk[]  = " Desk ";
 static char g_text_file[]  = " File ";
 static char g_text_edit[]  = " Edit ";
 static char g_text_tools[] = " Tools ";
+static char g_text_new[]   = "  New";
 static char g_text_open[]  = "  Open";
 static char g_text_save[]  = "  Save";
 static char g_text_quit[]  = "  Quit";
@@ -240,6 +246,7 @@ void wp_menu_tree_init(short wcell, short hcell,
     wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_spec.free_string = g_text_file;
     wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_spec.free_string = g_text_edit;
     wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_spec.free_string = g_text_tools;
+    wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_spec.free_string = g_text_new;
     wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_spec.free_string = g_text_open;
     wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_spec.free_string = g_text_save;
     wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_spec.free_string = g_text_quit;
@@ -365,7 +372,7 @@ static wp_bool child_chain_ok(short parent)
    the table nor the local-item list, i.e. drawn, highlightable, and
    silently inert. Bumping it remains the prompt to go wire the item up. */
 #define WP_ATARI_MENU_TITLES              6   /* Desk File Edit Tools Format Help */
-#define WP_ATARI_MENU_DISPATCHED_LEAVES  22   /* About + 3 File + 3 Edit + 4 Tools + 8 Format + 3 Help */
+#define WP_ATARI_MENU_DISPATCHED_LEAVES  23   /* About + 4 File + 3 Edit + 4 Tools + 8 Format + 3 Help */
 #define WP_ATARI_MENU_INERT_LEAVES        7   /* separator + 6 AES-reserved Desk slots */
 
 /* Defined next to the dispatch table it validates, far below -- this
@@ -546,7 +553,9 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_spec.free_string != g_text_desk_dummy6) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_next != WP_MENU_OBJ_EDIT_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_head != WP_MENU_OBJ_FILE_OPEN) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_head != WP_MENU_OBJ_FILE_NEW) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_next != WP_MENU_OBJ_FILE_OPEN) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_spec.free_string != g_text_new) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_tail != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_type != G_BOX) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
@@ -641,7 +650,21 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_HELP_KEYS].ob_spec.free_string != g_text_help_keys) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT].ob_next != WP_MENU_OBJ_HELP_BOX) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT].ob_spec.free_string != g_text_help_format) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    /* Help > Format Keys used to be the final array entry and so carried
+       OF_LASTOB. File > New was appended after it (T170), so the flag
+       moved on; this now asserts it moved OFF here, which is the half a
+       whole-array count cannot express -- the count above proves there
+       is exactly one and that it sits on the last object, but not that
+       an intermediate object was cleared rather than the count being
+       satisfied some other way. This assertion is what caught the flag
+       being left in two places during that very edit. */
+    if ((wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_type != G_STRING) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_head != -1) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_tail != -1) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
 
     /* Every item this menu bar shows must resolve to a real action, and
        every action the shared registry files under a group this backend
@@ -808,7 +831,12 @@ static const char g_sample_text[] =
     "This is RetroWP, the portable word processor engine, running on "
     "a real Atari ST under Hatari. Word wrap and on-screen rendering "
     "are driven entirely through the platform.h VDI metrics seam -- "
-    "the engine itself has never heard of GEM.\n";
+    "the engine itself has never heard of GEM.\n"
+    "\n"
+    "Press F1 at any time for the built-in manual -- it covers the "
+    "editing keys, formatting, and everything else. The Help menu "
+    "opens the same manual at Editing Keys or Format Keys directly. "
+    "File > New (Ctrl+N) starts a fresh, empty document.\n";
 
 /* Relayouts only what actually needs it: a paragraph whose layout was
    never built (layout == NULL), one the engine marked layout_dirty (any
@@ -3991,6 +4019,7 @@ typedef struct {
 } wp_menu_action_pair;
 
 static const wp_menu_action_pair g_menu_actions[] = {
+    { WP_MENU_OBJ_FILE_NEW,           WP_ACT_FILE_NEW },
     { WP_MENU_OBJ_FILE_OPEN,          WP_ACT_FILE_OPEN },
     { WP_MENU_OBJ_FILE_SAVE,          WP_ACT_FILE_SAVE },
     { WP_MENU_OBJ_FILE_QUIT,          WP_ACT_FILE_QUIT },

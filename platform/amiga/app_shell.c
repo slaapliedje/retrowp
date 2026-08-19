@@ -231,7 +231,12 @@ static const char g_sample_text[] =
     "table over a Menustrip/Menu/Menuitem hierarchy.\n"
     "\n"
     "Press j/k to move the cursor down/up, i to enter Insert mode,\n"
-    "Esc to return to Normal mode, :q Enter to quit.\n";
+    "Esc to return to Normal mode, :q Enter to quit.\n"
+    "\n"
+    "Press F1 at any time for the built-in manual -- it covers the\n"
+    "editing keys, formatting, and everything else. The Help menu\n"
+    "opens the same manual at Editing Keys or Format Keys directly.\n"
+    "File > New (Ctrl+N) starts a fresh, empty document.\n";
 
 /* Relayouts every paragraph at content_width_twips, mirroring platform/
    atari/app_shell.c's relayout_document exactly -- see docs/layout.md.

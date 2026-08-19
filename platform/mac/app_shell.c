@@ -208,7 +208,12 @@ static const char g_sample_text[] =
     "Manager calls (NewMenu/InsertMenuItem/InsertMenu).\n"
     "\n"
     "Press j/k to move the cursor down/up, i to enter Insert mode,\n"
-    "Esc to return to Normal mode, :q Enter to quit.\n";
+    "Esc to return to Normal mode, :q Enter to quit.\n"
+    "\n"
+    "Press F1 at any time for the built-in manual -- it covers the\n"
+    "editing keys, formatting, and everything else. The Help menu\n"
+    "opens the same manual at Editing Keys or Format Keys directly.\n"
+    "File > New (Ctrl+N) starts a fresh, empty document.\n";
 
 /* Relayouts only what actually needs it, mirroring platform/amiga/
    app_shell.c's relayout_document exactly -- see docs/layout.md. A

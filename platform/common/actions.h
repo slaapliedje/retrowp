@@ -23,7 +23,15 @@
    host build immediately, since no such header exists there. */
 
 typedef enum {
-    WP_ACT_FILE_OPEN = 0,
+    /* New comes first because that is where it belongs in a File menu,
+       and because backends that fold over this table in order (Amiga,
+       Mac) get the on-screen order straight from here. Inserting rather
+       than appending renumbers every id below, which is safe: no action
+       id is ever written to disk or the wire -- the config file stores
+       keymap NAMES, not action numbers -- and every reference in this
+       codebase is symbolic. */
+    WP_ACT_FILE_NEW = 0,
+    WP_ACT_FILE_OPEN,
     WP_ACT_FILE_SAVE,
     WP_ACT_FILE_QUIT,
     WP_ACT_EDIT_CUT,

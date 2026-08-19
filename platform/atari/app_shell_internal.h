@@ -200,7 +200,19 @@
 #define WP_MENU_OBJ_HELP_CONTENTS        42
 #define WP_MENU_OBJ_HELP_KEYS            43
 #define WP_MENU_OBJ_HELP_FORMAT          44
-#define WP_MENU_OBJ_COUNT        45
+/* File > New (T170). APPENDED for exactly the reason Help's block above
+   was: array position is nothing to the AES -- it walks ob_next/ob_head/
+   ob_tail indices -- while renumbering the 44 entries above is the
+   precise class of edit that has broken this tree twice. The two rules
+   that DO bind are both still honoured: OF_LASTOB moves to this new
+   final object, and the AES-reserved Desk block at 10..18 plus the
+   contiguous title run at 3..8 are untouched, so menu_sub()'s
+   (ititle - THEACTIVE - 1) arithmetic is unaffected.
+
+   Only the File dropdown's own sibling chain and item y-positions
+   change, and wp_menu_tree_selfcheck walks that chain. */
+#define WP_MENU_OBJ_FILE_NEW             45
+#define WP_MENU_OBJ_COUNT        46
 
 extern OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 

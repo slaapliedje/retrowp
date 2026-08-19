@@ -3,6 +3,8 @@
 #include "app_ctx.h"
 #include "format_txt.h"
 #include "offload.h"
+#include "keymap.h"
+#include "editing.h"
 
 /* ------------------------------------------------------------------ */
 /* Portable handlers                                                    */
@@ -13,6 +15,73 @@
    (this app still has no cursor-independent selection model for plain
    typing; see docs/atari-platform.md's Format controls section, a
    design carried over unchanged from before M8.5). */
+/* File > New: replace the document with a single empty paragraph.
+ *
+ * Portable rather than per-backend, so all four get it from one place --
+ * everything it touches (document, undo journal, keymap cursor, the
+ * current-style state) lives in wp_app_ctx already. It mirrors what the
+ * Atari backend's own replace_document() does on Open, minus the parts
+ * that are genuinely native (the file picker, the relayout, which every
+ * backend already runs before its next paint because edit.c marks
+ * paragraphs dirty).
+ *
+ * The fresh document is built and fully checked BEFORE anything existing
+ * is freed. That ordering is the whole point: if an allocation fails
+ * midway, the writer still has the document they were working on. A New
+ * that destroys the current text and THEN discovers it cannot allocate
+ * a replacement would be the worst possible failure for a word
+ * processor, and on a 1MB ST an allocation failure is a real
+ * possibility, not a theoretical one.
+ *
+ * No "save your changes first?" prompt yet -- there is no dirty flag in
+ * the document model to drive one. Worth having, and deliberately not
+ * faked here. */
+static wp_status act_file_new(wp_app_ctx *ctx)
+{
+    wp_document fresh;
+    u32 sec_idx, para_idx;
+    wp_section *sec;
+    const wp_char_style *def_cs;
+    const wp_para_style *def_ps;
+
+    if (ctx == NULL || ctx->doc == NULL || ctx->journal == NULL) return WP_ERR;
+
+    if (wp_document_init(&fresh) != WP_OK) return WP_NOMEM;
+    if (wp_document_section_add(&fresh, &sec_idx) != WP_OK) {
+        wp_document_free(&fresh);
+        return WP_NOMEM;
+    }
+    sec = wp_document_section_get(&fresh, sec_idx);
+    if (sec == NULL || wp_section_paragraph_add(sec, &para_idx) != WP_OK) {
+        wp_document_free(&fresh);
+        return WP_NOMEM;
+    }
+
+    /* Past this point nothing can fail, so the swap is safe to commit. */
+    wp_undo_journal_free(ctx->journal);
+    wp_document_free(ctx->doc);
+    *ctx->doc = fresh;
+    wp_undo_journal_init(ctx->journal);
+
+    /* The active keymap scheme was holding a cursor, registers and
+       possibly pending operator state for a document that no longer
+       exists -- reset it rather than resync it, exactly as
+       replace_document does on Open. */
+    wp_keymap_free(ctx);
+    wp_keymap_init(ctx, (wp_keymap_id)ctx->keymap_id, ctx->doc, ctx->journal);
+
+    def_cs = wp_document_cstyle_get(ctx->doc, ctx->doc->default_cstyle);
+    if (def_cs != NULL) {
+        ctx->style_flags = def_cs->flags;
+        ctx->current_size_twips = def_cs->size_twips;
+    }
+    def_ps = wp_document_pstyle_get(ctx->doc, ctx->doc->default_pstyle);
+    if (def_ps != NULL) ctx->align = def_ps->align;
+
+    ctx->doc_loaded = WP_TRUE;
+    return WP_OK;
+}
+
 static wp_status act_format_bold(wp_app_ctx *ctx)
 {
     ctx->style_flags ^= WP_STYLE_BOLD;
@@ -270,6 +339,7 @@ wp_status wp_action_dictate(wp_app_ctx *ctx)
 }
 
 const wp_action g_wp_actions[WP_ACT_COUNT] = {
+    { WP_ACT_FILE_NEW,        WP_MENU_FILE,   "New",            "Ctrl+N", 0x0E, act_file_new, NULL },
     { WP_ACT_FILE_OPEN,         WP_MENU_FILE,   "Open",           "Ctrl+O", 0x0F, NULL, NULL },
     { WP_ACT_FILE_SAVE,         WP_MENU_FILE,   "Save",           "Ctrl+S", 0x13, NULL, NULL },
     { WP_ACT_FILE_QUIT,         WP_MENU_FILE,   "Quit",           "Ctrl+Q", 0x11, act_file_quit, NULL },

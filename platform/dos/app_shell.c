@@ -211,7 +211,12 @@ static const char g_sample_text[] =
     "This is RetroWP, the portable word processor engine, running on "
     "real 16-bit DOS under Open Watcom. Word wrap and on-screen "
     "rendering are driven entirely through the platform.h metrics seam "
-    "-- the engine itself has never heard of INT 10h or INT 16h.\n";
+    "-- the engine itself has never heard of INT 10h or INT 16h.\n"
+    "\n"
+    "Press F1 at any time for the built-in manual -- it covers the "
+    "editing keys, formatting, and everything else. The Help menu "
+    "opens the same manual at Editing Keys or Format Keys directly. "
+    "File > New (Ctrl+N) starts a fresh, empty document.\n";
 
 #define WP_DOS_CONFIG_PATH "C:\\RETROWP.CFG"
 
