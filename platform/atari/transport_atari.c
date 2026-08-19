@@ -83,12 +83,26 @@ static wp_bool parse_baud(const char *s, const char *end, short *out_idx)
    has no way to push back on a fast sender, which is survivable for this
    protocol's short CRC-framed request/response traffic (a dropped byte
    costs one frame, and wire.c resyncs) but not for sustained bulk. */
+/* "soft" and "both" are DELIBERATELY ABSENT, and their absence is a
+   correctness requirement rather than an unfinished case.
+
+   FLOW_SOFT is XON/XOFF: in-band CTRL-S (0x13) and CTRL-Q (0x11)
+   (Compendium p.271, Rsconf's own flow table). This protocol's frames
+   are binary -- the 4-byte length, the 2-byte sequence and the 2-byte
+   CRC all take arbitrary values, so a payload of 17 bytes puts a literal
+   0x11 in the length field and roughly one CRC in every 128 contains an
+   0x11 or 0x13 byte. Those bytes would be consumed by the UART as flow
+   characters and never reach wire.c, which sees a short frame and a CRC
+   mismatch. Silent, intermittent, data-dependent corruption -- strictly
+   worse than refusing the endpoint outright, and exactly the kind of
+   fault that costs days to chase (see this file's own history).
+
+   RTS/CTS is out-of-band, on its own wires, so it carries no such
+   hazard. Only "none" and "hard" are offered. */
 static wp_bool parse_flow(const char *s, short *out_flow)
 {
     if (strcmp(s, "none") == 0) { *out_flow = FLOW_NONE; return WP_TRUE; }
-    if (strcmp(s, "soft") == 0) { *out_flow = FLOW_SOFT; return WP_TRUE; }
     if (strcmp(s, "hard") == 0) { *out_flow = FLOW_HARD; return WP_TRUE; }
-    if (strcmp(s, "both") == 0) { *out_flow = FLOW_BOTH; return WP_TRUE; }
     return WP_FALSE;
 }
 

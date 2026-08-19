@@ -107,9 +107,19 @@ int main(void)
               "endpoint with :hard parses and opens");
         if (tp) { plat_transport_close(tp); tp = NULL; }
 
-        check(plat_transport_open("serial:aux:19200:both", 1000, &tp) == WP_OK,
-              "19200 (the Rsconf ceiling) with :both parses and opens");
+        check(plat_transport_open("serial:aux:19200:hard", 1000, &tp) == WP_OK,
+              "19200 (the Rsconf ceiling) with :hard parses and opens");
         if (tp) { plat_transport_close(tp); tp = NULL; }
+
+        /* XON/XOFF must be refused, not quietly accepted: it is in-band
+           CTRL-S/CTRL-Q, and this protocol's length/seq/CRC fields carry
+           arbitrary binary that would be eaten as flow characters. A
+           refused endpoint is the correct outcome; a corrupt frame is
+           not. Both spellings that would enable it are checked. */
+        check(plat_transport_open("serial:aux:9600:soft", 1000, &tp) != WP_OK,
+              ":soft (XON/XOFF) is refused -- in-band bytes corrupt binary frames");
+        check(plat_transport_open("serial:aux:9600:both", 1000, &tp) != WP_OK,
+              ":both is refused for the same reason as :soft");
 
         check(plat_transport_open("serial:a:b:9600", 1000, &tp) == WP_OK,
               "device containing a colon still parses as before");

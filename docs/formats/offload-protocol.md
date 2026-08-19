@@ -9,7 +9,32 @@
 The protocol is transport-agnostic: it runs identically over `pipe:`
 (host self-test), `tcp:host:port` (host, and the mock gateway), and
 `serial:device:baud[:flow]` (Atari RS232 over the AUX BIOS device,
-implemented in T6.3; `flow` is none|soft|hard|both, default none).
+implemented in T6.3; `flow` is `none` or `hard`, default `none`).
+
+Two constraints on the serial transport are worth stating here rather
+than leaving to be rediscovered:
+
+* **19200 baud is the ceiling**, and it is a BIOS limit, not a wiring or
+  cable one: "while some ports support transfer rates of greater than
+  19200 baud, this is the limit of the `Rsconf()` call. Other rates must
+  currently be set in hardware (or with the `Fcntl()` when MiNT is
+  present)" (Atari Compendium, XBIOS serial port configuration). A faster
+  adapter on the other end changes nothing by itself -- going above 19200
+  means bypassing `Rsconf`, via HSMODEM or direct SCC programming on the
+  machines that have an SCC (Mega STE, TT, Falcon). Neither is in scope
+  for the plain-TOS baseline.
+* **XON/XOFF flow control is not offered, deliberately.** It is in-band
+  CTRL-S/CTRL-Q, and these frames are binary -- the length, sequence and
+  CRC fields all take arbitrary values, so those bytes occur naturally in
+  normal traffic and would be swallowed by the UART. `hard` (RTS/CTS) is
+  out-of-band and safe; `soft` and `both` are refused by the endpoint
+  parser rather than silently corrupting frames.
+
+Both ends must be told the same thing. The Atari's 4th endpoint field and
+the gateway's `--serial-flow` select the same behaviour, and a mismatch
+wedges the link in a way neither side can diagnose alone: if the ST asks
+for `hard` while the gateway leaves RTS/CTS off, the gateway never
+asserts RTS, `Bcostat()` never reports ready, and every write times out.
 Framing, CRC, and payload shapes below never change based on transport;
 only `plat_transport_open`'s endpoint string does. See
 `engine/include/platform.h` and `offload/transport/wire.h` for where this

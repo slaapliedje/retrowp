@@ -209,8 +209,12 @@ wp_status plat_dialog_choice(plat_window *parent,
    socket, pipe, or serial port itself. Each backend interprets `endpoint`
    by prefix and owns everything past that:
      platform/host:  "pipe:<path>", "tcp:<host>:<port>"
-     platform/atari: "serial:<device>:<baud>[:<flow>]", <flow> being one
-                     of none|soft|hard|both and defaulting to none.
+     platform/atari: "serial:<device>:<baud>[:<flow>]", <flow> being
+                     none or hard (RTS/CTS), defaulting to none. XON/XOFF
+                     is deliberately not offered -- in-band CTRL-S/CTRL-Q
+                     would be eaten out of this protocol's own binary
+                     length/seq/CRC fields; see transport_atari.c.
+                     <baud> tops out at 19200, the Rsconf() ceiling.
                      "tcp:" is WP_UNSUPPORTED there -- plain TOS has no
                      sockets; see docs/atari-platform.md.
    Swapping transports for a new target means implementing these four

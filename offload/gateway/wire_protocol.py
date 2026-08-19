@@ -108,7 +108,7 @@ def read_frame(read_fd, timeout_s):
     return {'type': msg_type, 'op': op, 'status': status, 'seq': seq}, payload
 
 
-def open_fifo_rdwr(path, baud=None):
+def open_fifo_rdwr(path, baud=None, flow='none'):
     """O_RDWR, not O_RDONLY/O_WRONLY -- avoids the classic named-FIFO
     open-blocks-until-peer-connects deadlock (same trick
     gw_common.c's gw_open_fifo_rdwr and platform/host/transport_host.c's
@@ -120,7 +120,19 @@ def open_fifo_rdwr(path, baud=None):
     device happened to be left with -- so a gateway served correctly
     over a FIFO but depended on an external `stty` having been run first
     to work over an actual cable. Configuring it here makes serial mode
-    self-contained, which is what the Atari-over-real-RS232 path needs."""
+    self-contained, which is what the Atari-over-real-RS232 path needs.
+
+    `flow` is 'none' or 'rtscts' and MUST match what the other end was
+    told to do. The Atari's endpoint carries the same choice as its
+    optional 4th field ("serial:aux:19200:hard"), and the two are not
+    independent: with the ST asking for FLOW_HARD while this side leaves
+    CRTSCTS clear, this side never asserts RTS, so the ST's Bcostat()
+    never reports the line ready and every write it attempts times out.
+    A dead link, from a mismatch neither end can detect on its own.
+
+    There is deliberately no XON/XOFF option to match, for the reason
+    platform/atari/transport_atari.c's parse_flow spells out: it is
+    in-band signalling and these frames are binary."""
     if not os.path.exists(path):
         os.mkfifo(path, 0o600)
         return os.open(path, os.O_RDWR)
@@ -150,10 +162,20 @@ def open_fifo_rdwr(path, baud=None):
         # of stream" indistinguishable to a caller reading a stream.
         cc[termios.VMIN] = 1
         cc[termios.VTIME] = 0
+
+        # CLOCAL stays set even with RTS/CTS: it governs DCD/carrier, not
+        # handshaking, and a 3-wire-plus-handshake cable still has no
+        # carrier to wait on. CRTSCTS is the separate, orthogonal bit.
+        cflag = termios.CS8 | termios.CREAD | termios.CLOCAL
+        if flow == 'rtscts':
+            cflag |= termios.CRTSCTS
+        elif flow != 'none':
+            raise GatewayError('unsupported serial flow control: %s' % flow)
+
         termios.tcsetattr(fd, termios.TCSANOW, [
             0,                                              # iflag: no IXON/ICRNL
             0,                                              # oflag: no ONLCR
-            termios.CS8 | termios.CREAD | termios.CLOCAL,   # cflag: 8N1, ignore DCD
+            cflag,                                          # 8N1, ignore DCD, +CRTSCTS
             0,                                              # lflag: no ICANON/ECHO
             speed, speed, cc,
         ])
@@ -206,6 +228,12 @@ def parse_gateway_args(description=None, extra_args=None):
     parser.add_argument('--serial-baud', type=int, default=None,
                         help='line speed when --serial-rx/--serial-tx name a '
                               'real tty rather than a FIFO (ignored for FIFOs)')
+    parser.add_argument('--serial-flow', choices=('none', 'rtscts'), default='none',
+                        help='hardware flow control on a real tty. Must match the '
+                             'other end: the Atari endpoint\'s 4th field '
+                             '("serial:aux:19200:hard") selects the same thing, and '
+                             'a mismatch silently wedges the link. No XON/XOFF '
+                             'option exists -- this protocol is binary.')
     parser.add_argument('--hello-timeout-ms', type=int, default=5000)
     if extra_args:
         for name_tuple, kwargs in extra_args:
@@ -225,7 +253,8 @@ def run_gateway_with_args(args, handle_request, ops_supported, gateway_name):
     mock_gateway.c already share), then hands off to serve()."""
     if args.serial_rx and args.serial_tx:
         baud = getattr(args, 'serial_baud', None)
-        rx_fd = open_fifo_rdwr(args.serial_rx, baud)
+        flow = getattr(args, 'serial_flow', 'none')
+        rx_fd = open_fifo_rdwr(args.serial_rx, baud, flow)
         # A single bidirectional tty is ONE fd used both ways -- opening
         # the same device twice would give two independent line
         # disciplines fighting over one UART. FIFO mode keeps two, since
@@ -233,7 +262,7 @@ def run_gateway_with_args(args, handle_request, ops_supported, gateway_name):
         if args.serial_tx == args.serial_rx and stat.S_ISCHR(os.stat(args.serial_rx).st_mode):
             tx_fd = rx_fd
         else:
-            tx_fd = open_fifo_rdwr(args.serial_tx, baud)
+            tx_fd = open_fifo_rdwr(args.serial_tx, baud, flow)
         print('serial', flush=True)
         return serve(rx_fd, tx_fd, args.hello_timeout_ms, ops_supported, gateway_name, handle_request)
 

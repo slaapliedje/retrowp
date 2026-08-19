@@ -1381,7 +1381,16 @@ static wp_bool str_ends_with_ci(const char *s, const char *suffix)
        -DWP_ATARI_OFFLOAD_ENDPOINT='"serial:aux:19200:hard"'
 
    Both ends must agree out of band; there is no baud negotiation in the
-   protocol (docs/atari-platform.md). */
+   protocol (docs/atari-platform.md). The gateway is told the same thing
+   with --serial-baud and --serial-flow, so the line above pairs with:
+
+       whisper_gateway.py --serial-rx=/dev/ttyAMA0 --serial-tx=/dev/ttyAMA0
+                          --serial-baud=19200 --serial-flow=rtscts
+
+   A flow-control mismatch is the one to watch for: asking the ST for
+   `hard` while the gateway leaves RTS/CTS off means nothing ever asserts
+   RTS, Bcostat() never reports ready, and every write times out. Neither
+   end can tell that apart from a dead cable. */
 #ifndef WP_ATARI_OFFLOAD_ENDPOINT
 #define WP_ATARI_OFFLOAD_ENDPOINT "serial:aux:9600"
 #endif
