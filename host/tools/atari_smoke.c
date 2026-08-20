@@ -154,6 +154,9 @@ int main(void)
     check(wp_atari_rtf_spell_selfcheck(),
           "RTF file round-trip + spell dictionary lookups over real Atari file I/O");
 
+    check(wp_atari_wordstar_selfcheck(),
+          "WordStar import on m68k: soft returns join, bit 7 stripped, styles survive");
+
     check(wp_atari_thesaurus_selfcheck(),
           "word-before-cursor extraction for the Thesaurus menu action");
 

@@ -7,6 +7,7 @@
 #include "layout.h"
 #include "editing.h"
 #include "format_txt.h"
+#include "format_ws.h"
 #include "metrics_dos_internal.h"
 #include "offload.h"
 #include "app_ctx.h"
@@ -805,7 +806,18 @@ static void do_file_open(void)
     buf = (u8 *)mem_alloc(size + 1);
     if (buf != NULL) {
         if (plat_file_read(f, buf, size, &read_len) == WP_OK) {
-            set_document_from_text(buf, read_len, g_content_width_twips);
+            /* WordStar is detected by CONTENT, not by name -- those
+               files carry no magic number and no reserved extension.
+               The sniff never claims plain ASCII. See
+               docs/formats/wordstar.md. */
+            if (format_ws_looks_like(buf, read_len)) {
+                wp_document ws_doc;
+                if (format_ws_import(buf, read_len, &ws_doc) == WP_OK) {
+                    replace_document(&ws_doc, g_content_width_twips);
+                }
+            } else {
+                set_document_from_text(buf, read_len, g_content_width_twips);
+            }
         }
         mem_free(buf);
     }

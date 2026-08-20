@@ -352,6 +352,7 @@ wp_bool wp_atari_rtf_spell_selfcheck(void);
    add ~2s of guaranteed-to-fail connect/handshake timeout to every
    ci_atari.sh run (no gateway is attached in that harness) for no new
    coverage. */
+wp_bool wp_atari_wordstar_selfcheck(void);
 wp_bool wp_atari_thesaurus_selfcheck(void);
 
 /* M8 T8.1/T8.2: proves the non-blocking pieces behind the Grammar Check

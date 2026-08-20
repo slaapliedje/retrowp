@@ -6,6 +6,7 @@
 #include "docmodel.h"
 #include "format_txt.h"
 #include "format_rtf.h"
+#include "format_ws.h"
 #include "layout.h"
 #include "editing.h"
 #include "app_shell.h"
@@ -1690,7 +1691,19 @@ static void do_file_open(void)
     buf = (u8 *)mem_alloc(size + 1);
     if (buf != NULL) {
         if (plat_file_read(f, buf, size, &read_len) == WP_OK) {
-            if (str_ends_with_ci(fullpath, ".RTF")) {
+                /* WordStar is detected by CONTENT, not by name: those
+                   files carry no magic number and no reserved extension
+                   -- commonly .WS, .DOC (colliding with Word), or none
+                   at all. The sniff is conservative and never claims
+                   plain ASCII, which is what WordStar's own
+                   non-document mode produced. See
+                   docs/formats/wordstar.md. */
+            if (format_ws_looks_like(buf, read_len)) {
+                wp_document ws_doc;
+                if (format_ws_import(buf, read_len, &ws_doc) == WP_OK) {
+                    replace_document(&ws_doc, g_content_width_twips);
+                }
+            } else if (str_ends_with_ci(fullpath, ".RTF")) {
                 wp_document new_doc;
                 if (format_rtf_import(buf, read_len, &new_doc) == WP_OK) {
                     replace_document(&new_doc, g_content_width_twips);
@@ -3140,6 +3153,64 @@ wp_bool wp_atari_rtf_spell_selfcheck(void)
    typed" behavior, the same spirit as many editors' Ctrl+Backspace),
    not an accident -- this selfcheck's offset=6 case exists specifically
    to pin that behavior down, not just the immediately-adjacent case. */
+/* WordStar import, on real 68000 hardware.
+ *
+ * Worth running on target rather than trusting the host tests alone,
+ * because this parser's one platform-sensitive operation is exactly the
+ * thing that differs here: it masks bit 7 off every text byte. m68k GCC
+ * makes `char` SIGNED by default, so a high-bit byte is negative, and
+ * any place the format touched a plain char instead of u8 would sign-
+ * extend and corrupt text that the host build handles perfectly. This
+ * proves the whole path -- soft returns, the high-bit flag, style
+ * toggles -- against the compiler that actually ships. */
+wp_bool wp_atari_wordstar_selfcheck(void)
+{
+    static const u8 ws[] = {
+        'W','r','a','p','p','e','d' | 0x80u,
+        0x8Du, 0x0Au,                       /* soft return: same paragraph */
+        'l','i','n','e',
+        0x0Du, 0x0Au,                       /* hard return: real break */
+        0x02u, 'b','o','l','d', 0x02u,
+        0x0Du, 0x0Au
+    };
+    wp_document doc;
+    wp_section *sec;
+    wp_paragraph *para;
+    const u8 *bytes;
+    wp_bool ok = WP_TRUE;
+
+    if (!format_ws_looks_like(ws, (u32)sizeof(ws))) return WP_FALSE;
+    if (format_ws_import(ws, (u32)sizeof(ws), &doc) != WP_OK) return WP_FALSE;
+
+    sec = wp_document_section_get(&doc, 0);
+    if (sec == NULL || sec->para_count != 2) ok = WP_FALSE;
+
+    if (ok) {
+        para = wp_section_paragraph_get(sec, 0);
+        /* "Wrapped line" -- the soft return joined, and the flagged 'd'
+           survived as 'd' rather than as a sign-extended 0xE4. */
+        if (para == NULL || para->run_count != 1) ok = WP_FALSE;
+        else {
+            bytes = wp_strpool_get(&doc.strings, para->runs[0].text);
+            if (para->runs[0].text.length != 12u) ok = WP_FALSE;
+            else if (memcmp(bytes, "Wrapped line", 12) != 0) ok = WP_FALSE;
+        }
+    }
+
+    if (ok) {
+        const wp_char_style *cs;
+        para = wp_section_paragraph_get(sec, 1);
+        if (para == NULL || para->run_count != 1) ok = WP_FALSE;
+        else {
+            cs = wp_document_cstyle_get(&doc, para->runs[0].style);
+            if (cs == NULL || (cs->flags & WP_STYLE_BOLD) == 0) ok = WP_FALSE;
+        }
+    }
+
+    wp_document_free(&doc);
+    return ok;
+}
+
 wp_bool wp_atari_thesaurus_selfcheck(void)
 {
     static const char text[] = "hello world\n";

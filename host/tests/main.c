@@ -361,6 +361,15 @@ void test_undo_insert_then_undo_then_redo(void);
 void test_undo_delete_all_cases_then_undo_redo(void);
 void test_undo_new_edit_clears_redo(void);
 void test_undo_empty_journal_returns_error(void);
+void test_ws_soft_return_joins_hard_return_splits(void);
+void test_ws_soft_return_does_not_double_space(void);
+void test_ws_high_bit_is_stripped(void);
+void test_ws_style_toggles_produce_styled_runs(void);
+void test_ws_dot_commands_dropped_but_prose_kept(void);
+void test_ws_blank_lines_survive(void);
+void test_ws_sniff_rejects_plain_text(void);
+void test_ws_garbage_still_imports(void);
+void test_ws_import_is_not_modified(void);
 void test_undo_no_leaks(void);
 void test_document_import_is_not_modified(void);
 void test_journaled_edit_marks_document_modified(void);
@@ -831,6 +840,15 @@ static const test_case g_cases[] = {
     { "undo_new_edit_clears_redo", test_undo_new_edit_clears_redo },
     { "undo_empty_journal_returns_error", test_undo_empty_journal_returns_error },
     { "undo_no_leaks", test_undo_no_leaks },
+    { "ws_soft_return_joins_hard_return_splits", test_ws_soft_return_joins_hard_return_splits },
+    { "ws_soft_return_does_not_double_space", test_ws_soft_return_does_not_double_space },
+    { "ws_high_bit_is_stripped", test_ws_high_bit_is_stripped },
+    { "ws_style_toggles_produce_styled_runs", test_ws_style_toggles_produce_styled_runs },
+    { "ws_dot_commands_dropped_but_prose_kept", test_ws_dot_commands_dropped_but_prose_kept },
+    { "ws_blank_lines_survive", test_ws_blank_lines_survive },
+    { "ws_sniff_rejects_plain_text", test_ws_sniff_rejects_plain_text },
+    { "ws_garbage_still_imports", test_ws_garbage_still_imports },
+    { "ws_import_is_not_modified", test_ws_import_is_not_modified },
     { "document_import_is_not_modified", test_document_import_is_not_modified },
     { "journaled_edit_marks_document_modified", test_journaled_edit_marks_document_modified },
     { "failed_undo_does_not_mark_modified", test_failed_undo_does_not_mark_modified },

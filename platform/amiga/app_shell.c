@@ -25,6 +25,7 @@
 #include "docmodel.h"
 #include "layout.h"
 #include "format_txt.h"
+#include "format_ws.h"
 #include "editing.h"
 #include "vimode.h"
 #include "keyevent.h"
@@ -392,7 +393,24 @@ static void do_file_open(void)
     buf = (u8 *)mem_alloc(size + 1);
     if (buf != NULL) {
         if (plat_file_read(f, buf, size, &read_len) == WP_OK) {
-            set_document_from_text(buf, read_len);
+            /* WordStar is detected by CONTENT, not by name -- those
+               files carry no magic number and no reserved extension.
+               The sniff never claims plain ASCII. See
+               docs/formats/wordstar.md. */
+            if (format_ws_looks_like(buf, read_len)) {
+                wp_document ws_doc;
+                if (format_ws_import(buf, read_len, &ws_doc) == WP_OK) {
+                    if (g_ctx.doc_loaded) wp_document_free(&g_amiga_doc);
+                    g_amiga_doc = ws_doc;
+                    wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id,
+                                    &g_amiga_doc, &g_amiga_journal);
+                    (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_start(&g_amiga_doc);
+                    g_ctx.doc_loaded = WP_TRUE;
+                    wp_document_mark_saved(&g_amiga_doc);
+                }
+            } else {
+                set_document_from_text(buf, read_len);
+            }
         }
         mem_free(buf);
     }
