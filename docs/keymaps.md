@@ -127,6 +127,39 @@ against building a shared registry ahead of need:
 modules ahead of need and it was never built ("format_txt is still
 called directly by name everywhere").
 
+## Hardware keys, and who gets F1
+
+Two machines in this project's target set have dedicated keys for things
+every other machine spends a function key on, and RetroWP ignored both
+until they were pointed out.
+
+| Key | Machines | Scan/raw code | Bound to |
+| --- | --- | --- | --- |
+| HELP | Atari ST family, Amiga | ST `0x62`, Amiga rawkey `0x5F` | Opens the built-in manual |
+| UNDO | Atari ST family | ST `0x61` | `Edit > Undo` |
+
+ST scan codes are from the Atari Compendium's IKBD table (p.787: `HELP
+0x6200`, `UNDO 0x6100`), and the Compendium separately lists `UNDO — Undo
+last operation` among the standard UI conventions (p.703), so this is
+what the platform expects rather than an invention. The Amiga's HELP sits
+at rawkey `0x5F`, immediately past the `0x50`–`0x59` F1–F10 block.
+
+**F1 is not unconditionally Help.** It means Help only when the active
+scheme does not bind it, which today means every scheme except
+WordPerfect — where F1 is Undelete, as it should be. Before this,
+every backend intercepted F1 before the scheme ever saw it, which made
+`wordperfect.c`'s Undelete case unreachable code on all four targets: the
+documentation said one thing and the program did another.
+
+On the ST and Amiga this question barely arises, because the HELP key is
+the better door and no scheme competes for it. Machines without one (DOS,
+and every Mac keyboard except the Apple Extended Keyboard II) keep F1.
+
+Pressing UNDO while a vi Insert session is still open undoes the most
+recent run rather than the whole session, because the session is not
+closed until Escape. A documented wrinkle of a global key crossing a
+modal scheme, not a defect in either.
+
 ## vi (the default)
 
 Reference table for the scheme `keymap=vi` selects, which is also the

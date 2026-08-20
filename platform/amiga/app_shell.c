@@ -1250,6 +1250,12 @@ static void translate_rawkey(struct IntuiMessage *imsg, wp_key_event *out)
         out->special = (u16)(WP_KEY_F1 + (code - 0x50));
         goto done;
     }
+    /* The Amiga's own HELP key, rawkey 0x5F -- immediately past the F1-F10
+       block above. Unhandled until now, on a keyboard that has it. */
+    if (code == 0x5F) {
+        out->special = (u16)WP_KEY_HELP;
+        goto done;
+    }
 
     memset(&ie, 0, sizeof(ie));
     ie.ie_Class = IECLASS_RAWKEY;
@@ -1291,8 +1297,20 @@ static wp_bool amiga_dispatch_key(wp_key_event ev)
         if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
         return WP_FALSE;
     }
-    if (ev.special == (u16)WP_KEY_F1) {
+    /* A dedicated HELP key beats everything: no scheme competes for it. */
+    if (ev.special == (u16)WP_KEY_HELP) {
         do_help_contents();
+        return WP_FALSE;
+    }
+    /* F1 only means Help when the active scheme does not bind it -- under
+       WordPerfect it is Undelete. */
+    if (ev.special == (u16)WP_KEY_F1 &&
+        !wp_keymap_claims_f1((wp_keymap_id)g_ctx.keymap_id)) {
+        do_help_contents();
+        return WP_FALSE;
+    }
+    if (ev.special == (u16)WP_KEY_UNDO) {
+        invoke_action(WP_ACT_EDIT_UNDO);
         return WP_FALSE;
     }
 

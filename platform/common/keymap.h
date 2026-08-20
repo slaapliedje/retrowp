@@ -37,6 +37,19 @@ typedef enum {
        full account of each. */
 } wp_keymap_id;
 
+/* Does this scheme bind plain F1 itself?
+
+   Only WordPerfect does (F1 is its Undelete), and that collided with the
+   application's own "F1 opens Help" convention -- every backend was
+   intercepting F1 before the scheme ever saw it, which made
+   wordperfect.c's Undelete case unreachable code on all four targets.
+
+   Rather than pick one binding and break the other, a backend asks: if
+   the scheme claims F1, hand it over; if not, F1 means Help. The ST and
+   Amiga are unaffected either way, since both have a real HELP key
+   (WP_KEY_HELP) that no scheme competes for. */
+wp_bool wp_keymap_claims_f1(wp_keymap_id id);
+
 typedef union {
     wp_vimode_state vi;
     wp_wordstar_state ws;

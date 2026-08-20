@@ -212,7 +212,8 @@
    Only the File dropdown's own sibling chain and item y-positions
    change, and wp_menu_tree_selfcheck walks that chain. */
 #define WP_MENU_OBJ_FILE_NEW             45
-#define WP_MENU_OBJ_COUNT        46
+#define WP_MENU_OBJ_EDIT_UNDO            46
+#define WP_MENU_OBJ_COUNT        47
 
 extern OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 

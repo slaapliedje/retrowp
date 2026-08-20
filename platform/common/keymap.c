@@ -554,3 +554,11 @@ wp_bool wp_keymap_take_pending_path(char *out, u32 out_cap)
        different file, and on a save that is silent data loss. */
     return (wp_bool)(g_pending_path[i] == '\0');
 }
+
+wp_bool wp_keymap_claims_f1(wp_keymap_id id)
+{
+    /* WordPerfect and nothing else -- see keymap.h. Word binds Shift-F4
+       and no plain F-key, so it does not compete for F1; vi and Emacs
+       bind no function keys at all. */
+    return (id == WP_KEYMAP_WORDPERFECT) ? WP_TRUE : WP_FALSE;
+}

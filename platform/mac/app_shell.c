@@ -902,7 +902,18 @@ static wp_bool mac_dispatch_key(wp_key_event ev)
         if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
         return WP_FALSE;
     }
-    if (ev.special == (u16)WP_KEY_F1) {
+    /* No 68k Mac or PC keyboard here has a dedicated HELP key, but the
+       portable event exists and costs nothing to honour -- an Apple
+       Extended Keyboard II or a future backend may well produce one. */
+    if (ev.special == (u16)WP_KEY_HELP) {
+        do_help_contents();
+        return WP_FALSE;
+    }
+    /* F1 only means Help when the active scheme does not bind it -- under
+       WordPerfect it is Undelete, and swallowing it here is what made
+       that unreachable on every backend. */
+    if (ev.special == (u16)WP_KEY_F1 &&
+        !wp_keymap_claims_f1((wp_keymap_id)g_ctx.keymap_id)) {
         do_help_contents();
         return WP_FALSE;
     }

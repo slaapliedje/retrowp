@@ -47,6 +47,64 @@ SCHEMES = [
 ]
 
 
+def strip_md(s):
+    return s.replace('`', '')
+
+
+def parse_table_under(lines, heading_prefix, header_prefix):
+    """Rows of the first `header_prefix` table under `## heading_prefix`."""
+    start = None
+    for i, ln in enumerate(lines):
+        if ln.startswith('## ') and ln[3:].startswith(heading_prefix):
+            start = i
+            break
+    if start is None:
+        return None
+    rows = []
+    in_table = False
+    for ln in lines[start + 1:]:
+        if ln.startswith('## '):
+            break
+        if ln.startswith(header_prefix):
+            in_table = True
+            continue
+        if in_table and ln.startswith('|---'):
+            continue
+        if in_table:
+            if not ln.startswith('|'):
+                in_table = False
+                continue
+            cells = [c.strip() for c in ln.strip().strip('|').split('|')]
+            # Separator rows vary in this repo: some tables write
+            # |---|---| and some | --- | --- |. Recognise both by
+            # content rather than by prefix.
+            if all(set(c) <= set('-: ') and c for c in cells):
+                continue
+            rows.append(cells)
+    return rows
+
+
+def parse_hardware_keys(md_path):
+    """The machine-specific HELP/UNDO keys.
+
+    These belong on EVERY card, not on one scheme's: an ST has a HELP key
+    whichever keybinding scheme you drive it with. Optional -- an older
+    keymaps.md without the section simply yields nothing rather than
+    failing the whole run.
+    """
+    with open(md_path, encoding='utf-8') as fh:
+        lines = fh.read().split('\n')
+    rows = parse_table_under(lines, 'Hardware keys', '| Key ')
+    if not rows:
+        return []
+    out = []
+    for cells in rows:
+        if len(cells) >= 4:
+            out.append((strip_md(cells[0]), strip_md(cells[3]),
+                        strip_md(cells[1])))
+    return out
+
+
 def parse_keymap_tables(md_path):
     """Pull each scheme's `| Command | Key(s) |` table out of keymaps.md.
 
@@ -173,11 +231,7 @@ def md_inline(s):
     return re.sub(r'`([^`]+)`', lambda m: '<code>%s</code>' % esc(m.group(1)), esc(s))
 
 
-def strip_md(s):
-    return s.replace('`', '')
-
-
-def render_html(scheme_id, display, rows, universal):
+def render_html(scheme_id, display, rows, universal, hardware=()):
     groups = {}
     order = []
     for label, hint, group in universal:
@@ -212,6 +266,15 @@ def render_html(scheme_id, display, rows, universal):
                          % (esc(label), esc(hint)))
         parts.append('</dl></div>')
 
+    if hardware:
+        parts.append('<div class="grp"><h2>Hardware keys</h2><dl>')
+        for key, action, machines in hardware:
+            parts.append('<div class="row"><span class="cmd">%s '
+                         '<span style="color:#777">(%s)</span></span>'
+                         '<span class="key"><code>%s</code></span></div>'
+                         % (esc(action), esc(machines), esc(key)))
+        parts.append('</dl></div>')
+
     parts.append('</div>')
     parts.append('<footer><span>Set <code>keymap=%s</code> in the config file.</span>'
                  '<span>F1 opens the built-in manual.</span>'
@@ -221,7 +284,7 @@ def render_html(scheme_id, display, rows, universal):
     return '\n'.join(parts) + '\n'
 
 
-def render_text(scheme_id, display, rows, universal):
+def render_text(scheme_id, display, rows, universal, hardware=()):
     def block(title, pairs):
         width = max((len(a) for a, _ in pairs), default=0)
         out = [title, '-' * len(title)]
@@ -248,7 +311,11 @@ def render_text(scheme_id, display, rows, universal):
     for group in order:
         lines += block(group, groups[group])
 
-    lines.append('F1 opens the built-in manual.')
+    if hardware:
+        lines += block('Hardware keys',
+                       [('%s (%s)' % (a, m), k) for k, a, m in hardware])
+
+    lines.append('F1 opens the built-in manual, unless the scheme binds it.')
     lines.append('Generated from docs/keymaps.md and platform/common/actions.c '
                  '-- do not edit.')
     return '\n'.join(lines) + '\n'
@@ -278,6 +345,7 @@ def main():
 
     tables = parse_keymap_tables(os.path.join(root, 'docs', 'keymaps.md'))
     universal = parse_actions(os.path.join(root, 'platform', 'common', 'actions.c'))
+    hardware = parse_hardware_keys(os.path.join(root, 'docs', 'keymaps.md'))
 
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
@@ -287,17 +355,17 @@ def main():
         rows = tables[scheme_id]
         with open(os.path.join(outdir, scheme_id + '.html'), 'w',
                   encoding='utf-8') as fh:
-            fh.write(render_html(scheme_id, display, rows, universal))
+            fh.write(render_html(scheme_id, display, rows, universal, hardware))
         with open(os.path.join(outdir, scheme_id + '.txt'), 'w',
                   encoding='utf-8') as fh:
-            fh.write(render_text(scheme_id, display, rows, universal))
+            fh.write(render_text(scheme_id, display, rows, universal, hardware))
         entries.append((scheme_id, display, len(rows)))
 
     with open(os.path.join(outdir, 'index.html'), 'w', encoding='utf-8') as fh:
         fh.write(render_index(entries))
 
-    print('gen_keycard: %d cards, %d universal shortcuts -> %s'
-          % (len(entries), len(universal), outdir))
+    print('gen_keycard: %d cards, %d universal shortcuts, %d hardware keys -> %s'
+          % (len(entries), len(universal), len(hardware), outdir))
     for scheme_id, display, count in entries:
         print('  %-12s %3d scheme bindings' % (scheme_id, count))
 

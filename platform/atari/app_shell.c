@@ -141,10 +141,10 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 8,  1 },
     { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 8,  1 },
     { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  3, 8,  1 },
-    { WP_MENU_OBJ_TOOLS_BOX,     WP_MENU_OBJ_EDIT_CUT,    WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE    , OS_NORMAL,   {0}, 12, 0, 8,  3 },
-    { WP_MENU_OBJ_EDIT_COPY,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 8,  1 },
-    { WP_MENU_OBJ_EDIT_PASTE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 8,  1 },
-    { WP_MENU_OBJ_EDIT_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 8,  1 },
+    { WP_MENU_OBJ_TOOLS_BOX,     WP_MENU_OBJ_EDIT_UNDO,   WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE    , OS_NORMAL,   {0}, 12, 0, 8,  4 },
+    { WP_MENU_OBJ_EDIT_COPY,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 8,  1 },
+    { WP_MENU_OBJ_EDIT_PASTE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  2, 8,  1 },
+    { WP_MENU_OBJ_EDIT_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  3, 8,  1 },
     { WP_MENU_OBJ_FORMAT_BOX,    WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_CHAT, G_BOX, OF_NONE    , OS_NORMAL, {0}, 18, 0, 16, 4 },
     { WP_MENU_OBJ_TOOLS_THESAURUS, -1,                    -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 16, 1 },
     { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, -1,                 -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  1, 16, 1 },
@@ -174,7 +174,12 @@ OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
        child of the File box, so its ob_next is Open, not the box -- only
        the LAST sibling in a chain wraps back to its parent. OF_LASTOB
        lives here now, on the final array entry, and nowhere else. */
-    { WP_MENU_OBJ_FILE_OPEN,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  0, 8,  1 }
+    { WP_MENU_OBJ_FILE_OPEN,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   {0}, 0,  0, 8,  1 },
+    /* Edit > Undo, appended for the same reason File > New above was:
+       array position is nothing to the AES, and renumbering is what has
+       broken this tree twice. First child of the Edit box, so its
+       ob_next is Cut. OF_LASTOB lives here now. */
+    { WP_MENU_OBJ_EDIT_CUT,      -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   {0}, 0,  0, 8,  1 }
 };
 
 /* T169: how many text fragments the paint loop has actually drawn since
@@ -193,6 +198,7 @@ static char g_text_new[]   = "  New";
 static char g_text_open[]  = "  Open";
 static char g_text_save[]  = "  Save";
 static char g_text_quit[]  = "  Quit";
+static char g_text_undo[]  = "  Undo";
 static char g_text_cut[]   = "  Cut";
 static char g_text_copy[]  = "  Copy";
 static char g_text_paste[] = "  Paste";
@@ -250,6 +256,7 @@ void wp_menu_tree_init(short wcell, short hcell,
     wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_spec.free_string = g_text_open;
     wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_spec.free_string = g_text_save;
     wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_spec.free_string = g_text_quit;
+    wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_spec.free_string = g_text_undo;
     wp_menu_tree[WP_MENU_OBJ_EDIT_CUT].ob_spec.free_string = g_text_cut;
     wp_menu_tree[WP_MENU_OBJ_EDIT_COPY].ob_spec.free_string = g_text_copy;
     wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_spec.free_string = g_text_paste;
@@ -372,7 +379,7 @@ static wp_bool child_chain_ok(short parent)
    the table nor the local-item list, i.e. drawn, highlightable, and
    silently inert. Bumping it remains the prompt to go wire the item up. */
 #define WP_ATARI_MENU_TITLES              6   /* Desk File Edit Tools Format Help */
-#define WP_ATARI_MENU_DISPATCHED_LEAVES  23   /* About + 4 File + 3 Edit + 4 Tools + 8 Format + 3 Help */
+#define WP_ATARI_MENU_DISPATCHED_LEAVES  24   /* About + 4 File + 4 Edit + 4 Tools + 8 Format + 3 Help */
 #define WP_ATARI_MENU_INERT_LEAVES        7   /* separator + 6 AES-reserved Desk slots */
 
 /* Defined next to the dispatch table it validates, far below -- this
@@ -570,7 +577,9 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_spec.free_string != g_text_quit) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_head != WP_MENU_OBJ_EDIT_CUT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_head != WP_MENU_OBJ_EDIT_UNDO) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_next != WP_MENU_OBJ_EDIT_CUT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_spec.free_string != g_text_undo) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_tail != WP_MENU_OBJ_EDIT_PASTE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_type != G_BOX) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
@@ -663,7 +672,9 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_type != G_STRING) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_head != -1) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_tail != -1) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_type != G_STRING) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
 
     /* Every item this menu bar shows must resolve to a real action, and
@@ -3626,6 +3637,17 @@ static wp_key_event atari_translate_key(short key, short kstate)
     if (scan >= 0x3B && scan <= 0x44) {
         ev.special = (u16)(WP_KEY_F1 + (scan - 0x3B));
         goto done;
+    } else if (scan == 0x62) {
+        /* The ST's own HELP key. Scan codes verified against the Atari
+           Compendium's IKBD table (p.787: HELP 0x6200, UNDO 0x6100),
+           not recalled -- the same discipline the table below already
+           states for every other key here. Both keys were simply
+           unhandled before now, on a keyboard that has them. */
+        ev.special = (u16)WP_KEY_HELP;
+        goto done;
+    } else if (scan == 0x61) {
+        ev.special = (u16)WP_KEY_UNDO;
+        goto done;
     }
 
     if (ascii == 0) goto done; /* unmapped special key -- WP_KEY_NONE, harmlessly ignored */
@@ -3694,7 +3716,12 @@ wp_bool wp_atari_key_translate_selfcheck(void)
         { (short)((0x47 << 8) | 0x00), 0, 0, (u16)WP_KEY_HOME, 0 },
         { (short)((0x3B << 8) | 0x00), 0, 0, (u16)WP_KEY_F1, 0 },
         { (short)((0x44 << 8) | 0x00), 0, 0, (u16)WP_KEY_F10, 0 },
-        { (short)((0x62 << 8) | 0x00), 0, 0, (u16)WP_KEY_NONE, 0 },  /* HELP -- real, unmapped, harmless */
+        /* HELP and UNDO were recorded here for years as "real, unmapped,
+           harmless" -- the ST has both keys and this app ignored them.
+           Now mapped; scan codes from the Compendium's IKBD table
+           (p.787: HELP 0x6200, UNDO 0x6100). */
+        { (short)((0x62 << 8) | 0x00), 0, 0, (u16)WP_KEY_HELP, 0 },
+        { (short)((0x61 << 8) | 0x00), 0, 0, (u16)WP_KEY_UNDO, 0 },
         { (short)((0x1E << 8) | 0x61), 0, 'a', (u16)WP_KEY_NONE, 0 },        /* plain 'a' */
         { (short)((0x39 << 8) | 0x20), 0, 0x20, (u16)WP_KEY_NONE, 0 },       /* Space -- printable-range boundary */
         { (short)((0x1E << 8) | 0x01), 0, 'a', (u16)WP_KEY_NONE, (u8)WP_MOD_CTRL }, /* Ctrl+A */
@@ -3973,8 +4000,24 @@ wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key, short kstate
         redraw_window(window_handle, vdi);
         return WP_FALSE;
     }
-    if (ev.special == (u16)WP_KEY_F1) {
+    /* A dedicated HELP key beats everything: no scheme competes for it,
+       which is exactly why it is the better door on the machines that
+       have one. */
+    if (ev.special == (u16)WP_KEY_HELP) {
         open_help_node(window_handle, vdi, "Main", 4);
+        return WP_FALSE;
+    }
+    /* F1 only means Help when the active scheme does not bind it. Under
+       WordPerfect it is Undelete, and swallowing it here is what made
+       that unreachable on every backend. */
+    if (ev.special == (u16)WP_KEY_F1 &&
+        !wp_keymap_claims_f1((wp_keymap_id)g_ctx.keymap_id)) {
+        open_help_node(window_handle, vdi, "Main", 4);
+        return WP_FALSE;
+    }
+    if (ev.special == (u16)WP_KEY_UNDO) {
+        invoke_action(window_handle, vdi, WP_ACT_EDIT_UNDO);
+        redraw_window(window_handle, vdi);
         return WP_FALSE;
     }
 
@@ -4039,6 +4082,7 @@ static const wp_menu_action_pair g_menu_actions[] = {
     { WP_MENU_OBJ_FILE_OPEN,          WP_ACT_FILE_OPEN },
     { WP_MENU_OBJ_FILE_SAVE,          WP_ACT_FILE_SAVE },
     { WP_MENU_OBJ_FILE_QUIT,          WP_ACT_FILE_QUIT },
+    { WP_MENU_OBJ_EDIT_UNDO,          WP_ACT_EDIT_UNDO },
     { WP_MENU_OBJ_EDIT_CUT,           WP_ACT_EDIT_CUT },
     { WP_MENU_OBJ_EDIT_COPY,          WP_ACT_EDIT_COPY },
     { WP_MENU_OBJ_EDIT_PASTE,         WP_ACT_EDIT_PASTE },

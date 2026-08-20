@@ -35,7 +35,19 @@ typedef enum {
     WP_KEY_F7,
     WP_KEY_F8,
     WP_KEY_F9,
-    WP_KEY_F10
+    WP_KEY_F10,
+
+    /* Dedicated keys the Atari ST and Amiga keyboards actually have, and
+       which this project ignored entirely until now. Appended AFTER F10
+       on purpose: every value above keeps its number, so no backend's
+       scan-code arithmetic (which computes WP_KEY_F1 + n) shifts.
+
+       HELP exists on both ST and Amiga; UNDO is an ST key, and the Atari
+       Compendium lists it among the standard UI conventions (p.703,
+       "UNDO -- Undo last operation"). Machines without these keys simply
+       never emit them. */
+    WP_KEY_HELP,
+    WP_KEY_UNDO
     /* F11/F12 deliberately omitted: real ST/Amiga/classic-Mac keyboards
        commonly stop at F10 -- add later if a target genuinely needs
        more. */

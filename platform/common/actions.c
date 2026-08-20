@@ -250,6 +250,33 @@ static wp_status act_edit_copy(wp_app_ctx *ctx)
     return st;
 }
 
+/* Edit > Undo.
+ *
+ * Every scheme already has its own undo (vi's u, Word's Ctrl-Z, and so
+ * on) and keeps its own cursor, so this is not the only route -- it is
+ * the route for people who are not in a scheme's own idiom: a menu entry
+ * on the backends that have menus, and the Atari ST's dedicated UNDO
+ * key, which this project ignored completely until now even though the
+ * Compendium lists it among the standard UI conventions (p.703, "UNDO --
+ * Undo last operation").
+ *
+ * The clamp afterwards is not optional. Undo can shorten the document
+ * under a cursor that was past the new end, and every scheme's own undo
+ * path already clamps for exactly this reason (vimode.c's clamp_cursor).
+ * wp_pos_clamp_to_document is the same primitive those use. */
+static wp_status act_edit_undo(wp_app_ctx *ctx)
+{
+    wp_status st;
+
+    if (ctx == NULL || ctx->doc == NULL || ctx->journal == NULL) return WP_ERR;
+
+    st = wp_edit_undo(ctx->doc, ctx->journal);
+    if (st != WP_OK) return st;   /* nothing to undo -- not an error worth reporting */
+
+    *wp_keymap_cursor(ctx) = wp_pos_clamp_to_document(ctx->doc, *wp_keymap_cursor(ctx));
+    return WP_OK;
+}
+
 static wp_status act_file_quit(wp_app_ctx *ctx)
 {
     /* Quitting throws the document away just as surely as New does, so
@@ -402,6 +429,7 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_EDIT_CUT,          WP_MENU_EDIT,   "Cut",            "Ctrl+X", 0x18, NULL, NULL },
     { WP_ACT_EDIT_COPY,         WP_MENU_EDIT,   "Copy",           "Ctrl+C", 0x03, act_edit_copy, NULL },
     { WP_ACT_EDIT_PASTE,        WP_MENU_EDIT,   "Paste",          "Ctrl+V", 0x16, NULL, NULL },
+    { WP_ACT_EDIT_UNDO,       WP_MENU_EDIT,   "Undo",           0,        0,    act_edit_undo, NULL },
     { WP_ACT_FORMAT_BOLD,       WP_MENU_FORMAT, "Bold",           "Ctrl+B", 0x02, act_format_bold, NULL },
     { WP_ACT_FORMAT_ITALIC,     WP_MENU_FORMAT, "Italic",         "Ctrl+I", 0x09, act_format_italic, NULL },
     { WP_ACT_FORMAT_UNDERLINE,  WP_MENU_FORMAT, "Underline",      "Ctrl+U", 0x15, act_format_underline, NULL },
