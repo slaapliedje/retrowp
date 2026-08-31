@@ -9,18 +9,29 @@ project(retrowp_mac C CXX)
 
 set(RETROWP_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
 
+# retroplat: the platform seam and the Mac backend, extracted out of this
+# repo per docs/platform-extraction.md. Overridable the same way the
+# top-level Makefile's own RETROPLAT is:
+#   cmake .. -DRETROPLAT_ROOT=/path/to/retroplat
+if(NOT DEFINED RETROPLAT_ROOT)
+    set(RETROPLAT_ROOT ${RETROWP_ROOT}/../retroplat)
+endif()
+
 # rwpci_launcher: injected exactly ONCE into the fixture template's own
 # Startup Items (see host/tools/mac_hfs/), never rebuilt/reinjected per
 # CI run -- only rebuild+reinject if launcher.c itself changes.
 add_application(rwpci_launcher launcher.c)
 
-# platform/mac's own sources, excluding the two files with their own
-# main() (main.c for RETROWP, smoke.c for mac_smoke) -- everything else
-# (app shell, mem/file/clipboard/timer/draw/metrics/dialog) is shared by
-# both binaries, mirroring ATARI_PLATFORM_SRC/AMIGA_PLATFORM_SRC's own
-# filter-out-main.c convention in the top-level Makefile.
+# Two roots since the extraction: the app shell is still this project's
+# (it IS the word processor), while mem/file/clipboard/timer/draw/metrics/
+# dialog/transport come from retroplat's Mac backend. main.c is excluded
+# because RETROWP supplies it and mac_smoke supplies smoke.c instead --
+# mirroring ATARI_PLATFORM_SRC/AMIGA_PLATFORM_SRC's own filter-out
+# convention in the top-level Makefile, which now spans two roots too.
 file(GLOB RETROWP_MAC_PLATFORM_SRC ${RETROWP_ROOT}/platform/mac/*.c)
 list(FILTER RETROWP_MAC_PLATFORM_SRC EXCLUDE REGEX ".*/main\\.c$")
+file(GLOB RETROPLAT_MAC_SRC ${RETROPLAT_ROOT}/backends/mac/*.c)
+list(APPEND RETROWP_MAC_PLATFORM_SRC ${RETROPLAT_MAC_SRC})
 
 # The whole portable engine, including offload_client.c now that
 # transport_mac.c (Phase 4) implements plat_transport_* -- excluded up
@@ -31,6 +42,9 @@ list(FILTER RETROWP_MAC_PLATFORM_SRC EXCLUDE REGEX ".*/main\\.c$")
 # encoding), matching ATARI_TRANSPORT_OBJ/AMIGA_TRANSPORT_OBJ in the
 # top-level Makefile.
 file(GLOB RETROWP_ENGINE_SRC ${RETROWP_ROOT}/engine/src/*.c)
+# endian.c/utf8.c moved to retroplat with the seam they belong to.
+file(GLOB RETROPLAT_PORTABLE_SRC ${RETROPLAT_ROOT}/src/*.c)
+list(APPEND RETROWP_ENGINE_SRC ${RETROPLAT_PORTABLE_SRC})
 file(GLOB RETROWP_TRANSPORT_SRC ${RETROWP_ROOT}/offload/transport/*.c)
 
 # config.c/help_doc.c/help_view.c/statusline.c (Phase 5): the retrofit
@@ -57,6 +71,8 @@ set(RETROWP_COMMON_SRC
 # has to it in the top-level Makefile.
 set(RETROWP_INCLUDES
     ${RETROWP_ROOT}/engine/include
+    ${RETROPLAT_ROOT}/include
+    ${RETROPLAT_ROOT}/backends/mac
     ${RETROWP_ROOT}/platform/mac
     ${RETROWP_ROOT}/platform/common
     ${RETROWP_ROOT}/offload/transport

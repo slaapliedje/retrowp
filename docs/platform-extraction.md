@@ -1,10 +1,15 @@
 # Extracting the platform layer into a shared library
 
-**Status: a worked proposal, not a decision.** This refactor was carried out in full,
-verified green against the baseline below, and then reverted at the author's direction.
-Nothing in the tree today depends on it. **Do not execute it unprompted** — it is written
-down so that if RetroWP ever wants to share its platform layer, the analysis and the
-recipe already exist.
+**Status: DONE.** The layer now lives in `../retroplat` and RetroWP consumes it through a
+`RETROPLAT ?= ../retroplat` knob. This document is no longer a proposal; it is the record
+of what was moved, why the line falls where it does, and what was verified.
+
+It had been carried out once before, verified, and reverted at the author's direction —
+which is why the analysis below was already written when the decision changed.
+
+What actually moved: **55 files, 6,620 lines** out of RetroWP, plus a Makefile rewiring and
+the equivalent edit to `host/tools/mac/CMakeLists.txt` (which globs its sources directly
+and therefore needed its own two roots).
 
 ## What it is
 
@@ -96,14 +101,16 @@ Two things follow that are worth having regardless of the extraction:
   `mac-engine-check` is engine-only and the real Mac build goes through Retro68's CMake,
   so those files previously had no Makefile-side compile coverage.
 
-## The move
+## The move — as executed
 
-    <shared>/include/    platform.h  types.h  endian.h  utf8.h
+    ../retroplat/include/    platform.h  types.h  endian.h  utf8.h
     <shared>/src/        endian.c  utf8.c
     <shared>/backends/   host/ atari/ amiga/ mac/ dos/
                          (everything in platform/<target>/ EXCEPT app_shell* and main.c)
 
-`git mv` will not cross repositories: copy, then `git rm` from RetroWP.
+`git mv` will not cross repositories: copy, then `git rm` from RetroWP. That is what was
+done, so RetroWP's history shows the deletions and retroplat starts with a fresh initial
+commit rather than carrying RetroWP's.
 
 Keep the header **filenames** identical (`types.h`, not `wp_types.h`). Every `#include
 "types.h"` in the engine then resolves to the shared copy with no source change, provided
@@ -144,7 +151,13 @@ no other file.
 
 Note `mac-engine-check` compiles the engine only and never built the Mac backend, so
 after the move nothing in RetroWP compiles `backends/mac/` — the shared library needs its
-own standalone compile check to cover it.
+own standalone compile check to cover it. It has one: retroplat's `make check-mac`, which
+was in place before the move for exactly this reason.
+
+One thing the recipe above did not anticipate: `host/tools/mac/CMakeLists.txt` globs
+`platform/mac/*.c` and `engine/src/*.c` directly, so the Makefile edit alone would have
+left the Mac build sourcing files that no longer exist. It now takes a `RETROPLAT_ROOT`
+the same way, defaulting to `${RETROWP_ROOT}/../retroplat`.
 
 ## Verification protocol — read this before starting
 
@@ -171,11 +184,21 @@ The 435 above is environment-dependent, not a constant: with Pillow available to
 offload gateway the same tree gives a full sweep. Take your own baseline rather than
 trusting either number.
 
-Both held after the extraction was applied.
+All held after the extraction was applied, on both the first (reverted) attempt and the
+one that stuck. On the second: **440/440** tests, `RETROWP.PRG` at **292,693 bytes —
+byte-for-byte the size it was before the move**, and every other target (`amiga-app`,
+`amiga-smoke`, `dos`, `dos-smoke`, all five Atari tool binaries, `mac-engine-check`)
+building unchanged.
 
-Work on a branch. The whole change is deletions plus a Makefile edit
-(**56 files, +50 / −6,624**), so `git reset --hard` reverts it completely — which is
-exactly how it was undone.
+The one thing that does NOT build is the Mac CMake application, and it is unrelated:
+Retro68's `ld` is linked against `libboost_filesystem.so.1.91.0` while the system now has
+1.92.0, so CMake's own compiler test fails before it reads a line of this project.
+Compiling is fine — `make seam-check-mac` passes — only linking is broken. Reinstall or
+rebuild Retro68 against current Boost to fix it.
+
+Work on a branch. The whole change is deletions plus build-file edits, so `git reset
+--hard` reverts the RetroWP side completely and `rm -rf ../retroplat` the other — which is
+exactly how the first attempt was undone.
 
 ## Deferred: the `wp_` → `plat_` rename
 
@@ -186,18 +209,20 @@ move makes both harder to verify. Do it afterwards, as its own commit, with both
 green before and after. New seam additions can use `plat_`/`PLAT_` from the start (the
 style flags above already do).
 
-## Prior art: GACS vendored instead
+## Prior art: GACS vendored instead — and should now stop
 
 `~/dev/gacs` needed exactly this layer and took the other road: it holds a **copy** under
 `gacs/platform/`, with `gacs/platform/README.md` recording the provenance. RetroWP is
 neither modified by nor dependent on it.
 
 The trade that copy accepts, stated plainly there: **a backend fix does not propagate**
-between the two and has to be carried across by hand. If that ever becomes painful, this
-document is the recipe for closing it. The one local change GACS made — the
-`PLAT_STYLE_*` decoupling described above — **has now been upstreamed here**, so a
-file-by-file diff of the two copies is once again empty apart from that change's own
-wording.
+between the two and has to be carried across by hand. The one local change GACS had made —
+the `PLAT_STYLE_*` decoupling described above — was upstreamed here first, so the two
+copies agreed before anything moved.
+
+**GACS should now consume `../retroplat` and delete `gacs/platform/`**, which is the whole
+point of the move and the thing that stops the hand-carrying. That is a change to GACS, not
+to this repo, and has not been made.
 
 GACS is also a working demonstration that the seam is genuinely app-independent: its GEM
 shell (`gacs/shells/gem/main.c`, ~380 lines) drives an AES window and draws entirely

@@ -30,18 +30,28 @@ CC ?= cc
 # doesn't wedge make with "No rule to make target" -- it just rebuilds.
 DEPFLAGS = -MMD -MP
 
+# retroplat: the platform seam (platform.h, types.h, endian.h, utf8.h)
+# and one backend per machine, extracted per docs/platform-extraction.md
+# so other vintage-targeting apps consume the same copy instead of
+# forking it. Override to build against a checkout elsewhere:
+#     make RETROPLAT=/path/to/retroplat
+# Header FILENAMES are unchanged by the move, so every #include "types.h"
+# in engine/ still resolves -- to the shared copy, because the old file
+# is gone and this directory is on the path.
+RETROPLAT ?= ../retroplat
+
 
 STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror $(DEPFLAGS)
 RELAXED_CFLAGS = -Wall -Wextra $(DEPFLAGS)
 
-INCLUDES = -Iengine/include -Iplatform/host -Iplatform/common -Ioffload/transport -Iservices/spell -Iservices/grammar -Ihost/tests -I$(GENERATED)
+INCLUDES = -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/host -Iplatform/common -Ioffload/transport -Iservices/spell -Iservices/grammar -Ihost/tests -I$(GENERATED)
 
 BUILD = build
 BIN   = bin
 GENERATED = build/generated
 
-ENGINE_SRC    = $(wildcard engine/src/*.c)
-PLATFORM_SRC  = $(wildcard platform/host/*.c)
+ENGINE_SRC    = $(wildcard engine/src/*.c) $(wildcard $(RETROPLAT)/src/*.c)
+PLATFORM_SRC  = $(wildcard $(RETROPLAT)/backends/host/*.c)
 # platform/common/ (M8.5): the action registry + app context shared by
 # every backend -- see CLAUDE.md's platform/common/ layer rule. May call
 # platform.h but must never #include a native header; built here under
@@ -53,8 +63,8 @@ SERVICES_SRC  = $(wildcard services/spell/*.c) $(wildcard services/grammar/*.c)
 TEST_SRC      = $(wildcard host/tests/*.c)
 GATEWAY_SRC   = $(wildcard offload/gateway/*.c)
 
-ENGINE_OBJ    = $(patsubst engine/src/%.c,$(BUILD)/engine/%.o,$(ENGINE_SRC))
-PLATFORM_OBJ  = $(patsubst platform/host/%.c,$(BUILD)/platform/%.o,$(PLATFORM_SRC))
+ENGINE_OBJ    = $(patsubst engine/src/%.c,$(BUILD)/engine/%.o,$(patsubst $(RETROPLAT)/src/%.c,$(BUILD)/engine/%.o,$(ENGINE_SRC)))
+PLATFORM_OBJ  = $(patsubst $(RETROPLAT)/backends/host/%.c,$(BUILD)/platform/%.o,$(PLATFORM_SRC))
 PLATFORM_COMMON_OBJ = $(patsubst platform/common/%.c,$(BUILD)/platform_common/%.o,$(PLATFORM_COMMON_SRC))
 TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(BUILD)/transport/%.o,$(TRANSPORT_SRC))
 SERVICES_OBJ  = $(patsubst services/spell/%.c,$(BUILD)/services/%.o,$(patsubst services/grammar/%.c,$(BUILD)/services/%.o,$(SERVICES_SRC)))
@@ -68,11 +78,13 @@ TEST_OBJ      = $(patsubst host/tests/%.c,$(BUILD)/tests/%.o,$(TEST_SRC))
 MOCK_GATEWAY_OBJ   = $(BUILD)/gateway/mock_gateway.o $(BUILD)/gateway/fixtures.o $(BUILD)/gateway/gw_common.o
 OLLAMA_GATEWAY_OBJ = $(BUILD)/gateway/ollama_gateway.o $(BUILD)/gateway/gw_common.o $(BUILD)/gateway/http_client.o
 
-# offload/transport (wire.c, caps_codec.c) uses engine/src/endian.c's
-# be_read*/be_write* helpers. endian.c has no other engine dependency (no
-# mem_alloc, no platform.h), so it's the one engine/src file the
-# standalone gateway build links directly, without pulling in the rest of
-# ENGINE_OBJ (which needs platform/host's mem_alloc -- unavailable here).
+# offload/transport (wire.c, caps_codec.c) uses endian.c's be_read*/
+# be_write* helpers. endian.c has no other dependency (no mem_alloc, no
+# platform.h) -- which is exactly why it moved to retroplat/src/ with the
+# seam. It stays the one file the standalone gateway build links directly,
+# without pulling in the rest of ENGINE_OBJ (which needs the host
+# backend's mem_alloc -- unavailable here). The object path is unchanged
+# by the move, so this variable is not.
 ENDIAN_OBJ    = $(BUILD)/engine/endian.o
 
 .PHONY: all test clean
@@ -97,7 +109,13 @@ $(BIN)/ollama_gateway: $(OLLAMA_GATEWAY_OBJ) $(TRANSPORT_OBJ) $(ENDIAN_OBJ) | $(
 $(BUILD)/engine/%.o: engine/src/%.c | $(BUILD)/engine
 	$(CC) $(STRICT_CFLAGS) $(INCLUDES) -c $< -o $@
 
-$(BUILD)/platform/%.o: platform/host/%.c | $(BUILD)/platform
+# The same object directory, sourced from retroplat's tree. GNU Make
+# picks whichever rule's prerequisite actually exists, so the two rules
+# above and below coexist without ambiguity.
+$(BUILD)/engine/%.o: $(RETROPLAT)/src/%.c | $(BUILD)/engine
+	$(CC) $(STRICT_CFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BUILD)/platform/%.o: $(RETROPLAT)/backends/host/%.c | $(BUILD)/platform
 	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BUILD)/platform_common/%.o: platform/common/%.c | $(BUILD)/platform_common
@@ -192,8 +210,9 @@ ollama-smoke: $(BIN)/ollama_gateway_smoke
 # int, matching types.h's u32/i32 == long -- see docs/atari-platform.md
 # for why -mshort was deliberately rejected). platform/atari is UI-owning
 # app code (CLAUDE.md: "platform/ owns UI + rendering"), so it links
-# directly against libgem (AES+VDI) with no separate "backend" split the
-# way platform/host has one.
+# directly against libgem (AES+VDI). Since the extraction, platform/atari
+# is ONLY that app code -- app_shell.c and main.c -- while the backend it
+# calls through platform.h lives in $(RETROPLAT)/backends/atari.
 # ---------------------------------------------------------------------
 
 ATARICC ?= m68k-atari-mint-gcc
@@ -206,12 +225,12 @@ ATARICC ?= m68k-atari-mint-gcc
 # docs/atari-platform.md.
 ATARI_STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror -O2 $(DEPFLAGS)
 ATARI_RELAXED_CFLAGS = -Wall -Wextra -O2 $(DEPFLAGS)
-ATARI_INCLUDES       = -Iengine/include -Iplatform/atari -Iplatform/common -Ioffload/transport -I$(GENERATED)
+ATARI_INCLUDES       = -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -Iplatform/common -Ioffload/transport -I$(GENERATED)
 
 ATARI_BUILD = build/atari
 ATARI_BIN   = bin/atari
 
-ATARI_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(ATARI_BUILD)/engine/%.o,$(ENGINE_SRC))
+ATARI_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(ATARI_BUILD)/engine/%.o,$(patsubst $(RETROPLAT)/src/%.c,$(ATARI_BUILD)/engine/%.o,$(ENGINE_SRC)))
 ATARI_TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(ATARI_BUILD)/transport/%.o,$(TRANSPORT_SRC))
 ATARI_SERVICES_OBJ  = $(patsubst services/spell/%.c,$(ATARI_BUILD)/services/%.o,$(patsubst services/grammar/%.c,$(ATARI_BUILD)/services/%.o,$(SERVICES_SRC)))
 ATARI_COMMON_OBJ    = $(patsubst platform/common/%.c,$(ATARI_BUILD)/common/%.o,$(PLATFORM_COMMON_SRC))
@@ -232,6 +251,12 @@ atari-engine-check: $(ATARI_ENGINE_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_
 $(ATARI_BUILD)/engine/%.o: engine/src/%.c | $(ATARI_BUILD)/engine
 	$(ATARICC) $(ATARI_STRICT_CFLAGS) $(ATARI_INCLUDES) -c $< -o $@
 
+# The same object directory, sourced from retroplat's tree. GNU Make
+# picks whichever rule's prerequisite actually exists, so the two rules
+# above and below coexist without ambiguity.
+$(ATARI_BUILD)/engine/%.o: $(RETROPLAT)/src/%.c | $(ATARI_BUILD)/engine
+	$(ATARICC) $(ATARI_STRICT_CFLAGS) $(ATARI_INCLUDES) -c $< -o $@
+
 $(ATARI_BUILD)/transport/%.o: offload/transport/%.c | $(ATARI_BUILD)/transport
 	$(ATARICC) $(ATARI_STRICT_CFLAGS) $(ATARI_INCLUDES) -c $< -o $@
 
@@ -245,11 +270,19 @@ $(ATARI_BUILD)/services/%.o: services/grammar/%.c | $(ATARI_BUILD)/services
 # main() (main.c for RETROWP.PRG, and host/tools/atari_smoke.c for
 # SMOKE.PRG) -- everything else (app shell, mem/metrics/draw/transport)
 # is shared by both binaries.
-ATARI_PLATFORM_SRC = $(filter-out platform/atari/main.c,$(wildcard platform/atari/*.c))
-ATARI_PLATFORM_OBJ = $(patsubst platform/atari/%.c,$(ATARI_BUILD)/app/%.o,$(ATARI_PLATFORM_SRC))
+# Two roots now: the app shell stays here (it IS the word processor), the
+# backend comes from retroplat. Both map into the same object directory,
+# so the link lines below are unchanged.
+ATARI_PLATFORM_SRC = $(filter-out platform/atari/main.c,$(wildcard platform/atari/*.c)) \
+                     $(wildcard $(RETROPLAT)/backends/atari/*.c)
+ATARI_PLATFORM_OBJ = $(patsubst platform/atari/%.c,$(ATARI_BUILD)/app/%.o,\
+                     $(patsubst $(RETROPLAT)/backends/atari/%.c,$(ATARI_BUILD)/app/%.o,$(ATARI_PLATFORM_SRC)))
 
 $(ATARI_BUILD)/app/%.o: platform/atari/%.c | $(ATARI_BUILD)/app
-	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Iplatform/common -Iservices/spell -Iservices/grammar -I$(GENERATED) -c $< -o $@
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -Iplatform/common -Iservices/spell -Iservices/grammar -I$(GENERATED) -c $< -o $@
+
+$(ATARI_BUILD)/app/%.o: $(RETROPLAT)/backends/atari/%.c | $(ATARI_BUILD)/app
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -Iplatform/common -Iservices/spell -Iservices/grammar -I$(GENERATED) -c $< -o $@
 
 # app_shell.c #includes the generated help header (M8.5 Phase 10) --
 # an explicit extra prerequisite since Make can't see into #include
@@ -260,7 +293,7 @@ $(ATARI_BIN)/RETROWP.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/app/main.o $(ATAR
 	$(ATARICC) $^ -o $@ -lgem
 
 $(ATARI_BUILD)/smoke/%.o: host/tools/%.c | $(ATARI_BUILD)/smoke
-	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -c $< -o $@
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -c $< -o $@
 
 $(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
@@ -282,7 +315,7 @@ $(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o
 # were never affected. Any future .PRG linking ATARI_PLATFORM_OBJ needs
 # ATARI_COMMON_OBJ too.
 $(ATARI_BUILD)/serialsmoke/%.o: host/tools/%.c | $(ATARI_BUILD)/serialsmoke
-	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Ioffload/transport -c $< -o $@
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -Ioffload/transport -c $< -o $@
 
 $(ATARI_BIN)/SERIALTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialsmoke/atari_serial_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
@@ -290,7 +323,7 @@ $(ATARI_BIN)/SERIALTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialsmoke/ata
 # M7 T7.4c: same shape as SERIALTST.PRG, proving CONVERT_IMPORT/EXPORT
 # (not just THESAURUS) survive real RS-232 -- see atari_convert_smoke.c.
 $(ATARI_BUILD)/convertsmoke/%.o: host/tools/%.c | $(ATARI_BUILD)/convertsmoke
-	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Ioffload/transport -c $< -o $@
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -Ioffload/transport -c $< -o $@
 
 $(ATARI_BIN)/CONVERTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/convertsmoke/atari_convert_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
@@ -301,7 +334,7 @@ $(ATARI_BIN)/CONVERTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/convertsmoke/at
 # no business knowing what a document is. Keeping it engine-free also
 # keeps it buildable and startable in a fraction of RETROWP.PRG's time.
 $(ATARI_BUILD)/redrawprobe/%.o: host/tools/%.c | $(ATARI_BUILD)/redrawprobe
-	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -c $< -o $@
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -c $< -o $@
 
 $(ATARI_BIN)/WMREDRAW.PRG: $(ATARI_BUILD)/redrawprobe/atari_wmredraw_probe.o | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
@@ -322,7 +355,7 @@ atari-smoke: $(ATARI_BIN)/SMOKE.PRG
 # Not part of any CI gate: it needs a real cable and a real gateway,
 # which is exactly the thing CI cannot supply.
 $(ATARI_BUILD)/serialhw/%.o: host/tools/%.c | $(ATARI_BUILD)/serialhw
-	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -Iplatform/atari -Ioffload/transport -c $< -o $@
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -Ioffload/transport -c $< -o $@
 
 $(ATARI_BIN)/SERHW.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/serialhw/atari_serial_hw.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
@@ -385,12 +418,12 @@ AMIGA_CPU = -m68000 -msoft-float -fbbb=abcefilmnprsz0
 
 AMIGA_STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror $(AMIGA_CPU) $(DEPFLAGS)
 AMIGA_RELAXED_CFLAGS = -Wall -Wextra $(AMIGA_CPU) $(DEPFLAGS)
-AMIGA_INCLUDES       = -Iengine/include -Iplatform/amiga -Iplatform/common -Ioffload/transport -I$(GENERATED)
+AMIGA_INCLUDES       = -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/amiga -Iplatform/amiga -Iplatform/common -Ioffload/transport -I$(GENERATED)
 
 AMIGA_BUILD = build/amiga
 AMIGA_BIN   = bin/amiga
 
-AMIGA_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(AMIGA_BUILD)/engine/%.o,$(ENGINE_SRC))
+AMIGA_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(AMIGA_BUILD)/engine/%.o,$(patsubst $(RETROPLAT)/src/%.c,$(AMIGA_BUILD)/engine/%.o,$(ENGINE_SRC)))
 AMIGA_TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(AMIGA_BUILD)/transport/%.o,$(TRANSPORT_SRC))
 AMIGA_SERVICES_OBJ  = $(patsubst services/spell/%.c,$(AMIGA_BUILD)/services/%.o,$(patsubst services/grammar/%.c,$(AMIGA_BUILD)/services/%.o,$(SERVICES_SRC)))
 AMIGA_COMMON_OBJ    = $(patsubst platform/common/%.c,$(AMIGA_BUILD)/common/%.o,$(PLATFORM_COMMON_SRC))
@@ -410,6 +443,12 @@ amiga-engine-check: $(AMIGA_ENGINE_OBJ) $(AMIGA_TRANSPORT_OBJ) $(AMIGA_SERVICES_
 $(AMIGA_BUILD)/engine/%.o: engine/src/%.c | $(AMIGA_BUILD)/engine
 	$(AMIGACC) $(AMIGA_STRICT_CFLAGS) $(AMIGA_INCLUDES) -c $< -o $@
 
+# The same object directory, sourced from retroplat's tree. GNU Make
+# picks whichever rule's prerequisite actually exists, so the two rules
+# above and below coexist without ambiguity.
+$(AMIGA_BUILD)/engine/%.o: $(RETROPLAT)/src/%.c | $(AMIGA_BUILD)/engine
+	$(AMIGACC) $(AMIGA_STRICT_CFLAGS) $(AMIGA_INCLUDES) -c $< -o $@
+
 $(AMIGA_BUILD)/transport/%.o: offload/transport/%.c | $(AMIGA_BUILD)/transport
 	$(AMIGACC) $(AMIGA_STRICT_CFLAGS) $(AMIGA_INCLUDES) -c $< -o $@
 
@@ -422,11 +461,19 @@ $(AMIGA_BUILD)/services/%.o: services/grammar/%.c | $(AMIGA_BUILD)/services
 # platform/amiga/'s own sources (app shell, mem/metrics/draw/transport)
 # -- empty today (M9 Phase 0), populated starting Phase 1. Mirrors
 # ATARI_PLATFORM_SRC/_OBJ's shape exactly, main.c excluded once it exists.
-AMIGA_PLATFORM_SRC = $(filter-out platform/amiga/main.c,$(wildcard platform/amiga/*.c))
-AMIGA_PLATFORM_OBJ = $(patsubst platform/amiga/%.c,$(AMIGA_BUILD)/app/%.o,$(AMIGA_PLATFORM_SRC))
+# Two roots now: the app shell stays here (it IS the word processor), the
+# backend comes from retroplat. Both map into the same object directory,
+# so the link lines below are unchanged.
+AMIGA_PLATFORM_SRC = $(filter-out platform/amiga/main.c,$(wildcard platform/amiga/*.c)) \
+                     $(wildcard $(RETROPLAT)/backends/amiga/*.c)
+AMIGA_PLATFORM_OBJ = $(patsubst platform/amiga/%.c,$(AMIGA_BUILD)/app/%.o,\
+                     $(patsubst $(RETROPLAT)/backends/amiga/%.c,$(AMIGA_BUILD)/app/%.o,$(AMIGA_PLATFORM_SRC)))
 
 $(AMIGA_BUILD)/app/%.o: platform/amiga/%.c | $(AMIGA_BUILD)/app
-	$(AMIGACC) $(AMIGA_RELAXED_CFLAGS) -Iengine/include -Iplatform/amiga -Iplatform/common -Iservices/spell -Iservices/grammar -I$(GENERATED) -c $< -o $@
+	$(AMIGACC) $(AMIGA_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/amiga -Iplatform/amiga -Iplatform/common -Iservices/spell -Iservices/grammar -I$(GENERATED) -c $< -o $@
+
+$(AMIGA_BUILD)/app/%.o: $(RETROPLAT)/backends/amiga/%.c | $(AMIGA_BUILD)/app
+	$(AMIGACC) $(AMIGA_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/amiga -Iplatform/amiga -Iplatform/common -Iservices/spell -Iservices/grammar -I$(GENERATED) -c $< -o $@
 
 # T9.1a smoke test (memory/file/clipboard/timer only -- no MUI/Intuition
 # yet). -noixemul is a LINK-time-only flag (selects libnix's standalone
@@ -436,7 +483,7 @@ $(AMIGA_BUILD)/app/%.o: platform/amiga/%.c | $(AMIGA_BUILD)/app
 # toolchain; see docs/amiga-platform.md), so it appears only on the final
 # link line below, never in AMIGA_STRICT_CFLAGS/AMIGA_RELAXED_CFLAGS.
 $(AMIGA_BUILD)/smoke/%.o: host/tools/%.c | $(AMIGA_BUILD)/smoke
-	$(AMIGACC) $(AMIGA_RELAXED_CFLAGS) -Iengine/include -Iplatform/amiga -c $< -o $@
+	$(AMIGACC) $(AMIGA_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/amiga -Iplatform/amiga -c $< -o $@
 
 # T9.1b's MUI shell and T9.1a's selfcheck live in the same app_shell.c
 # (mirroring platform/atari/app_shell.c's own single-big-file precedent),
@@ -506,11 +553,11 @@ MAC_TOOLROOT ?= $(HOME)/opt/Retro68-build/toolchain
 MACCC        ?= $(MAC_TOOLROOT)/bin/m68k-apple-macos-gcc
 
 MAC_STRICT_CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror -O2 $(DEPFLAGS)
-MAC_INCLUDES      = -Iengine/include -Iplatform/mac -Iplatform/common -Ioffload/transport -I$(GENERATED)
+MAC_INCLUDES      = -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/mac -Iplatform/mac -Iplatform/common -Ioffload/transport -I$(GENERATED)
 
 MAC_BUILD = build/mac_engine_check
 
-MAC_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(MAC_BUILD)/engine/%.o,$(ENGINE_SRC))
+MAC_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(MAC_BUILD)/engine/%.o,$(patsubst $(RETROPLAT)/src/%.c,$(MAC_BUILD)/engine/%.o,$(ENGINE_SRC)))
 MAC_TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(MAC_BUILD)/transport/%.o,$(TRANSPORT_SRC))
 MAC_SERVICES_OBJ  = $(patsubst services/spell/%.c,$(MAC_BUILD)/services/%.o,$(patsubst services/grammar/%.c,$(MAC_BUILD)/services/%.o,$(SERVICES_SRC)))
 
@@ -519,6 +566,12 @@ mac-engine-check: $(MAC_ENGINE_OBJ) $(MAC_TRANSPORT_OBJ) $(MAC_SERVICES_OBJ)
 	@echo "engine + offload/transport + services cross-compile clean for m68k-apple-macos"
 
 $(MAC_BUILD)/engine/%.o: engine/src/%.c | $(MAC_BUILD)/engine
+	$(MACCC) $(MAC_STRICT_CFLAGS) $(MAC_INCLUDES) -c $< -o $@
+
+# The same object directory, sourced from retroplat's tree. GNU Make
+# picks whichever rule's prerequisite actually exists, so the two rules
+# above and below coexist without ambiguity.
+$(MAC_BUILD)/engine/%.o: $(RETROPLAT)/src/%.c | $(MAC_BUILD)/engine
 	$(MACCC) $(MAC_STRICT_CFLAGS) $(MAC_INCLUDES) -c $< -o $@
 
 $(MAC_BUILD)/transport/%.o: offload/transport/%.c | $(MAC_BUILD)/transport
@@ -607,18 +660,20 @@ endef
 
 DOS_STRICT_CFLAGS  = -0 -ml -bt=dos -za -zastd=c89 -we -wx
 DOS_RELAXED_CFLAGS = -0 -ml -bt=dos -wx
-# engine/include first, deliberately: Watcom's own h/ ships a same-
-# named endian.h (OS/2-oriented) that shadowed this project's real
-# engine/include/endian.h when searched first, producing bizarre
-# parse errors deep in Watcom's header, not this project's -- found
-# directly during Phase 0 bring-up, not assumed. Project headers must
-# win over Watcom's system headers on any name collision.
-DOS_INCLUDES       = -i=engine/include -i=platform/dos -i=platform/common -i=offload/transport -i=$(GENERATED) -i=$(DOS_TOOLROOT)/h
+# Project headers first, Watcom's h/ LAST, deliberately: Watcom ships a
+# same-named endian.h (OS/2-oriented) that shadowed the real one when
+# searched first, producing bizarre parse errors deep inside Watcom's
+# header rather than this project's -- found directly during Phase 0
+# bring-up, not assumed. The hazard survived the platform extraction and
+# moved with the file: endian.h now lives in $(RETROPLAT)/include, which
+# is still ahead of $(DOS_TOOLROOT)/h below, which is what matters. Never
+# reorder $(DOS_TOOLROOT)/h earlier.
+DOS_INCLUDES       = -i=engine/include -i=$(RETROPLAT)/include -i=$(RETROPLAT)/backends/dos -i=platform/dos -i=platform/common -i=offload/transport -i=$(GENERATED) -i=$(DOS_TOOLROOT)/h
 
 DOS_BUILD = build/dos
 DOS_BIN   = bin/dos
 
-DOS_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(DOS_BUILD)/engine/%.o,$(ENGINE_SRC))
+DOS_ENGINE_OBJ    = $(patsubst engine/src/%.c,$(DOS_BUILD)/engine/%.o,$(patsubst $(RETROPLAT)/src/%.c,$(DOS_BUILD)/engine/%.o,$(ENGINE_SRC)))
 DOS_TRANSPORT_OBJ = $(patsubst offload/transport/%.c,$(DOS_BUILD)/transport/%.o,$(TRANSPORT_SRC))
 DOS_SERVICES_OBJ  = $(patsubst services/spell/%.c,$(DOS_BUILD)/services/%.o,$(patsubst services/grammar/%.c,$(DOS_BUILD)/services/%.o,$(SERVICES_SRC)))
 # platform/common/ (T14.5): the action registry/keymap dispatch/status
@@ -636,8 +691,13 @@ DOS_COMMON_OBJ    = $(patsubst platform/common/%.c,$(DOS_BUILD)/common/%.o,$(PLA
 # the same file. SMOKE.EXE's own link line was missing every platform/
 # dos/*.o file this exact way on the first attempt (undefined mem_
 # alloc_/plat_font_open_/etc. at link time) until this was moved up.
-DOS_PLATFORM_SRC = $(filter-out platform/dos/main.c,$(wildcard platform/dos/*.c))
-DOS_PLATFORM_OBJ = $(patsubst platform/dos/%.c,$(DOS_BUILD)/app/%.o,$(DOS_PLATFORM_SRC))
+# Two roots now: the app shell stays here (it IS the word processor), the
+# backend comes from retroplat. Both map into the same object directory,
+# so the link lines below are unchanged.
+DOS_PLATFORM_SRC = $(filter-out platform/dos/main.c,$(wildcard platform/dos/*.c)) \
+                     $(wildcard $(RETROPLAT)/backends/dos/*.c)
+DOS_PLATFORM_OBJ = $(patsubst platform/dos/%.c,$(DOS_BUILD)/app/%.o,\
+                     $(patsubst $(RETROPLAT)/backends/dos/%.c,$(DOS_BUILD)/app/%.o,$(DOS_PLATFORM_SRC)))
 
 # dos-engine-check mirrors atari-engine-check/amiga-engine-check/
 # mac-engine-check exactly: a link-free portability check of the SAME
@@ -648,6 +708,13 @@ dos-engine-check: $(DOS_ENGINE_OBJ) $(DOS_TRANSPORT_OBJ) $(DOS_SERVICES_OBJ)
 	@echo "engine + offload/transport + services cross-compile clean for Open Watcom DOS"
 
 $(DOS_BUILD)/engine/%.o: engine/src/%.c | $(DOS_BUILD)/engine
+	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) $(DOS_DEPFLAGS) -fo=$@ $<
+	@$(call dos_depfix,$(@:.o=.d))
+
+# The same object directory, sourced from retroplat's tree. GNU Make
+# picks whichever rule's prerequisite actually exists, so the two rules
+# above and below coexist without ambiguity.
+$(DOS_BUILD)/engine/%.o: $(RETROPLAT)/src/%.c | $(DOS_BUILD)/engine
 	env $(DOS_ENV) $(DOSCC) $(DOS_STRICT_CFLAGS) $(DOS_INCLUDES) $(DOS_DEPFLAGS) -fo=$@ $<
 	@$(call dos_depfix,$(@:.o=.d))
 
@@ -703,6 +770,10 @@ $(DOS_BUILD)/app/%.o: platform/dos/%.c | $(DOS_BUILD)/app
 	env $(DOS_ENV) $(DOSCC) $(DOS_RELAXED_CFLAGS) $(DOS_INCLUDES) $(DOS_DEPFLAGS) -fo=$@ $<
 	@$(call dos_depfix,$(@:.o=.d))
 
+$(DOS_BUILD)/app/%.o: $(RETROPLAT)/backends/dos/%.c | $(DOS_BUILD)/app
+	env $(DOS_ENV) $(DOSCC) $(DOS_RELAXED_CFLAGS) $(DOS_INCLUDES) $(DOS_DEPFLAGS) -fo=$@ $<
+	@$(call dos_depfix,$(@:.o=.d))
+
 $(DOS_BIN)/RETROWP.EXE: $(DOS_PLATFORM_OBJ) $(DOS_BUILD)/app/main.o $(DOS_ENGINE_OBJ) $(DOS_COMMON_OBJ) $(DOS_TRANSPORT_OBJ) $(DOS_SERVICES_OBJ) | $(DOS_BIN)
 	env $(DOS_ENV) $(DOSLINK) -0 -ml -bt=dos -k32768 $^ -fe=$@
 
@@ -713,122 +784,26 @@ $(DOS_BUILD)/engine $(DOS_BUILD)/transport $(DOS_BUILD)/services $(DOS_BUILD)/co
 dos: $(DOS_BIN)/RETROWP.EXE
 
 # ---------------------------------------------------------------------
-# Seam check (docs/platform-extraction.md): compile each backend WITHOUT
-# an application around it.
+# Seam check -- now delegated, because the seam is its own project.
 #
-# CLAUDE.md rule 1 is enforced in one direction only. engine/ never
-# includes a platform header, and the host build breaks the moment it
-# does. The CONVERSE was never enforced at all -- nothing stopped
-# platform/<target>/ reaching back into the document model, and four
-# metrics_*.c files quietly did exactly that, including docmodel.h for
-# four text-style bits (now PLAT_STYLE_* in platform.h, where the
-# plat_font_open() argument that consumes them already lived).
+# It used to synthesize an include directory holding only the shareable
+# headers, so that a backend reaching back into the engine failed to
+# compile. That directory is now retroplat's actual include/, and the
+# check is retroplat's own `make check-all`. Kept under the old names so
+# CI and habit keep working, and because "is the platform layer still
+# application-independent?" is a question RetroWP wants answered even
+# though the code no longer lives here.
 #
-# THE GATE IS THE INCLUDE PATH, NOT THE COMPILER. SEAM_INC is a
-# synthesized directory holding only the four genuinely app-independent
-# headers, so a backend that includes docmodel.h -- or app_ctx.h, or
-# anything else of RetroWP's -- fails with "No such file" instead of
-# compiling happily against -Iengine/include. Compiling the backends as
-# part of the app, which is all any other target does, cannot catch this:
-# the application's headers are right there on the path.
-#
-# It doubles as a standing check that the extraction described in
-# docs/platform-extraction.md remains viable, since SEAM_INC is precisely
-# the include/ directory that move would create. If this target passes,
-# the seam is still liftable; if it stops passing, something crossed the
-# line and the diff will say what.
-#
-# Deliberately always recompiles rather than tracking dependencies: it is
-# a couple of seconds over ~6,600 lines, and a gate that can be stale is
-# not a gate. app_shell*.c and main.c are excluded by construction -- they
-# ARE the word processor and are expected to use engine headers freely.
-
-SEAM_BUILD = $(BUILD)/seam
-SEAM_INC   = $(SEAM_BUILD)/include
-
-# The shareable set, per docs/platform-extraction.md's inventory. Kept as
-# symlinks so there is exactly one copy of each header in the tree and no
-# staleness is possible.
-SEAM_HDRS     = platform.h types.h endian.h utf8.h
-SEAM_INC_HDRS = $(addprefix $(SEAM_INC)/,$(SEAM_HDRS))
-
-# The portable half of the seam: no platform calls, no engine dependency.
-SEAM_PORTABLE_SRC = engine/src/endian.c engine/src/utf8.c
-
-# Every .c in a backend except the application shell.
-seam_src = $(filter-out %/app_shell.c %/main.c,$(wildcard platform/$(1)/*.c))
-
-# Each target's own relaxed flag set, minus DEPFLAGS (nothing here is
-# incremental). Relaxed rather than strict on purpose: these files are
-# compiled relaxed in the real builds too, because the native GEM/MUI/
-# Toolbox headers are not -pedantic-clean and that is not this gate's
-# business. This gate is about the include path.
-SEAM_CFLAGS_HOST  = -Wall -Wextra -O2
-SEAM_CFLAGS_ATARI = -Wall -Wextra -O2
-SEAM_CFLAGS_AMIGA = -Wall -Wextra $(AMIGA_CPU)
-SEAM_CFLAGS_MAC   = -Wall -Wextra -O2
-SEAM_CFLAGS_DOS   = -0 -ml -bt=dos -wx
-
-$(SEAM_INC):
-	mkdir -p $@
-
-$(SEAM_INC)/%.h: engine/include/%.h | $(SEAM_INC)
-	ln -sf $(abspath $<) $@
+# An absent cross-toolchain skips rather than fails, in retroplat's
+# Makefile, exactly as before.
 
 .PHONY: seam-check seam-check-atari seam-check-amiga seam-check-mac seam-check-dos seam-check-all
 
-seam-check: $(SEAM_INC_HDRS)
-	@mkdir -p $(SEAM_BUILD)/host
-	@for f in $(SEAM_PORTABLE_SRC) $(call seam_src,host); do \
-		$(CC) $(SEAM_CFLAGS_HOST) -I$(SEAM_INC) -Iplatform/host \
-			-c $$f -o $(SEAM_BUILD)/host/`basename $$f .c`.o || exit 1; \
-	done
-	@echo "seam-check: portable seam + host backend compile with NO application header on the include path"
+seam-check seam-check-atari seam-check-amiga seam-check-mac seam-check-dos:
+	$(MAKE) -C $(RETROPLAT) $(patsubst seam-%,%,$@)
 
-seam-check-atari: $(SEAM_INC_HDRS)
-	@mkdir -p $(SEAM_BUILD)/atari
-	@for f in $(SEAM_PORTABLE_SRC) $(call seam_src,atari); do \
-		$(ATARICC) $(SEAM_CFLAGS_ATARI) -I$(SEAM_INC) -Iplatform/atari \
-			-c $$f -o $(SEAM_BUILD)/atari/`basename $$f .c`.o || exit 1; \
-	done
-	@echo "seam-check-atari: Atari backend is application-independent"
-
-seam-check-amiga: $(SEAM_INC_HDRS)
-	@mkdir -p $(SEAM_BUILD)/amiga
-	@for f in $(SEAM_PORTABLE_SRC) $(call seam_src,amiga); do \
-		$(AMIGACC) $(SEAM_CFLAGS_AMIGA) -I$(SEAM_INC) -Iplatform/amiga \
-			-c $$f -o $(SEAM_BUILD)/amiga/`basename $$f .c`.o || exit 1; \
-	done
-	@echo "seam-check-amiga: Amiga backend is application-independent"
-
-# Worth having for its own sake, not just for the seam: the Makefile
-# never compiles platform/mac/ at all (mac-engine-check is engine-only,
-# and the real Mac build goes through Retro68's CMake for its resource
-# fork). This is the only `make` target that touches those files.
-seam-check-mac: $(SEAM_INC_HDRS)
-	@mkdir -p $(SEAM_BUILD)/mac
-	@for f in $(SEAM_PORTABLE_SRC) $(call seam_src,mac); do \
-		$(MACCC) $(SEAM_CFLAGS_MAC) -I$(SEAM_INC) -Iplatform/mac \
-			-c $$f -o $(SEAM_BUILD)/mac/`basename $$f .c`.o || exit 1; \
-	done
-	@echo "seam-check-mac: Mac backend is application-independent"
-
-seam-check-dos: $(SEAM_INC_HDRS)
-	@mkdir -p $(SEAM_BUILD)/dos
-	@for f in $(SEAM_PORTABLE_SRC) $(call seam_src,dos); do \
-		env $(DOS_ENV) $(DOSCC) $(SEAM_CFLAGS_DOS) -i=$(SEAM_INC) -i=platform/dos \
-			-i=$(DOS_TOOLROOT)/h \
-			-fo=$(SEAM_BUILD)/dos/`basename $$f .c`.o $$f || exit 1; \
-	done
-	@echo "seam-check-dos: DOS backend is application-independent"
-
-# Skips any target whose cross-compiler is not installed, exactly as the
-# CI matrix does -- an absent toolchain is not a failed gate.
-seam-check-all: seam-check
-	@command -v $(ATARICC) >/dev/null 2>&1 && $(MAKE) seam-check-atari || echo "-- no Atari toolchain, skipped"
-	@test -x $(AMIGACC) && $(MAKE) seam-check-amiga || echo "-- no Amiga toolchain, skipped"
-	@test -x $(MACCC) && $(MAKE) seam-check-mac || echo "-- no Mac toolchain, skipped"
-	@test -x $(DOSCC) && $(MAKE) seam-check-dos || echo "-- no DOS toolchain, skipped"
+seam-check-all:
+	$(MAKE) -C $(RETROPLAT) check-all
 
 clean:
 	rm -rf $(BUILD) $(BIN)

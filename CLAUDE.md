@@ -24,17 +24,21 @@ over a serial/TCP link so low-RAM machines stay lean.
 6. Everything in the engine must compile and unit-test on a modern host (PC/Mac)
    with a stub platform backend. Off-target testing is a first-class workflow.
 
-## Related Design Docs
-- **docs/platform-extraction.md** — a worked, verified proposal for lifting `platform.h`
-  and the per-target backends into a shared library that other apps could consume. It was
-  implemented, checked against the baseline, then reverted; it is recorded, not adopted.
-  **Do not execute it unprompted.** Read it if the question of sharing this platform layer
-  comes up, or if you need the coupling analysis (what in `platform/` is genuinely
-  app-independent and what is the word processor). The one real leak it identified —
-  `metrics_*.c` reaching into `docmodel.h` for four text-style flags — **has since been
-  fixed**, on its own merits and without the extraction: they are `PLAT_STYLE_*` in
-  `platform.h` now, beside the `plat_font_open` `style_flags` argument that consumes them,
-  and `make seam-check-all` keeps it that way.
+## The platform layer lives in another repo now
+`platform.h`, `types.h`, `endian.h`, `utf8.h`, `endian.c`, `utf8.c` and every per-machine
+backend are **retroplat** (`../retroplat`), a standalone library RetroWP consumes. Only the
+app shells — `platform/<target>/app_shell*.c` and `main.c` — are still here, plus
+`platform/common/`.
+
+Point the build elsewhere with `make RETROPLAT=/path/to/retroplat`. Header filenames are
+unchanged by the move, so every `#include "platform.h"` still resolves.
+
+**A backend fix belongs in retroplat, not here.** If you find yourself wanting to edit a
+`metrics_*.c` or `draw_*.c`, it is in the other repo.
+
+**docs/platform-extraction.md** is the record of how and why, including the coupling
+analysis (what in `platform/` was genuinely app-independent and what was the word
+processor) and the verification protocol the move was held to.
 
 ## Testing Baseline (know this before you refactor)
 `make test` on a clean tree gives **435/438** where Pillow is not available to the offload
@@ -44,11 +48,16 @@ baseline before changing anything rather than trusting either number, or you wil
 regression you did not cause.
 
 `make seam-check-all` is the other standing gate, and the one a refactor is most likely to
-break without noticing. It compiles each backend *without an application around it*,
-against an include path holding only `platform.h`, `types.h`, `endian.h` and `utf8.h` — so
-anything under `platform/<target>/` outside the app shells that reaches back into the
-engine fails to compile. No other target can catch that, because in every other build the
-application's headers are already on the path. Absent cross-toolchains skip, not fail.
+break without noticing. It delegates to retroplat's own `make check-all`, which compiles
+each backend *without an application around it*, against nothing but the seam's four
+headers — so a backend reaching back into this engine fails to compile. No build that
+includes an application can catch that, because there the application's headers are already
+on the path. Absent cross-toolchains skip, not fail.
+
+Known broken here and NOT caused by anything in this repo: the Retro68 `ld` is linked
+against Boost 1.91 while the system has 1.92, so the Mac CMake build fails at CMake's own
+compiler test, before it reads a line of this project. `make seam-check-mac` still passes,
+because compiling is fine and only linking is broken.
 
 ## Architecture Layers
 - `engine/`   Portable C. Document model, editing, layout, formats, offload client.
@@ -61,8 +70,10 @@ application's headers are already on the path. Absent cross-toolchains skip, not
               cross-compiler, and eventually Amiga/Mac/DOS cross-compilers) --
               a stray native `#include` breaks the host build immediately,
               since no such header exists there.
-- `platform/<target>/` One backend per target. Implements `platform.h`, plus
-              that target's own native headers freely. Owns UI + rendering.
+- `platform/<target>/` The application shell for one target: `app_shell*.c` and
+              `main.c`, using that target's native headers freely. Owns the UI.
+              The BACKEND it calls through `platform.h` is not here — it is
+              `../retroplat/backends/<target>/`.
 - `services/` Standalone algorithmic modules (spell, thesaurus, grammar-lite).
               Pure C, data-driven, no UI, no platform calls. Shared everywhere.
 - `offload/`  The Pi-side gateway (modern C/Python). Mirrors the serial protocol.
