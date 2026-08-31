@@ -24,6 +24,32 @@ over a serial/TCP link so low-RAM machines stay lean.
 6. Everything in the engine must compile and unit-test on a modern host (PC/Mac)
    with a stub platform backend. Off-target testing is a first-class workflow.
 
+## Related Design Docs
+- **docs/platform-extraction.md** — a worked, verified proposal for lifting `platform.h`
+  and the per-target backends into a shared library that other apps could consume. It was
+  implemented, checked against the baseline, then reverted; it is recorded, not adopted.
+  **Do not execute it unprompted.** Read it if the question of sharing this platform layer
+  comes up, or if you need the coupling analysis (what in `platform/` is genuinely
+  app-independent and what is the word processor). The one real leak it identified —
+  `metrics_*.c` reaching into `docmodel.h` for four text-style flags — **has since been
+  fixed**, on its own merits and without the extraction: they are `PLAT_STYLE_*` in
+  `platform.h` now, beside the `plat_font_open` `style_flags` argument that consumes them,
+  and `make seam-check-all` keeps it that way.
+
+## Testing Baseline (know this before you refactor)
+`make test` on a clean tree gives **435/438** where Pillow is not available to the offload
+gateway, and a full sweep where it is. The three variable cases are all in
+`host/tests/test_image_convert.c` — pre-existing and environment-dependent. Take your own
+baseline before changing anything rather than trusting either number, or you will hunt a
+regression you did not cause.
+
+`make seam-check-all` is the other standing gate, and the one a refactor is most likely to
+break without noticing. It compiles each backend *without an application around it*,
+against an include path holding only `platform.h`, `types.h`, `endian.h` and `utf8.h` — so
+anything under `platform/<target>/` outside the app shells that reaches back into the
+engine fails to compile. No other target can catch that, because in every other build the
+application's headers are already on the path. Absent cross-toolchains skip, not fail.
+
 ## Architecture Layers
 - `engine/`   Portable C. Document model, editing, layout, formats, offload client.
 - `platform/common/` Shared UI scaffolding (action registry, app context, status

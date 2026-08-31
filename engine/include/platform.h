@@ -89,6 +89,25 @@ void plat_sleep_ms(u32 ms);
 /* ONLY through this seam -- never a platform font API directly)       */
 /* ------------------------------------------------------------------ */
 
+/* Style bits for plat_font_open()'s style_flags argument.
+
+   These belong to this seam's own contract, not to any application's
+   document model: every backend's metrics and draw code has to interpret
+   them, and no backend should need an application header to do it. Before
+   these existed the four metrics_*.c files included docmodel.h for exactly
+   these four constants -- a dependency pointing the wrong way through the
+   seam, and the one real leak found by the survey in
+   docs/platform-extraction.md.
+
+   docmodel.h's wp_style_flags keeps its own definition with the SAME bit
+   values, and adds SUPER and SUB, which are a document concern rather than
+   a font-selection one. The two are held in step by
+   host/tests/test_platform_style.c, not by hope. */
+#define PLAT_STYLE_BOLD      (1u << 0)
+#define PLAT_STYLE_ITALIC    (1u << 1)
+#define PLAT_STYLE_UNDERLINE (1u << 2)
+#define PLAT_STYLE_STRIKE    (1u << 3)
+
 typedef void plat_font;
 
 typedef struct {

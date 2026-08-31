@@ -1,7 +1,6 @@
 #include <stddef.h>
 #include <string.h>
 #include "platform.h"
-#include "docmodel.h"
 #include "metrics_atari_internal.h"
 
 /* GDOS (SpeedoGDOS/FontGDOS) is detected at runtime via vq_gdos(), not
@@ -341,11 +340,12 @@ static short map_effects(u16 style_flags)
 {
     short effects = TXT_NORMAL;
 
-    if (style_flags & WP_STYLE_BOLD)      effects |= TXT_THICKENED;
-    if (style_flags & WP_STYLE_ITALIC)    effects |= TXT_SKEWED;
-    if (style_flags & WP_STYLE_UNDERLINE) effects |= TXT_UNDERLINED;
-    /* WP_STYLE_STRIKE/SUPER/SUB have no VDI text-effect equivalent --
-       not mapped; documented gap in docs/atari-platform.md. */
+    if (style_flags & PLAT_STYLE_BOLD)      effects |= TXT_THICKENED;
+    if (style_flags & PLAT_STYLE_ITALIC)    effects |= TXT_SKEWED;
+    if (style_flags & PLAT_STYLE_UNDERLINE) effects |= TXT_UNDERLINED;
+    /* PLAT_STYLE_STRIKE has no VDI text-effect equivalent, and the
+       document model's own SUPER/SUB never reach this seam at all --
+       neither is mapped; documented gap in docs/atari-platform.md. */
     return effects;
 }
 

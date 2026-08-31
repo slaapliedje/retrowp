@@ -13,6 +13,12 @@ typedef u16 wp_cstyle; /* index into wp_document.cstyles; 0 = none/invalid */
 typedef u16 wp_pstyle; /* index into wp_document.pstyles; 0 = none/invalid */
 typedef u16 wp_image;  /* index into wp_document.images; 0 = none/invalid */
 
+/* The low four bits are deliberately the SAME VALUES as platform.h's
+   PLAT_STYLE_* , which is what plat_font_open() takes; SUPER and SUB have
+   no PLAT_ equivalent because they are a document concern that never
+   reaches the font-selection seam. Restated here rather than included from
+   platform.h so the document model stays free of the platform seam --
+   host/tests/test_platform_style.c fails if the two ever diverge. */
 typedef enum {
     WP_STYLE_BOLD      = 1 << 0,
     WP_STYLE_ITALIC    = 1 << 1,

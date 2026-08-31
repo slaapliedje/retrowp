@@ -712,6 +712,124 @@ $(DOS_BUILD)/engine $(DOS_BUILD)/transport $(DOS_BUILD)/services $(DOS_BUILD)/co
 .PHONY: dos
 dos: $(DOS_BIN)/RETROWP.EXE
 
+# ---------------------------------------------------------------------
+# Seam check (docs/platform-extraction.md): compile each backend WITHOUT
+# an application around it.
+#
+# CLAUDE.md rule 1 is enforced in one direction only. engine/ never
+# includes a platform header, and the host build breaks the moment it
+# does. The CONVERSE was never enforced at all -- nothing stopped
+# platform/<target>/ reaching back into the document model, and four
+# metrics_*.c files quietly did exactly that, including docmodel.h for
+# four text-style bits (now PLAT_STYLE_* in platform.h, where the
+# plat_font_open() argument that consumes them already lived).
+#
+# THE GATE IS THE INCLUDE PATH, NOT THE COMPILER. SEAM_INC is a
+# synthesized directory holding only the four genuinely app-independent
+# headers, so a backend that includes docmodel.h -- or app_ctx.h, or
+# anything else of RetroWP's -- fails with "No such file" instead of
+# compiling happily against -Iengine/include. Compiling the backends as
+# part of the app, which is all any other target does, cannot catch this:
+# the application's headers are right there on the path.
+#
+# It doubles as a standing check that the extraction described in
+# docs/platform-extraction.md remains viable, since SEAM_INC is precisely
+# the include/ directory that move would create. If this target passes,
+# the seam is still liftable; if it stops passing, something crossed the
+# line and the diff will say what.
+#
+# Deliberately always recompiles rather than tracking dependencies: it is
+# a couple of seconds over ~6,600 lines, and a gate that can be stale is
+# not a gate. app_shell*.c and main.c are excluded by construction -- they
+# ARE the word processor and are expected to use engine headers freely.
+
+SEAM_BUILD = $(BUILD)/seam
+SEAM_INC   = $(SEAM_BUILD)/include
+
+# The shareable set, per docs/platform-extraction.md's inventory. Kept as
+# symlinks so there is exactly one copy of each header in the tree and no
+# staleness is possible.
+SEAM_HDRS     = platform.h types.h endian.h utf8.h
+SEAM_INC_HDRS = $(addprefix $(SEAM_INC)/,$(SEAM_HDRS))
+
+# The portable half of the seam: no platform calls, no engine dependency.
+SEAM_PORTABLE_SRC = engine/src/endian.c engine/src/utf8.c
+
+# Every .c in a backend except the application shell.
+seam_src = $(filter-out %/app_shell.c %/main.c,$(wildcard platform/$(1)/*.c))
+
+# Each target's own relaxed flag set, minus DEPFLAGS (nothing here is
+# incremental). Relaxed rather than strict on purpose: these files are
+# compiled relaxed in the real builds too, because the native GEM/MUI/
+# Toolbox headers are not -pedantic-clean and that is not this gate's
+# business. This gate is about the include path.
+SEAM_CFLAGS_HOST  = -Wall -Wextra -O2
+SEAM_CFLAGS_ATARI = -Wall -Wextra -O2
+SEAM_CFLAGS_AMIGA = -Wall -Wextra $(AMIGA_CPU)
+SEAM_CFLAGS_MAC   = -Wall -Wextra -O2
+SEAM_CFLAGS_DOS   = -0 -ml -bt=dos -wx
+
+$(SEAM_INC):
+	mkdir -p $@
+
+$(SEAM_INC)/%.h: engine/include/%.h | $(SEAM_INC)
+	ln -sf $(abspath $<) $@
+
+.PHONY: seam-check seam-check-atari seam-check-amiga seam-check-mac seam-check-dos seam-check-all
+
+seam-check: $(SEAM_INC_HDRS)
+	@mkdir -p $(SEAM_BUILD)/host
+	@for f in $(SEAM_PORTABLE_SRC) $(call seam_src,host); do \
+		$(CC) $(SEAM_CFLAGS_HOST) -I$(SEAM_INC) -Iplatform/host \
+			-c $$f -o $(SEAM_BUILD)/host/`basename $$f .c`.o || exit 1; \
+	done
+	@echo "seam-check: portable seam + host backend compile with NO application header on the include path"
+
+seam-check-atari: $(SEAM_INC_HDRS)
+	@mkdir -p $(SEAM_BUILD)/atari
+	@for f in $(SEAM_PORTABLE_SRC) $(call seam_src,atari); do \
+		$(ATARICC) $(SEAM_CFLAGS_ATARI) -I$(SEAM_INC) -Iplatform/atari \
+			-c $$f -o $(SEAM_BUILD)/atari/`basename $$f .c`.o || exit 1; \
+	done
+	@echo "seam-check-atari: Atari backend is application-independent"
+
+seam-check-amiga: $(SEAM_INC_HDRS)
+	@mkdir -p $(SEAM_BUILD)/amiga
+	@for f in $(SEAM_PORTABLE_SRC) $(call seam_src,amiga); do \
+		$(AMIGACC) $(SEAM_CFLAGS_AMIGA) -I$(SEAM_INC) -Iplatform/amiga \
+			-c $$f -o $(SEAM_BUILD)/amiga/`basename $$f .c`.o || exit 1; \
+	done
+	@echo "seam-check-amiga: Amiga backend is application-independent"
+
+# Worth having for its own sake, not just for the seam: the Makefile
+# never compiles platform/mac/ at all (mac-engine-check is engine-only,
+# and the real Mac build goes through Retro68's CMake for its resource
+# fork). This is the only `make` target that touches those files.
+seam-check-mac: $(SEAM_INC_HDRS)
+	@mkdir -p $(SEAM_BUILD)/mac
+	@for f in $(SEAM_PORTABLE_SRC) $(call seam_src,mac); do \
+		$(MACCC) $(SEAM_CFLAGS_MAC) -I$(SEAM_INC) -Iplatform/mac \
+			-c $$f -o $(SEAM_BUILD)/mac/`basename $$f .c`.o || exit 1; \
+	done
+	@echo "seam-check-mac: Mac backend is application-independent"
+
+seam-check-dos: $(SEAM_INC_HDRS)
+	@mkdir -p $(SEAM_BUILD)/dos
+	@for f in $(SEAM_PORTABLE_SRC) $(call seam_src,dos); do \
+		env $(DOS_ENV) $(DOSCC) $(SEAM_CFLAGS_DOS) -i=$(SEAM_INC) -i=platform/dos \
+			-i=$(DOS_TOOLROOT)/h \
+			-fo=$(SEAM_BUILD)/dos/`basename $$f .c`.o $$f || exit 1; \
+	done
+	@echo "seam-check-dos: DOS backend is application-independent"
+
+# Skips any target whose cross-compiler is not installed, exactly as the
+# CI matrix does -- an absent toolchain is not a failed gate.
+seam-check-all: seam-check
+	@command -v $(ATARICC) >/dev/null 2>&1 && $(MAKE) seam-check-atari || echo "-- no Atari toolchain, skipped"
+	@test -x $(AMIGACC) && $(MAKE) seam-check-amiga || echo "-- no Amiga toolchain, skipped"
+	@test -x $(MACCC) && $(MAKE) seam-check-mac || echo "-- no Mac toolchain, skipped"
+	@test -x $(DOSCC) && $(MAKE) seam-check-dos || echo "-- no DOS toolchain, skipped"
+
 clean:
 	rm -rf $(BUILD) $(BIN)
 

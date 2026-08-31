@@ -12,7 +12,6 @@
 #include <proto/diskfont.h>
 
 #include "platform.h"
-#include "docmodel.h"
 #include "metrics_amiga_internal.h"
 
 /* T9.2: real graphics.library/diskfont.library metrics, replacing the
@@ -175,12 +174,13 @@ static UWORD map_style(u16 style_flags)
 {
     UWORD style = FS_NORMAL;
 
-    if (style_flags & WP_STYLE_BOLD)      style |= FSF_BOLD;
-    if (style_flags & WP_STYLE_ITALIC)    style |= FSF_ITALIC;
-    if (style_flags & WP_STYLE_UNDERLINE) style |= FSF_UNDERLINED;
-    /* WP_STYLE_STRIKE/SUPER/SUB have no FS_* equivalent -- not mapped,
-       same documented gap metrics_atari.c's map_effects already has for
-       VDI's TXT_* effects. */
+    if (style_flags & PLAT_STYLE_BOLD)      style |= FSF_BOLD;
+    if (style_flags & PLAT_STYLE_ITALIC)    style |= FSF_ITALIC;
+    if (style_flags & PLAT_STYLE_UNDERLINE) style |= FSF_UNDERLINED;
+    /* PLAT_STYLE_STRIKE has no FS_* equivalent, and the document model's
+       own SUPER/SUB never reach this seam -- not mapped, the same
+       documented gap metrics_atari.c's map_effects already has for VDI's
+       TXT_* effects. */
     return style;
 }
 

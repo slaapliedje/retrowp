@@ -3,7 +3,6 @@
 #include <Quickdraw.h>
 #include <Fonts.h>
 #include "platform.h"
-#include "docmodel.h"
 #include "metrics_mac_internal.h"
 
 /* Phase 3: real QuickDraw font metrics, replacing the Phase 2
@@ -103,12 +102,13 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
     f->size = (short)mac_twips_to_px(size_twips);
     if (f->size < 1) f->size = 1;
     f->style = 0;
-    if (style_flags & (u16)WP_STYLE_BOLD)      f->style |= bold;
-    if (style_flags & (u16)WP_STYLE_ITALIC)    f->style |= italic;
-    if (style_flags & (u16)WP_STYLE_UNDERLINE) f->style |= underline;
-    /* WP_STYLE_STRIKE/SUPER/SUB have no plain QuickDraw Style bit --
-       not mapped, same documented gap metrics_atari.c/metrics_amiga.c
-       each already have for their own target's effects bits. */
+    if (style_flags & (u16)PLAT_STYLE_BOLD)      f->style |= bold;
+    if (style_flags & (u16)PLAT_STYLE_ITALIC)    f->style |= italic;
+    if (style_flags & (u16)PLAT_STYLE_UNDERLINE) f->style |= underline;
+    /* PLAT_STYLE_STRIKE has no plain QuickDraw Style bit, and the
+       document model's own SUPER/SUB never reach this seam -- not mapped,
+       the same documented gap metrics_atari.c/metrics_amiga.c each
+       already have for their own target's effects bits. */
 
     *out = (plat_font *)f;
     return WP_OK;

@@ -25,6 +25,10 @@ void test_file_roundtrip(void);
 void test_pipe_transport_loopback_and_timeout(void);
 void test_fake_monospace_metrics(void);
 
+/* platform_style.c */
+void test_platform_style_bits_match_document_model(void);
+void test_platform_style_bits_do_not_collide_with_document_only_bits(void);
+
 /* menucheck.c */
 void test_menucheck_accel_letter_maps_only_ctrl_letters(void);
 void test_menucheck_accel_letter_0x0c_is_ctrl_l(void);
@@ -538,6 +542,8 @@ static const test_case g_cases[] = {
     { "file_roundtrip", test_file_roundtrip },
     { "pipe_transport_loopback_and_timeout", test_pipe_transport_loopback_and_timeout },
     { "fake_monospace_metrics", test_fake_monospace_metrics },
+    { "platform_style_bits_match_document_model", test_platform_style_bits_match_document_model },
+    { "platform_style_bits_do_not_collide_with_document_only_bits", test_platform_style_bits_do_not_collide_with_document_only_bits },
 
     { "menucheck_accel_letter_maps_only_ctrl_letters", test_menucheck_accel_letter_maps_only_ctrl_letters },
     { "menucheck_accel_letter_0x0c_is_ctrl_l", test_menucheck_accel_letter_0x0c_is_ctrl_l },

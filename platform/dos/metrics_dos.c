@@ -1,6 +1,5 @@
 #include <stddef.h>
 #include "platform.h"
-#include "docmodel.h"
 #include "utf8.h"
 #include "metrics_dos_internal.h"
 
@@ -20,7 +19,7 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
     f = (dos_font *)mem_alloc((u32)sizeof(dos_font));
     if (f == NULL) return WP_NOMEM;
     f->size_twips = size_twips;
-    f->bold = (wp_bool)((style_flags & WP_STYLE_BOLD) ? WP_TRUE : WP_FALSE);
+    f->bold = (wp_bool)((style_flags & PLAT_STYLE_BOLD) ? WP_TRUE : WP_FALSE);
     *out = (plat_font *)f;
     return WP_OK;
 }
