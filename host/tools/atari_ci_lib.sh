@@ -23,6 +23,52 @@
 #   ATARI_CI_LOG     - path to a combined stdout+stderr log; the caller
 #                       owns cleanup (rm -rf "$(dirname "$ATARI_CI_LOG")")
 #                       once done reading it.
+# Video mode and RAM differ per machine family, and getting them wrong is
+# not cosmetic: RETROWP puts up a modal "Screen is under 80 columns" alert
+# at startup and then WAITS for it, so a machine booted into a narrow mode
+# looks exactly like a hung app to every marker this harness polls for.
+# That is precisely what the Falcon did the first time it was pointed at
+# this harness -- alive, drawing correctly, and blocked on its own dialog.
+#
+#   ST family  --tos-res med, the ST's own 640x200 80-column mode.
+#   TT030      --tos-res ttmed ("med" is an ST-only value).
+#
+# The FALCON is deliberately absent, and the matrix has no Falcon entry
+# yet, because none of the obvious levers work -- recorded here so the
+# next attempt does not repeat them:
+#   --tos-res   Hatari: "TOS resolution setting doesn't work with Falcon
+#               (yet)". No effect.
+#   --monitor vga alone   still boots 40 columns; the app then sits on
+#               its own "Screen is under 80 columns" alert forever, which
+#               every marker here reads as a hang.
+#   --vdi       Hatari refuses: "Please use 512k EmuTOS instead of TOS v4
+#               for proper extended VDI resolutions support on Falcon."
+#
+# What DOES work is NEWDESK.INF: TOS 4 takes its boot video mode from the
+# "#E" line, whose bytes 3-4 are a videl mode word (a real Falcon here
+# has "#E 18 04 00 06 00 1A ...", 0x001A = VGA|COL80|BPS4 = 640x480x16).
+# Writing one drove the emulated Falcon to a full 640x480 desktop. The
+# catch, and the remaining work: Hatari'"'"'s --auto launches the program
+# WITHOUT the desktop ever processing the INF, so the Falcon path needs
+# "#Z 01 C:\RETROWP.PRG@" autorun in the INF and no --auto at all -- and
+# that #Z form did not fire on the first attempt.
+#
+# RAM likewise: 1MB is the project's ST baseline (CLAUDE.md rule 5) and is
+# what the ST entries must keep testing, but a TT030 will not boot in it.
+atari_ci_video_args() {
+    case "$1" in
+    tt) echo "--monitor vga --tos-res ttmed" ;;
+    *)  echo "--monitor rgb --tos-res med" ;;
+    esac
+}
+
+atari_ci_memsize() {
+    case "$1" in
+    tt|falcon) echo 4 ;;
+    *)         echo 1 ;;
+    esac
+}
+
 run_atari_smoke_once() {
     _tos_image="$1"
     _offset="$2"
@@ -80,9 +126,9 @@ run_atari_smoke_once() {
         --natfeats on \
         --tos "$_tos_image" \
         --machine "$_machine" \
-        --memsize 1 \
+        --memsize "$(atari_ci_memsize "$_machine")" \
         --fast-boot yes \
-        --monitor rgb --tos-res med --zoom 2 --statusbar no --borders no \
+        $(atari_ci_video_args "$_machine") --zoom 2 --statusbar no --borders no \
         --confirm-quit no \
         --sound off \
         --conout 2 \
@@ -183,9 +229,9 @@ run_atari_app_once() {
         --natfeats on \
         --tos "$_tos_image" \
         --machine "$_machine" \
-        --memsize 1 \
+        --memsize "$(atari_ci_memsize "$_machine")" \
         --fast-boot yes \
-        --monitor rgb --tos-res med --zoom 2 --statusbar no --borders no \
+        $(atari_ci_video_args "$_machine") --zoom 2 --statusbar no --borders no \
         --confirm-quit no \
         --sound off \
         --conout 2 \

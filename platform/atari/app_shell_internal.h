@@ -251,6 +251,16 @@ void wp_menu_tree_init(short wcell, short hcell,
    explicitly rather than trusted. */
 wp_bool wp_menu_tree_selfcheck(void);
 
+/* Dropdown placement, clamped so a box's right edge never leaves the
+   screen -- Atari's own rule from RCSMENU.C's fix_menu_bar(), and a
+   crash rather than a cosmetic issue if skipped: TOS's menu_sr() saves
+   the screen under a dropdown via bb_save() WITHOUT clipping the
+   rectangle first. See the definition in app_shell.c for the full
+   account. */
+short wp_menu_dropdown_x(short title_x, short box_w, short screen_w,
+                         short wcell);
+wp_bool wp_menu_dropdown_geometry_selfcheck(void);
+
 /* The backend's whole menu selfcheck: platform/common/menucheck.h's
    portable table checks, then wp_menu_tree_selfcheck's GEM OBJECT tree
    checks, then a leaf-level sweep (every item is a real G_STRING with a

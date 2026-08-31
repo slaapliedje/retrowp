@@ -244,10 +244,71 @@ static char g_text_desk_dummy4[32];
 static char g_text_desk_dummy5[32];
 static char g_text_desk_dummy6[32];
 
+/* Where a dropdown box actually goes, clamped so its right edge never
+   leaves the screen.
+ *
+   This is Atari's OWN rule, from the Resource Construction Set that
+   generated essentially every GEM menu ever shipped -- RCSMENU.C's
+   fix_menu_bar():
+
+       x1 = x + 2 * gl_wchar;
+       x2 = full.g_w - tree[menu_obj].ob_width;
+       tree[menu_obj].ob_x = min(x1, x2);
+
+   It is not cosmetic, and skipping it is not a layout bug -- it CRASHES
+   the machine. TOS's own menu handler saves the screen under a dropdown
+   before drawing it (aes/gemmnlib.c, menu_sr -> bb_save) and does NOT
+   clip that rectangle to the screen first; it trusts the tree to have
+   been built by a tool that already did. A box hanging off the right
+   edge therefore makes the AES copy memory past the end of the
+   framebuffer: screen corruption, then bombs, on a real Falcon, while
+   merely traversing the menu bar rightwards.
+
+   This tree is authored in CHARACTER CELLS and scaled by wcell at
+   runtime, which is exactly how it gets into trouble: the Help title is
+   at column 33 with a 15-wide box, so the menu bar needs 48 columns to
+   contain its own dropdowns. At 640x480 with an 8px font that is 80
+   columns and everything fits; halve the column count and Format and
+   Help both hang off the edge.
+
+   Kept as a separate function, taking its inputs rather than reading the
+   tree, so wp_atari_menu_selfcheck can prove it on the real failing
+   geometry without needing a screen (SMOKE.PRG never opens one).
+
+   The 2-cell indent is RCS's too, and it is NOT cosmetic -- it was
+   dropped once here on the grounds that the Compendium's prose says a
+   box falls "underneath its corresponding G_TITLE", and that was wrong.
+   menu_sr() subtracts MTH (GEMLIB.H: 1 pixel) from the rect's x before
+   handing it to bb_save, so a box at x=0 -- which is exactly where Desk
+   sits when boxes are flush with their titles -- produces x = -1 and
+   reads off the left end of the framebuffer. Atari's indent is what
+   keeps the leftmost dropdown clear of that edge. Both halves of
+   min(x + 2*wcell, screen_w - box_w) guard an edge; take either away and
+   one edge is unguarded. */
+short wp_menu_dropdown_x(short title_x, short box_w, short screen_w,
+                         short wcell)
+{
+    short want  = (short)(title_x + 2 * wcell);
+    short limit = (short)(screen_w - box_w);
+
+    if (limit < 0) limit = 0;           /* box wider than the screen */
+    return (want < limit) ? want : limit;
+}
+
+/* What wp_menu_tree_init was last given. The placement selfcheck below
+   re-derives every box position from these rather than hardcoding an
+   alignment rule, which is what let a stale "flush with its title"
+   assertion outlive the rule it was asserting. Zero until init runs. */
+static short g_menu_screen_w;
+static short g_menu_wcell;
+
 void wp_menu_tree_init(short wcell, short hcell,
                         short screen_w_px, short screen_h_px)
 {
     short i;
+
+    g_menu_screen_w = screen_w_px;
+    g_menu_wcell    = wcell;
 
     wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_spec.free_string = g_text_desk;
     wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_spec.free_string = g_text_file;
@@ -339,6 +400,40 @@ void wp_menu_tree_init(short wcell, short hcell,
 
     wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_width = screen_w_px;
     wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_height = (short)(screen_h_px - hcell);
+
+    /* Bar and active-area heights, straight from RCSMENU.C's
+       fix_menu_bar() -- the "+2 pixels for a border line" the
+       Compendium's menu-bar contract also asks for (Ch.6, "The Menu
+       Bar"), plus the extra row the active area gets. Both were exactly
+       hcell here, which is a cell short of what the AES lays out for. */
+    wp_menu_tree[WP_MENU_OBJ_BAR].ob_height    = (short)(hcell + 2);
+    wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_height = (short)(hcell + 3);
+
+    /* Now clamp every dropdown onto the screen. Titles and boxes are
+       paired in menu-bar order; see wp_menu_dropdown_x above for why
+       this is load-bearing rather than tidy. */
+    {
+        static const short pairs[] = {
+            WP_MENU_OBJ_DESK_TITLE,   WP_MENU_OBJ_DESK_BOX,
+            WP_MENU_OBJ_FILE_TITLE,   WP_MENU_OBJ_FILE_BOX,
+            WP_MENU_OBJ_EDIT_TITLE,   WP_MENU_OBJ_EDIT_BOX,
+            WP_MENU_OBJ_TOOLS_TITLE,  WP_MENU_OBJ_TOOLS_BOX,
+            WP_MENU_OBJ_FORMAT_TITLE, WP_MENU_OBJ_FORMAT_BOX,
+            WP_MENU_OBJ_HELP_TITLE,   WP_MENU_OBJ_HELP_BOX
+        };
+        short n = (short)(sizeof(pairs) / sizeof(pairs[0]));
+        short p;
+
+        for (p = 0; p < n; p += 2) {
+            short title = pairs[p];
+            short box   = pairs[p + 1];
+
+            wp_menu_tree[box].ob_x =
+                wp_menu_dropdown_x(wp_menu_tree[title].ob_x,
+                                   wp_menu_tree[box].ob_width,
+                                   screen_w_px, wcell);
+        }
+    }
 }
 
 /* Walks every parent's child chain (ob_head -> ob_next -> ... ->
@@ -387,6 +482,32 @@ static wp_bool child_chain_ok(short parent)
    selfcheck runs it as its last step so a tree that is structurally
    perfect but wired to nothing still fails. */
 static wp_bool menu_action_map_selfcheck(void);
+
+/* A dropdown is correctly placed if it is exactly where
+   wp_menu_dropdown_x would put it AND it lies wholly on screen. The
+   second half is the one that matters: TOS's menu_sr() hands this rect
+   to bb_save() after growing it by MTH on each side, without clipping,
+   so a box off either edge makes the AES copy memory outside the
+   framebuffer. Before init has run there is no screen to check against,
+   so the geometry is not yet meaningful and the check passes. */
+static wp_bool menu_box_placed_ok(short title, short box)
+{
+    short x, w;
+
+    if (g_menu_screen_w <= 0 || g_menu_wcell <= 0) return WP_TRUE;
+
+    x = wp_menu_tree[box].ob_x;
+    w = wp_menu_tree[box].ob_width;
+
+    if (x != wp_menu_dropdown_x(wp_menu_tree[title].ob_x, w,
+                                g_menu_screen_w, g_menu_wcell))
+        return WP_FALSE;
+
+    if (x < 0) return WP_FALSE;                       /* off the left  */
+    if ((short)(x + w) > g_menu_screen_w) return WP_FALSE;  /* off the right */
+
+    return WP_TRUE;
+}
 
 wp_bool wp_menu_tree_selfcheck(void)
 {
@@ -507,8 +628,9 @@ wp_bool wp_menu_tree_selfcheck(void)
 
         while (t != WP_MENU_OBJ_ACTIVE && n <= WP_MENU_OBJ_COUNT) {
             if (b < 0 || b >= WP_MENU_OBJ_COUNT) return WP_FALSE;
-            /* Each box must sit under its own title. */
-            if (wp_menu_tree[b].ob_x != wp_menu_tree[t].ob_x) return WP_FALSE;
+            /* Each box must be placed by the documented rule, and must
+               fit on screen -- see menu_box_placed_ok. */
+            if (!menu_box_placed_ok(t, b)) return WP_FALSE;
             t = wp_menu_tree[t].ob_next;
             b = wp_menu_tree[b].ob_next;
             n++;
@@ -567,7 +689,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_tail != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_type != G_BOX) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_x) return WP_FALSE;
+    if (!menu_box_placed_ok(WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_FILE_BOX)) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_next != WP_MENU_OBJ_FILE_SAVE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_spec.free_string != g_text_open) return WP_FALSE;
@@ -584,7 +706,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_tail != WP_MENU_OBJ_EDIT_PASTE) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_type != G_BOX) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_x) return WP_FALSE;
+    if (!menu_box_placed_ok(WP_MENU_OBJ_EDIT_TITLE, WP_MENU_OBJ_EDIT_BOX)) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_CUT].ob_next != WP_MENU_OBJ_EDIT_COPY) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_CUT].ob_spec.free_string != g_text_cut) return WP_FALSE;
@@ -599,7 +721,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_CHAT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_type != G_BOX) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_x) return WP_FALSE;
+    if (!menu_box_placed_ok(WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_TOOLS_BOX)) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_next != WP_MENU_OBJ_TOOLS_THESAURUS) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_spec.free_string != g_text_spellcheck) return WP_FALSE;
@@ -622,7 +744,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_tail != WP_MENU_OBJ_FORMAT_ALIGN_RIGHT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_type != G_BOX) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_x) return WP_FALSE;
+    if (!menu_box_placed_ok(WP_MENU_OBJ_FORMAT_TITLE, WP_MENU_OBJ_FORMAT_BOX)) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOLD].ob_next != WP_MENU_OBJ_FORMAT_ITALIC) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOLD].ob_spec.free_string != g_text_bold) return WP_FALSE;
@@ -652,7 +774,7 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_tail != WP_MENU_OBJ_HELP_FORMAT) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_type != G_BOX) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_x != wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_x) return WP_FALSE;
+    if (!menu_box_placed_ok(WP_MENU_OBJ_HELP_TITLE, WP_MENU_OBJ_HELP_BOX)) return WP_FALSE;
 
     if (wp_menu_tree[WP_MENU_OBJ_HELP_CONTENTS].ob_next != WP_MENU_OBJ_HELP_KEYS) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_HELP_CONTENTS].ob_spec.free_string != g_text_help_contents) return WP_FALSE;
@@ -690,6 +812,46 @@ wp_bool wp_menu_tree_selfcheck(void)
 }
 
 
+/* Proves wp_menu_dropdown_x against the geometry that actually broke,
+   without needing a screen -- SMOKE.PRG never opens one.
+
+   The clamp is the whole point, so the test is: on a screen too narrow
+   for the tree's nominal layout, does every box still end on-screen? */
+wp_bool wp_menu_dropdown_geometry_selfcheck(void)
+{
+    /* Wide screen: nothing is clamped; the box sits 2 cells right of
+       its title, per RCS. */
+    if (wp_menu_dropdown_x(264, 120, 640, 8) != 280) return WP_FALSE;
+
+    /* The LEFT edge, which is the half this originally got wrong. Desk's
+       title is at x=0, and menu_sr() subtracts MTH=1 before bb_save --
+       so a flush box would hand the AES x = -1. The indent must put it
+       clear of zero. */
+    if (wp_menu_dropdown_x(0, 160, 640, 8) != 16) return WP_FALSE;
+
+    /* Help's real geometry at 8px cells on a 40-column screen: title at
+       column 33 (264px), 15-wide box (120px), 320px of screen. Nominal
+       right edge 384 -- 64px past the end. Must be pulled back to
+       320-120 = 200. This is the exact case that made TOS's own
+       bb_save() read past the framebuffer. */
+    if (wp_menu_dropdown_x(264, 120, 320, 8) != 200) return WP_FALSE;
+
+    /* Format's box, same screen: 25*8=200, 16 cells wide = 128px,
+       nominal right edge 328, clamped to 320-128 = 192. */
+    if (wp_menu_dropdown_x(200, 128, 320, 8) != 192) return WP_FALSE;
+
+    /* Exactly-fits must NOT be moved: an off-by-one here would shift
+       every dropdown left by a pixel on the common 640px screen. */
+    if (wp_menu_dropdown_x(520, 120, 640, 8) != 520) return WP_FALSE;
+
+    /* Degenerate: a box wider than the whole screen clamps to 0 rather
+       than going negative, which would put ob_x off the LEFT edge and
+       reintroduce the same out-of-bounds save at the other end. */
+    if (wp_menu_dropdown_x(264, 700, 640, 8) != 0) return WP_FALSE;
+
+    return WP_TRUE;
+}
+
 wp_bool wp_atari_menu_selfcheck(void)
 {
     short i;
@@ -706,6 +868,13 @@ wp_bool wp_atari_menu_selfcheck(void)
 
     /* Then the GEM OBJECT tree itself. */
     if (!wp_menu_tree_selfcheck()) return WP_FALSE;
+
+    /* And the geometry rule that costs a crash rather than a glitch.
+       Exercised on the REAL numbers this tree uses, not on abstract
+       ones: Help's title is at column 33 with a 15-wide box, so it needs
+       48 columns, and the case that took down a real Falcon is a screen
+       with fewer than that. */
+    if (!wp_menu_dropdown_geometry_selfcheck()) return WP_FALSE;
 
     for (i = 0; i < WP_MENU_OBJ_COUNT; i++) {
         const OBJECT *ob = &wp_menu_tree[i];
@@ -4361,18 +4530,33 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
    real pixel width v_opnvwk reports); 640px is the real threshold
    SpeedoGDOS's own INSTALL.PRG uses (verified: refuses at 320x200,
    proceeds at 640x200 -- see docs/atari-platform.md). */
-static wp_bool needs_80_column_warning(short screen_width_px)
+static wp_bool needs_80_column_warning(short screen_width_px, short wcell)
 {
-    return (wp_bool)(screen_width_px < 640);
+    if (wcell <= 0) return WP_TRUE;     /* nonsense metrics: warn, don't divide */
+    return (wp_bool)((screen_width_px / wcell) < 80);
+}
+
+/* Divide-by-zero guard, proven rather than assumed: a backend that
+   reports a zero cell width must make this warn, not crash. */
+static wp_bool wcell_is_zero_safe(void)
+{
+    return needs_80_column_warning(640, 0);
 }
 
 wp_bool wp_atari_resolution_selfcheck(void)
 {
     wp_bool ok = WP_TRUE;
 
-    if (!needs_80_column_warning(320)) ok = WP_FALSE;  /* ST low-res: under 80 columns */
-    if (needs_80_column_warning(640))  ok = WP_FALSE;  /* ST medium-res: exactly 80 columns */
-    if (needs_80_column_warning(640 * 2)) ok = WP_FALSE; /* wide/overscan: well over 80 columns */
+    if (!needs_80_column_warning(320, 8)) ok = WP_FALSE;  /* ST low-res: 40 columns */
+    if (needs_80_column_warning(640, 8))  ok = WP_FALSE;  /* ST medium-res: exactly 80 */
+    if (needs_80_column_warning(640 * 2, 8)) ok = WP_FALSE; /* wide/overscan: well over */
+
+    /* THE case the old pixels-only test waved through: 640 pixels of a
+       16-pixel-wide system font is 40 columns, not 80. It passed
+       "screen_width_px < 640" and put the app on a screen too narrow to
+       hold its own menu bar. */
+    if (!needs_80_column_warning(640, 16)) ok = WP_FALSE;
+    if (wcell_is_zero_safe() != WP_TRUE) ok = WP_FALSE;
 
     return ok;
 }
@@ -4599,7 +4783,7 @@ void app_shell_run(void)
        does -- editing still works, just cramped -- so this warns once
        at startup with the same 640px/80-column threshold rather than
        blocking launch. */
-    if (needs_80_column_warning((short)(work_out[0] + 1))) {
+    if (needs_80_column_warning((short)(work_out[0] + 1), wcell)) {
         form_alert(1, FA_ERROR "[Screen is under 80 columns.|Text and menus may be cramped|at this resolution.][ OK ]");
     }
 
