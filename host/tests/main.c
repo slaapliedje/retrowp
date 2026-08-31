@@ -283,6 +283,8 @@ void test_config_malformed_line_without_equals_is_skipped(void);
 void test_config_tolerates_crlf_line_endings(void);
 void test_config_last_line_without_trailing_newline_is_parsed(void);
 void test_config_load_missing_file_yields_default(void);
+void test_config_shipped_sample_parses(void);
+void test_config_sample_inert_keys_do_not_alter_defaults(void);
 
 /* test_keymap.c */
 void test_keymap_app_ctx_size_stays_under_ceiling(void);
@@ -785,6 +787,8 @@ static const test_case g_cases[] = {
     { "config_tolerates_crlf_line_endings", test_config_tolerates_crlf_line_endings },
     { "config_last_line_without_trailing_newline_is_parsed", test_config_last_line_without_trailing_newline_is_parsed },
     { "config_load_missing_file_yields_default", test_config_load_missing_file_yields_default },
+    { "config_shipped_sample_parses", test_config_shipped_sample_parses },
+    { "config_sample_inert_keys_do_not_alter_defaults", test_config_sample_inert_keys_do_not_alter_defaults },
 
     { "keymap_app_ctx_size_stays_under_ceiling", test_keymap_app_ctx_size_stays_under_ceiling },
     { "keymap_init_selects_vi_and_seeds_cursor_at_doc_start", test_keymap_init_selects_vi_and_seeds_cursor_at_doc_start },

@@ -2,7 +2,7 @@
 #include "config.h"
 #include "platform.h"
 
-#define WP_CONFIG_FILE_MAX 512 /* generous for a handful of short key=value lines --
+#define WP_CONFIG_FILE_MAX 4096 /* room for a documented, commented file --
                                    see config.h's own comment on truncated reads being safe */
 
 static u8 ascii_lower(u8 c)
@@ -98,8 +98,9 @@ wp_status wp_config_load(const char *native_path, wp_config *out)
 {
     plat_file *f;
     u32 size, read_len;
-    u8 buf[WP_CONFIG_FILE_MAX];
+    u8 *buf;
     wp_bool exists;
+    wp_status st;
 
     out->keymap_id = (u8)WP_KEYMAP_VI;
 
@@ -112,11 +113,27 @@ wp_status wp_config_load(const char *native_path, wp_config *out)
     }
     if (size > (u32)WP_CONFIG_FILE_MAX) size = (u32)WP_CONFIG_FILE_MAX;
 
+    /* Heap, not stack. This was a 512-byte stack buffer, which was two
+       problems at once: a config file with enough comments to be worth
+       hand-editing silently truncated at 512 bytes -- taking any key
+       past that point with it, with no error -- and growing the buffer
+       in place would have put kilobytes on the stack of a RUN-launched
+       Amiga program, which gets 4096 bytes TOTAL (docs/amiga-platform.md).
+       Same reason format_ws_import's scratch buffer is heap. */
+    buf = (u8 *)mem_alloc(size > 0 ? size : 1u);
+    if (buf == NULL) {
+        plat_file_close(f);
+        return WP_OK;                   /* documented default stands */
+    }
+
     if (plat_file_read(f, buf, size, &read_len) != WP_OK) {
+        mem_free(buf);
         plat_file_close(f);
         return WP_OK;
     }
     plat_file_close(f);
 
-    return wp_config_parse(buf, read_len, out);
+    st = wp_config_parse(buf, read_len, out);
+    mem_free(buf);
+    return st;
 }

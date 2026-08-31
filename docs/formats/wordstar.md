@@ -15,6 +15,11 @@ machine and be finished on a quiet one built for writing. RTF and ODT
 already carry documents *in* from the modern side. WordStar is the first
 step of the other half — reading what already exists on the vintage side.
 
+A sibling reader for Atari Works `.STW` is researched in
+[atariworks.md](atariworks.md) — that one has a corpus of 263 documents
+present simultaneously as `.STW`, `.RTF` and `.TXT`, so it can be scored
+against reality in a way this reader cannot.
+
 It is also the most tractable of the three vintage formats worth having
 (WordStar, WordPerfect, Word `.DOC`): close to plain text, no compound
 container, no binary record tables. And it is the one still in active

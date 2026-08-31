@@ -205,8 +205,9 @@ expensive way on real machines.
 - [`docs/editing.md`](docs/editing.md), [`docs/vimode.md`](docs/vimode.md),
   [`docs/keymaps.md`](docs/keymaps.md) — editing model and the five
   keybinding schemes.
-- [`docs/formats/`](docs/formats) — RTF, ODT, TXT, PDF, and the offload
-  wire protocol.
+- [`docs/formats/`](docs/formats) — RTF, ODT, TXT, PDF, the offload wire
+  protocol, and the vintage-native readers: WordStar (implemented) and
+  Atari Works (researched, not yet built).
 - [`docs/*-platform.md`](docs) — per-backend bring-up notes, real bugs
   found, and every emulator-specific gotcha.
 - [`docs/hardware.md`](docs/hardware.md) — the offload box: parts, cable
