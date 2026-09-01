@@ -2938,7 +2938,7 @@ wp_bool wp_atari_layout_selfcheck(void)
     wp_paragraph *para;
     wp_paragraph_layout *layout;
     static const char text[] = "The quick brown fox jumps over the lazy dog\n";
-    const i32 content_width_twips = 900; /* narrow enough to force >1 line */
+    i32 content_width_twips;
     wp_bool ok = WP_TRUE;
     u32 i;
 
@@ -2946,6 +2946,32 @@ wp_bool wp_atari_layout_selfcheck(void)
 
     sec = wp_document_section_get(&doc, 0);
     para = wp_section_paragraph_get(sec, 0);
+
+    /* Derive the test width from THIS machine's font instead of hardcoding
+       one. It used to be a flat 900 twips, "narrow enough to force >1
+       line" -- true with an 8-pixel ST cell, false on a Falcon, whose
+       larger VDI cell can make a single word wider than 900 twips. A word
+       that does not fit has nowhere to break, so the layout engine
+       correctly emits a line wider than the limit and the assertion below
+       fired on a bug that was not there. Found by adding tos-4.04-falcon
+       to the matrix.
+
+       Measure the paragraph on one unconstrained line, then halve it: for
+       this sentence (43 characters, longest word 5) half the full width is
+       comfortably wider than the widest word at any font size, so wrapping
+       is always possible and no line ever HAS to overflow. Scales with the
+       font instead of assuming one. */
+    if (wp_paragraph_relayout(&doc, para, 1000000) != WP_OK) {
+        wp_document_free(&doc);
+        return WP_FALSE;
+    }
+    layout = (wp_paragraph_layout *)para->layout;
+    if (layout == NULL || layout->line_count != 1 ||
+        layout->lines[0].width_twips <= 0) {
+        wp_document_free(&doc);
+        return WP_FALSE;
+    }
+    content_width_twips = layout->lines[0].width_twips / 2;
 
     if (wp_paragraph_relayout(&doc, para, content_width_twips) != WP_OK) {
         wp_document_free(&doc);
@@ -4783,7 +4809,22 @@ void app_shell_run(void)
        does -- editing still works, just cramped -- so this warns once
        at startup with the same 640px/80-column threshold rather than
        blocking launch. */
-    if (needs_80_column_warning((short)(work_out[0] + 1), wcell)) {
+    /* CI mode is detected BEFORE this alert, not after it as it used to
+       be: the alert is modal, and under CI there is nobody to answer it.
+       The app then sits on it forever with no window, which every marker
+       the harness polls reads as a hang -- indistinguishable from a
+       crash. That is exactly how the Falcon looked the first time it was
+       pointed at this harness: alive, drawing correctly, and waiting.
+
+       A machine that boots under 80 columns is a real configuration
+       worth testing -- it is the geometry that overhangs a dropdown off
+       the screen edge (see wp_menu_dropdown_x) -- so the answer is to
+       keep the warning for humans and skip the BLOCKING for CI, not to
+       stop testing narrow screens. */
+    g_atari_ci_active = atari_ci_mode();
+
+    if (needs_80_column_warning((short)(work_out[0] + 1), wcell)
+        && !g_atari_ci_active) {
         form_alert(1, FA_ERROR "[Screen is under 80 columns.|Text and menus may be cramped|at this resolution.][ OK ]");
     }
 
@@ -4811,7 +4852,6 @@ void app_shell_run(void)
        and the sample document is laid out -- so its mere existence is
        the "the app really came up" signal, exactly what AMISMOKE-style
        smoke tests cannot attest. See atari_ci_mode's own comment. */
-    g_atari_ci_active = atari_ci_mode();
     if (g_atari_ci_active) atari_ci_write_alive();
 
     quit = WP_FALSE;

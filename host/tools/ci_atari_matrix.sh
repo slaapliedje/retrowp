@@ -12,10 +12,15 @@
 #     (--harddrive + auto-launching SMOKE.PRG from C:) depends on --
 #     there is no working recipe for booting it here, not a coverage
 #     tradeoff.
-#   - TT (tos306us.img) and Falcon (tos404.img, TOSv4.92.img) ROMs are
-#     installed on this machine but are for hardware CLAUDE.md doesn't
-#     list as a project target (ST/Amiga/Mac/DOS only) -- skipped, not
-#     silently ignored.
+#   - TOS 4.92 (TOSv4.92.img) is a late/beta Falcon ROM, not what any
+#     real machine here runs -- 4.04 is. Skipped, not silently ignored.
+#
+# TT030 and Falcon030 ARE in the list, as of the menu-crash work: the
+# machines actually used for hardware testing here are a Falcon030 and a
+# TT030 alongside the Mega STE, and the dropdown-overhang crash fixed in
+# 72df6cb was in a configuration this matrix had been told to ignore.
+# The old note that they "are for hardware CLAUDE.md doesn't list as a
+# project target" was written before any of that and is no longer true.
 set -e
 
 cd "$(dirname "$0")/../.."
@@ -33,6 +38,8 @@ emutos-512us:/usr/share/hatari/etos512us.img:st
 tos-1.04:/usr/share/hatari/tos104us.img:st
 tos-1.62-ste:/usr/share/hatari/tos162us.img:ste
 tos-2.06-megaste:/usr/share/hatari/tos206us.img:megaste
+tos-3.06-tt:/usr/share/hatari/tos306us.img:tt
+tos-4.04-falcon:/usr/share/hatari/tos404.img:falcon
 "
 
 make atari-engine-check

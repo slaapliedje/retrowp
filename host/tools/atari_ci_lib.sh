@@ -32,6 +32,7 @@
 #
 #   ST family  --tos-res med, the ST's own 640x200 80-column mode.
 #   TT030      --tos-res ttmed ("med" is an ST-only value).
+#   Falcon030  nothing -- it boots narrow, and that is accepted. See below.
 #
 # The FALCON is deliberately absent, and the matrix has no Falcon entry
 # yet, because none of the obvious levers work -- recorded here so the
