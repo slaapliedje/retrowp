@@ -34,25 +34,43 @@
 #   TT030      --tos-res ttmed ("med" is an ST-only value).
 #   Falcon030  nothing -- it boots narrow, and that is accepted. See below.
 #
-# The FALCON is deliberately absent, and the matrix has no Falcon entry
-# yet, because none of the obvious levers work -- recorded here so the
-# next attempt does not repeat them:
+# The Falcon entry deliberately tests a 40-COLUMN screen, not the 640x480
+# the real machine runs. Narrow is the geometry that overhangs a dropdown
+# off the screen edge (see wp_menu_dropdown_x), which is the crash this
+# backend had, so it is worth testing either way -- but it is not
+# representative, and getting 80 columns is still unsolved.
+#
+# What has been tried, so nobody repeats it:
 #   --tos-res   Hatari: "TOS resolution setting doesn't work with Falcon
 #               (yet)". No effect.
-#   --monitor vga alone   still boots 40 columns; the app then sits on
-#               its own "Screen is under 80 columns" alert forever, which
-#               every marker here reads as a hang.
-#   --vdi       Hatari refuses: "Please use 512k EmuTOS instead of TOS v4
-#               for proper extended VDI resolutions support on Falcon."
-#
-# What DOES work is NEWDESK.INF: TOS 4 takes its boot video mode from the
-# "#E" line, whose bytes 3-4 are a videl mode word (a real Falcon here
-# has "#E 18 04 00 06 00 1A ...", 0x001A = VGA|COL80|BPS4 = 640x480x16).
-# Writing one drove the emulated Falcon to a full 640x480 desktop. The
-# catch, and the remaining work: Hatari'"'"'s --auto launches the program
-# WITHOUT the desktop ever processing the INF, so the Falcon path needs
-# "#Z 01 C:\RETROWP.PRG@" autorun in the INF and no --auto at all -- and
-# that #Z form did not fire on the first attempt.
+#   --vdi       Hatari refuses outright: "Please use 512k EmuTOS instead
+#               of TOS v4 for proper extended VDI resolutions support on
+#               Falcon."
+#   NEWDESK.INF "#E"   DOES work -- it drove the emulated Falcon to a full
+#               640x480 desktop. But #E and the "#Z" autorun are mutually
+#               exclusive: a resolution change re-reads the INF after the
+#               AES has cleared `autoexec`, and the #Z case is guarded by
+#               it (FALCON.AES/GEMINIT.C). Proved both ways round -- #Z
+#               alone launches the app, #E alone sets the mode, together
+#               the autorun never fires. (#Z's FORM was never the problem;
+#               an earlier note here said it "did not fire", but that was
+#               the app blocking on its own modal alert, since fixed.)
+#   NVRAM       nv_vmode is a word at NVRAM offset $0E -- identical in
+#               Atari's own BIOS/STARTUP.S and in EmuTOS. The checksum is
+#               NOT the obstacle either, though an earlier note guessed it
+#               was: BIOS/CLOCK.S nvmgetchk sums registers $0E..$3D into a
+#               byte, sum at register 63 and ~sum at 62, which is what was
+#               written. The first hand-built file failed only because
+#               hatari's src/falcon/nvram.c persists registers 14..63 ONLY
+#               (NVRAM_START 14, NVRAM_LEN 50), so a 64-byte file starting
+#               at register 0 lands 14 registers out of place. With a
+#               correct 50-byte file the mode word STILL has no effect,
+#               tried as 0x001A and 0x011A (bit 8 is vertical resolution;
+#               bits 2-0 are log2 bits-per-pixel -- Atari's own
+#               BIOS/VIDEODOC/SPXBIOS.DOC gives the full bit layout).
+#               Hatari preserves a loaded file's mode bytes unless
+#               bUseVDIRes, which is off here. Unexplained; the file
+#               format is right and the cause is somewhere else.
 #
 # RAM likewise: 1MB is the project's ST baseline (CLAUDE.md rule 5) and is
 # what the ST entries must keep testing, but a TT030 will not boot in it.
