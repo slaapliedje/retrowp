@@ -34,43 +34,29 @@
 #   TT030      --tos-res ttmed ("med" is an ST-only value).
 #   Falcon030  nothing -- it boots narrow, and that is accepted. See below.
 #
-# The Falcon entry deliberately tests a 40-COLUMN screen, not the 640x480
-# the real machine runs. Narrow is the geometry that overhangs a dropdown
-# off the screen edge (see wp_menu_dropdown_x), which is the crash this
-# backend had, so it is worth testing either way -- but it is not
-# representative, and getting 80 columns is still unsolved.
+# The Falcon runs at 640x480, 80 columns, like the real machine -- see
+# atari_ci_setup_boot below for how, and read this before touching it,
+# because two plausible-sounding conclusions here were both wrong:
 #
-# What has been tried, so nobody repeats it:
-#   --tos-res   Hatari: "TOS resolution setting doesn't work with Falcon
-#               (yet)". No effect.
-#   --vdi       Hatari refuses outright: "Please use 512k EmuTOS instead
-#               of TOS v4 for proper extended VDI resolutions support on
-#               Falcon."
-#   NEWDESK.INF "#E"   DOES work -- it drove the emulated Falcon to a full
-#               640x480 desktop. But #E and the "#Z" autorun are mutually
-#               exclusive: a resolution change re-reads the INF after the
-#               AES has cleared `autoexec`, and the #Z case is guarded by
-#               it (FALCON.AES/GEMINIT.C). Proved both ways round -- #Z
-#               alone launches the app, #E alone sets the mode, together
-#               the autorun never fires. (#Z's FORM was never the problem;
-#               an earlier note here said it "did not fire", but that was
-#               the app blocking on its own modal alert, since fixed.)
-#   NVRAM       nv_vmode is a word at NVRAM offset $0E -- identical in
-#               Atari's own BIOS/STARTUP.S and in EmuTOS. The checksum is
-#               NOT the obstacle either, though an earlier note guessed it
-#               was: BIOS/CLOCK.S nvmgetchk sums registers $0E..$3D into a
-#               byte, sum at register 63 and ~sum at 62, which is what was
-#               written. The first hand-built file failed only because
-#               hatari's src/falcon/nvram.c persists registers 14..63 ONLY
-#               (NVRAM_START 14, NVRAM_LEN 50), so a 64-byte file starting
-#               at register 0 lands 14 registers out of place. With a
-#               correct 50-byte file the mode word STILL has no effect,
-#               tried as 0x001A and 0x011A (bit 8 is vertical resolution;
-#               bits 2-0 are log2 bits-per-pixel -- Atari's own
-#               BIOS/VIDEODOC/SPXBIOS.DOC gives the full bit layout).
-#               Hatari preserves a loaded file's mode bytes unless
-#               bUseVDIRes, which is off here. Unexplained; the file
-#               format is right and the cause is somewhere else.
+#   "--tos-res sets it"        No: hatari says "TOS resolution setting
+#                              doesn't work with Falcon (yet)".
+#   "--vdi sets it"            No: hatari refuses, "Please use 512k EmuTOS
+#                              instead of TOS v4 for proper extended VDI
+#                              resolutions support on Falcon."
+#   "it comes from NVRAM"      Mostly no. There IS a vmode word at NVRAM
+#                              offset $0E, but hatari's default already
+#                              boots high-res, so writing one changes
+#                              nothing. The desktop's Options > Set Video
+#                              writes NEWDESK.INF, and that is what decides
+#                              the working resolution.
+#   "#E and #Z cannot coexist" NO -- and this one cost the most. A short
+#                              hand-written "#E 3A 11 00 1A" makes TOS 4's
+#                              parser run off the end of the line and eat
+#                              the "#Z" after it, which is indistinguishable
+#                              from the autorun being suppressed. With the
+#                              full ten-field #E line a real desktop writes,
+#                              both work together, which is what this
+#                              harness now does.
 #
 # RAM likewise: 1MB is the project's ST baseline (CLAUDE.md rule 5) and is
 # what the ST entries must keep testing, but a TT030 will not boot in it.
@@ -78,6 +64,43 @@ atari_ci_video_args() {
     case "$1" in
     tt) echo "--monitor vga --tos-res ttmed" ;;
     *)  echo "--monitor rgb --tos-res med" ;;
+    esac
+}
+
+# How the app gets launched, and at what resolution.
+#
+# ST/STE/MegaSTE/TT: hatari's --auto, which needs no INF at all.
+#
+# FALCON: --auto is no use, because it launches the program WITHOUT the
+# desktop ever processing NEWDESK.INF -- and on a Falcon the boot video
+# mode comes from that INF's "#E" line, not from NVRAM. (NVRAM does hold
+# a vmode at offset $0E, but hatari's default already boots high-res
+# there; the desktop's Options > Set Video writes the INF, and that is
+# what decides the working resolution.) So the Falcon gets an INF that
+# does both jobs: "#E" for 640x480 80 columns, "#Z" to autorun the app.
+#
+# THE #E LINE MUST BE THE FULL TEN FIELDS. This was got wrong twice. A
+# short hand-written "#E 3A 11 00 1A" makes TOS 4's parser run off the end
+# of the line and swallow the "#Z" that follows, which looks exactly like
+# "#E and #Z are mutually exclusive" -- they are not. The line below is
+# what a real Falcon desktop wrote for 640x480 256-colour (Options > Set
+# Video: 256 colours, 80 columns, double-line off, then Save Desktop).
+# 0x001B is the videl mode word: bit 4 VGA, bit 3 horizontal, bits 2-0
+# log2 bits-per-pixel (Atari's own BIOS/VIDEODOC/SPXBIOS.DOC).
+atari_ci_setup_boot() {   # $1=machine  $2=c_drive dir  $3=program name
+    case "$1" in
+    falcon)
+        printf '%s\r\n' \
+            '#E 18 04 00 06 00 1B 00 00 00 00' \
+            "#Z 01 C:\\$3@" > "$2/NEWDESK.INF"
+        ;;
+    esac
+}
+
+atari_ci_auto_args() {    # $1=machine  $2=program name
+    case "$1" in
+    falcon) echo "" ;;              # launched from NEWDESK.INF's #Z
+    *)      echo "--auto $2" ;;
     esac
 }
 
@@ -123,6 +146,7 @@ run_atari_smoke_once() {
 
     mkdir -p "$_scratch/c_drive"
     cp bin/atari/SMOKE.PRG "$_scratch/c_drive/SMOKE.PRG"
+    atari_ci_setup_boot "$_machine" "$_scratch/c_drive" SMOKE.PRG
 
     # 25s (this harness's original budget, tuned against EmuTOS's
     # near-instant boot) is not enough for a real TOS ROM's slower
@@ -152,7 +176,7 @@ run_atari_smoke_once() {
         --sound off \
         --conout 2 \
         --harddrive "$_scratch/c_drive" \
-        --auto SMOKE.PRG \
+        $(atari_ci_auto_args "$_machine" SMOKE.PRG) \
         >"$_scratch/stdout.log" 2>"$_scratch/stderr.log"
     ATARI_CI_STATUS=$?
     set -e
@@ -235,6 +259,7 @@ run_atari_app_once() {
     mkdir -p "$_scratch/c_drive"
     cp bin/atari/RETROWP.PRG "$_scratch/c_drive/RETROWP.PRG"
     echo "ci" > "$_scratch/c_drive/RETROWP.CI"
+    atari_ci_setup_boot "$_machine" "$_scratch/c_drive" RETROWP.PRG
 
     # Backgrounded, not `timeout`-wrapped-and-waited like the smoke run:
     # the real app never exits on its own, so this polls for the markers
@@ -255,7 +280,7 @@ run_atari_app_once() {
         --sound off \
         --conout 2 \
         --harddrive "$_scratch/c_drive" \
-        --auto RETROWP.PRG \
+        $(atari_ci_auto_args "$_machine" RETROWP.PRG) \
         >"$_scratch/stdout.log" 2>"$_scratch/stderr.log" &
     _hatari_pid=$!
 

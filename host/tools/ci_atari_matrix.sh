@@ -15,6 +15,10 @@
 #   - TOS 4.92 (TOSv4.92.img) is a late/beta Falcon ROM, not what any
 #     real machine here runs -- 4.04 is. Skipped, not silently ignored.
 #
+# The Falcon entry boots at 640x480/80 columns, the same as the real
+# machine, via a NEWDESK.INF written by atari_ci_setup_boot -- not the
+# 40-column fallback an earlier version of this settled for.
+#
 # TT030 and Falcon030 ARE in the list, as of the menu-crash work: the
 # machines actually used for hardware testing here are a Falcon030 and a
 # TT030 alongside the Mega STE, and the dropdown-overhang crash fixed in
