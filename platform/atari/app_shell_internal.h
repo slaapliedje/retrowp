@@ -2,6 +2,7 @@
 #define WP_ATARI_APP_SHELL_INTERNAL_H
 
 #include <gem.h>
+#include "gemcompat.h"   /* WP_AES_NEAR: wp_menu_tree is handed to the AES */
 #include "types.h"
 
 /* Private to platform/atari -- shared between app_shell.c (the real AES
@@ -215,7 +216,7 @@
 #define WP_MENU_OBJ_EDIT_UNDO            46
 #define WP_MENU_OBJ_COUNT        47
 
-extern OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
+extern WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 
 /* Patches ob_spec.free_string on the title/item objects, then scales
    every populated ob_x/ob_y/ob_width/ob_height in wp_menu_tree[] from

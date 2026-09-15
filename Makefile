@@ -273,8 +273,20 @@ $(ATARI_BUILD)/services/%.o: services/grammar/%.c | $(ATARI_BUILD)/services
 # Two roots now: the app shell stays here (it IS the word processor), the
 # backend comes from retroplat. Both map into the same object directory,
 # so the link lines below are unchanged.
+# The backend directory serves two GEMs (see GEM4XE below), so the ST
+# build takes its own half.  The gem4xe-only files are self-guarding and
+# would compile to nothing here anyway -- filtering them keeps the link
+# line honest about what is in the binary rather than relying on that.
+ATARI_GEM4XE_ONLY  = $(RETROPLAT)/backends/atari/file_gem4xe.c \
+                     $(RETROPLAT)/backends/atari/mem_gem4xe.c \
+                     $(RETROPLAT)/backends/atari/clipboard_gem4xe.c \
+                     $(RETROPLAT)/backends/atari/transport_gem4xe.c \
+                     $(RETROPLAT)/backends/atari/clib_gem4xe.c \
+                     $(RETROPLAT)/backends/atari/gemcompat_gem4xe.c
+
 ATARI_PLATFORM_SRC = $(filter-out platform/atari/main.c,$(wildcard platform/atari/*.c)) \
-                     $(wildcard $(RETROPLAT)/backends/atari/*.c)
+                     $(filter-out $(ATARI_GEM4XE_ONLY),\
+                                  $(wildcard $(RETROPLAT)/backends/atari/*.c))
 ATARI_PLATFORM_OBJ = $(patsubst platform/atari/%.c,$(ATARI_BUILD)/app/%.o,\
                      $(patsubst $(RETROPLAT)/backends/atari/%.c,$(ATARI_BUILD)/app/%.o,$(ATARI_PLATFORM_SRC)))
 
@@ -801,6 +813,169 @@ dos: $(DOS_BIN)/RETROWP.EXE
 
 seam-check seam-check-atari seam-check-amiga seam-check-mac seam-check-dos:
 	$(MAKE) -C $(RETROPLAT) $(patsubst seam-%,%,$@)
+
+# --------------------------------------------------------------------
+# GEM4XE -- RetroWP on an Atari 8-bit, through gem4xe's GEM
+# --------------------------------------------------------------------
+# gem4xe (~/dev/gem4xe) is a port of GEM -- the VDI, then the AES -- to an
+# Atari XL/XE with a 65C816 accelerator, VBXE and Ultimate 1MB.  It serves
+# the same AES this project's ST shell already talks to, so this target is
+# NOT a new front end: it is platform/atari/app_shell.c, unchanged,
+# compiled for a different CPU against a different binding of the same
+# calls.  What genuinely differs between the two GEMs lives in
+# $(RETROPLAT)/backends/atari/gemcompat.h and the *_gem4xe.c files beside
+# it; the shell says nothing about which machine it is on.
+#
+# LICENCE.  An application links no part of gem4xe -- it reaches the VDI,
+# the AES and GEMDOS through three COP gates -- but it DOES compile in the
+# application kit (gemlib.c, gemabi.s, crt_gemapp.s, clib.c), and the kit
+# is GPLv2.  RETROWP.G4A is therefore a GPLv2 binary, while the engine and
+# retroplat sources it is built from remain under their own licences.  See
+# LICENSE.
+#
+# The three links are the kit's relocation scheme, not a mistake: nothing
+# emits relocations for a program placed at load time, so the program is
+# linked at its placeholders, again a page higher and again a bank higher,
+# and mkg4a.py takes the bytes that moved as the loader's fixup lists.
+GEM4XE_SDK   ?= $(HOME)/dev/gem4xe/build/gem4xe-sdk
+CALYPSI65816 ?= $(HOME)/dev/toolchains/calypsi-65816
+
+# The kit is a build product of the gem4xe tree, not a checked-in
+# directory, so it can simply be absent -- `make sdk` over there creates
+# it and a `rm -rf build` removes it again.  Without this the first
+# failure is "gem.h: file not found" from a backend source, which points
+# at the wrong tree entirely.
+GEM4XE_GUARD = \
+  test -f $(GEM4XE_SDK)/include/gem.h || { \
+    echo "gem4xe kit not found at $(GEM4XE_SDK)"; \
+    echo "  it is a build product: run 'make sdk' in the gem4xe tree,"; \
+    echo "  or point GEM4XE_SDK at an unpacked gem4xe-sdk.tar.gz"; \
+    exit 1; }
+
+G4X_CC = $(CALYPSI65816)/bin/cc65816
+G4X_AS = $(CALYPSI65816)/bin/as65816
+G4X_LD = $(CALYPSI65816)/bin/ln65816
+
+# --code-model=large because the code is in far banks and every call to it
+# is a jsl.  --data-model=LARGE is the part that matters and is not the
+# kit's default: it puts every global in far memory, which is the only
+# reason this fits at all.  An application's near memory -- where the
+# 65816's stack must live, in bank $00 by hardware -- is a 2 KB pool, and
+# RetroWP's statics are far larger than that.  gemapp.scm names the `far`
+# and `zfar` sections for exactly this model (GACS is written to it too).
+GEM4XE_CFLAGS   = --code-model=large --data-model=large -O2
+GEM4XE_INCLUDES = -I engine/include -I $(RETROPLAT)/include \
+                  -I $(RETROPLAT)/backends/atari -I platform/atari \
+                  -I platform/common -I offload/transport \
+                  -I services/spell -I services/grammar \
+                  -I $(GEM4XE_SDK)/include -I $(GENERATED)
+
+# Three code banks: the far code measures ~155 KB and a bank holds just
+# under 64 KB.  app-layout-n is gemapp.scm's own mechanism for that, and
+# gem4xe's loader has been exercised on a spilled link (its test-m6).
+# STACK is raised from the kit's 256: the shell's own frames are small,
+# but the engine's call chains are not the kit's example programs'.
+GEM4XE_CBANKS ?= 3
+GEM4XE_FBANKS ?= 1
+# Raised from the kit's 2048/256: WP_AES_NEAR puts the menu tree and its
+# strings in bank $00 (they are handed to the AES, which reads only that
+# bank), so `near` carries ~1.2 KB of tree and `inear` the same again as
+# its initialiser image.  GEM.COM gives an application the pool from
+# $4800 to $7FFF -- about 14 KB -- so 256 + 4096 + 3072 sits well inside
+# it.  The kit's defaults suit the kit's example programs; a word
+# processor's menu bar is simply bigger than a calculator's.
+#
+# STACK is 4096 by measurement, not by taste: at the kit's 256 and at
+# 1536 the program does not reach its first draw, and at 4096 it does
+# (the screen clears to the page's white).  6144 behaves exactly as 4096,
+# so 4096 is where the curve flattens rather than merely where it stopped
+# failing.  256 + 8192 + 3072 = 11520, inside GEM.COM's pool.
+GEM4XE_BSS    ?= 8192
+GEM4XE_BITS   ?= 3072
+GEM4XE_STACK  ?= 4096
+
+GEM4XE_BUILD = build/gem4xe
+GEM4XE_BIN   = bin/gem4xe
+
+GEM4XE_BACKEND_SRC = $(RETROPLAT)/backends/atari/dialog_atari.c \
+                     $(RETROPLAT)/backends/atari/draw_atari.c \
+                     $(RETROPLAT)/backends/atari/metrics_atari.c \
+                     $(RETROPLAT)/backends/atari/timer_atari.c \
+                     $(ATARI_GEM4XE_ONLY)
+
+GEM4XE_OBJ = \
+  $(patsubst engine/src/%.c,$(GEM4XE_BUILD)/%.o,$(filter engine/src/%,$(ENGINE_SRC))) \
+  $(patsubst $(RETROPLAT)/src/%.c,$(GEM4XE_BUILD)/%.o,$(filter $(RETROPLAT)/src/%,$(ENGINE_SRC))) \
+  $(patsubst offload/transport/%.c,$(GEM4XE_BUILD)/%.o,$(TRANSPORT_SRC)) \
+  $(patsubst services/spell/%.c,$(GEM4XE_BUILD)/%.o,$(patsubst services/grammar/%.c,$(GEM4XE_BUILD)/%.o,$(SERVICES_SRC))) \
+  $(patsubst platform/common/%.c,$(GEM4XE_BUILD)/%.o,$(PLATFORM_COMMON_SRC)) \
+  $(patsubst $(RETROPLAT)/backends/atari/%.c,$(GEM4XE_BUILD)/%.o,$(GEM4XE_BACKEND_SRC)) \
+  $(GEM4XE_BUILD)/app_shell.o $(GEM4XE_BUILD)/main.o \
+  $(GEM4XE_BUILD)/gemlib.o $(GEM4XE_BUILD)/clib.o \
+  $(GEM4XE_BUILD)/crt_gemapp.o $(GEM4XE_BUILD)/gemabi.o
+
+$(GEM4XE_BUILD) $(GEM4XE_BIN):
+	mkdir -p $@
+
+$(GEM4XE_BUILD)/%.o: engine/src/%.c | $(GEM4XE_BUILD)
+	$(G4X_CC) $(GEM4XE_CFLAGS) $(GEM4XE_INCLUDES) -o $@ $<
+$(GEM4XE_BUILD)/%.o: $(RETROPLAT)/src/%.c | $(GEM4XE_BUILD)
+	$(G4X_CC) $(GEM4XE_CFLAGS) $(GEM4XE_INCLUDES) -o $@ $<
+$(GEM4XE_BUILD)/%.o: offload/transport/%.c | $(GEM4XE_BUILD)
+	$(G4X_CC) $(GEM4XE_CFLAGS) $(GEM4XE_INCLUDES) -o $@ $<
+$(GEM4XE_BUILD)/%.o: services/spell/%.c | $(GEM4XE_BUILD)
+	$(G4X_CC) $(GEM4XE_CFLAGS) $(GEM4XE_INCLUDES) -o $@ $<
+$(GEM4XE_BUILD)/%.o: services/grammar/%.c | $(GEM4XE_BUILD)
+	$(G4X_CC) $(GEM4XE_CFLAGS) $(GEM4XE_INCLUDES) -o $@ $<
+$(GEM4XE_BUILD)/%.o: platform/common/%.c | $(GEM4XE_BUILD)
+	$(G4X_CC) $(GEM4XE_CFLAGS) $(GEM4XE_INCLUDES) -o $@ $<
+$(GEM4XE_BUILD)/%.o: $(RETROPLAT)/backends/atari/%.c | $(GEM4XE_BUILD)
+	$(G4X_CC) $(GEM4XE_CFLAGS) $(GEM4XE_INCLUDES) -o $@ $<
+$(GEM4XE_BUILD)/%.o: platform/atari/%.c | $(GEM4XE_BUILD)
+	$(G4X_CC) $(GEM4XE_CFLAGS) $(GEM4XE_INCLUDES) -o $@ $<
+$(GEM4XE_BUILD)/%.o: $(GEM4XE_SDK)/lib/%.c | $(GEM4XE_BUILD)
+	$(G4X_CC) $(GEM4XE_CFLAGS) $(GEM4XE_INCLUDES) -o $@ $<
+$(GEM4XE_BUILD)/%.o: $(GEM4XE_SDK)/lib/%.s | $(GEM4XE_BUILD)
+	$(G4X_AS) -o $@ $<
+
+$(GEM4XE_BUILD)/app_shell.o: $(GENERATED)/help_retrowp.h
+
+GEM4XE_LDOPT = $(GEM4XE_SDK)/lib/gemapp.scm $(GEM4XE_OBJ) clib-lc-ld.a \
+               --rtattr exit=simplified --cstartup gemapp \
+               --stack-size $(GEM4XE_STACK)
+# near base, far base, bss, bits, code banks, far-variable banks
+GEM4XE_LAYOUT = $(GEM4XE_BSS) $(GEM4XE_BITS) $(GEM4XE_CBANKS) $(GEM4XE_FBANKS)
+
+$(GEM4XE_BUILD)/retrowp.elf: $(GEM4XE_OBJ)
+	$(G4X_LD) $(GEM4XE_LDOPT) -o $@ --list-file $(GEM4XE_BUILD)/retrowp.map \
+	    --memories-expression "(app-layout-n #x1000 #x020000 $(GEM4XE_LAYOUT))"
+$(GEM4XE_BUILD)/retrowp-near.elf: $(GEM4XE_OBJ)
+	$(G4X_LD) $(GEM4XE_LDOPT) -o $@ \
+	    --memories-expression "(app-layout-n #x1100 #x020000 $(GEM4XE_LAYOUT))"
+$(GEM4XE_BUILD)/retrowp-far.elf: $(GEM4XE_OBJ)
+	$(G4X_LD) $(GEM4XE_LDOPT) -o $@ \
+	    --memories-expression "(app-layout-n #x1000 #x030000 $(GEM4XE_LAYOUT))"
+
+$(GEM4XE_BIN)/RETROWP.G4A: $(GEM4XE_BUILD)/retrowp.elf \
+                           $(GEM4XE_BUILD)/retrowp-near.elf \
+                           $(GEM4XE_BUILD)/retrowp-far.elf | $(GEM4XE_BIN)
+	python3 $(GEM4XE_SDK)/tools/mkg4a.py $(GEM4XE_BUILD)/retrowp.elf \
+	    $(GEM4XE_BUILD)/retrowp-near.elf $(GEM4XE_BUILD)/retrowp-far.elf \
+	    $@ --syms $(GEM4XE_BUILD)/retrowp.sym
+
+.PHONY: gem4xe gem4xe-engine-check gem4xe-sdk-check
+# First, not as an order-only prerequisite of the object directory: a run
+# that failed after creating that directory leaves it behind, and the
+# check would then never run again.
+gem4xe-sdk-check:
+	@$(GEM4XE_GUARD)
+
+gem4xe: gem4xe-sdk-check $(GEM4XE_BIN)/RETROWP.G4A
+
+# The same free portability check the other targets get: the portable
+# layers compiled for a 65816, with no shell and no link.
+gem4xe-engine-check: $(filter $(GEM4XE_BUILD)/%,$(GEM4XE_OBJ))
+
 
 seam-check-all:
 	$(MAKE) -C $(RETROPLAT) check-all
