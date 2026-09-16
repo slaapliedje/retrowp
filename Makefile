@@ -281,7 +281,7 @@ ATARI_GEM4XE_ONLY  = $(RETROPLAT)/backends/atari/file_gem4xe.c \
                      $(RETROPLAT)/backends/atari/mem_gem4xe.c \
                      $(RETROPLAT)/backends/atari/clipboard_gem4xe.c \
                      $(RETROPLAT)/backends/atari/transport_gem4xe.c \
-                     $(RETROPLAT)/backends/atari/clib_gem4xe.c \
+                     $(RETROPLAT)/backends/atari/timer_gem4xe.c \
                      $(RETROPLAT)/backends/atari/gemcompat_gem4xe.c
 
 ATARI_PLATFORM_SRC = $(filter-out platform/atari/main.c,$(wildcard platform/atari/*.c)) \
@@ -897,10 +897,13 @@ GEM4XE_STACK  ?= 4096
 GEM4XE_BUILD = build/gem4xe
 GEM4XE_BIN   = bin/gem4xe
 
+# timer_atari.c is NOT here: its clock() links on gem4xe now, but it
+# busy-waits, and a spin that never calls the AES starves the accessories
+# for the whole span.  timer_gem4xe.c is the same seam on evnt_timer, and
+# it comes in with ATARI_GEM4XE_ONLY below.
 GEM4XE_BACKEND_SRC = $(RETROPLAT)/backends/atari/dialog_atari.c \
                      $(RETROPLAT)/backends/atari/draw_atari.c \
                      $(RETROPLAT)/backends/atari/metrics_atari.c \
-                     $(RETROPLAT)/backends/atari/timer_atari.c \
                      $(ATARI_GEM4XE_ONLY)
 
 GEM4XE_OBJ = \
@@ -985,7 +988,7 @@ gem4xe-engine-check: $(filter $(GEM4XE_BUILD)/%,$(GEM4XE_OBJ))
 # symbols) and two fixtures named in its fixtures.toml, neither of which
 # is ours to ship.
 GEM4XE_TREE  ?= $(HOME)/dev/gem4xe
-GEM4XE_XEX    = $(GEM4XE_TREE)/build/gem.xex
+GEM4XE_XEX   ?= $(GEM4XE_TREE)/build/gem.xex
 GEM4XE_ATR    = $(GEM4XE_BUILD)/RETROWP.ATR
 GEM4XE_FIX    = $(shell python3 -c "import tomllib;print(tomllib.load(open('$(GEM4XE_TREE)/fixtures.toml','rb'))['spartados']['disk_32'])" 2>/dev/null)
 GEM4XE_CART   = $(shell python3 -c "import tomllib;print(tomllib.load(open('$(GEM4XE_TREE)/fixtures.toml','rb'))['spartados']['sdx_cart'])" 2>/dev/null)
@@ -994,8 +997,15 @@ $(GEM4XE_ATR): $(GEM4XE_BIN)/RETROWP.G4A $(GEM4XE_XEX)
 	@test -n "$(GEM4XE_FIX)" || \
 	    { echo "retrowp: no SpartaDOS fixture: set [spartados].disk_32 in $(GEM4XE_TREE)/fixtures.toml"; exit 1; }
 	@rm -f $@
+# 4096 sectors, not the 2560 (320 KB) this started at: GEM.COM and
+# RETROWP.G4A together outgrew that disk -- it had 23 sectors free, and one
+# kit revision plus one rebuild wanted 28 more.  A gate that fails with
+# "disk full" when both sides are healthy is a gate measuring the disk, so
+# there is room to grow now.  SDFS sector numbers are 16 bits, so 4096 x
+# 128 is nowhere near any limit; the DOS is the same SpartaDOS 3.2 either
+# way, and under SDX this disk is just D1:.
 	python3 $(GEM4XE_TREE)/tools/mkspdisk.py "$(GEM4XE_FIX)" $(GEM4XE_XEX) $@ \
-	    --sectors 2560 --name GEM.COM --boot GEM \
+	    --sectors 4096 --name GEM.COM --boot GEM \
 	    --add $(GEM4XE_BIN)/RETROWP.G4A DESKTOP.G4A
 
 gem4xe-check: $(GEM4XE_ATR)

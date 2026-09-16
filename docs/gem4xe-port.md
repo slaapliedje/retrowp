@@ -163,12 +163,24 @@ What isn't right yet:
   and drew whatever sat there in bank `$00`; `50a6a0e` then refused a far title outright
   instead of truncating it. Either way the bar was blank, and the fix looked like
   RetroWP's: a persistent `WP_AES_NEAR` title. gem4xe has since taken the other route
-  (`src/aes/wind.c`): `WF_NAME` and `WF_INFO` keep the **whole** 32-bit address, and
+  (`src/aes/wind.c`): `WF_NAME` and `WF_INFO` keep the **whole** address — 24 bits of it in a
+  32-bit field, the top byte always zero — and
   `w_ptext` copies the string into bank `$00` **at draw time**, because the AES re-reads
   it on every redraw and a one-time bounce would freeze the title. So a large-data
-  program's far title now works, and RetroWP needs no change.
+  program's far title now works, and RetroWP needs no change. One limit worth knowing:
+  a **far** title is drawn to 40 characters (the margin on both sides of bank `$00` cost
+  the other 40). A **near** title is used where it lies and has no cap. "RetroWP" is
+  nowhere near either, but a title that showed a document path would want the near
+  route.
 - **The window's work area isn't painted:** the desktop pattern shows through where
-  the document should be. Not investigated yet. `WM_REDRAW` goes to
+  the document should be.
+- **The timer seam was wrong here, and is now its own file.** `timer_atari.c`
+  implemented `plat_ticks_ms` and `plat_sleep_ms` on C's `clock()`, which is right on
+  the ST and was meaningless on gem4xe: Calypsi's library supplied a `clock()` nothing
+  drove, so it linked and returned nonsense from the day the port started. `timer_gem4xe.c`
+  replaces it on this target — see "The timer" below for what differs and for the
+  32-bit overflow the ST and DOS backends carried with it.
+- **The window's work area isn't painted.** Not investigated yet. `WM_REDRAW` goes to
   `redraw_window()` (`app_shell.c:3785`), which draws through VDI calls that run
   on the ST but haven't been checked on gem4xe. gem4xe's `src/hello_app.c`
   is a known-good redraw loop to compare against: `wind_update(BEG_UPDATE)`, walk
@@ -220,10 +232,13 @@ what actually differs is which `gem.h` the include path found.
 | `gemcompat.h` | every place two GEMs are not the same shape (below) |
 | `mem_gem4xe.c` | a real allocator over far arenas — the substantive one |
 | `file_gem4xe.c` | `plat_file` on GEMDOS instead of stdio |
-| `clipboard_gem4xe.c` | the scrap file, without `scrp_read`/`scrp_write` |
+| `clipboard_gem4xe.c` | the scrap file, over GEMDOS and the scrap manager |
 | `transport_gem4xe.c` | "no offload device", completely |
-| `clib_gem4xe.c` | `memcmp` and `memchr` |
+| `timer_gem4xe.c` | the tick, and a sleep that yields to the AES |
 | `gemcompat_gem4xe.c` | the `evnt_multi` adapter |
+
+`clib_gem4xe.c` was here too, holding `memcmp` and `memchr`; the kit writes both
+itself now (under the same licence, for the same reason), so it is gone.
 
 Each is self-guarding, so a wildcard sweep by the ST build or by retroplat's seam
 gate compiles them to nothing rather than breaking.
@@ -332,6 +347,12 @@ AltirraSDL --disk /tmp/rwp.atr ...        # or gem4xe's tools/a8test/launcher.py
 
 Staging RetroWP **as `DESKTOP.G4A`** makes GEM.COM's shell load it directly,
 which is the shortest path to seeing it run.
+
+**Take `gem.xex` from a quiet tree.** gem4xe's gate runs relink `build/gem.xex`
+repeatedly, and a copy taken mid-link is torn in ways that fail like anything but a torn
+file. Copy it when that tree is idle, or from a `make dist` artefact, and check the copy's
+md5 — as the scripts in `build/gem4xe-baseline/` do — rather than reading `build/`
+directly.
 
 ## Where it stops, exactly
 
@@ -605,6 +626,61 @@ manager. When the kit is regenerated, RetroWP should be rebuilt against it, and
 retroplat's `clipboard_gem4xe.c` can then stop working around the absence of
 `scrp_read`/`scrp_write`.
 
+### Rebuilt for the `4994e46` kit (2026-09-16)
+
+    RETROWP.G4A   203,352 bytes   format 4   near 11,520   far 168,751   4 banks
+
+Four changes, all of them the kit catching up with what this port had to work around:
+
+- `timer_gem4xe.c` replaces `timer_atari.c` on this target (below).
+- `clib_gem4xe.c` is gone; `memcmp` and `memchr` come from the kit's own `clib.c`.
+  Checked in the link map rather than assumed: both resolve to `build/gem4xe/clib.o`,
+  not to `clib-lc-ld.a`, which is the whole point of them.
+- `gemcompat.h`'s `wind_create_grect`/`wind_open_grect` macros are gone; `gem.h`
+  declares the functions.
+- `clipboard_gem4xe.c` uses the real scrap manager, so RetroWP's clipboard is now the
+  machine's rather than its own private file. Two details it has to get right: the path
+  buffer crossing into the AES must be `__near` (a path is longer than the far-string
+  bounce, and `gem.h` says so where it declares the calls), and the fallback directory
+  is `Dgetdrv`'s rather than a literal `C:\` — gem4xe maps a GEM drive letter onto a
+  SpartaDOS device by position (`src/sys/dos.c`), so `C:` is `D3:`, which a one-floppy
+  machine has not got.
+
+The gate's disk went from 2,560 sectors to 4,096 in the same pass. GEM.COM and
+RETROWP.G4A together no longer fit 320 KB — 23 sectors free, 28 more wanted — and a
+gate that fails with "disk full" while both sides are healthy is measuring the disk.
+
+#### `make gem4xe-check` fails on this kit, and not because of this rebuild
+
+Against gem4xe `4994e46`, RetroWP reads, loads, draws its menu bar, opens its window
+**with the title** — and then returns from its event loop. `app_near` is `$0000` and
+`sh_runs` is 1, which is `app_free` having wound the pool back; `sh_lastrc` is `APP_OK`
+and `sh_lastret` is 0, so nothing failed and nothing trapped. It starts up correctly and
+then leaves, cleanly.
+
+Bisected before blaming it on the rebuild, because two things changed at once — this
+port's four changes and gem4xe's kit:
+
+| kit | `gem.xex` | image | result |
+|---|---|---|---|
+| 0.2 | `30048b2a` | 202,424 | in its event loop (`sh_runs` 0), PASS |
+| `0f3c984` | `a469e696` | 202,424 | in its event loop, PASS |
+| `4994e46` | `cfb888b8` | 202,424 | returns (`sh_runs` 1) |
+| `4994e46` | `cfb888b8` | 203,352 | returns (`sh_runs` 1) |
+
+The 202,424 image is byte-identical in the first three rows — the file that passed on
+the older kits is the file that returns on the newest. So the variable is the kit, and
+`0f3c984` is clean, which puts it on `4994e46`. Each run booted the `gem.sym` belonging
+to the `gem.xex` under it: symbols from one build read against another answer garbage,
+which would have looked exactly like this.
+
+Reported upstream with the bisect. Nothing to do here until it comes back.
+
+The general lesson is the one this port keeps relearning: when the thing under test and
+the thing it runs on both move, a failure names neither. Keep a verified snapshot of
+every kit (`build/gem4xe-baseline/kit-*/`, each with its `MD5SUMS`), because the control
+run needs the old one, and gem4xe's `build/` will not have it.
+
 ### No C library heap
 
 gem4xe `fe75914` makes `malloc` and `free` fail at link time, with an undefined
@@ -612,6 +688,53 @@ gem4xe `fe75914` makes `malloc` and `free` fail at link time, with an undefined
 and every call used to return NULL. RetroWP is unaffected. The engine allocates only through
 `mem_alloc`, `mem_gem4xe.c` builds its arenas on GEMDOS `Malloc`, and the committed image's
 link map references no `malloc`, `free`, `calloc` or `realloc`.
+
+### The timer: a link refusal, then a real clock, and a bug of our own
+
+For a few kit revisions `clock()` was a deliberate link-time refusal
+(`gem4xe_has_no_clock__use_evnt_timer_or_vex_timv`), on the grounds that the library's
+`clock.o` is Apache-2.0 object code that would link quietly into a GPLv2 binary and then
+answer a number with no meaning, because nothing on the machine drives the library's tick.
+
+Since gem4xe `4994e46` it is real: `gemlib.c` implements it over `Tgettimeofday`
+(GEMDOS `0x155`, MiNT's call, served from the ~4 kHz POKEY timer the pointer sampler
+already runs), in `CLOCKS_PER_SEC` units. So `timer_atari.c` links again. Two things
+about it differ from the ST and should not be inherited by assumption:
+
+- It counts from the program's **first call to `clock()`**, not from power-on. mintlib's
+  is `_hz_200` since the machine came up. Only deltas are taken here, so it does not
+  matter — but a caller that expects a large value at startup would be wrong.
+- `CLOCKS_PER_SEC` is **1000**, not mintlib's 200. Verified by compiling a probe under
+  this target's own flags rather than by reading `calypsi/config.h`, which `time.h` does
+  not include; `clock_t` is `int64_t`. There is no risk of the kit and the caller
+  disagreeing about the rate, because this build compiles the kit's `gemlib.c` and
+  `clib.c` itself, from the same headers.
+
+That second point exposes a defect in **our** line, not gem4xe's:
+
+    return (u32)(((u32)c * 1000UL) / (u32)CLOCKS_PER_SEC);
+
+At 1000 the ratio is the identity, so the multiply buys nothing — and costs ten bits of
+range. `(u32)c * 1000` overflows at `c = 4,294,967`, so **71.58 minutes** into a session
+`plat_ticks_ms` stops being monotonic and begins answering garbage. The truncation to
+`u32` is not the problem: at this rate `c` is milliseconds and fits for 49 days. The same
+line is in the ST and DOS backends, where a slower `CLOCKS_PER_SEC` merely moves the
+cliff out — about six hours at mintlib's 200 Hz. The fix is what the kit's own `clock()`
+does for the same reason: divide first, or split whole seconds from the remainder.
+
+`plat_sleep_ms` busy-spins, which was correct on the ST and is not here: a spin that
+never calls the AES starves the desk accessories and the AES's own timer events.
+`evnt_timer(lo, hi)` is the same span and yields.
+
+Both were latent — nothing in the gem4xe build calls the timer seam, since
+`transport_atari.c` is excluded — and both are fixed in `timer_gem4xe.c`, behind the
+`ATARI_GEM4XE_ONLY` filter so that a gem4xe fix changes no ST behaviour. The overflow
+is fixed in `timer_atari.c` and `timer_dos.c` too, where it was the same line.
+
+The linker discards both functions today, nothing having called them, so the link does
+not prove they resolve. `nm` on `timer_gem4xe.o` does: it defines `plat_ticks_ms` and
+`plat_sleep_ms` and leaves `clock` and `evnt_timer` undefined, and both of those are
+`T` in the kit's own `gemlib.o`, which is already on the link line.
 
 ### Toolchain
 
@@ -638,6 +761,15 @@ it is built from remain under their own licences.
 from Apache NuttX, and Apache 2.0 cannot be linked into a GPLv2 binary. Without
 them the linker satisfies both from the library quietly — quietly being the
 problem.
+
+The kit writes both itself now, for that same reason, so `clib_gem4xe.c` is gone: its
+copies would be duplicate symbols, and the licence argument that put them there is
+satisfied by gem4xe's own implementations, which are GPLv2 like the rest of the kit.
+Verified in the link map rather than assumed — `memcmp`, `memchr`, `strcpy` and
+`strcat` all resolve to `build/gem4xe/clib.o`. What still comes from `clib-lc-ld.a` is
+the compiler's own support code (`pseudoRegisters.o`, `integer.o`, `memory.o`,
+`vswitch*.o`, `controlFlow.o`, `spill.o`, `initialize.o`), which is what the kit's own
+`clib.c` comment says to expect and is not the C library.
 
 RetroWP has no top-level `LICENSE` file. It needs one, and which it should be is
 not a decision this document can make.
