@@ -1,18 +1,65 @@
 # RetroWP on gem4xe (Atari 8-bit)
 
-**Status: RetroWP runs on gem4xe under SpartaDOS X.** The full image loads
-(`APP_OK`), `wp_menu_tree_init` runs, and GEM draws RetroWP's menu bar (Desk · File ·
-Edit · Tools · Format · Help) and its document window, all from the ST's unchanged
-`app_shell.c`. **Not working yet:** the window's title bar is empty, and its work area
-isn't painted. **Off a SpartaDOS 3.2 floppy staged the way these probes were, it doesn't
-load.** GEM.COM stops reading at byte 24,576. But gem4xe's own SD 3.2 product disk,
-staged differently, reads a file of the same size under SD 3.2, so the cause involves
-the staging and isn't established. Details are in "Clean-kit measurements"; everything
-after that section is history, including measurements later shown to be confounded.
+**Status: RetroWP runs on gem4xe, under both SpartaDOS X and SpartaDOS 3.2.** The full
+image loads (`APP_OK`), `wp_menu_tree_init` runs, and GEM draws RetroWP's menu bar
+(Desk · File · Edit · Tools · Format · Help) and its document window, all from the ST's
+unchanged `app_shell.c`. **Not working yet:** the window's work area isn't
+painted. (The title bar was blank until gem4xe taught `WF_NAME` to bring a far title
+down to bank `$00` at draw time; see below.) **The long-running "load failure" was
+never a failure.** Every probe that reported one looked at the machine once, at a fixed
+frame, before a slow floppy read had finished. See "What the load failure really was".
+Everything after that section is history, including conclusions later withdrawn.
 
 `make gem4xe` produces `bin/gem4xe/RETROWP.G4A`.
 
+## What the load failure really was (2026-09-15)
+
+For most of this work `RETROWP.G4A` appeared not to load. Later, a SpartaDOS 3.2 read
+appeared to fail at exactly byte 24,577. **Neither happened.** Every probe that reported a
+failure sampled the machine once, at a fixed frame count. gem4xe writes `sh_desk_blob`
+(and, in older builds, `sh_desk_len`) only when a whole read has finished, so a read still
+in progress reads as zero, which is indistinguishable from a failure.
+
+The proof came from single boots sampled over time, on gem4xe's 02:10 build, a bare SD 3.2
+floppy, and the patched emulator. `farmem.brk` advances one slice at a time during a read,
+so a climbing break under a zero blob is a read in progress:
+
+| file | still reading at | finished by |
+|---|---|---|
+| 24,576 bytes | frame 1,700 (break 8 KB in) | frame 1,800 |
+| 24,577 bytes | frame 1,700 | frame 1,800 |
+| 48,128 bytes | frame 1,800 (break 26 KB in) | frame 2,000 |
+| `RETROWP.G4A`, 202,325 bytes | frame 2,400 (break 119 KB in) | frame 3,000 |
+
+What that explains:
+
+- **The "exact edge" at 24,577.** gem4xe's author sampled the exact 00:47 binary (md5-matched)
+  every 25 frames. 24,576 bytes finished at frame 1,800 and 24,577 at frame 1,850; at
+  frame 1,800 the larger read was still in progress (blob 0, break `$0493A4`). The
+  byte-exact edge was two completion frames falling either side of a single sample. On the
+  02:10 build both finish just before 1,800, which is why the edge seemed to vanish.
+- **"SDX reads, SD 3.2 fails".** The SDX probe waited 2,400 frames and the SD 3.2 probe
+  1,800, so the comparison moved the sampling window along with the DOS.
+- **gem4xe's product disk passing.** Its gate polls instead of sampling once.
+- **A gem4xe change appearing to remove the failure.** Nothing was removed; later probes
+  simply waited 2,400 frames.
+- **"RetroWP never loads" (`app_near` reading `$0000`).** A 202 KB read sampled at frame
+  1,800, which finishes near frame 3,000.
+
+**Withdrawn:** the SpartaDOS 3.2 read limit, the claim that the DOS was the variable, and any
+suggestion of a bug, or a masked bug, in gem4xe's `far_read_file`. **Still standing:** the
+emulator binary matters (`/usr/bin/AltirraSDL` lacks the 65C816 CPU fixes; at 12,288 bytes
+and frame 1,800 the patched build read 3/3 and the unpatched one 1/3), Calypsi 5.18.1's
+regression for images of 3 or more banks, and everything in the port itself.
+
+**The lesson:** a probe that samples once at a fixed time cannot tell "failed" from "not
+finished". Poll for completion, or sample a timeline, before calling anything a failure.
+
 ## Clean-kit measurements (2026-09-15)
+
+> **Read with the section above.** Every "fails" in this section came from a probe that
+> looked once at frame 1,800, before the read had finished. The numbers are what that probe
+> saw, not what gem4xe did.
 
 Taken with both confounds described further down removed: a GEM.COM built with
 Calypsi **5.18** from a clean gem4xe tree, the **patched** emulator (`KEYRAW`
@@ -109,15 +156,17 @@ with the same result: `APP_OK`, `wp_menu_tree_init` ran, menu bar and window dra
 
 What isn't right yet:
 
-- **The window's title bar is empty.** The cause is confirmed in gem4xe's
-  `src/aes/wind.c`: `wind_set(WF_NAME)`, and `WF_INFO` likewise, keeps only the low
-  word of the string's address. `app_shell.c:4847` passes a literal,
-  `wind_set_str(window_handle, WF_NAME, "RetroWP")`, which under
-  `--data-model=large` lives in far memory. Its bank byte is dropped, and the AES
-  reads whatever is at that 16-bit address in bank `$00`. No bounce can fix this,
-  because GEM keeps the pointer and redraws the title from it on every move, top and
-  uncover. The contract is *near, and alive as long as the window*: a persistent
-  `WP_AES_NEAR` title array, like the menu strings.
+- **The window's title bar was empty, and is not any more.** It is worth keeping the
+  history, because the fix is not RetroWP's. `app_shell.c:4847` passes a literal,
+  `wind_set_str(window_handle, WF_NAME, "RetroWP")`, which under `--data-model=large`
+  lives in far memory. Through gem4xe 0.1 the AES kept only the low word of that address
+  and drew whatever sat there in bank `$00`; `50a6a0e` then refused a far title outright
+  instead of truncating it. Either way the bar was blank, and the fix looked like
+  RetroWP's: a persistent `WP_AES_NEAR` title. gem4xe has since taken the other route
+  (`src/aes/wind.c`): `WF_NAME` and `WF_INFO` keep the **whole** 32-bit address, and
+  `w_ptext` copies the string into bank `$00` **at draw time**, because the AES re-reads
+  it on every redraw and a one-time bounce would freeze the title. So a large-data
+  program's far title now works, and RetroWP needs no change.
 - **The window's work area isn't painted:** the desktop pattern shows through where
   the document should be. Not investigated yet. `WM_REDRAW` goes to
   `redraw_window()` (`app_shell.c:3785`), which draws through VDI calls that run
@@ -128,6 +177,23 @@ What isn't right yet:
 
 Scripts, logs, screenshots and the exact 202,327-byte baseline image are in
 `build/gem4xe-baseline/`.
+
+**`make gem4xe-check` now does all of that on its own** (`tools/ci_gem4xe.py`) —
+the check this shell lacked while every other one had it, since it had only ever
+been verified by linking. It stages RetroWP as `DESKTOP.G4A`, boots it under the
+SDX cartridge, and **polls** instead of sampling: the lesson above, built in. It
+waits for `sh_desk_len` and reports how many frames that took (about 3,200 here),
+then asserts the read is the whole file, `APP_OK` with a near region,
+`wp_menu_tree_init` having run (BAR spec `$180` at 640×10), and ink in the menu
+bar's own rows.
+
+Two things it deliberately does **not** assert. The blank title and the unpainted
+work area are printed every run, because a gate that fails when somebody fixes
+them is worse than no gate. And `sh_runs` is reported rather than checked: the
+table above records 1, a live run says 0, because RetroWP is still in its event
+loop rather than having returned — asserting the documented figure would have
+failed a good run. The read size is compared against the file on disk rather than
+a constant, so it followed the 0.2 rebuild from 202,325 to 202,424 by itself.
 
 ## What this target is
 
@@ -141,7 +207,7 @@ RetroWP's ST shell makes 42 distinct AES/VDI calls and gem4xe serves 39 of them
 outright.
 
 An application links **no part of gem4xe**: it reaches the VDI, the AES and
-GEMDOS through three `COP` gates (`$73`, `$C8`, `$01`).
+GEMDOS through three `COP` gates. Through gem4xe 0.1 these were `$73`, `$C8` and `$01`. From 0.2 (master `01c2e17`) they are `$56` (VDI), `$41` (AES) and `$44` (GEMDOS), because `$01` belongs to Rapidus OS and `$80`–`$FF` are reserved by WDC.
 
 ## Where the differences live
 
@@ -248,6 +314,12 @@ A bank holds just under 64 KB, hence three. gem4xe's loader has been exercised o
 a spilled link (its `test-m6`).
 
 ## How to run it
+
+```sh
+make gem4xe-check    # builds the disk, boots it under SDX, checks what it drew
+```
+
+or by hand, to watch it:
 
 ```sh
 make gem4xe
@@ -490,6 +562,56 @@ not found` from a backend source, which points at the wrong tree entirely.
 
 For a build that does not depend on another tree's live build directory, unpack
 `gem4xe-sdk.tar.gz` somewhere stable and point `GEM4XE_SDK` at that.
+
+### gem4xe 0.2 needs a rebuild, and a fresh kit first
+
+gem4xe 0.2 moved the call gates and the `.g4a` format number (now 3 or 4). It refuses a
+format 1 or 2 image with a "built for an older gem4xe" alert, and an older gem4xe refuses
+a new one. **Every `RETROWP.G4A` built before 0.2 is refused**, the measured baseline and the
+committed image included.
+
+No source or Makefile change is needed. RetroWP issues no `COP` of its own: its only
+assembly is the kit's `gemabi.s` and `crt_gemapp.s`. And gem4xe's `tools/mksdk.py` still
+ships all seven files `make gem4xe` links from, at the same paths (`include/gem.h`,
+`lib/gemlib.c`, `lib/clib.c`, `lib/gemabi.s`, `lib/crt_gemapp.s`, `lib/gemapp.scm`,
+`tools/mkg4a.py`).
+
+But the kit is a build product, and `make gem4xe` uses whatever is unpacked in
+`GEM4XE_SDK`. **Regenerate it first** (`make build/gem4xe-sdk.tar.gz` in the gem4xe tree).
+Otherwise the build succeeds against the old `gemabi.s` (`cop #0x73` / `#0xc8` / `#0x01`)
+and produces an image 0.2 will refuse, with nothing at build time to say so.
+
+On 2026-09-15 at 10:41 the unpacked kit in `~/dev/gem4xe/build/gem4xe-sdk` was
+regenerated from 0.2. I checked it: `gemabi.s` is `cop #0x56` / `#0x41` / `#0x44`, and
+`mkg4a.py` stamps format 3/4. So a clean `make gem4xe` now builds a 0.2 image. The kit
+regenerated at 12:12 (gem4xe `63e121e`) also carries the guard: `mkg4a.py` refuses to pack
+a program whose `vdi_call`/`aes_call`/`dos_call` aren't 0.2's gates, and says to rebuild
+its objects. So the silent failure above is now an error on the host.
+
+### Rebuilt for 0.2 (2026-09-16)
+
+`make gem4xe` on Calypsi 5.18, against the kit unpacked at 21:03 on 2026-09-15:
+
+    RETROWP.G4A   202,424 bytes   format 4   near 11,520   far 168,077   4 banks
+
+It packs through gem4xe's new gate check, so its calls really are 0.2's. Booted against
+gem4xe's 00:13 GEM.COM on a bare SpartaDOS 3.2 floppy: read 202,424 bytes, `APP_OK`,
+near region at `$4C00`, `wp_menu_tree_init` ran, and the menu bar and document window
+drew — this time **with the title**.
+
+One caveat on that build: the unpacked kit was already behind its own sources. Four
+gem4xe commits since `63e121e` touch them, including `dfdef44`, which adds the scrap
+manager. When the kit is regenerated, RetroWP should be rebuilt against it, and
+retroplat's `clipboard_gem4xe.c` can then stop working around the absence of
+`scrp_read`/`scrp_write`.
+
+### No C library heap
+
+gem4xe `fe75914` makes `malloc` and `free` fail at link time, with an undefined
+`gem4xe_has_no_heap__use_GEMDOS_Malloc`, because an application's heap was always zero bytes
+and every call used to return NULL. RetroWP is unaffected. The engine allocates only through
+`mem_alloc`, `mem_gem4xe.c` builds its arenas on GEMDOS `Malloc`, and the committed image's
+link map references no `malloc`, `free`, `calloc` or `realloc`.
 
 ### Toolchain
 
