@@ -650,36 +650,89 @@ The gate's disk went from 2,560 sectors to 4,096 in the same pass. GEM.COM and
 RETROWP.G4A together no longer fit 320 KB — 23 sectors free, 28 more wanted — and a
 gate that fails with "disk full" while both sides are healthy is measuring the disk.
 
-#### `make gem4xe-check` fails on this kit, and not because of this rebuild
+#### The "4994e46 regression" was a stale `gem.sym`, and there is no regression
 
-Against gem4xe `4994e46`, RetroWP reads, loads, draws its menu bar, opens its window
-**with the title** — and then returns from its event loop. `app_near` is `$0000` and
-`sh_runs` is 1, which is `app_free` having wound the pool back; `sh_lastrc` is `APP_OK`
-and `sh_lastret` is 0, so nothing failed and nothing trapped. It starts up correctly and
-then leaves, cleanly.
+**Everything this section said before was wrong, and the way it was wrong is worth more
+than what it claimed.** It is left corrected rather than deleted.
 
-Bisected before blaming it on the rebuild, because two things changed at once — this
-port's four changes and gem4xe's kit:
+The gate failed with `app_near` reading `$0000` and I read that as the program having
+loaded, run and exited. I bisected it across three kits with a byte-identical binary,
+found it passed on the two older ones, and reported a regression upstream. gem4xe spent
+real effort on it: diffing their GEMDOS dispatch, confirming a fault parks the machine,
+offering to cut a diagnostic build.
 
-| kit | `gem.xex` | image | result |
-|---|---|---|---|
-| 0.2 | `30048b2a` | 202,424 | in its event loop (`sh_runs` 0), PASS |
-| `0f3c984` | `a469e696` | 202,424 | in its event loop, PASS |
-| `4994e46` | `cfb888b8` | 202,424 | returns (`sh_runs` 1) |
-| `4994e46` | `cfb888b8` | 203,352 | returns (`sh_runs` 1) |
+There was no regression. **The gate reads `gem.sym` from gem4xe's live build tree, while
+`GEM4XE_XEX` had been pinned to a verified snapshot.** `app_near` sits at `$002402` in
+the live symbol file and `$0023F7` in the snapshot I actually booted — eleven bytes
+apart. Symbols are read by ADDRESS, so a stale one does not fail; it answers whatever
+lives at the wrong address, which here was a steady zero, which is exactly what "never
+loaded" looks like. Both failing runs used the live `gem.sym` against a pinned `gem.xex`.
+Both passing runs happened to use a matched pair. The kit was never the variable.
 
-The 202,424 image is byte-identical in the first three rows — the file that passed on
-the older kits is the file that returns on the newest. So the variable is the kit, and
-`0f3c984` is clean, which puts it on `4994e46`. Each run booted the `gem.sym` belonging
-to the `gem.xex` under it: symbols from one build read against another answer garbage,
-which would have looked exactly like this.
+The paragraph that stood here even claimed, of the bisect, that "each run booted the
+`gem.sym` belonging to the `gem.xex` under it". That was not a measurement. It was the
+control I knew the experiment needed, asserted instead of performed — which is how a
+careful-looking bisect produces a confident wrong answer.
 
-Reported upstream with the bisect. Nothing to do here until it comes back.
+Fixed so it cannot recur: `GEM4XE_SYM` defaults to the `gem.sym` beside `GEM4XE_XEX`, so
+pinning one pins both; the gate prints which symbol file it used; and its failure text
+names a symbol mismatch as the first thing to check. Also corrected there: `sh_runs`
+counts runs STARTED, not finished (gem4xe's `src/aes/shel.c` increments it before
+`app_exec`), so "`sh_runs` 1" never meant the application had returned.
 
-The general lesson is the one this port keeps relearning: when the thing under test and
-the thing it runs on both move, a failure names neither. Keep a verified snapshot of
-every kit (`build/gem4xe-baseline/kit-*/`, each with its `MD5SUMS`), because the control
-run needs the old one, and gem4xe's `build/` will not have it.
+#### What is actually wrong: a BRK in layout
+
+With matching symbols, a near stage byte polled every 100 frames says where it really
+gets to:
+
+    stage = IN relayout   paras=1   point=4   measures=0   width=13278   irq_fault=2
+
+`irq_fault` is 2: the machine is **parked on a BRK** (`src/sys/irq.s`), which is neither
+a hang nor a return. gem4xe parks with interrupts off and a `WAI` loop precisely so the
+emulator's instruction history survives for a post-mortem.
+
+Where: exactly one call to `wp_paragraph_relayout`, which never returns. Inside it,
+`plat_font_open` ran and returned `WP_OK` (point 4). `plat_font_metrics_get` was never
+entered — it would set point 5 — and `plat_measure_text` was never entered, its counter
+being 0. So the BRK falls between `plat_font_open` returning and the call into
+`plat_measure_text`: a few stores into the font cache and one call
+(`engine/src/linebreak.c`, `measure_and_height`). A BRK there is a wild jump landing on a
+zero byte.
+
+The content width is sane (13,278 twips), so gem4xe's "a zero width means an empty
+string reached `vqt_extent`" shape is not this. Stack exhaustion is ruled out as far as it can be cheaply: the near
+data immediately below this program's stack still reads correctly at the park, so nothing
+walked deep past the bottom, and relinking with a 6 KB stack instead of 4 KB BRKs in the
+same place with the same counters. (8 KB does not fit the near image at all — the linker
+refuses to place it.)
+
+The instrumentation that found this is not committed — it was a `volatile __near` stage
+byte plus three counters, set along the path and polled every 100 frames — but
+`build/gem4xe-baseline/stage_timeline.py` is kept, because the technique is the reusable
+part: **bank `$00` is memdump-able live, and a guest disk write is not.** An earlier
+attempt wrote one breadcrumb file per stage and read the `.atr` afterwards; not one file
+appeared, including one written before `appl_init` in a run whose screenshot plainly
+showed the menu bar. The emulator keeps guest disk writes in memory. Everything inferred
+from those absent files was void, and gem4xe's own `m15_gdos` checks its write round
+trips in-guest through `Fsfirst` for what now looks like the same reason.
+
+What the park itself says, from `REGS`: `D=$4A00` (this program's near base, so it is
+our code with our direct page), and the stack pointer at `$5EF6` against a stack running
+`$5123`-`$6122` — about 550 bytes deep of 4,096. **The stack is nowhere near exhausted**,
+which is the second, independent reason it is not a stack overflow.
+
+The emulator's instruction history survives the park, but it is **off unless asked for**:
+`b.ok("CONFIG history true")` right after launch, then `b.ok("HISTORY 4096")` at the
+fault (`build/gem4xe-baseline/post_mortem.py`). Two cautions learned by doing it: poll
+often and dump the moment `irq_fault` reads 2, because the park's own loop overwrites the
+trail, and a `.g4a`'s far image is relocated by whole banks — runtime = link +
+((bank - 2) << 16), one delta for the whole image — so resolving a runtime address against
+the link map needs that bank first. Anchoring it is the unfinished step.
+
+**This is not new damage, and it is probably not gem4xe's.** It explains the thing this
+document has called a redraw problem since the port began: the work area is unpainted
+because there is no laid-out document to paint. The window is open, the menu bar is
+installed, and the program died before its first measurement.
 
 ### No C library heap
 

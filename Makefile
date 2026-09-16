@@ -989,6 +989,13 @@ gem4xe-engine-check: $(filter $(GEM4XE_BUILD)/%,$(GEM4XE_OBJ))
 # is ours to ship.
 GEM4XE_TREE  ?= $(HOME)/dev/gem4xe
 GEM4XE_XEX   ?= $(GEM4XE_TREE)/build/gem.xex
+# The symbols travel WITH the GEM.COM, always -- they are read by address,
+# so a gem.sym from another build answers plausible nonsense instead of
+# failing.  app_near moved eleven bytes between two kits, and the gate,
+# pointed at a pinned gem.xex but still reading the live tree's gem.sym,
+# reported a steady 0 and called it a load failure.  Defaulting beside the
+# xex means pinning one pins both.
+GEM4XE_SYM   ?= $(dir $(GEM4XE_XEX))gem.sym
 GEM4XE_ATR    = $(GEM4XE_BUILD)/RETROWP.ATR
 GEM4XE_FIX    = $(shell python3 -c "import tomllib;print(tomllib.load(open('$(GEM4XE_TREE)/fixtures.toml','rb'))['spartados']['disk_32'])" 2>/dev/null)
 GEM4XE_CART   = $(shell python3 -c "import tomllib;print(tomllib.load(open('$(GEM4XE_TREE)/fixtures.toml','rb'))['spartados']['sdx_cart'])" 2>/dev/null)
@@ -1011,7 +1018,7 @@ $(GEM4XE_ATR): $(GEM4XE_BIN)/RETROWP.G4A $(GEM4XE_XEX)
 gem4xe-check: $(GEM4XE_ATR)
 	@test -n "$(GEM4XE_CART)" || \
 	    { echo "retrowp: no SpartaDOS X cartridge: set [spartados].sdx_cart in $(GEM4XE_TREE)/fixtures.toml"; exit 1; }
-	@python3 tools/ci_gem4xe.py "$(GEM4XE_CART)"
+	@GEM4XE_SYM="$(GEM4XE_SYM)" python3 tools/ci_gem4xe.py "$(GEM4XE_CART)"
 
 
 seam-check-all:

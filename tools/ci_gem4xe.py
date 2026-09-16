@@ -113,7 +113,17 @@ def main():
     want_len = os.path.getsize(G4A)
     link_near = link_near_of(G4A)
     tree_link = tree_link_of(MAP)
-    sysm = symfile.load(os.path.join(GEM4XE, "build", "gem.sym"))
+    # The symbols MUST be the ones belonging to the GEM.COM on the disk.
+    # They are read by address, so a gem.sym from a different build answers
+    # plausible nonsense rather than failing: app_near moved eleven bytes
+    # between two of gem4xe's kits, and reading the stale address gave a
+    # steady 0, which reads exactly like "the program never loaded".  That
+    # cost a day and an upstream bug report that had to be withdrawn.  So
+    # the Makefile passes the gem.sym that sits beside the gem.xex it
+    # staged, and this says which file it used.
+    sym_path = os.environ.get("GEM4XE_SYM") or os.path.join(GEM4XE, "build", "gem.sym")
+    sysm = symfile.load(sym_path)
+    print(f"  symbols   {sym_path}")
     cart = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("SDX_CART")
     if not cart:
         print("FAIL: no SpartaDOS X cartridge: pass one, or set SDX_CART")
@@ -159,10 +169,15 @@ def main():
         runs = b.peek16(sysm["sh_runs"])
         rc, ret = s16(b.peek16(sysm["sh_lastrc"])), s16(b.peek16(sysm["sh_lastret"]))
         print(f"  load      app_near=${near:04X} (linked ${link_near:04X}), "
-              f"sh_runs={runs}, sh_lastrc={rc} ({ERR.get(rc, '?')}), sh_lastret={ret}")
+              f"sh_runs={runs} (runs STARTED, not finished), "
+              f"sh_lastrc={rc} ({ERR.get(rc, '?')}), sh_lastret={ret}")
         if not near:
-            problems.append(f"the program never loaded: app_near is 0, "
-                            f"sh_lastrc {rc} ({ERR.get(rc, '?')})")
+            problems.append(
+                f"app_near stayed 0 through {frames} frames, sh_lastrc {rc} "
+                f"({ERR.get(rc, '?')}).  Before reading this as a load failure, "
+                f"check that {sym_path} belongs to the GEM.COM on the disk -- a "
+                f"gem.sym from another build reads a stale address and answers a "
+                f"steady 0, which looks identical")
         if rc not in (0, None):
             problems.append(f"sh_lastrc {rc} ({ERR.get(rc, '?')}), expected APP_OK")
 
