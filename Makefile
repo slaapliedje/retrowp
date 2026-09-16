@@ -963,7 +963,7 @@ $(GEM4XE_BIN)/RETROWP.G4A: $(GEM4XE_BUILD)/retrowp.elf \
 	    $(GEM4XE_BUILD)/retrowp-near.elf $(GEM4XE_BUILD)/retrowp-far.elf \
 	    $@ --syms $(GEM4XE_BUILD)/retrowp.sym
 
-.PHONY: gem4xe gem4xe-engine-check gem4xe-sdk-check
+.PHONY: gem4xe gem4xe-engine-check gem4xe-sdk-check gem4xe-check
 # First, not as an order-only prerequisite of the object directory: a run
 # that failed after creating that directory leaves it behind, and the
 # check would then never run again.
@@ -975,6 +975,33 @@ gem4xe: gem4xe-sdk-check $(GEM4XE_BIN)/RETROWP.G4A
 # The same free portability check the other targets get: the portable
 # layers compiled for a 65816, with no shell and no link.
 gem4xe-engine-check: $(filter $(GEM4XE_BUILD)/%,$(GEM4XE_OBJ))
+
+# BOOTING IT, which is the check this shell did not have.  RetroWP goes on
+# a floppy as DESKTOP.G4A and comes up under SpartaDOS X -- the cartridge
+# supplies the DOS, the disk carries none -- so gem4xe's shell loop reads
+# it with far_read_file and hands it to app_load, running the whole loader
+# path: a format 4 header, a chunked copy of a 202 KB image, and fixups
+# across four banks.  Needs the gem4xe tree BUILT (its GEM.COM and its
+# symbols) and two fixtures named in its fixtures.toml, neither of which
+# is ours to ship.
+GEM4XE_TREE  ?= $(HOME)/dev/gem4xe
+GEM4XE_XEX    = $(GEM4XE_TREE)/build/gem.xex
+GEM4XE_ATR    = $(GEM4XE_BUILD)/RETROWP.ATR
+GEM4XE_FIX    = $(shell python3 -c "import tomllib;print(tomllib.load(open('$(GEM4XE_TREE)/fixtures.toml','rb'))['spartados']['disk_32'])" 2>/dev/null)
+GEM4XE_CART   = $(shell python3 -c "import tomllib;print(tomllib.load(open('$(GEM4XE_TREE)/fixtures.toml','rb'))['spartados']['sdx_cart'])" 2>/dev/null)
+
+$(GEM4XE_ATR): $(GEM4XE_BIN)/RETROWP.G4A $(GEM4XE_XEX)
+	@test -n "$(GEM4XE_FIX)" || \
+	    { echo "retrowp: no SpartaDOS fixture: set [spartados].disk_32 in $(GEM4XE_TREE)/fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 $(GEM4XE_TREE)/tools/mkspdisk.py "$(GEM4XE_FIX)" $(GEM4XE_XEX) $@ \
+	    --sectors 2560 --name GEM.COM --boot GEM \
+	    --add $(GEM4XE_BIN)/RETROWP.G4A DESKTOP.G4A
+
+gem4xe-check: $(GEM4XE_ATR)
+	@test -n "$(GEM4XE_CART)" || \
+	    { echo "retrowp: no SpartaDOS X cartridge: set [spartados].sdx_cart in $(GEM4XE_TREE)/fixtures.toml"; exit 1; }
+	@python3 tools/ci_gem4xe.py "$(GEM4XE_CART)"
 
 
 seam-check-all:
