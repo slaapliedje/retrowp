@@ -257,6 +257,17 @@ That change is a breaking one done kindly: the old form is still there as
 `evnt_multi` stops compiling rather than quietly passing a `MOBLK *` where a flags word
 goes.
 
+**What the flat call is actually proved against, and what it is not.** This tree's gate
+exercises `MU_MESAG | MU_KEYBD` with both mouse rectangles zeroed and a zero timer, and
+nothing else — that is the only `WP_EVNT_MULTI` call RetroWP makes. A second application
+on this machine (GACS) moved to the same flat call independently and gates the same path,
+message and key, rectangles zeroed, timer zero. So the shape has two independent ports
+behind it on that path and **no coverage at all of the rectangle words or a non-zero
+timeout**. Two greens on the same axis are one axis, not two, and the first code here to
+ask for `MU_M1` or a real timeout is the run to watch. Recorded because this port has
+already spent days on the difference between "verified" and "verified for the case we
+happened to run".
+
 Each is self-guarding, so a wildcard sweep by the ST build or by retroplat's seam
 gate compiles them to nothing rather than breaking.
 
