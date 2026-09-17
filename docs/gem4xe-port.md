@@ -241,10 +241,21 @@ what actually differs is which `gem.h` the include path found.
 | `clipboard_gem4xe.c` | the scrap file, over GEMDOS and the scrap manager |
 | `transport_gem4xe.c` | "no offload device", completely |
 | `timer_gem4xe.c` | the tick, and a sleep that yields to the AES |
-| `gemcompat_gem4xe.c` | the `evnt_multi` adapter |
 
-`clib_gem4xe.c` was here too, holding `memcmp` and `memchr`; the kit writes both
-itself now (under the same licence, for the same reason), so it is gone.
+Two files that were here are gone, both because the kit caught up.
+`clib_gem4xe.c` held `memcmp` and `memchr`, which the kit now writes itself under the
+same licence and for the same reason. `gemcompat_gem4xe.c` held an `evnt_multi` adapter:
+gemlib takes the two mouse rectangles as ten loose words and the timer as a LONG, and
+gem4xe used to take two `MOBLK` pointers, which needs somewhere to put the MOBLKs and so
+could not be a C89 macro. Since gem4xe `fcbe718` its `evnt_multi` **is** the ST's shape —
+the Compendium's twenty-three arguments, both rectangles flat — so the only remaining
+difference is that gemlib joins the timer into a LONG where the AES has always taken two
+words. A macro can do that, and `WP_EVNT_MULTI` now does.
+
+That change is a breaking one done kindly: the old form is still there as
+`evnt_multi_moblk`, and a fifteen-argument call to the new twenty-three-argument
+`evnt_multi` stops compiling rather than quietly passing a `MOBLK *` where a flags word
+goes.
 
 Each is self-guarding, so a wildcard sweep by the ST build or by retroplat's seam
 gate compiles them to nothing rather than breaking.

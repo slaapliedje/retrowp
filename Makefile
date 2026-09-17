@@ -281,8 +281,7 @@ ATARI_GEM4XE_ONLY  = $(RETROPLAT)/backends/atari/file_gem4xe.c \
                      $(RETROPLAT)/backends/atari/mem_gem4xe.c \
                      $(RETROPLAT)/backends/atari/clipboard_gem4xe.c \
                      $(RETROPLAT)/backends/atari/transport_gem4xe.c \
-                     $(RETROPLAT)/backends/atari/timer_gem4xe.c \
-                     $(RETROPLAT)/backends/atari/gemcompat_gem4xe.c
+                     $(RETROPLAT)/backends/atari/timer_gem4xe.c
 
 ATARI_PLATFORM_SRC = $(filter-out platform/atari/main.c,$(wildcard platform/atari/*.c)) \
                      $(filter-out $(ATARI_GEM4XE_ONLY),\
