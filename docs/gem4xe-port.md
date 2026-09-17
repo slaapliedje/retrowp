@@ -828,8 +828,10 @@ which matches what gem4xe's own `ccbug` notes say about these.
 
 ### What this port is built against: gem4xe 0.3
 
-RetroWP's gem4xe target is pinned to **gem4xe 0.3** (tag `v0.3`, tree `2ce31c2`) — a
-release rather than a commit, which is the more durable thing to name.
+RetroWP's gem4xe target is pinned to **gem4xe 0.4** — a release rather than a commit,
+which is the more durable thing to name. (It was 0.3; 0.4 carries the two C-surface
+changes this port absorbed, the flat `evnt_multi` and the `ob_spec` union, and adds only
+constants and the board routines that make `printf` link.)
 
 The kit is a build product, so 0.3's tree carries no `sdk/` directory; what is verified
 here is that the snapshot in `build/gem4xe-baseline/kit-bea44a6/` IS 0.3's kit. Every
@@ -932,7 +934,27 @@ not prove they resolve. `nm` on `timer_gem4xe.o` does: it defines `plat_ticks_ms
 ### Toolchain
 
 `CALYPSI65816` defaults to `~/dev/toolchains/calypsi-65816`, which is a symlink
-the machine's owner repoints. It moved from 5.18 to 5.18.1 during this work.
+the machine's owner repoints. It has moved twice during this work: to 5.18.1, and on
+2026-09-17 to **5.18.2**, which is what builds here now.
+
+**The "5.18.1 breaks multi-bank loads" warning is withdrawn**, by the source it came
+from: gem4xe reported it, later found it was their own test racing itself, and retracted
+it. This tree never reproduced it independently — it was inherited and recorded as
+received — so it comes out the same way. A retracted warning left lying in a file is how
+somebody loses a day to a compiler that was fine all along.
+
+**5.18.2 does NOT fix the defect behind `linebreak.c`'s `-O1`.** It fixes five
+code-generation shapes, and this is not one of them. Measured two ways rather than
+assumed: on target, an `-O2` build against the 0.4 kit BRKs in exactly the same place
+(`P=$21`, `plat_measure_text +0x33`); and statically, compiling `linebreak.c` alone with
+5.18 and with 5.18.2 and reading each listing, both reach the call to `plat_measure_text`
+with an eight-bit accumulator. The workaround stays. It costs 636 bytes — 202,882 against
+202,074 — which is not a reason to ship a program that dies before it measures a word.
+
+A note on the minimal reproducer, since gem4xe's own catalogue warns that a small case
+can hide its own bug by inlining away: the candidate here was re-checked with
+`--no-inline` and is still negative. So it is a genuine negative, not a folded shape, and
+`linebreak.c` remains the reproducer.
 
 The hazard there is not the version but the **stale objects**: existing `.o`
 files are up to date by every timestamp `make` can see, so a plain build after a
