@@ -956,6 +956,35 @@ can hide its own bug by inlining away: the candidate here was re-checked with
 `--no-inline` and is still negative. So it is a genuine negative, not a folded shape, and
 `linebreak.c` remains the reproducer.
 
+**This tree cannot currently be proved clean of it, and that is worth saying.** gem4xe
+wrote a proper scanner for the shape (`tools/ccbug/mscan.py`), deliberately conservative:
+a `##` immediate proves the accumulator is wide, any call makes the state unknown, and any
+non-entry label makes it unknown, so it under-reports rather than inventing. Run over 49
+of this project's translation units at `-O2` it reports **zero** — including the call that
+demonstrably BRKs on target.
+
+The assembly says why. Before the failing call, both paths reach the label narrow:
+
+        sep     #32
+        lda     5,s
+        bra     `?L340`
+    `?L40`:    lda     ##1
+        sep     #32
+    `?L340`:   sta     1,s
+        ...
+    `?L30`:    lda     46,s
+        ...
+        jsl     long:plat_measure_text
+
+There is no `rep #32` between the `sep` and the call on either path. The scan declares the
+state unknown at `?L340`, which is honest but costs the detection: **every** predecessor
+of that label is known-narrow, so the join is known-narrow.
+
+So a zero from that scan is not a clean bill of health, here or anywhere. One real
+instance in this tree goes unreported by it, which means others could. What is actually
+known is narrower and worth stating in those terms: the program builds, loads, lays out
+and paints, and the one instance that was found is worked around.
+
 The hazard there is not the version but the **stale objects**: existing `.o`
 files are up to date by every timestamp `make` can see, so a plain build after a
 toolchain change links output from two compilers and says nothing. Whenever the
