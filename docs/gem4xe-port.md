@@ -712,6 +712,24 @@ walked deep past the bottom, and relinking with a 6 KB stack instead of 4 KB BRK
 same place with the same counters. (8 KB does not fit the near image at all — the linker
 refuses to place it.)
 
+**Far memory is readable now, and was not while this was being chased.** gem4xe has since
+patched the bridge (`tools/altirra/altirra-sdl-bridge-memory-24bit.patch`) so `MEMDUMP`,
+`MEMLOAD`, `PEEK` and `PEEK16` take a 24-bit address — bank in the high byte. Before it
+the bridge could read bank `$00` and nothing else, which is exactly why the hunt below
+went to the stack frame and the instruction history instead of simply comparing the
+loaded code against the file. With it, `build/gem4xe-baseline/far_verify.py` reads a
+function out of far memory and diffs it against the `.g4a`: 64/64 bytes identical at
+`plat_measure_text`, and the image base it derives (`$080000`, six banks) is the same
+delta the BRK hunt arrived at three other ways. That is both a check of the emulator
+patch and a check of the loader's fixups.
+
+The emulator binary changed when that landed. `~/dev/altirra-patched/AltirraSDL` is the
+rebuilt one (md5 `0f8d57d3`); the previous sits beside it as `AltirraSDL.46567a14-hostfs`
+and `BUILT-FROM.txt` says which is which, so a regression can be bisected against it.
+Re-running the gate on the new binary gives the same read size, the same `app_near` and
+the same two ink counts — checked rather than assumed, because a changed emulator once
+looked exactly like a changed program here.
+
 The instrumentation that found this is not committed — it was a `volatile __near` stage
 byte plus three counters, set along the path and polled every 100 frames — but
 `build/gem4xe-baseline/stage_timeline.py` is kept, because the technique is the reusable
