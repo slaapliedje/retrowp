@@ -1,11 +1,17 @@
 # RetroWP on gem4xe (Atari 8-bit)
 
-**Status: RetroWP runs on gem4xe, under both SpartaDOS X and SpartaDOS 3.2.** The full
-image loads (`APP_OK`), `wp_menu_tree_init` runs, and GEM draws RetroWP's menu bar
-(Desk · File · Edit · Tools · Format · Help) and its document window, all from the ST's
-unchanged `app_shell.c`. **Not working yet:** the window's work area isn't
-painted. (The title bar was blank until gem4xe taught `WF_NAME` to bring a far title
-down to bank `$00` at draw time; see below.) **The long-running "load failure" was
+**Status: RetroWP runs on gem4xe, under both SpartaDOS X and SpartaDOS 3.2 — menu bar,
+window, title, and the document laid out and painted.** The full image loads (`APP_OK`),
+`wp_menu_tree_init` runs, and GEM draws RetroWP's menu bar (Desk · File · Edit · Tools ·
+Format · Help), its document window and the sample document's text, all from the ST's
+unchanged `app_shell.c`.
+
+The work area was blank for the port's first week and this document called it a redraw
+problem. It was not. Layout took a **BRK before it measured a single word**, because
+Calypsi 5.18 at `-O2` left the accumulator eight bits wide across a call — see "A BRK in
+layout" below. `linebreak.c` is built at `-O1`, and that is the whole fix. (The title bar
+was blank until gem4xe taught `WF_NAME` to bring a far title down to bank `$00` at draw
+time; see below.) **The long-running "load failure" was
 never a failure.** Every probe that reported one looked at the machine once, at a fixed
 frame, before a slow floppy read had finished. See "What the load failure really was".
 Everything after that section is history, including conclusions later withdrawn.
@@ -680,7 +686,7 @@ names a symbol mismatch as the first thing to check. Also corrected there: `sh_r
 counts runs STARTED, not finished (gem4xe's `src/aes/shel.c` increments it before
 `app_exec`), so "`sh_runs` 1" never meant the application had returned.
 
-#### What is actually wrong: a BRK in layout
+#### A BRK in layout — found, and fixed at -O1
 
 With matching symbols, a near stage byte polled every 100 frames says where it really
 gets to:
@@ -729,10 +735,40 @@ trail, and a `.g4a`'s far image is relocated by whole banks — runtime = link +
 ((bank - 2) << 16), one delta for the whole image — so resolving a runtime address against
 the link map needs that bank first. Anchoring it is the unfinished step.
 
-**This is not new damage, and it is probably not gem4xe's.** It explains the thing this
-document has called a redraw problem since the port began: the work area is unpainted
-because there is no laid-out document to paint. The window is open, the menu bar is
-installed, and the program died before its first measurement.
+**It is Calypsi, not gem4xe, and not RetroWP's logic.** The proof came in four steps,
+each checkable:
+
+1. **The BRK frame off the stack.** A native BRK pushes PBR, PCH, PCL and P, and
+   gem4xe's handler pushes nothing more before parking, so the frame survives: `P=$21`
+   — **M set, an eight-bit accumulator** — and a faulting address of `$09:5C8E`.
+2. **The bank delta, from the machine rather than a guess.** The loader reads the file
+   into far memory first and then takes whole banks after it, so blob `$044464` plus
+   203,352 bytes rounds up to an image base of `$080000`: six banks. Under that delta the
+   JSL target `$09:5C5B` is `plat_measure_text`'s **entry** in the link map — the anchor
+   test gem4xe proposed, and the other deltas land mid-function.
+3. **The bytes, decoded under M=1.** `plat_measure_text`'s prologue carries two sixteen-bit
+   immediates: `SBC #$0128` at `+0x0B` and `ADC #$0134` at `+0x2F`. Eight-bit they are two
+   bytes, not three, so the stream slides out of step: `+0x2F` becomes `ADC #$34`, `+0x31`
+   `ORA ($A2,X)`, and `+0x33` lands inside `LDX #$0000` and reads `00 00` — a BRK, at
+   exactly the address the stack frame gives. Byte for byte.
+4. **The caller.** `?L280` in `linebreak.o`, `+0x17b`: `measure_and_height`'s call site.
+
+So `engine/src/linebreak.c` at `-O2` reaches that call with the accumulator eight bits
+wide, and the callee is compiled — as all C here is — to be entered with sixteen.
+
+**`-O1` on that one file is the whole fix.** Verified on target: no BRK, and the document
+lays out and paints. The image stays three code banks and ~204 KB; `-O1` everywhere would
+need five banks and 220 KB for nothing. gem4xe is cataloguing it as B17, a sibling of
+B16 — the same width switch on the wrong side of an edge, across a call rather than a
+loop's back edge. It is **not** B16 itself: none of this tree's 45 translation units
+shows B16's listing signature.
+
+One dead end worth recording, so nobody repeats it: reading the listings for "a `jsl`
+reached after a `sep` with no `rep` between" finds the crashing call in `linebreak.c` —
+and 434 others across the tree, because a linear scan ignores branches and basic blocks.
+It is not a usable detector without real dataflow, and the single clean hit is not
+evidence on its own. A minimal reproducer of the shape did not reproduce it either,
+which matches what gem4xe's own `ccbug` notes say about these.
 
 ### No C library heap
 

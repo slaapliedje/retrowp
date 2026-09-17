@@ -864,6 +864,28 @@ G4X_LD = $(CALYPSI65816)/bin/ln65816
 # RetroWP's statics are far larger than that.  gemapp.scm names the `far`
 # and `zfar` sections for exactly this model (GACS is written to it too).
 GEM4XE_CFLAGS   = --code-model=large --data-model=large -O2
+
+# linebreak.c is built at -O1, and the port does not run without it.
+#
+# At -O2 Calypsi 5.18 leaves this file's code calling plat_measure_text
+# with the accumulator eight bits wide.  That function is compiled, like
+# all C here, to be entered with a sixteen-bit accumulator, and its
+# prologue carries two sixteen-bit immediates (SBC #$0128, ADC #$0134).
+# Decoded eight-bit they are two bytes each instead of three, so the
+# instruction stream slides out of step and lands on the $00 $00 inside
+# an LDX #$0000 -- a BRK, 0x33 into the function, which is exactly where
+# gem4xe's fault handler parks the machine.  Proved rather than guessed:
+# the BRK frame on the stack gives P with M set and the faulting address,
+# and decoding the bytes from the .g4a under M=1 predicts that address
+# byte for byte.
+#
+# It is not gem4xe's B16 (tools/ccbug): that is a loop whose width switch
+# lands before its back edge, and none of this tree's 46 translation units
+# shows its listing signature.  This one crosses a call.
+#
+# -O1 on this one file is the whole fix -- the image stays 3 code banks
+# and ~203 KB, where -O1 everywhere needs 5 banks and ~220 KB.
+GEM4XE_O1_CFLAGS = --code-model=large --data-model=large -O1
 GEM4XE_INCLUDES = -I engine/include -I $(RETROPLAT)/include \
                   -I $(RETROPLAT)/backends/atari -I platform/atari \
                   -I platform/common -I offload/transport \
@@ -896,6 +918,9 @@ GEM4XE_STACK  ?= 4096
 
 GEM4XE_BUILD = build/gem4xe
 GEM4XE_BIN   = bin/gem4xe
+
+# The -O1 exception above; here, where GEM4XE_BUILD has a value.
+$(GEM4XE_BUILD)/linebreak.o: GEM4XE_CFLAGS = $(GEM4XE_O1_CFLAGS)
 
 # timer_atari.c is NOT here: its clock() links on gem4xe now, but it
 # busy-waits, and a spin that never calls the AES starves the accessories

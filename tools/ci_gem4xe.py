@@ -25,13 +25,19 @@ name off the boot disk and hands it to app_load, so the whole loader runs
 banks.  SpartaDOS X supplies the DOS from the cartridge; the disk carries
 none of its own.
 
-WHAT IS ASSERTED, and what is only reported.  Two things are known to be
-wrong and are NOT assertions, because a gate that fails when they are
-fixed is worse than no gate: the window's title bar is empty (gem4xe
-refuses a far string for WF_NAME, and RetroWP passes a literal, which is
-far under --data-model=large), and the window's work area is not painted.
-Both are in docs/gem4xe-port.md with their causes.  They are printed
-every run so that the day they change, somebody sees it.
+WHAT IS ASSERTED.  The read is the whole file; the program loads with a
+near region and APP_OK; wp_menu_tree_init ran; the menu bar drew its
+titles; and the WORK AREA carries the document's own text.  That last one
+was for a week the thing this gate excused as "known broken" and printed
+rather than checked.  It was neither a redraw bug nor gem4xe's: layout
+took a BRK before it measured a word, because Calypsi at -O2 left the
+accumulator eight bits wide across a call (the Makefile builds
+linebreak.c at -O1, with the reasoning).  The blank title bar, the other
+excused item, was fixed upstream.  Both are assertions now.
+
+The symbols MUST match the GEM.COM on the disk -- see where they are
+loaded below; the Makefile passes GEM4XE_SYM beside GEM4XE_XEX.  A
+mismatched pair does not fail, it answers plausible nonsense.
 """
 import os
 import re
@@ -69,6 +75,12 @@ BAR_XYWH = (0, 0, 640, 10)
 # ten rows are the top twenty of the picture.
 BAR_ROWS = 20
 MIN_INK = 100           # "Desk" alone is 48 px wide; several titles follow
+# The window's work area: below the menu bar and the title bar, above the
+# status line.  Ink here is laid-out document text, which is the whole
+# point -- it was absent for the port's first week, and the cause was not
+# drawing at all but a BRK in layout (docs/gem4xe-port.md).
+WORK_TOP, WORK_BOT = 24, 200
+MIN_WORK_INK = 400
 
 
 def s16(v):
@@ -101,6 +113,19 @@ def bar_ink(path):
     w = im.width
     px = im.load()
     return sum(1 for y in range(min(BAR_ROWS, im.height)) for x in range(w)
+               if sum(px[x, y]) < 128 * 3)
+
+
+def work_ink(path):
+    """Dark pixels in the window's work area: the document's own text."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    im = Image.open(path).convert("RGB")
+    w = im.width
+    px = im.load()
+    return sum(1 for y in range(WORK_TOP, min(WORK_BOT, im.height)) for x in range(w)
                if sum(px[x, y]) < 128 * 3)
 
 
@@ -207,6 +232,18 @@ def main():
             if ink < MIN_INK:
                 problems.append(f"the menu bar drew {ink} dark pixels, under "
                                 f"{MIN_INK}: the titles are missing")
+            # The document itself.  Both of the things this gate used to
+            # print as "known broken" -- the blank title and the unpainted
+            # work area -- are fixed, so they are checked rather than
+            # excused: the title came right when gem4xe taught WF_NAME to
+            # bring a far string down at draw time, and the work area when
+            # linebreak.c stopped being built at -O2 (see the Makefile).
+            wink = work_ink(SHOT)
+            print(f"  document  {wink} dark pixels in the work area")
+            if wink < MIN_WORK_INK:
+                problems.append(f"the work area drew {wink} dark pixels, under "
+                                f"{MIN_WORK_INK}: the document did not lay out "
+                                f"or did not paint")
     finally:
         try:
             b.close()
@@ -217,11 +254,6 @@ def main():
         except Exception:
             pass
 
-    # Known, and deliberately not assertions -- see the module docstring.
-    print("  known     the window title is blank (gem4xe refuses a far WF_NAME "
-          "string; app_shell.c passes a literal, far under --data-model=large)")
-    print("  known     the window work area is not painted (redraw_window(), "
-          "app_shell.c:3785, unchecked on gem4xe)")
 
     if problems:
         for p in problems:
