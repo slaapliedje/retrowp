@@ -770,6 +770,24 @@ It is not a usable detector without real dataflow, and the single clean hit is n
 evidence on its own. A minimal reproducer of the shape did not reproduce it either,
 which matches what gem4xe's own `ccbug` notes say about these.
 
+### The kit's bindings are built without cross-jumping
+
+gem4xe's Makefile builds `lib/gemlib.c` with `--no-interprocedural-cross-jump`, and says
+to keep the flag if you compile the bindings with your own rules — which this build does.
+At `-O2` the compiler shares one identical tail across the GEMDOS bindings and parks it
+inside a single function's section, so under `--data-model=large` a program that calls
+`Fread` drags in `clock`, `Tgettimeofday` and `Psystem` it never calls, and one more with
+every binding gem4xe adds. Without the sharing each binding is its own section: a few
+bytes more for the ones actually called, nothing for the rest.
+
+Measured here rather than taken on faith — `gemlib.c` is byte-identical between the two
+kits either side of the change, so the flag is the only variable:
+
+    RETROWP.G4A   204,252 bytes without it
+                  203,177 bytes with it        -1,075
+
+and `Tgettimeofday` and `Psystem` no longer appear in the link map at all.
+
 ### No C library heap
 
 gem4xe `fe75914` makes `malloc` and `free` fail at link time, with an undefined

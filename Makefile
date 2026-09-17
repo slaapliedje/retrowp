@@ -966,6 +966,17 @@ $(GEM4XE_BUILD)/%.o: $(GEM4XE_SDK)/lib/%.c | $(GEM4XE_BUILD)
 $(GEM4XE_BUILD)/%.o: $(GEM4XE_SDK)/lib/%.s | $(GEM4XE_BUILD)
 	$(G4X_AS) -o $@ $<
 
+# The kit's bindings, without interprocedural cross-jumping.  gem4xe's own
+# Makefile carries this rule and says to keep it if you build the bindings
+# with your own rules, which this does.  At -O2 the compiler shares one
+# identical tail across the GEMDOS bindings and parks it inside a single
+# function's section, so under --data-model=large a program that calls
+# Fread drags in clock, Tgettimeofday and Psystem it never calls -- and one
+# more with every binding gem4xe adds.  Without the sharing each binding is
+# its own section: a few bytes more for the ones actually called, nothing
+# for the rest.
+$(GEM4XE_BUILD)/gemlib.o: GEM4XE_CFLAGS += --no-interprocedural-cross-jump
+
 $(GEM4XE_BUILD)/app_shell.o: $(GENERATED)/help_retrowp.h
 
 GEM4XE_LDOPT = $(GEM4XE_SDK)/lib/gemapp.scm $(GEM4XE_OBJ) clib-lc-ld.a \
