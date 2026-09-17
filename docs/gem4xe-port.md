@@ -273,6 +273,22 @@ gate compiles them to nothing rather than breaking.
 
 ### What `gemcompat.h` reconciles
 
+Less every month. Since gem4xe `0b3b5b3` its `gem.h` declares `OBJECT.ob_spec` as the
+same union gemlib does — `index` for the raw four bytes, `free_string`, `tedinfo` and the
+rest for what an object of that type points at — where it used to declare the bare `LONG`
+the ST's own `aes.h` has. That was the largest entry in this header: every site needed two
+spellings, and the gem4xe one widened the `LONG` back into a far pointer by hand, in both
+directions. All six `OB_SPEC_*` macros are one definition each now, and the header has no
+opinion about `ob_spec` left — it only gives the operations names.
+
+Two things checked with the compiler rather than reasoned about, because this is the
+seam where reasoning has been wrong before: a `__near` string (which is what the AES
+reads, so what the shell declares) assigns to and compares against the union's far
+`char *` cleanly under `--data-model=large`; and `OB_SPEC_ZERO` is `{0}` in both now,
+a union initializer being brace-enclosed. The old `0` on gem4xe was there because Calypsi
+refuses braces around a **scalar** — that limit is unchanged and simply no longer applies.
+
+
 - **`ob_spec`** — a union on the ST, a bare `LONG` on gem4xe. 79 sites in
   `app_shell.c` now go through `OB_SPEC_SET_STRING` / `OB_SPEC_IS_STRING` /
   `OB_SPEC_SET_INDEX` / `OB_SPEC_ZERO`.

@@ -941,6 +941,19 @@ GEM4XE_OBJ = \
   $(GEM4XE_BUILD)/gemlib.o $(GEM4XE_BUILD)/clib.o \
   $(GEM4XE_BUILD)/crt_gemapp.o $(GEM4XE_BUILD)/gemabi.o
 
+# Every gem4xe object depends on the kit's headers, coarsely and on
+# purpose.  The ST and DOS builds get this from -MMD depfiles; Calypsi can
+# emit dependencies too, but the kit is four headers and an ABI change
+# should rebuild everything anyway, so the blunt rule is the honest one.
+#
+# Without it `make gem4xe` answers "up to date" after gem4xe changes a
+# declaration out from under it, and links a stale object that was correct
+# against the old header -- a passing build of a binary that no longer
+# matches its system.  That is not hypothetical: it is how a second port
+# on this machine met the OBSPEC change tonight, and this tree had the
+# same gap (verified by touching gem.h and watching make do nothing).
+$(GEM4XE_OBJ): $(GEM4XE_SDK)/include/gem.h $(GEM4XE_SDK)/include/portab.h
+
 $(GEM4XE_BUILD) $(GEM4XE_BIN):
 	mkdir -p $@
 
