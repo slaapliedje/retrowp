@@ -1001,6 +1001,17 @@ So the one instance the scan finds is the one this port already knew about and w
 around, and the binary as actually built has none. That is real evidence rather than the
 absence of it — the check was demonstrated to speak before its silence was believed.
 
+**`make gem4xe-mscan` runs all of that, in that order.** The scan is a standing check
+here rather than something someone remembers to do, and the target is built around its own
+weakness: it runs gem4xe's fixture FIRST and refuses to go on if the scan is silent on it,
+because a zero from a check nobody has proved can speak is worth nothing. It compiles the
+sources the way the build does — same flags, same `-O1` on `linebreak.c` — so what is
+scanned is what is shipped.
+
+It was itself tested by being made to fail: forcing `linebreak.c` back to `-O2` makes the
+target report that one call and exit non-zero. A gate nobody has watched fail is in the
+same position as the scan it runs.
+
 It is still not a proof. The scan refuses to follow what it cannot model and never reports
 an unknown state, so it under-reports by design. What is known is: the program builds,
 loads, lays out and paints; the one instance found is worked around; and nothing else of

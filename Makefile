@@ -1069,6 +1069,50 @@ gem4xe-check: $(GEM4XE_ATR)
 	@GEM4XE_SYM="$(GEM4XE_SYM)" python3 tools/ci_gem4xe.py "$(GEM4XE_CART)"
 
 
+# The B17 scan (gem4xe tools/ccbug/mscan.py): a call the compiler reaches
+# with an 8-bit accumulator, when the callee was compiled to be entered
+# with sixteen.  RetroWP met one as a BRK inside plat_measure_text, which
+# is why engine/src/linebreak.c is built at -O1.
+#
+# THE FIXTURE RUNS FIRST, which is the reason this is a target and not a
+# note in a document.  mscan under-reports on purpose -- it never reports
+# a state it cannot prove -- so its silence is evidence only once
+# something has made it speak.  It answered zero twice during its own
+# development, from two unrelated causes, and both zeroes looked exactly
+# like a clean tree.
+#
+# The assembly is a pass of its own because --assembly-source replaces the
+# object rather than accompanying it.  It uses the same GEM4XE_CFLAGS and
+# the same -O1 exception as the real build, so what is scanned is what is
+# shipped; if that ever drifts, this comment is the thing that was wrong.
+GEM4XE_MSCAN     = $(GEM4XE_TREE)/tools/ccbug/mscan.py
+GEM4XE_MSCAN_FIX = $(GEM4XE_TREE)/tools/ccbug/mscan_b17.s
+GEM4XE_ASMDIR    = $(GEM4XE_BUILD)/asm
+GEM4XE_C_SRC     = $(filter %.c,$(ENGINE_SRC)) $(TRANSPORT_SRC) $(SERVICES_SRC) \
+                   $(PLATFORM_COMMON_SRC) $(GEM4XE_BACKEND_SRC) \
+                   platform/atari/app_shell.c platform/atari/main.c \
+                   $(GEM4XE_SDK)/lib/gemlib.c $(GEM4XE_SDK)/lib/clib.c
+
+.PHONY: gem4xe-mscan
+gem4xe-mscan: $(GENERATED)/help_retrowp.h
+	@test -f $(GEM4XE_MSCAN) || { echo "no mscan at $(GEM4XE_MSCAN)"; exit 1; }
+	@python3 $(GEM4XE_MSCAN) $(GEM4XE_MSCAN_FIX) >/dev/null 2>&1; \
+	    test $$? -eq 1 || { echo "mscan is SILENT on its own fixture: the scan is broken, and a zero below would mean nothing"; exit 1; }
+	@echo "  control   mscan reports its own fixture, so it can speak"
+	@rm -rf $(GEM4XE_ASMDIR); mkdir -p $(GEM4XE_ASMDIR)
+	@for f in $(GEM4XE_C_SRC); do \
+	    b=`basename $$f .c`; \
+	    case $$b in \
+	      linebreak) fl="$(GEM4XE_O1_CFLAGS)";; \
+	      *)         fl="$(GEM4XE_CFLAGS)";; \
+	    esac; \
+	    $(G4X_CC) $$fl $(GEM4XE_INCLUDES) --assembly-source $(GEM4XE_ASMDIR)/$$b.s $$f \
+	        || { echo "mscan: $$f would not compile alone"; exit 1; }; \
+	done
+	@echo "  scanned   `ls $(GEM4XE_ASMDIR)/*.s | wc -l` translation units, as the build compiles them"
+	@python3 $(GEM4XE_MSCAN) $(GEM4XE_ASMDIR)/*.s; \
+	    test $$? -eq 0 || { echo "FAIL: the call(s) above are reached with an 8-bit accumulator -- tell gem4xe (ccbug B17)"; exit 1; }
+
 seam-check-all:
 	$(MAKE) -C $(RETROPLAT) check-all
 
