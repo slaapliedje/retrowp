@@ -980,10 +980,31 @@ There is no `rep #32` between the `sep` and the call on either path. The scan de
 state unknown at `?L340`, which is honest but costs the detection: **every** predecessor
 of that label is known-narrow, so the join is known-narrow.
 
-So a zero from that scan is not a clean bill of health, here or anywhere. One real
-instance in this tree goes unreported by it, which means others could. What is actually
-known is narrower and worth stating in those terms: the program builds, loads, lays out
-and paints, and the one instance that was found is worked around.
+**Since fixed, and re-run — with the control that makes a zero mean something.** gem4xe
+added the join (a label whose predecessors are all known and agree takes that state;
+disagreement or any unknown predecessor stays unknown) and, more usefully, a FIXTURE the
+scan must report, so that silence is a result rather than a possible malfunction. Their
+own account is worth repeating: the scan was wrong twice and both times the answer was
+zero — once for the missing join, once because the parser spelled a label with backticks
+and a branch target without them, so no edge was ever recorded and the new join never ran.
+
+Re-run here against a scan first proved able to speak:
+
+| what was scanned | result |
+|---|---|
+| gem4xe's `mscan_b17.s` fixture | 1 call — the scan can speak |
+| this tree's 49 units, all at `-O2` | **1** — `measure_and_height` calling `plat_measure_text` |
+| `linebreak.c` alone at `-O1`, as shipped | 0 |
+| the shipping configuration (48 at `-O2`, `linebreak.c` at `-O1`) | **0** |
+
+So the one instance the scan finds is the one this port already knew about and works
+around, and the binary as actually built has none. That is real evidence rather than the
+absence of it — the check was demonstrated to speak before its silence was believed.
+
+It is still not a proof. The scan refuses to follow what it cannot model and never reports
+an unknown state, so it under-reports by design. What is known is: the program builds,
+loads, lays out and paints; the one instance found is worked around; and nothing else of
+that shape is visible to a check that can find that shape.
 
 The hazard there is not the version but the **stale objects**: existing `.o`
 files are up to date by every timestamp `make` can see, so a plain build after a
