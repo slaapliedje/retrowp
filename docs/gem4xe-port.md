@@ -770,6 +770,36 @@ It is not a usable detector without real dataflow, and the single clean hit is n
 evidence on its own. A minimal reproducer of the shape did not reproduce it either,
 which matches what gem4xe's own `ccbug` notes say about these.
 
+### What this port is built against: gem4xe 0.3
+
+RetroWP's gem4xe target is pinned to **gem4xe 0.3** (tag `v0.3`, tree `2ce31c2`) — a
+release rather than a commit, which is the more durable thing to name.
+
+The kit is a build product, so 0.3's tree carries no `sdk/` directory; what is verified
+here is that the snapshot in `build/gem4xe-baseline/kit-bea44a6/` IS 0.3's kit. Every
+source the kit is built from is byte-identical between the two, checked file by file
+rather than taken on report: `gemlib.c`, `clib.c`, `gemabi.s`, `crt_gemapp.s`,
+`gemapp.scm`, `gem.h`, `portab.h` and `mkg4a.py`. The release differs only in README
+words.
+
+Everything 0.3 brought that this port actually uses, and where each landed:
+
+| 0.3 | what it replaced here |
+|---|---|
+| `scrp_read` / `scrp_write` | `clipboard_gem4xe.c`'s private `C:\SCRAP.TXT` |
+| `Tgettimeofday` and a real `clock()` | a `clock()` that returned nonsense, then a link-time refusal |
+| far window titles | a blank title bar |
+| the bindings' compile flag | 1,075 bytes of bindings this program never calls |
+| `memcmp` / `memchr` in the kit's `clib.c` | `clib_gem4xe.c`, now deleted |
+| the `wind_*_grect` wrappers | two macros in `gemcompat.h`, now deleted |
+
+Also in 0.3 and not used here yet: `objc_add`/`objc_delete`, `Psystem` (a line through
+SpartaDOS X's command processor — the obvious plumbing if the offload client ever needs
+to shell out on-machine), long alert strings, and colour icons. And `test-m32n`, gem4xe's
+first gate on an NTSC machine, which matters to this port only indirectly: the frame is
+17 ms there against PAL's 20, and `a8test`'s launcher boots PAL, so anything here that
+comes to depend on frame timing should say which it assumes.
+
 ### The kit's bindings are built without cross-jumping
 
 gem4xe's Makefile builds `lib/gemlib.c` with `--no-interprocedural-cross-jump`, and says
