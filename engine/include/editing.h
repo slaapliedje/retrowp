@@ -295,10 +295,58 @@ wp_status wp_edit_delete_selection(wp_document *doc, wp_undo_journal *journal,
 wp_status wp_edit_paste_text(wp_document *doc, wp_undo_journal *journal, wp_pos pos,
                               const u8 *utf8, u32 len, wp_pos *out_pos);
 
+/* -- Character styling over a range ------------------------------------ */
+
+/* What wp_edit_style_range applies to every run it touches.
+ *
+ * A DELTA, not a whole wp_char_style, because that is what a toggle
+ * actually means: "turn bold on and leave everything else as each run
+ * already has it". Styling a mixed selection bold must not flatten its
+ * sizes, fonts and colours to one style, which is exactly what handing
+ * the range a finished wp_char_style would do. */
+typedef struct {
+    u16 flags_set;    /* wp_style_flags bits to turn ON */
+    u16 flags_clear;  /* bits to turn OFF -- applied after flags_set, so a
+                          bit named in both ends up clear */
+    i32 size_twips;   /* > 0 replaces the size; 0 leaves each run's own */
+} wp_style_delta;
+
+/* Applies `delta` to every run overlapping [start, end), splitting runs
+   at both ends so that a partially covered run is styled exactly as far
+   as the range reaches and no further. A character style belongs to a
+   run, so "bold from here to there" is "make that stretch its own run
+   first" -- which is why this lives in the engine rather than being
+   something a shell could assemble out of the existing primitives.
+   `start` and `end` may be given in either order; an empty range is
+   WP_OK and does nothing. An image paragraph has no runs and is skipped.
+   The caret and any selection a caller is holding are by byte position,
+   and byte positions do not move here: no text is inserted or removed.
+
+   Journaled: one WP_OP_SET_CSTYLE per run touched, bracketed by a group
+   so undo and redo treat the whole range as one user-facing step.
+
+   The SPLITS are deliberately not journaled. Undo restores every style
+   but leaves the run boundaries where the styling put them, which is
+   the content-equivalent-not-layout-identical contract undo already
+   holds to everywhere else (docs/editing.md): a run boundary between two
+   runs of the same style is invisible in the text, in the layout and in
+   every exporter. */
+wp_status wp_edit_style_range(wp_document *doc, wp_undo_journal *journal,
+                               wp_pos start, wp_pos end,
+                               const wp_style_delta *delta);
+
+/* WP_TRUE when EVERY run overlapping [start, end) already has all of
+   `flags` set -- the question a toggle asks before deciding whether
+   Ctrl+B should turn bold on or off, and the reason it is "every" is
+   that a half-bold selection should go fully bold first, not unbold.
+   An empty range, or one covering no runs at all, answers WP_FALSE. */
+wp_bool wp_document_range_has_flags(const wp_document *doc,
+                                     wp_pos start, wp_pos end, u16 flags);
+
 /* Undoes/redoes the most recent entry on the respective stack. WP_ERR if
    that stack is empty. A group (a run of ops bracketed by
-   wp_undo_group_begin/end -- currently only wp_edit_delete_selection
-   produces one) undoes/redoes as a single call: every op inside it is
+   wp_undo_group_begin/end -- wp_edit_delete_selection and
+   wp_edit_style_range both produce one) undoes/redoes as a single call: every op inside it is
    applied, in the correct order, before this function returns. Nested
    groups compose correctly (depth-counted, not "stop at the first
    marker") -- needed because a future Insert-mode session grouping a

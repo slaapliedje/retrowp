@@ -54,6 +54,39 @@ void      paragraph_remove_at(wp_section *sec, u32 index);
    content end" as a plain (run, offset) pair rather than a full wp_pos. */
 void paragraph_end_run_offset(const wp_paragraph *para, u32 *out_run, u32 *out_offset);
 
+/* Splits the run at `index` so that `offset` bytes stay where they are
+   and the remainder becomes a new run immediately after it, carrying the
+   same style. A no-op (WP_OK) when `offset` is 0 or the run's whole
+   length -- i.e. when the boundary already falls between runs -- so a
+   caller can ask for a split at any byte without checking first.
+
+   This is what makes styling a PART of a run possible: a character style
+   belongs to a run, so "bold from here to there" means "make that stretch
+   a run of its own first". */
+wp_status run_split_at(wp_paragraph *para, u16 index, u32 offset);
+
+/* The run containing byte `byte` of the paragraph's flattened text, and
+   how far into that run it falls. `byte` == the paragraph's total length
+   answers (run_count, 0) -- one past the end, which run_split_at then
+   treats as the no-op it is. */
+void run_at_byte(const wp_paragraph *para, u32 byte, u16 *out_index, u32 *out_offset);
+
+/* The byte offset of `pos` within its own paragraph -- the inverse of
+   pos_from_byte_in_paragraph below. A range walk needs this because
+   splitting runs invalidates every run INDEX in the paragraph while
+   leaving every byte offset exactly where it was. */
+u32 para_byte_of_pos(const wp_paragraph *para, wp_pos pos);
+
+/* Total bytes of a paragraph's flattened text. */
+u32 para_total_bytes(const wp_paragraph *para);
+
+/* The slice of `para` (identified by its own section/paragraph indices)
+   that [start, end) covers, as a byte range. WP_FALSE when the paragraph
+   lies outside the range entirely, or when the overlap is empty. `start`
+   must not be after `end` -- callers normalize first. */
+wp_bool range_in_paragraph(const wp_paragraph *para, u32 section, u32 paragraph,
+                            wp_pos start, wp_pos end, u32 *out_from, u32 *out_to);
+
 /* The (section, paragraph, run, offset) position exactly byte_offset
    bytes into a paragraph's flattened text (the inverse of summing run
    lengths) -- clamps to paragraph_end_run_offset's own result if

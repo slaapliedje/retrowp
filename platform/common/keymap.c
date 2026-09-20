@@ -451,6 +451,46 @@ wp_pos *wp_keymap_cursor(wp_app_ctx *ctx)
     }
 }
 
+wp_bool wp_keymap_selection(const wp_app_ctx *ctx, wp_selection *out)
+{
+    wp_selection sel;
+
+    switch ((wp_keymap_id)ctx->keymap_id) {
+    case WP_KEYMAP_WORDSTAR:
+        /* A marker pair, and both ends must be set: WordStar lets you
+           place ^KB without ^KK, and half a block is not a region. */
+        if (!ctx->km.ws.block_begin_set || !ctx->km.ws.block_end_set) return WP_FALSE;
+        sel.anchor = ctx->km.ws.block_begin;
+        sel.caret = ctx->km.ws.block_end;
+        break;
+    case WP_KEYMAP_EMACS:
+        if (!ctx->km.em.mark_set) return WP_FALSE;
+        sel.anchor = ctx->km.em.mark;
+        sel.caret = ctx->km.em.cursor;
+        break;
+    case WP_KEYMAP_WORDPERFECT:
+        if (!ctx->km.wp5.block_active) return WP_FALSE;
+        sel.anchor = ctx->km.wp5.block_start;
+        sel.caret = ctx->km.wp5.cursor;
+        break;
+    case WP_KEYMAP_MSWORD:
+        if (!ctx->km.mw.selecting) return WP_FALSE;
+        sel.anchor = ctx->km.mw.anchor;
+        sel.caret = ctx->km.mw.cursor;
+        break;
+    case WP_KEYMAP_VI:
+    default:
+        if (ctx->km.vi.mode != (u8)WP_VIMODE_VISUAL &&
+            ctx->km.vi.mode != (u8)WP_VIMODE_VISUAL_LINE) return WP_FALSE;
+        sel = ctx->km.vi.visual;
+        break;
+    }
+
+    if (wp_pos_compare(sel.anchor, sel.caret) == 0) return WP_FALSE;
+    if (out) *out = sel;
+    return WP_TRUE;
+}
+
 void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,
                                 wp_vi_status_view *out)
 {

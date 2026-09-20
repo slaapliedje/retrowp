@@ -187,3 +187,105 @@ void test_actions_format_size_uses_dialog_choice(void)
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
 }
+
+/* Bold with something selected -- the behaviour that did not exist
+   before wp_edit_style_range: every scheme's Bold used to change only
+   the style of text typed NEXT, so selecting a word and pressing Ctrl+B
+   did nothing at all to it. */
+
+static u16 flags_of_first_run(wp_document *doc)
+{
+    wp_section *sec = wp_document_section_get(doc, 0);
+    wp_paragraph *para = wp_section_paragraph_get(sec, 0);
+    const wp_char_style *cs = wp_document_cstyle_get(doc, para->runs[0].style);
+
+    return cs ? cs->flags : 0;
+}
+
+static void select_vi_visual(wp_app_ctx *ctx, u32 from, u32 to)
+{
+    ctx->km.vi.mode = (u8)WP_VIMODE_VISUAL;
+    ctx->km.vi.visual.anchor.section = 0;
+    ctx->km.vi.visual.anchor.paragraph = 0;
+    ctx->km.vi.visual.anchor.run = 0;
+    ctx->km.vi.visual.anchor.offset = from;
+    ctx->km.vi.visual.caret = ctx->km.vi.visual.anchor;
+    ctx->km.vi.visual.caret.offset = to;
+}
+
+void test_actions_bold_styles_the_selection(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    const wp_action *bold = wp_action_find(WP_ACT_FORMAT_BOLD);
+
+    build_doc_with_text(&doc, "Hello World");
+    wp_undo_journal_init(&journal);
+    wp_app_ctx_init(&ctx, WP_KEYMAP_VI, &doc, &journal);
+    select_vi_visual(&ctx, 0, 5);
+
+    ASSERT_TRUE(bold->handler(&ctx) == WP_OK);
+
+    /* The selected text itself is bold now ... */
+    ASSERT_TRUE((flags_of_first_run(&doc) & WP_STYLE_BOLD) != 0);
+    /* ... and it is one undoable step. */
+    ASSERT_TRUE(wp_undo_can_undo(&journal));
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_TRUE((flags_of_first_run(&doc) & WP_STYLE_BOLD) == 0);
+
+    wp_keymap_free(&ctx);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_actions_bold_toggles_input_style_with_no_selection(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    const wp_action *bold = wp_action_find(WP_ACT_FORMAT_BOLD);
+
+    build_doc_with_text(&doc, "Hello World");
+    wp_undo_journal_init(&journal);
+    wp_app_ctx_init(&ctx, WP_KEYMAP_VI, &doc, &journal);
+    ctx.style_flags = 0;
+
+    /* Nothing selected: the old behaviour, unchanged -- what gets typed
+       next is bold, and the document is not touched. */
+    ASSERT_TRUE(bold->handler(&ctx) == WP_OK);
+    ASSERT_TRUE((ctx.style_flags & WP_STYLE_BOLD) != 0);
+    ASSERT_TRUE((flags_of_first_run(&doc) & WP_STYLE_BOLD) == 0);
+    ASSERT_TRUE(!wp_undo_can_undo(&journal));
+
+    ASSERT_TRUE(bold->handler(&ctx) == WP_OK);
+    ASSERT_TRUE((ctx.style_flags & WP_STYLE_BOLD) == 0);   /* a toggle, still */
+
+    wp_keymap_free(&ctx);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+void test_actions_bold_on_an_all_bold_selection_clears_it(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    const wp_action *bold = wp_action_find(WP_ACT_FORMAT_BOLD);
+
+    build_doc_with_text(&doc, "Hello World");
+    wp_undo_journal_init(&journal);
+    wp_app_ctx_init(&ctx, WP_KEYMAP_VI, &doc, &journal);
+    select_vi_visual(&ctx, 0, 11);
+
+    ASSERT_TRUE(bold->handler(&ctx) == WP_OK);
+    ASSERT_TRUE((flags_of_first_run(&doc) & WP_STYLE_BOLD) != 0);
+
+    /* Already bold end to end, so the second press turns it off. */
+    ASSERT_TRUE(bold->handler(&ctx) == WP_OK);
+    ASSERT_TRUE((flags_of_first_run(&doc) & WP_STYLE_BOLD) == 0);
+
+    wp_keymap_free(&ctx);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}

@@ -10,11 +10,52 @@
 /* Portable handlers                                                    */
 /* ------------------------------------------------------------------ */
 
-/* Format toggles operate on ctx->style_flags, the "current input style"
-   -- applied to newly-typed characters, not existing selected text
-   (this app still has no cursor-independent selection model for plain
-   typing; see docs/atari-platform.md's Format controls section, a
-   design carried over unchanged from before M8.5). */
+/* Format toggles do one of two things, decided by whether anything is
+   selected right now.
+ *
+ * WITH A SELECTION they restyle it, through wp_edit_style_range -- one
+ * undoable step however many runs it spans. Until that function existed
+ * this branch could not be written at all: a character style belongs to
+ * a run, so styling part of one means splitting it, which is engine
+ * work and not something an action could assemble out of the public
+ * primitives. Selecting a word and pressing Ctrl+B did nothing, in
+ * every scheme, on every platform.
+ *
+ * WITHOUT ONE they toggle ctx->style_flags, the "current input style"
+ * applied to newly-typed characters -- the original behaviour, and
+ * still the right one when there is nothing to restyle. That is also
+ * what every word processor these schemes imitate does.
+ *
+ * Which selection counts is wp_keymap_selection's problem: vi's Visual
+ * pair, Emacs's mark and point, WordStar's ^KB/^KK markers,
+ * WordPerfect's Block, Word's Shift+motion anchor. */
+
+/* Sets `flag` across the selection if there is one and returns WP_TRUE;
+   WP_FALSE means "nothing selected, toggle the input style instead".
+   The direction is the usual one: a selection that is ALREADY entirely
+   in this style turns it off, anything else turns it on -- so Ctrl+B on
+   a half-bold selection makes all of it bold rather than unbolding the
+   bold half. */
+static wp_bool style_selection(wp_app_ctx *ctx, u16 flag)
+{
+    wp_selection sel;
+    wp_style_delta delta;
+
+    if (ctx->doc == NULL || ctx->journal == NULL) return WP_FALSE;
+    if (!wp_keymap_selection(ctx, &sel)) return WP_FALSE;
+
+    delta.size_twips = 0;
+    if (wp_document_range_has_flags(ctx->doc, sel.anchor, sel.caret, flag)) {
+        delta.flags_set = 0;
+        delta.flags_clear = flag;
+    } else {
+        delta.flags_set = flag;
+        delta.flags_clear = 0;
+    }
+
+    wp_edit_style_range(ctx->doc, ctx->journal, sel.anchor, sel.caret, &delta);
+    return WP_TRUE;
+}
 /* "You have unsaved changes -- really discard them?"
  *
  * Returns WP_TRUE only when it is safe to throw the current document
@@ -134,18 +175,21 @@ static wp_status act_file_new(wp_app_ctx *ctx)
 
 static wp_status act_format_bold(wp_app_ctx *ctx)
 {
+    if (style_selection(ctx, WP_STYLE_BOLD)) return WP_OK;
     ctx->style_flags ^= WP_STYLE_BOLD;
     return WP_OK;
 }
 
 static wp_status act_format_italic(wp_app_ctx *ctx)
 {
+    if (style_selection(ctx, WP_STYLE_ITALIC)) return WP_OK;
     ctx->style_flags ^= WP_STYLE_ITALIC;
     return WP_OK;
 }
 
 static wp_status act_format_underline(wp_app_ctx *ctx)
 {
+    if (style_selection(ctx, WP_STYLE_UNDERLINE)) return WP_OK;
     ctx->style_flags ^= WP_STYLE_UNDERLINE;
     return WP_OK;
 }

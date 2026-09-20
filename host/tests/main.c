@@ -254,6 +254,9 @@ void test_msword_no_leaks(void);
 
 /* test_actions.c */
 void test_actions_find_by_id(void);
+void test_actions_bold_styles_the_selection(void);
+void test_actions_bold_toggles_input_style_with_no_selection(void);
+void test_actions_bold_on_an_all_bold_selection_clears_it(void);
 void test_actions_find_by_shortcut(void);
 void test_actions_every_shortcut_is_unique(void);
 void test_actions_table_row_order_matches_enum(void);
@@ -364,6 +367,20 @@ void test_paginate_no_leaks(void);
 
 /* undo.c */
 void test_undo_insert_then_undo_then_redo(void);
+
+/* style_range.c */
+void test_style_range_bolds_a_word_in_the_middle(void);
+void test_style_range_splits_the_run_it_partially_covers(void);
+void test_style_range_marks_the_paragraph_for_relayout(void);
+void test_style_range_marks_the_document_modified(void);
+void test_style_range_undo_restores_every_run_then_redo_reapplies(void);
+void test_style_range_undo_of_a_partial_range_restores_both_fragments(void);
+void test_style_range_keeps_each_runs_own_size(void);
+void test_style_range_clear_turns_a_flag_back_off(void);
+void test_style_range_accepts_its_ends_in_either_order(void);
+void test_style_range_empty_range_changes_nothing(void);
+void test_style_range_spans_paragraphs(void);
+void test_range_has_flags_answers_the_toggle_question(void);
 void test_undo_delete_all_cases_then_undo_redo(void);
 void test_undo_new_edit_clears_redo(void);
 void test_undo_empty_journal_returns_error(void);
@@ -760,6 +777,9 @@ static const test_case g_cases[] = {
     { "msword_no_leaks", test_msword_no_leaks },
 
     { "actions_find_by_id", test_actions_find_by_id },
+    { "actions_bold_styles_the_selection", test_actions_bold_styles_the_selection },
+    { "actions_bold_toggles_input_style_with_no_selection", test_actions_bold_toggles_input_style_with_no_selection },
+    { "actions_bold_on_an_all_bold_selection_clears_it", test_actions_bold_on_an_all_bold_selection_clears_it },
     { "actions_find_by_shortcut", test_actions_find_by_shortcut },
     { "actions_every_shortcut_is_unique", test_actions_every_shortcut_is_unique },
     { "actions_table_row_order_matches_enum", test_actions_table_row_order_matches_enum },
@@ -846,6 +866,18 @@ static const test_case g_cases[] = {
     { "paginate_no_leaks", test_paginate_no_leaks },
 
     { "undo_insert_then_undo_then_redo", test_undo_insert_then_undo_then_redo },
+    { "style_range_bolds_a_word_in_the_middle", test_style_range_bolds_a_word_in_the_middle },
+    { "style_range_splits_the_run_it_partially_covers", test_style_range_splits_the_run_it_partially_covers },
+    { "style_range_marks_the_paragraph_for_relayout", test_style_range_marks_the_paragraph_for_relayout },
+    { "style_range_marks_the_document_modified", test_style_range_marks_the_document_modified },
+    { "style_range_undo_restores_every_run_then_redo_reapplies", test_style_range_undo_restores_every_run_then_redo_reapplies },
+    { "style_range_undo_of_a_partial_range_restores_both_fragments", test_style_range_undo_of_a_partial_range_restores_both_fragments },
+    { "style_range_keeps_each_runs_own_size", test_style_range_keeps_each_runs_own_size },
+    { "style_range_clear_turns_a_flag_back_off", test_style_range_clear_turns_a_flag_back_off },
+    { "style_range_accepts_its_ends_in_either_order", test_style_range_accepts_its_ends_in_either_order },
+    { "style_range_empty_range_changes_nothing", test_style_range_empty_range_changes_nothing },
+    { "style_range_spans_paragraphs", test_style_range_spans_paragraphs },
+    { "range_has_flags_answers_the_toggle_question", test_range_has_flags_answers_the_toggle_question },
     { "undo_delete_all_cases_then_undo_redo", test_undo_delete_all_cases_then_undo_redo },
     { "undo_new_edit_clears_redo", test_undo_new_edit_clears_redo },
     { "undo_empty_journal_returns_error", test_undo_empty_journal_returns_error },

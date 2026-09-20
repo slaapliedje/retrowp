@@ -597,6 +597,14 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
            side tables are append-only, same as cstyles/pstyles. */
         paragraph_remove_at(sec, op->at.paragraph + 1);
         wp_document_merge_paragraph_raw(doc, op->at.section, op->at.paragraph, NULL);
+    } else if (op->kind == (u8)WP_OP_SET_CSTYLE) {
+        /* The run is still exactly where styling left it: this op moved
+           no bytes, so no index in the paragraph has shifted since.  The
+           run boundaries the styling introduced stay -- see
+           wp_edit_style_range's own comment on why that is the contract
+           and not an oversight. */
+        wp_run_cstyle_set(para, (u16)op->at.run, (wp_cstyle)op->style_before);
+        para->layout_dirty = WP_TRUE;
     }
 }
 
@@ -645,6 +653,9 @@ static wp_status apply_single_redo_op(wp_document *doc, wp_op *op)
                 image_para->layout_dirty = WP_TRUE;
             }
         }
+    } else if (op->kind == (u8)WP_OP_SET_CSTYLE) {
+        wp_run_cstyle_set(para, (u16)op->at.run, (wp_cstyle)op->style_after);
+        para->layout_dirty = WP_TRUE;
     }
 
     return st;
@@ -746,5 +757,115 @@ wp_status wp_edit_redo(wp_document *doc, wp_undo_journal *journal)
         journal->undo_top = op;
     } while (depth > 0);
 
+    return st;
+}
+
+/* -- Character styling over a range ------------------------------------ */
+
+/* One run's worth of the work: compute the new style handle from the run's
+   OWN current style plus the delta, record the change, apply it. Returns
+   WP_OK and does nothing when the delta leaves this run's style as it was
+   -- an unchanged run needs no op, and a range that changes nothing then
+   leaves an empty group, which undo/redo already handle. */
+static wp_status style_one_run(wp_document *doc, wp_undo_journal *journal,
+                                u32 section, u32 paragraph,
+                                wp_paragraph *para, u16 run_index,
+                                const wp_style_delta *delta)
+{
+    const wp_char_style *current = wp_document_cstyle_get(doc, para->runs[run_index].style);
+    wp_char_style want;
+    wp_cstyle handle;
+    wp_cstyle before = para->runs[run_index].style;
+    wp_status st;
+    wp_op *op;
+
+    if (current == NULL) return WP_ERR;
+
+    want = *current;
+    want.flags = (u16)((want.flags | delta->flags_set) & (u16)~delta->flags_clear);
+    if (delta->size_twips > 0) want.size_twips = delta->size_twips;
+
+    if (want.flags == current->flags && want.size_twips == current->size_twips)
+        return WP_OK;                       /* already what was asked for */
+
+    st = wp_document_cstyle_find_or_add(doc, &want, &handle);
+    if (st != WP_OK) return st;
+    if (handle == before) return WP_OK;
+
+    op = (wp_op *)mem_alloc((u32)sizeof(wp_op));
+    if (op == NULL) return WP_NOMEM;
+
+    op->kind = (u8)WP_OP_SET_CSTYLE;
+    op->at.section = section;
+    op->at.paragraph = paragraph;
+    op->at.run = run_index;
+    op->at.offset = 0;                      /* a style belongs to a whole run */
+    op->text.offset = 0;
+    op->text.length = 0;                    /* unused for this kind */
+    op->style_before = (u16)before;
+    op->style_after = (u16)handle;
+
+    wp_run_cstyle_set(para, run_index, handle);
+
+    op->next = journal->undo_top;
+    journal->undo_top = op;
+    return WP_OK;
+}
+
+wp_status wp_edit_style_range(wp_document *doc, wp_undo_journal *journal,
+                               wp_pos start, wp_pos end,
+                               const wp_style_delta *delta)
+{
+    u32 si, pi;
+    wp_status st = WP_OK;
+
+    if (doc == NULL || journal == NULL || delta == NULL) return WP_ERR;
+
+    if (wp_pos_compare(start, end) > 0) {
+        wp_pos swap = start; start = end; end = swap;
+    }
+    if (wp_pos_compare(start, end) == 0) return WP_OK;
+
+    commit_edit(doc, journal);
+    wp_undo_group_begin(journal);
+
+    for (si = start.section; si <= end.section && si < doc->section_count; si++) {
+        wp_section *sec = wp_document_section_get(doc, si);
+
+        for (pi = 0; pi < sec->para_count && st == WP_OK; pi++) {
+            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            u32 from, to, consumed = 0;
+            u16 ri, split_index;
+            u32 split_offset;
+
+            if (!range_in_paragraph(para, si, pi, start, end, &from, &to)) continue;
+
+            /* Both boundaries first, so that afterwards every run is
+               either wholly inside the range or wholly outside it.  The
+               far end is split before the near one would move it: run
+               indices shift, byte offsets do not, so each split is found
+               by byte. */
+            run_at_byte(para, to, &split_index, &split_offset);
+            st = run_split_at(para, split_index, split_offset);
+            if (st != WP_OK) break;
+            run_at_byte(para, from, &split_index, &split_offset);
+            st = run_split_at(para, split_index, split_offset);
+            if (st != WP_OK) break;
+
+            for (ri = 0; ri < para->run_count && st == WP_OK; ri++) {
+                u32 run_start = consumed;
+                u32 run_end = consumed + para->runs[ri].text.length;
+                consumed = run_end;
+
+                if (run_start >= from && run_end <= to && run_end > run_start)
+                    st = style_one_run(doc, journal, si, pi, para, ri, delta);
+            }
+
+            para->layout_dirty = WP_TRUE;   /* bold is wider than roman */
+        }
+        if (st != WP_OK) break;
+    }
+
+    wp_undo_group_end(journal);
     return st;
 }

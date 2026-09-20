@@ -290,3 +290,59 @@ belongs to exactly one stack at a time):
 - Redo pops the redo stack, re-applies the forward op (using the same
   span/position -- the pool bytes are still there, append-only), pushes
   it back onto the undo stack.
+
+## Styling a Selection (`wp_edit_style_range`)
+
+Until this landed, a character style could only be chosen **before**
+typing. `WP_OP_SET_CSTYLE` and `WP_OP_SET_PSTYLE` had been in
+`wp_op_kind` since M2 and nothing in the tree ever produced or consumed
+either; `platform/common/actions.c`'s Bold/Italic/Underline were
+`ctx->style_flags ^= WP_STYLE_BOLD`, a *pending input style* stamped onto
+subsequently typed characters. Selecting a word and pressing Ctrl+B did
+nothing to it, in every scheme, on every platform, and no styling was
+undoable.
+
+**Why it needed engine work rather than an action.** A character style
+belongs to a *run*. "Bold from here to there" therefore means "make that
+stretch a run of its own first" -- splitting one run into as many as
+three. `run_split_at` (`edit_internal.h`) is that primitive, and no
+combination of the public API could have stood in for it.
+
+**The operation.** `wp_edit_style_range(doc, journal, start, end, delta)`
+walks every paragraph the range touches, splits at both boundaries so
+each run is then wholly inside or wholly outside, and applies the delta
+to those inside. Ends may be given in either order; an empty range does
+nothing; an image paragraph has no runs and is skipped.
+
+`wp_style_delta` is a delta -- `flags_set`, `flags_clear`, an optional
+`size_twips` -- and not a finished `wp_char_style`, because a toggle
+means "turn bold on and leave everything else as each run has it".
+Handing the range a whole style would flatten a mixed selection's sizes,
+fonts and colours to one, which is not what any word processor does.
+
+**Two contracts worth stating plainly:**
+
+- *Byte positions do not move.* Nothing is inserted or removed, so a
+  caret or selection a caller is holding stays valid across the call --
+  unlike every other journaled edit. Run *indices* do move, which is why
+  the walk is driven by byte offsets throughout.
+- *Undo restores styles, not run boundaries.* Each touched run gets its
+  own `WP_OP_SET_CSTYLE`, all bracketed in one group, so undo and redo
+  are a single user-facing step. The splits themselves are deliberately
+  not journaled: a boundary between two runs of identical style is
+  invisible in the text, in the layout and in every exporter. This is
+  the content-equivalent-not-layout-identical rule undo already holds to
+  everywhere else, and `host/tests/test_undo.c` has relied on it since
+  M2.
+
+**The toggle direction** is decided by `wp_document_range_has_flags`,
+which answers "is EVERY run in this range already bold?". A half-bold
+selection answers no and therefore goes fully bold, rather than
+unbolding the half that was bold -- the behaviour every editor these
+schemes imitate has.
+
+**Which selection.** `wp_keymap_selection` (`platform/common/keymap.c`)
+is the one place that knows all five schemes' region shapes: vi's Visual
+pair, Emacs's mark and point, WordStar's `^KB`/`^KK` marker pair,
+WordPerfect's Block, Word's Shift+motion anchor. With no selection, the
+format actions fall back to toggling the input style exactly as before.

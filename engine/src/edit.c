@@ -583,3 +583,121 @@ wp_status wp_document_delete_range_raw(wp_document *doc, u32 section,
         return run_insert_at(para, (u16)(run_index + 1), right_span, style);
     }
 }
+
+/* -- Range helpers, shared by the styling family ----------------------- */
+
+u32 para_total_bytes(const wp_paragraph *para)
+{
+    u32 total = 0;
+    u16 i;
+
+    for (i = 0; i < para->run_count; i++) total += para->runs[i].text.length;
+    return total;
+}
+
+u32 para_byte_of_pos(const wp_paragraph *para, wp_pos pos)
+{
+    u32 total = 0;
+    u16 i;
+
+    for (i = 0; i < para->run_count && i < (u16)pos.run; i++)
+        total += para->runs[i].text.length;
+    return total + pos.offset;
+}
+
+void run_at_byte(const wp_paragraph *para, u32 byte, u16 *out_index, u32 *out_offset)
+{
+    u32 consumed = 0;
+    u16 i;
+
+    for (i = 0; i < para->run_count; i++) {
+        u32 len = para->runs[i].text.length;
+        if (byte < consumed + len) {
+            *out_index = i;
+            *out_offset = byte - consumed;
+            return;
+        }
+        consumed += len;
+    }
+    *out_index = para->run_count;   /* one past the end */
+    *out_offset = 0;
+}
+
+wp_status run_split_at(wp_paragraph *para, u16 index, u32 offset)
+{
+    wp_run *run = wp_paragraph_run_get(para, index);
+    wp_span right;
+    wp_cstyle style;
+
+    if (run == NULL) return WP_OK;                 /* one past the end */
+    if (offset == 0 || offset >= run->text.length) return WP_OK;
+
+    /* Read both fields BEFORE run_insert_at: it may grow the runs array,
+       which invalidates `run` itself. */
+    style = run->style;
+    right.offset = run->text.offset + offset;
+    right.length = run->text.length - offset;
+
+    run->text.length = offset;
+    return run_insert_at(para, (u16)(index + 1), right, style);
+}
+
+wp_bool range_in_paragraph(const wp_paragraph *para, u32 section, u32 paragraph,
+                            wp_pos start, wp_pos end, u32 *out_from, u32 *out_to)
+{
+    u32 from, to;
+
+    if (section < start.section || section > end.section) return WP_FALSE;
+    if (section == start.section && paragraph < start.paragraph) return WP_FALSE;
+    if (section == end.section && paragraph > end.paragraph) return WP_FALSE;
+
+    from = (section == start.section && paragraph == start.paragraph)
+             ? para_byte_of_pos(para, start) : 0;
+    to   = (section == end.section && paragraph == end.paragraph)
+             ? para_byte_of_pos(para, end) : para_total_bytes(para);
+
+    if (to > para_total_bytes(para)) to = para_total_bytes(para);
+    if (to <= from) return WP_FALSE;
+
+    *out_from = from;
+    *out_to = to;
+    return WP_TRUE;
+}
+
+wp_bool wp_document_range_has_flags(const wp_document *doc,
+                                     wp_pos start, wp_pos end, u16 flags)
+{
+    u32 si, pi;
+    wp_bool saw_a_run = WP_FALSE;
+
+    if (wp_pos_compare(start, end) > 0) {
+        wp_pos swap = start; start = end; end = swap;
+    }
+
+    for (si = start.section; si <= end.section && si < doc->section_count; si++) {
+        wp_section *sec = wp_document_section_get((wp_document *)doc, si);
+
+        for (pi = 0; pi < sec->para_count; pi++) {
+            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            u32 from, to, consumed = 0;
+            u16 ri;
+
+            if (!range_in_paragraph(para, si, pi, start, end, &from, &to)) continue;
+
+            for (ri = 0; ri < para->run_count; ri++) {
+                u32 run_start = consumed;
+                u32 run_end = consumed + para->runs[ri].text.length;
+                consumed = run_end;
+
+                if (run_end <= from || run_start >= to) continue;  /* outside */
+                saw_a_run = WP_TRUE;
+                {
+                    const wp_char_style *cs =
+                        wp_document_cstyle_get(doc, para->runs[ri].style);
+                    if (cs == NULL || (cs->flags & flags) != flags) return WP_FALSE;
+                }
+            }
+        }
+    }
+    return saw_a_run;
+}

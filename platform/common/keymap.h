@@ -149,6 +149,23 @@ wp_keymap_outcome wp_keymap_feed_key(struct wp_app_ctx *ctx, wp_key_event ev,
    editing). */
 wp_pos *wp_keymap_cursor(struct wp_app_ctx *ctx);
 
+/* The active scheme's current selection, if it has one right now.
+ *
+ * Every scheme keeps a region in its own shape and under its own name --
+ * vi's Visual mode pair, Emacs's mark and point, WordStar's ^KB/^KK
+ * marker PAIR (the one that is genuinely not an anchor+extend), Word-
+ * Perfect's Block mode, Word's Shift+motion anchor -- and each is right
+ * for the editor it imitates.  This is the one place that knows all five,
+ * so an action like Bold can ask "is there a selection?" without knowing
+ * which editor the user chose, in the same spirit as wp_keymap_cursor.
+ *
+ * WP_FALSE when there is no selection, or when it is empty (anchor ==
+ * caret): "no text selected" and "a selection of nothing" want the same
+ * answer from every caller. The pair comes back in the scheme's own
+ * order, which may be backwards; wp_edit_style_range and every other
+ * range taker normalize for themselves. */
+wp_bool wp_keymap_selection(const struct wp_app_ctx *ctx, wp_selection *out);
+
 /* T172: parks the filename from an ex command (":w name" / ":e name")
    for the backend's own do_file_open/do_file_save to collect, since
    every backend's invoke_action(action_id) dispatcher carries no
