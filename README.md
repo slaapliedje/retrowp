@@ -223,9 +223,6 @@ expensive way on real machines.
 RetroWP is **GPL-2.0-or-later**. The full text is in [`COPYING`](COPYING),
 and every source file carries `SPDX-License-Identifier: GPL-2.0-or-later`.
 
-"or later" is load-bearing rather than boilerplate — see the Atari 8-bit
-note below.
-
 ### What else is in a binary you hand someone
 
 A RetroWP executable is not only RetroWP, and each of these carries its
@@ -234,8 +231,28 @@ own terms into the binary:
 | component | licence | what it asks of you |
 |---|---|---|
 | [retroplat](../retroplat) — the platform seam | LGPL-2.1-or-later | Section 6: say it is in there, and leave the recipient able to relink against a modified copy. |
-| gem4xe's application kit (Atari 8-bit only) | GPLv2-or-later in the pinned 0.4 kit; LGPL-2.1-or-later upstream since 2026-09-28 | Compatible either way. `docs/gem4xe-port.md` records which kit a given build used, because the answer depends on when it was built. |
-| Calypsi's C runtime (Atari 8-bit only) | Apache-2.0 | **This is why "or later" matters.** Apache-2.0 cannot be combined with GPLv2 alone, so a `.G4A` must be conveyed under **GPLv3** terms. The "or later" in RetroWP's own grant, and in gem4xe's, is what makes that automatic and legal. |
+| gem4xe's application kit (Atari 8-bit only) | GPLv2-or-later in the pinned 0.4 kit; LGPL-2.1-or-later upstream since 2026-09-28 | Compatible either way. `docs/gem4xe-port.md` records which kit a build used, because the answer depends on when it was built. |
+| Calypsi's compiler runtime (Atari 8-bit only) | the vendor's own, plus two 3-clause BSD objects | A **System Library** in the GPL's sense — see below. It does not force a licence on the work. |
+
+**The Apache-2.0 question, and why it does not arise.** Calypsi's C
+library carries NuttX's string and memory functions under Apache-2.0,
+which is incompatible with GPLv2. gem4xe replaces all eight with its own
+(`src/sys/clib.c`), so a `.G4A` never links them — verified in this
+project's own link map, not assumed: every one of `memcpy`, `memset`,
+`memcmp`, `memchr`, `strlen`, `strcpy`, `strcat`, `strcmp` resolves to
+the kit's `clib.o`, and the map contains no NuttX `lib_*` object at all.
+
+What the binary does take from the runtime archive is eight objects of
+pure compiler support — `pseudoRegisters.o`, `integer.o`, `memory.o`,
+`controlFlow.o`, `spill.o`, `initialize.o`, `vswitch16.o`,
+`vswitch32.o`. A compiler's runtime, shipped with the compiler, linked
+into every program it produces and good for nothing else, is exactly
+what GPLv3 section 1's "System Libraries" carve-out describes ("...or a
+compiler used to produce the work"), and GPLv2 section 3 has the older,
+looser form of the same exception. gem4xe's `docs/licence.md` works
+through this in full, including the toolchain licence's own clause 2,
+which grants "producing application software for vintage and retro
+computing systems" and restricts distributing *Calypsi*, not its output.
 
 **Not yet audited:** the per-target C runtimes the other backends link —
 mintlib on the ST, Open Watcom on DOS, and the Amiga and Mac toolchains.
@@ -246,5 +263,5 @@ preparing a release should settle them first.
 v0.15.0 (2026-07-24) shipped with no licence statement of any kind, and
 they predate both this licence and retroplat's. They contain no Atari
 8-bit build, so nothing already in someone's hands is affected by the
-gem4xe or Calypsi terms above. Any future release should carry `COPYING`
-in the archive and satisfy retroplat's section 6.
+terms above. Any future release should carry `COPYING` in the archive and
+satisfy retroplat's section 6.
