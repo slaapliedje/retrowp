@@ -177,8 +177,32 @@ reports `4x2 4bpp mode=P`, index 0 decodes to the palette's first RGB
 triple -- proving the BGRA order -- and the row stored last comes back as
 the top row, proving the flip.
 
-**Import does not read `\pict` back yet.** It is still in the skipped-
-destination list with `\stylesheet` and `\fonttbl`, so RetroWP cannot
-reopen its own pictures even though other readers can now see them. That
-is the next piece, and it needs the mirror of the source: a sink the
-caller implements to materialise a cache file.
+**Import reads `\pict` back**, through `wp_image_sink` — the mirror of
+the source, and needed for the same reason: the engine decodes the
+picture but may not create the file its `blob_path` has to name. The
+caller's `begin` makes a cache file and returns the path it chose (the
+Atari shell uses the same counter-suffixed naming as Insert Image, so
+reopening a document twice in one session cannot overwrite the first
+copy), `write` takes the rows, `end` closes it.
+
+Everything the export does is undone on the way in: the little-endian
+fields are read back, a positive `biHeight` means the stored rows are
+reversed, and the 4-byte row padding is dropped so the cache file holds
+the model's own packed rows. `format_rtf_import` is this with a NULL
+sink, and then a picture is skipped exactly as it was before import
+understood the destination at all — including, deliberately, not letting
+its hex leak into the document as text.
+
+A picture that cannot be read is dropped and the document still imports:
+a wrong depth, a compression other than `BI_RGB`, a truncated buffer, a
+sink that refuses. A file whose picture this parser cannot handle is
+still a file whose text is worth having.
+
+**The round trip is the test that matters**, and it is a byte
+comparison: the fixture's pixels go out as a bottom-up padded DIB and
+come back as top-down packed rows identical to what went in. That is
+also the only test that catches an upside-down image, which is why the
+flip was deliberately broken to confirm it fails — and, the first time,
+the break made a variable unused, `-Werror` stopped the build, `make
+test` never ran the suite, and "no failures" was printed by a suite that
+had not executed. A sabotage that does not compile proves nothing.

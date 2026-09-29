@@ -9,6 +9,38 @@
    and documented simplifications are in docs/formats/rtf.md -- read it
    before changing this file. */
 
+/* Receives one image's pixels during import -- the mirror of
+ * wp_image_source, and needed for the same reason: the engine decodes the
+ * picture but may not create the file the model's blob_path has to name.
+ *
+ * `begin` is called once the geometry is known and before any write. The
+ * caller creates its own pixel-cache file, names it however it likes
+ * (the Atari shell counter-suffixes, so a second image in one session
+ * cannot overwrite the first), and returns that native path; the engine
+ * records it in the descriptor verbatim.
+ *
+ * `write` receives the pixels top-down and unpadded -- the model's own
+ * layout, already undone from the DIB's bottom-up padded rows -- in
+ * order, one row per call. `end` closes the file.
+ *
+ * Any non-WP_OK abandons that one image: the paragraph is dropped and
+ * the rest of the document still imports. A picture that cannot be
+ * written is not a reason to lose the text around it. */
+typedef struct {
+    wp_status (*begin)(void *user, i32 width_px, i32 height_px,
+                        char *path_out, u32 path_cap, u32 *path_len);
+    wp_status (*write)(void *user, const u8 *bytes, u32 len);
+    wp_status (*end)(void *user);
+    void *user;
+} wp_image_sink;
+
+/* Imports RTF bytes into doc, materialising any \pict\dibitmap through
+   `sink`. With a NULL sink -- which is what format_rtf_import is --
+   pictures are skipped exactly as they were before import understood
+   them at all. */
+wp_status format_rtf_import_images(const u8 *bytes, u32 len, wp_document *doc,
+                                    const wp_image_sink *sink);
+
 /* Imports RTF bytes into doc. doc must NOT already be initialized --
    this function calls wp_document_init itself. On any failure, doc is
    left freed (safe to discard, not safe to use).

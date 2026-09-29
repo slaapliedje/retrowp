@@ -4,6 +4,7 @@
 #include "docmodel.h"
 #include "editing.h"
 #include "format_rtf.h"
+#include "format_txt.h"
 #include "mem_host.h"
 
 /* Saving a document that has a picture in it.
@@ -290,4 +291,168 @@ void test_rtf_image_text_paragraphs_are_unaffected(void)
     ASSERT_TRUE(strstr((char *)buf, "[image") == NULL);
 
     wp_document_free(&doc);
+}
+
+/* -- Import: the mirror ------------------------------------------------
+ *
+ * Export alone made the picture readable by other word processors but
+ * not by RetroWP itself, which is a strange place to stop. These cover
+ * the round trip: the bytes that went out come back, right way up. */
+
+static u8 g_sunk[64];
+static u32 g_sunk_len;
+static i32 g_sunk_w, g_sunk_h;
+static int g_sunk_begins;
+
+static wp_status sink_begin(void *user, i32 w, i32 h, char *path_out, u32 cap, u32 *path_len)
+{
+    (void)user;
+    g_sunk_w = w; g_sunk_h = h; g_sunk_len = 0; g_sunk_begins++;
+    if (cap < 12) return WP_ERR;
+    memcpy(path_out, "C:\\CACHE.TMP", 12);
+    *path_len = 12;
+    return WP_OK;
+}
+
+static wp_status sink_write(void *user, const u8 *bytes, u32 len)
+{
+    (void)user;
+    if (g_sunk_len + len > sizeof(g_sunk)) return WP_ERR;
+    memcpy(g_sunk + g_sunk_len, bytes, len);
+    g_sunk_len += len;
+    return WP_OK;
+}
+
+static wp_status sink_end(void *user) { (void)user; return WP_OK; }
+
+static void reset_sink(wp_image_sink *sink)
+{
+    g_sunk_len = 0; g_sunk_w = g_sunk_h = 0; g_sunk_begins = 0;
+    memset(g_sunk, 0, sizeof(g_sunk));
+    sink->begin = sink_begin;
+    sink->write = sink_write;
+    sink->end = sink_end;
+    sink->user = NULL;
+}
+
+void test_rtf_image_round_trips_through_export_and_import(void)
+{
+    wp_document doc, back;
+    wp_image_source src;
+    wp_image_sink sink;
+    u8 buf[4096];
+    wp_section *sec;
+    wp_paragraph *para;
+    const wp_image_desc *desc;
+    u32 pi, found = 0;
+
+    build_image_doc(&doc);
+    src.read = read_pixels;
+    src.user = NULL;
+    export_with(&doc, &src, buf, (u32)sizeof(buf));
+
+    reset_sink(&sink);
+    ASSERT_EQ_U32(format_rtf_import_images(buf, (u32)strlen((char *)buf), &back, &sink), WP_OK);
+
+    /* The geometry survived. */
+    ASSERT_EQ_U32(g_sunk_begins, 1);
+    ASSERT_EQ_U32(g_sunk_w, IMG_W);
+    ASSERT_EQ_U32(g_sunk_h, IMG_H);
+
+    /* And so did the pixels, the right way up: the DIB stored them
+       bottom-up and padded, and what comes back out is the model's own
+       top-down packed rows -- byte for byte what went in. */
+    ASSERT_EQ_U32(g_sunk_len, (u32)sizeof(g_pixels));
+    ASSERT_TRUE(memcmp(g_sunk, g_pixels, sizeof(g_pixels)) == 0);
+
+    /* The document has a real image paragraph again. */
+    sec = wp_document_section_get(&back, 0);
+    for (pi = 0; pi < sec->para_count; pi++) {
+        para = wp_section_paragraph_get(sec, pi);
+        if (para->kind != (u8)WP_PARA_IMAGE) continue;
+        found++;
+        desc = wp_document_image_get(&back, para->image);
+        ASSERT_TRUE(desc != NULL);
+        ASSERT_EQ_U32(desc->width_px, IMG_W);
+        ASSERT_EQ_U32(desc->height_px, IMG_H);
+        ASSERT_EQ_U32(desc->display_width_twips, 960);
+        ASSERT_EQ_U32(desc->display_height_twips, 480);
+        ASSERT_EQ_U32(desc->palette_count, 2);
+        /* RGB again, not the DIB's BGRA */
+        ASSERT_EQ_U32(desc->palette[0][0], 0x11);
+        ASSERT_EQ_U32(desc->palette[0][2], 0x33);
+        ASSERT_EQ_U32(desc->palette[1][0], 0xAA);
+        ASSERT_TRUE(desc->blob_path.length == 12);
+    }
+    ASSERT_EQ_U32(found, 1);
+
+    wp_document_free(&back);
+    wp_document_free(&doc);
+}
+
+void test_rtf_image_import_without_a_sink_skips_the_picture(void)
+{
+    wp_document doc, back;
+    wp_image_source src;
+    u8 buf[4096];
+    wp_section *sec;
+    u32 pi, images = 0;
+
+    build_image_doc(&doc);
+    src.read = read_pixels;
+    src.user = NULL;
+    export_with(&doc, &src, buf, (u32)sizeof(buf));
+
+    /* No sink means nowhere to put the pixels, so the picture is skipped
+       exactly as it was before import understood \pict at all -- and
+       crucially the hex must not leak into the document as text. */
+    ASSERT_EQ_U32(format_rtf_import(buf, (u32)strlen((char *)buf), &back), WP_OK);
+    sec = wp_document_section_get(&back, 0);
+    for (pi = 0; pi < sec->para_count; pi++) {
+        if (wp_section_paragraph_get(sec, pi)->kind == (u8)WP_PARA_IMAGE) images++;
+    }
+    ASSERT_EQ_U32(images, 0);
+
+    {   /* not one hex digit of the DIB became text */
+        u8 out[2048];
+        u32 n = 0;
+        ASSERT_EQ_U32(format_txt_export(&back, out, (u32)sizeof(out), &n), WP_OK);
+        out[n] = '\0';
+        ASSERT_TRUE(strstr((char *)out, "28000000") == NULL);
+    }
+
+    wp_document_free(&back);
+    wp_document_free(&doc);
+}
+
+void test_rtf_image_import_keeps_the_text_around_a_bad_picture(void)
+{
+    wp_document back;
+    wp_image_sink sink;
+    wp_section *sec;
+    u32 pi, images = 0;
+    u8 out[1024];
+    u32 n = 0;
+    /* A \pict whose DIB is truncated mid-header. */
+    static const char rtf[] =
+        "{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0 Helvetica;}}"
+        "\\pard{\\f0 before}\\par\r\n"
+        "\\pard{\\pict\\dibitmap0\\picw4\\pich2 2800}\\par\r\n"
+        "\\pard{\\f0 after}\\par\r\n}";
+
+    reset_sink(&sink);
+    ASSERT_EQ_U32(format_rtf_import_images((const u8 *)rtf, (u32)strlen(rtf), &back, &sink), WP_OK);
+
+    sec = wp_document_section_get(&back, 0);
+    for (pi = 0; pi < sec->para_count; pi++) {
+        if (wp_section_paragraph_get(sec, pi)->kind == (u8)WP_PARA_IMAGE) images++;
+    }
+    ASSERT_EQ_U32(images, 0);          /* the picture is dropped ... */
+
+    ASSERT_EQ_U32(format_txt_export(&back, out, (u32)sizeof(out), &n), WP_OK);
+    out[n] = '\0';
+    ASSERT_TRUE(strstr((char *)out, "before") != NULL);   /* ... and the text survives */
+    ASSERT_TRUE(strstr((char *)out, "after") != NULL);
+
+    wp_document_free(&back);
 }

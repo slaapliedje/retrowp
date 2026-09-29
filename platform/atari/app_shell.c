@@ -1713,6 +1713,9 @@ static wp_bool require_offload_for_convert(void)
     return WP_TRUE;
 }
 
+/* Defined below, beside the image cache-path helper it depends on. */
+static void atari_image_sink_init(wp_image_sink *sink);
+
 /* Reads a whole .odt file, ships it through OFFLOAD_CONVERT_IMPORT, and
    replaces the current document with the RTF the gateway sends back --
    format_rtf_import() does the actual parsing, exactly like the local
@@ -1759,7 +1762,9 @@ static void do_odt_open(const char *fullpath)
 
     if (resp.status == OFFLOAD_OK) {
         wp_document new_doc;
-        if (format_rtf_import(resp.result, resp.result_len, &new_doc) == WP_OK) {
+        wp_image_sink sink;
+        atari_image_sink_init(&sink);
+        if (format_rtf_import_images(resp.result, resp.result_len, &new_doc, &sink) == WP_OK) {
             replace_document(&new_doc, g_content_width_twips);
         } else {
             form_alert(1, FA_ERROR "[The gateway's reply couldn't be read|as a document.][ OK ]");
@@ -1875,7 +1880,9 @@ static void do_file_open(void)
                 }
             } else if (str_ends_with_ci(fullpath, ".RTF")) {
                 wp_document new_doc;
-                if (format_rtf_import(buf, read_len, &new_doc) == WP_OK) {
+                wp_image_sink sink;
+                atari_image_sink_init(&sink);
+                if (format_rtf_import_images(buf, read_len, &new_doc, &sink) == WP_OK) {
                     replace_document(&new_doc, g_content_width_twips);
                 }
             } else {
@@ -2843,6 +2850,65 @@ static void atari_format_image_cache_path(char *out, u32 counter)
     out[10] = (char)('0' + c % 10u);
     memcpy(out + 11, ".TMP", 5); /* includes NUL */
 }
+
+/* Receives an imported picture's pixels and puts them in a cache file --
+ * the mirror of atari_read_image_row, and the reason the model can hold
+ * a path rather than the pixels themselves.
+ *
+ * The file is named the same way Insert Image names one, from the same
+ * counter, so a document with three pictures in it gets three files and
+ * reopening it a second time does not overwrite the first session's.
+ * The handle is held between begin and end because the engine writes
+ * the rows straight through in order, top-down, and reopening per row
+ * would be pointless here in a way it is not on the export side (where
+ * the engine may ask for rows in any order it likes). */
+static plat_file *g_atari_image_sink_file;
+
+static wp_status atari_image_begin(void *user, i32 width_px, i32 height_px,
+                                    char *path_out, u32 path_cap, u32 *path_len)
+{
+    char cache_path[16];
+
+    (void)user; (void)width_px; (void)height_px;
+    if (path_cap < sizeof(cache_path)) return WP_ERR;
+
+    atari_format_image_cache_path(cache_path, g_atari_image_cache_counter);
+    if (plat_file_open(cache_path, PLAT_FILE_WRITE, &g_atari_image_sink_file) != WP_OK) {
+        g_atari_image_sink_file = NULL;
+        return WP_ERR;
+    }
+    g_atari_image_cache_counter++;
+
+    memcpy(path_out, cache_path, strlen(cache_path));
+    *path_len = (u32)strlen(cache_path);
+    return WP_OK;
+}
+
+static wp_status atari_image_write(void *user, const u8 *bytes, u32 len)
+{
+    (void)user;
+    if (g_atari_image_sink_file == NULL) return WP_ERR;
+    return plat_file_write(g_atari_image_sink_file, bytes, len);
+}
+
+static wp_status atari_image_end(void *user)
+{
+    (void)user;
+    if (g_atari_image_sink_file != NULL) {
+        plat_file_close(g_atari_image_sink_file);
+        g_atari_image_sink_file = NULL;
+    }
+    return WP_OK;
+}
+
+static void atari_image_sink_init(wp_image_sink *sink)
+{
+    sink->begin = atari_image_begin;
+    sink->write = atari_image_write;
+    sink->end = atari_image_end;
+    sink->user = NULL;
+}
+
 
 static void do_insert_image(void)
 {

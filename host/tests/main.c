@@ -258,6 +258,9 @@ void test_actions_find_by_id(void);
 
 /* format_rtf_image.c */
 void test_rtf_image_exports_a_real_pict(void);
+void test_rtf_image_round_trips_through_export_and_import(void);
+void test_rtf_image_import_without_a_sink_skips_the_picture(void);
+void test_rtf_image_import_keeps_the_text_around_a_bad_picture(void);
 void test_rtf_image_dib_header_is_well_formed(void);
 void test_rtf_image_rows_are_bottom_up_and_padded(void);
 void test_rtf_image_without_a_source_is_an_honest_placeholder(void);
@@ -788,6 +791,9 @@ static const test_case g_cases[] = {
 
     { "actions_find_by_id", test_actions_find_by_id },
     { "rtf_image_exports_a_real_pict", test_rtf_image_exports_a_real_pict },
+    { "rtf_image_round_trips_through_export_and_import", test_rtf_image_round_trips_through_export_and_import },
+    { "rtf_image_import_without_a_sink_skips_the_picture", test_rtf_image_import_without_a_sink_skips_the_picture },
+    { "rtf_image_import_keeps_the_text_around_a_bad_picture", test_rtf_image_import_keeps_the_text_around_a_bad_picture },
     { "rtf_image_dib_header_is_well_formed", test_rtf_image_dib_header_is_well_formed },
     { "rtf_image_rows_are_bottom_up_and_padded", test_rtf_image_rows_are_bottom_up_and_padded },
     { "rtf_image_without_a_source_is_an_honest_placeholder", test_rtf_image_without_a_source_is_an_honest_placeholder },
