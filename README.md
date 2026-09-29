@@ -259,6 +259,20 @@ mintlib on the ST, Open Watcom on DOS, and the Amiga and Mac toolchains.
 They are listed here as unchecked rather than implied to be clear. Anyone
 preparing a release should settle them first.
 
+### Packaging a release
+
+`tools/package_release.sh [target ...]` builds the archives, and puts
+`COPYING` and `dist/NOTICE.txt` in every one of them. It refuses to run
+at all if either is missing, rather than producing an archive that tells
+its recipient nothing — which is what v0.15.0's hand-assembled zips did.
+A target whose binary is not built is skipped by name, not silently
+omitted.
+
+`dist/<target>/README.txt` is the per-platform text that ships inside
+each archive. Those files used to exist only inside the published zips;
+they are in the repository now, where they can be reviewed and cannot be
+lost.
+
 **A note on releases already published.** The binaries attached to
 v0.15.0 (2026-07-24) shipped with no licence statement of any kind, and
 they predate both this licence and retroplat's. They contain no Atari

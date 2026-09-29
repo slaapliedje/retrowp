@@ -1,0 +1,59 @@
+RetroWP — third-party components in this binary
+===============================================
+
+RetroWP is Copyright the RetroWP authors and licensed GPL-2.0-or-later.
+The full licence text accompanies this file as COPYING.
+
+This binary also contains, or is built from, the following:
+
+
+retroplat — the platform seam
+-----------------------------
+LGPL-2.1-or-later.  Source: https://github.com/slaapliedje/retroplat
+
+Under section 6 of that licence you are entitled to modify retroplat and
+relink this program against your modified copy.  RetroWP's own source is
+published in full (https://github.com/slaapliedje/retrowp), and building
+it against a modified retroplat needs no more than:
+
+    make RETROPLAT=/path/to/your/retroplat
+
+The build requirements for each target are in that repository's README.
+
+
+gem4xe application kit — Atari 8-bit builds only
+------------------------------------------------
+The kit compiled into a .G4A carries gem4xe's terms, and WHICH terms
+depends on when the binary was built: GPLv2-or-later up to and including
+kit 0.4, LGPL-2.1-or-later from gem4xe's 2026-09-28 relicence onward.
+The build that produced this archive records its kit in
+docs/gem4xe-port.md.  Source: https://github.com/slaapliedje/gem4xe
+
+
+Calypsi compiler runtime — Atari 8-bit builds only
+--------------------------------------------------
+A .G4A links a small amount of compiler support code from Calypsi's
+runtime archive (pseudoRegisters.o, integer.o, memory.o, controlFlow.o,
+spill.o, initialize.o, vswitch16.o, vswitch32.o).  A compiler's runtime,
+shipped with the compiler and linked into every program it produces, is
+a "System Library" as the GPL uses that term -- GPLv3 section 1 names "a
+compiler used to produce the work", and GPLv2 section 3 carries the
+older form of the same exception.
+
+Two of those objects (memcpy_far, memset_far, where linked) are NuttX's
+under the three-clause BSD licence, Copyright (C) 2007, 2011 Gregory
+Nutt.  Its second clause asks that the notice travel with binary
+distributions, which is the purpose of this paragraph.
+
+Calypsi's Apache-2.0 C library is NOT linked: gem4xe supplies its own
+string and memory functions so that no Apache-2.0 object code enters a
+GPL binary.
+
+
+Toolchain runtimes on the other targets
+---------------------------------------
+The ST, Amiga, Mac and DOS builds each link their own toolchain's C
+runtime (mintlib, the Amiga and Retro68 toolchains, Open Watcom).  The
+same System Library reasoning is expected to apply, but this has not
+been audited file by file the way the Atari 8-bit case has.  It is
+recorded here as unchecked rather than asserted to be clear.
