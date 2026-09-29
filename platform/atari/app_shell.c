@@ -1886,6 +1886,38 @@ static void do_file_open(void)
     plat_file_close(f);
 }
 
+/* Hands the RTF exporter one image's pixels, a row at a time.
+ *
+ * The engine holds only the pixel-cache file's PATH and performs no file
+ * I/O (CLAUDE.md rule 1), so saving a picture needs somebody on this
+ * side of the seam to open that file -- the same division of labour
+ * plat_draw_image's caller already has when it blits the thing.
+ *
+ * Opened and closed per row rather than kept open across the export:
+ * this shell has a four-slot plat_file table (file_gem4xe.c), an export
+ * is not a hot path, and a handle held across a call into the engine is
+ * a handle leaked if that call ever returns early. */
+static wp_status atari_read_image_row(void *user, wp_span blob_path, u32 offset,
+                                       u8 *out, u32 cap, u32 *out_len)
+{
+    char path[128];
+    plat_file *f;
+    wp_status st;
+
+    (void)user;
+    *out_len = 0;
+    if (blob_path.length == 0 || blob_path.length >= sizeof(path)) return WP_ERR;
+
+    memcpy(path, wp_strpool_get(&g_doc.strings, blob_path), blob_path.length);
+    path[blob_path.length] = '\0';
+
+    if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) return WP_ERR;
+    st = plat_file_seek(f, (i32)offset, PLAT_SEEK_SET);
+    if (st == WP_OK) st = plat_file_read(f, out, cap, out_len);
+    plat_file_close(f);
+    return st;
+}
+
 static void do_file_save(void)
 {
     char path[128];
@@ -1895,6 +1927,7 @@ static void do_file_save(void)
     u32 needed;
     u8 *buf;
     wp_bool as_rtf;
+    wp_image_source img_src;
 
     if (!g_ctx.doc_loaded) return;
 
@@ -1920,15 +1953,17 @@ static void do_file_save(void)
     }
 
     as_rtf = str_ends_with_ci(fullpath, ".RTF");
+    img_src.read = atari_read_image_row;
+    img_src.user = NULL;
     if (as_rtf) {
-        format_rtf_export(&g_doc, NULL, 0, &needed);
+        format_rtf_export_images(&g_doc, NULL, 0, &needed, &img_src);
     } else {
         format_txt_export(&g_doc, NULL, 0, &needed);
     }
     buf = (u8 *)mem_alloc(needed);
     if (buf == NULL) return;
 
-    if ((as_rtf ? format_rtf_export(&g_doc, buf, needed, &needed)
+    if ((as_rtf ? format_rtf_export_images(&g_doc, buf, needed, &needed, &img_src)
                 : format_txt_export(&g_doc, buf, needed, &needed)) == WP_OK) {
         if (plat_file_open(fullpath, PLAT_FILE_WRITE, &f) == WP_OK) {
             plat_file_write(f, buf, needed);

@@ -125,3 +125,60 @@ copies would be a real drift risk. Nothing is written to the caller's
 buffer unless the whole document fits, matching `format_rtf.h`'s "nothing
 written if too small" contract exactly (tested explicitly with a sentinel-
 filled buffer).
+
+
+## Images (`\pict\dibitmap0`)
+
+An image paragraph exports as a real RTF picture carrying a **Windows
+DIB**, not a private destination: the point is that the saved document
+stops being RetroWP-only, so any reader that understands `\dibitmap`
+shows the picture.
+
+Before this existed, an image paragraph had no runs, the exporter walked
+its empty run list, and a document saved and reopened had lost its
+pictures with nothing said. M15 built the model, layout, painting and
+gateway conversion; no milestone task ever covered persistence.
+
+**Why the caller supplies the bytes.** `wp_image_desc` holds the PATH of
+a pixel-cache file, never the pixels (`docs/document-model.md`), and the
+engine performs no file I/O (CLAUDE.md rule 1). So
+`format_rtf_export_images` takes a `wp_image_source` whose `read` the
+caller implements over its own `plat_file_*` seam, and the exporter asks
+it for one row at a time. `format_rtf_export` is that call with a NULL
+source, and an image then becomes a bracketed `[image: name WxH]`
+placeholder -- the same honest marker `platform/dos` draws on a machine
+with no pixel graphics. Lossy, but never silent.
+
+A path reference was considered and rejected outright: the cache file is
+`C:\WPIMG000.TMP`, counter-suffixed **per session** and reset at
+startup, so a saved reference would collide across sessions and show a
+*different* document's picture. That is worse than losing it.
+
+**The three DIB details that are easy to get wrong**, each of which
+produces a picture no reader will show:
+
+- every field is **little-endian**, unlike everything else this project
+  writes to disk -- CLAUDE.md's big-endian rule governs OUR formats, and
+  a DIB is a foreign one with its own order;
+- a **positive `biHeight` means bottom-up**, so rows are emitted last
+  first;
+- each row is **padded to a 4-byte boundary**, which the model's packed
+  4-bit rows are not.
+
+The palette is written as `RGBQUAD`s -- blue, green, red, zero -- from
+the model's RGB triples, with `biClrUsed` set to the real palette count.
+
+**Validated against a real decoder, not just against itself.** The C
+tests assert the bytes this project writes, which proves only that they
+are what was intended. `host/tools/rtf_dib_check.py` puts the 14-byte
+`BITMAPFILEHEADER` back (a `\dibitmap0` payload is exactly a `.bmp`
+without one) and opens the result with Pillow. On the 4x2 fixture it
+reports `4x2 4bpp mode=P`, index 0 decodes to the palette's first RGB
+triple -- proving the BGRA order -- and the row stored last comes back as
+the top row, proving the flip.
+
+**Import does not read `\pict` back yet.** It is still in the skipped-
+destination list with `\stylesheet` and `\fonttbl`, so RetroWP cannot
+reopen its own pictures even though other readers can now see them. That
+is the next piece, and it needs the mirror of the source: a sink the
+caller implements to materialise a cache file.

@@ -254,6 +254,15 @@ void test_msword_no_leaks(void);
 
 /* test_actions.c */
 void test_actions_find_by_id(void);
+
+/* format_rtf_image.c */
+void test_rtf_image_exports_a_real_pict(void);
+void test_rtf_image_dib_header_is_well_formed(void);
+void test_rtf_image_rows_are_bottom_up_and_padded(void);
+void test_rtf_image_without_a_source_is_an_honest_placeholder(void);
+void test_rtf_image_export_is_not_an_empty_paragraph(void);
+void test_rtf_image_missing_cache_file_still_writes_the_promised_size(void);
+void test_rtf_image_text_paragraphs_are_unaffected(void);
 void test_actions_bold_styles_the_selection(void);
 void test_actions_bold_toggles_input_style_with_no_selection(void);
 void test_actions_bold_on_an_all_bold_selection_clears_it(void);
@@ -777,6 +786,13 @@ static const test_case g_cases[] = {
     { "msword_no_leaks", test_msword_no_leaks },
 
     { "actions_find_by_id", test_actions_find_by_id },
+    { "rtf_image_exports_a_real_pict", test_rtf_image_exports_a_real_pict },
+    { "rtf_image_dib_header_is_well_formed", test_rtf_image_dib_header_is_well_formed },
+    { "rtf_image_rows_are_bottom_up_and_padded", test_rtf_image_rows_are_bottom_up_and_padded },
+    { "rtf_image_without_a_source_is_an_honest_placeholder", test_rtf_image_without_a_source_is_an_honest_placeholder },
+    { "rtf_image_export_is_not_an_empty_paragraph", test_rtf_image_export_is_not_an_empty_paragraph },
+    { "rtf_image_missing_cache_file_still_writes_the_promised_size", test_rtf_image_missing_cache_file_still_writes_the_promised_size },
+    { "rtf_image_text_paragraphs_are_unaffected", test_rtf_image_text_paragraphs_are_unaffected },
     { "actions_bold_styles_the_selection", test_actions_bold_styles_the_selection },
     { "actions_bold_toggles_input_style_with_no_selection", test_actions_bold_toggles_input_style_with_no_selection },
     { "actions_bold_on_an_all_bold_selection_clears_it", test_actions_bold_on_an_all_bold_selection_clears_it },
