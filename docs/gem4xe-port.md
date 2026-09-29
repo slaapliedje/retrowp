@@ -1028,9 +1028,26 @@ never executed in any of them.
 ## Licence
 
 An application links no part of gem4xe, but it **does** compile in the kit
-(`gemlib.c`, `gemabi.s`, `crt_gemapp.s`, `clib.c`), and the kit is GPLv2.
-`RETROWP.G4A` is therefore a GPLv2 binary, while the engine and retroplat sources
-it is built from remain under their own licences.
+(`gemlib.c`, `gemabi.s`, `crt_gemapp.s`, `clib.c`), so the kit's terms reach the
+binary. **Those terms changed after the kit this port pins**, and both halves
+matter:
+
+- **The pinned 0.4 kit is GPLv2-or-later.** Its own README says so — "the library
+  here is part of gem4xe, so a program that links it inherits that" — and it ships
+  `COPYING` alone, with no SPDX tag on any file. So `RETROWP.G4A` as built today
+  **is** a GPLv2 binary.
+- **Upstream has since relicensed the kit to LGPL-2.1-or-later** (gem4xe tree
+  `1ce30c9`): every file in `include/` and `lib/` carries
+  `SPDX-License-Identifier: LGPL-2.1-or-later`, `COPYING.LIB` ships beside
+  `COPYING`, the examples are 0BSD, and the README now states plainly that
+  "gem4xe's GPL does not follow it into your program". Re-pinning to that kit
+  removes the constraint entirely and leaves RetroWP's own licence a free choice,
+  subject only to the LGPL's section 6 obligations on a binary you hand out.
+
+Checked in both kits directly rather than taken on report, because the claim
+arrived as a correction and the two readings are each right about a different
+kit. The engine and retroplat sources remain under their own licences either way;
+retroplat itself is LGPL-2.1-or-later as of its own `4528294`.
 
 `memcmp` and `memchr` are written in `clib_gem4xe.c` rather than taken from
 `clib-lc-ld.a` for the same reason the kit writes its own `memcpy`: Calypsi's come
