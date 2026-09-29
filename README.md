@@ -217,3 +217,34 @@ expensive way on real machines.
   `docs/keymaps.md` and the action registry so they cannot drift.
 - [`docs/milestones.md`](docs/milestones.md) — the complete task-by-task
   build history, M0 through M15.
+
+## Licence
+
+RetroWP is **GPL-2.0-or-later**. The full text is in [`COPYING`](COPYING),
+and every source file carries `SPDX-License-Identifier: GPL-2.0-or-later`.
+
+"or later" is load-bearing rather than boilerplate — see the Atari 8-bit
+note below.
+
+### What else is in a binary you hand someone
+
+A RetroWP executable is not only RetroWP, and each of these carries its
+own terms into the binary:
+
+| component | licence | what it asks of you |
+|---|---|---|
+| [retroplat](../retroplat) — the platform seam | LGPL-2.1-or-later | Section 6: say it is in there, and leave the recipient able to relink against a modified copy. |
+| gem4xe's application kit (Atari 8-bit only) | GPLv2-or-later in the pinned 0.4 kit; LGPL-2.1-or-later upstream since 2026-09-28 | Compatible either way. `docs/gem4xe-port.md` records which kit a given build used, because the answer depends on when it was built. |
+| Calypsi's C runtime (Atari 8-bit only) | Apache-2.0 | **This is why "or later" matters.** Apache-2.0 cannot be combined with GPLv2 alone, so a `.G4A` must be conveyed under **GPLv3** terms. The "or later" in RetroWP's own grant, and in gem4xe's, is what makes that automatic and legal. |
+
+**Not yet audited:** the per-target C runtimes the other backends link —
+mintlib on the ST, Open Watcom on DOS, and the Amiga and Mac toolchains.
+They are listed here as unchecked rather than implied to be clear. Anyone
+preparing a release should settle them first.
+
+**A note on releases already published.** The binaries attached to
+v0.15.0 (2026-07-24) shipped with no licence statement of any kind, and
+they predate both this licence and retroplat's. They contain no Atari
+8-bit build, so nothing already in someone's hands is affected by the
+gem4xe or Calypsi terms above. Any future release should carry `COPYING`
+in the archive and satisfy retroplat's section 6.

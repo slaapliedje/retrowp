@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Listen and transmit at the same time, so ONE run of SERRAW exercises
 both directions without any timing coordination.
 

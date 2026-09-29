@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Test the CABLE, with the Atari removed from the equation entirely.
 
 Unplug the cable from the Atari and short pins 2 and 3 together at that

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Permanent Startup Items launcher stub (M12 Phase 0).
 
    BasiliskII has no equivalent to amiberry's host-directory-mountable

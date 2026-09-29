@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Generate printable keyboard reference cards, one per keybinding scheme.
 
 The kind of card that used to sit on the strip above the function keys.

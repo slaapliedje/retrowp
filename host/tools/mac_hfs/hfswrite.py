@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Write-capable counterpart to hfsread.py (M12 Phase 0).
 
 Not a general HFS writer -- purpose-built for `inject_startup_item.py`'s

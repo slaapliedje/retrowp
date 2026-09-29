@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "msword.h"
 #include "utf8.h"

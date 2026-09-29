@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <stddef.h>
 #include "editing.h"
 #include "edit_internal.h"

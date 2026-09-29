@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <gem.h>
 #include "gemcompat.h"
 #include <string.h>

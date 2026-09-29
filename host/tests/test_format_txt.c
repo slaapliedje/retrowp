@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "test.h"
 #include "format_txt.h"
 #include "platform.h"

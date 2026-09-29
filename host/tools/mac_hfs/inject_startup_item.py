@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Inject a file directly into System Folder:Startup Items on the
 RetroWP Mac CI fixture's boot volume (M12 Phase 0), via targeted
 catalog B-tree surgery (cascading node splits, standard bottom-up

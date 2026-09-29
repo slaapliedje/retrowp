@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Toggle RTS on a slow 2-second cycle so a multimeter can follow it.
 
 Measure HAT DB9 pin 7 against pin 5 (GND). RS-232 signalling is +/-, and

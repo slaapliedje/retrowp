@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Read-only HFS (Mac OS Standard) parser, for exploring the RetroWP Mac
 CI fixture's boot volume (M12 Phase 0). Not a general-purpose HFS
 library -- just enough to walk the catalog B-tree and dump what's

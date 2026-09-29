@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Prove the Pi's own UART works before any of it is blamed on a cable.
 
 Run with the HAT's jumpers set to LOOPBACK. Whatever this writes should

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* SERHW.PRG -- serial diagnostic for REAL Atari hardware.
  *
  * WHY THIS EXISTS SEPARATELY FROM atari_serial_smoke.c

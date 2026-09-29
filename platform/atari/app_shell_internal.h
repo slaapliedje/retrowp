@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef WP_ATARI_APP_SHELL_INTERNAL_H
 #define WP_ATARI_APP_SHELL_INTERNAL_H
 

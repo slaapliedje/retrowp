@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Shared wire-protocol plumbing for this project's Python gateways
 (offload/gateway/odt_gateway.py, offload/gateway/image_gateway.py).
 

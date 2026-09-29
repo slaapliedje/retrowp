@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <stddef.h>
 #include "wordstar.h"
 #include "edit_internal.h"

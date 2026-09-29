@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* BasiliskII smoke test for platform/mac's platform.h seams. Cross-
    compiled with m68k-apple-macos-gcc (Retro68) into its own standalone
    binary, copied onto the fixture's ExtFS "Unix:" share as

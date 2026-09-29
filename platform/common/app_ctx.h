@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef WP_APP_CTX_H
 #define WP_APP_CTX_H
 

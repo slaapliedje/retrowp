@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* A second AES process whose only job is to cover and uncover RetroWP's
    window, so that RetroWP is forced to service a real, partial
    WM_REDRAW from a genuinely independent process.

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* amiberry-based smoke test for platform/amiga's non-UI platform.h seams
    (T9.1a: memory/file/clipboard/timer; T9.2: layout/metrics; T9.3:
    transport; Phase 6: help system). Cross-compiled with m68k-amigaos-gcc

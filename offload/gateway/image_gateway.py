@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Standalone image-downconversion gateway (M15, T15.4).
 
 A fourth offload/gateway executable, alongside mock_gateway.c

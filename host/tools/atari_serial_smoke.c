@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* T6.3: proves offload_init()'s HELLO/CAPS handshake, and one full
    request/response round trip, actually work over real RS-232 --
    platform/atari/transport_atari.c's Bconin/Bconout/Rsconf

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Hold RTS in a chosen state and keep the port open, so the far end can
 be tested against a KNOWN, stable handshake level.
 

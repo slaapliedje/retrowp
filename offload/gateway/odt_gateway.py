@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Standalone document-conversion gateway: ODT<->RTF and RTF->PDF (M7
 T7.2, T7.3).
 

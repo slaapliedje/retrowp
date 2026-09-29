@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* SERMINT.PRG -- ask MiNT what the serial port's handshake lines are
  * actually doing, from the Atari's own side.
  *

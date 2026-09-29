@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef WP_CAPS_CODEC_H
 #define WP_CAPS_CODEC_H
 

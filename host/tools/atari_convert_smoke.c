@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* M7 T7.4c: proves OFFLOAD_CONVERT_IMPORT/CONVERT_EXPORT actually work
    over real RS-232 -- platform/atari/transport_atari.c's Bconin/Bconout/
    Rsconf implementation, exercised through the SAME engine/

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Capture + verdict half of the multitasking-AES redraw gate.
 
 Driven by ci_afros_redraw.sh once ARAnyM is running. Follows the probe's

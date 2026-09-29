@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* DOSBox-based smoke test for platform/dos's non-UI platform.h seams.
    Phase 0 (T14.6's go/no-go gate) proved the Open Watcom toolchain and
    the DOSBox CI mechanism work before any real platform/dos/ backend

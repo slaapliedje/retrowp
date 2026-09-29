@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef WP_MAC_APP_SHELL_H
 #define WP_MAC_APP_SHELL_H
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef WP_MSWORD_H
 #define WP_MSWORD_H
 

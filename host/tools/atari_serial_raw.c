@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* SERRAW.PRG -- raw, protocol-free serial test for real hardware.
  *
  * SERHW.PRG proved the machine, the aux: mapping and that nothing

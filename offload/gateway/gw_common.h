@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef WP_GATEWAY_GW_COMMON_H
 #define WP_GATEWAY_GW_COMMON_H
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """A gateway whose only job is to prove a serial link works.
 
 Deliberately the dumbest gateway in this directory. It imports nothing

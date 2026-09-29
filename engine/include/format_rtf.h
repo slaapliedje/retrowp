@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef WP_FORMAT_RTF_H
 #define WP_FORMAT_RTF_H
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef WP_DOS_APP_SHELL_INTERNAL_H
 #define WP_DOS_APP_SHELL_INTERNAL_H
 

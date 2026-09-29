@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "vimode.h"
 #include "edit_internal.h"

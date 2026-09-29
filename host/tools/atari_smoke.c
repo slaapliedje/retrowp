@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Hatari-based CI smoke test for platform/atari's T4.1 AES shell.
    Cross-compiled with m68k-atari-mint-gcc into its own .prg (SMOKE.PRG)
    and autostarted under Hatari (docs/atari-platform.md documents the
