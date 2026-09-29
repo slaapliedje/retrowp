@@ -50,10 +50,32 @@ string and memory functions so that no Apache-2.0 object code enters a
 GPL binary.
 
 
+MiNTLib — Atari ST builds only
+------------------------------
+This program uses MiNTLib (https://github.com/freemint/mintlib).  Most
+of MiNTLib is under COPYMINT, a permissive licence whose "credits"
+clause asks that any program using the code say so in its
+documentation; this paragraph is that acknowledgement.  Other parts of
+MiNTLib are GPLv2.  Both are compatible with this program's own licence.
+
+
 Toolchain runtimes on the other targets
 ---------------------------------------
-The ST, Amiga, Mac and DOS builds each link their own toolchain's C
-runtime (mintlib, the Amiga and Retro68 toolchains, Open Watcom).  The
-same System Library reasoning is expected to apply, but this has not
-been audited file by file the way the Atari 8-bit case has.  It is
-recorded here as unchecked rather than asserted to be clear.
+Each backend links its own toolchain's C runtime, and a compiler's
+runtime -- shipped with the compiler, linked into every program it
+produces -- is a "System Library" as the GPL uses that term.
+
+  Atari ST   MiNTLib 0.60.1 (above), and gemlib, whose distribution
+             states no licence at all -- an open question, recorded
+             rather than assumed either way.
+  DOS        Open Watcom, under the Sybase Open Watcom Public License
+             1.0.  GPLv3's System Library wording covers a statically
+             linked compiler runtime plainly, which is part of why this
+             program is "or later" rather than GPLv2 alone.
+  Amiga      libnix, which likewise states no licence in its
+             distribution.
+  Mac        Retro68, not audited: its toolchain does not currently
+             build here, so no Mac binary is produced.
+
+All GCC-based targets also link libgcc, which carries the GCC Runtime
+Library Exception.

@@ -254,10 +254,26 @@ through this in full, including the toolchain licence's own clause 2,
 which grants "producing application software for vintage and retro
 computing systems" and restricts distributing *Calypsi*, not its output.
 
-**Not yet audited:** the per-target C runtimes the other backends link —
-mintlib on the ST, Open Watcom on DOS, and the Amiga and Mac toolchains.
-They are listed here as unchecked rather than implied to be clear. Anyone
-preparing a release should settle them first.
+### The other targets' runtimes, audited
+
+Checked against the installed toolchains and their upstreams rather than
+assumed. Two obligations and two genuine unknowns came out of it.
+
+| target | runtime | terms | what follows |
+|---|---|---|---|
+| all GCC targets | `libgcc` | GPL **with the GCC Runtime Library Exception** (`/usr/share/licenses/gcc/RUNTIME.LIBRARY.EXCEPTION`) | Nothing. The exception exists for exactly this. |
+| Atari ST | **MiNTLib 0.60.1** | dual: `COPYING` is GPLv2, and most files use `COPYMINT`, a FreeType/BSD-style permissive licence | Both GPL-compatible. **COPYMINT requires attribution** — "you must acknowledge somewhere in your documentation that you've used the MiNTlib code" — which `dist/NOTICE.txt` now does. |
+| Atari ST | **gemlib** (`-lgem`) | **not stated**: no `COPYING` in the distribution, no licence header in its sources | A real unknown, not an oversight in this audit. Worth asking the FreeMiNT project before a release leans on it. |
+| DOS | **Open Watcom** | Sybase Open Watcom Public License 1.0 | The FSF classes SOWPL as non-free and GPL-incompatible, so this relies on the System Library exception — and **here "or later" earns its keep**: GPLv3 section 1 plainly covers a compiler runtime linked into the executable, where GPLv2 section 3's older wording ("unless that component itself accompanies the executable") is far less comfortable for a statically linked one. |
+| Amiga | **libnix** | **not stated** in the installed tree or upstream's README | The same honest unknown as gemlib. |
+| Mac | Retro68 | **not audited** | Its toolchain does not build on this machine (CLAUDE.md records why), so there is no Mac binary to ship and nothing was checked. |
+
+The pattern worth carrying: a compiler's runtime is a System Library in
+the GPL's sense, and that is what makes every one of these workable. It
+is also why `GPL-2.0-or-later` rather than `GPL-2.0-only` matters more
+than it first appears — on DOS it is doing real work.
+
+
 
 ### Packaging a release
 
