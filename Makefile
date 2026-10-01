@@ -1113,6 +1113,22 @@ gem4xe-mscan: $(GENERATED)/help_retrowp.h
 	@python3 $(GEM4XE_MSCAN) $(GEM4XE_ASMDIR)/*.s; \
 	    test $$? -eq 0 || { echo "FAIL: the call(s) above are reached with an 8-bit accumulator -- tell gem4xe (ccbug B17)"; exit 1; }
 
+# ---------------------------------------------------------------------------
+# Apple IIGS (T13.6): the engine under ORCA/C, via Golden Gate.
+#
+# Only a portability gate for now -- there is no IIGS backend or app yet.
+# It compiles the same engine/ + offload/transport + services/ sources the
+# other *-engine-check targets do, under ORCA/C's full lint, after first
+# proving on a fixture that the pipeline reports an error at all.  ORCA/C
+# has a 16-bit int and 32-bit pointers, the same int width as the DOS build.
+# No iix installed is a SKIP.  tools/iigs_engine_check.sh says why the
+# sources are staged flat (ORCA's own types.h would otherwise win).
+IIX ?= $(HOME)/dev/gem4xe/ref/iix
+
+.PHONY: iigs-engine-check
+iigs-engine-check:
+	@tools/iigs_engine_check.sh $(IIX) $(RETROPLAT) $(ENGINE_SRC) $(TRANSPORT_SRC) $(SERVICES_SRC)
+
 seam-check-all:
 	$(MAKE) -C $(RETROPLAT) check-all
 

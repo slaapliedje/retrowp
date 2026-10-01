@@ -1523,6 +1523,36 @@ every honestly-documented gap: `docs/mac-platform.md`.
       ROM is a real licensing gray area (not freely redistributable,
       only informally-circulated archives) -- real hardware access
       sidesteps this for the verification pass that actually matters.
+
+      Progress (2026-09-30), toolchain chosen and the engine compiling:
+      - **Toolchain: ORCA/C 2.2.1** via Golden Gate 2.1.0 (the user's
+        licence), run as its Windows build under Wine -- the wrapper is
+        gem4xe's `ref/iix`. Calypsi 65816 was the alternative and was
+        not chosen: it has no IIGS runtime, no toolbox headers, and its
+        linker cannot write OMF. ORCA/C has a **16-bit `int`** and 32-bit
+        pointers -- the DOS build's int width, which the engine already
+        survives.
+      - **`make iigs-engine-check`** compiles engine/ + offload/transport
+        + services/ (27 files) under `#pragma lint -1`: all clean, no
+        source changes needed. It proves itself first on a fixture that
+        must be reported, and was shown to fail on a real error in
+        `justify.c`, on a file-name collision, and to SKIP without `iix`.
+      - ORCA/C has no `-I`; a quoted `#include` searches the **current
+        directory** (not the including file's) and then
+        `Libraries:ORCACDefs:`, which ships its own `types.h`,
+        `memory.h`, `font.h`, `event.h` and `window.h`. The check stages
+        sources flat and runs from inside that directory; the backend's
+        real build will need the same care.
+      - **Emulator: MAME's `apple2gs` runs headless**, superseding the
+        Xvfb bet above: `mame apple2gs -sl7 cffa2 -hard1 <image>` boots
+        GS/OS 6.0.4 to the Finder in ~75 emulated seconds, and a Lua
+        `-autoboot_script` takes the screenshots. Image and script live in
+        `~/dev/toolchains/iigs/`. (Needs `-noplugins`, not `-plugins 0`,
+        which MAME reads as a software name.)
+      - Not started: an OMF link of the engine, running the host test
+        suite under Golden Gate (it can execute text-mode GS/OS
+        programs, so 16-bit-int behaviour can be tested, not just
+        compiled), and `retroplat/backends/iigs`.
 - [ ] T13.7 `platform/c900`: Commodore 900 backend, Coherent (a Unix
       work-alike by Mark Williams Company) on a Zilog Z8001. Requested
       2026-07-24. The most architecturally different backend this
