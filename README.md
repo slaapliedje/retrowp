@@ -74,16 +74,24 @@ transport with grammar/spell/thesaurus/chat/image ops, and real (or
 honestly placeholder) image rendering on every backend. See
 [`docs/milestones.md`](docs/milestones.md) for the full history.
 
-Open: `T13.6`, a fifth backend for the Apple IIGS (65816 / GS/OS,
-a genuinely new CPU architecture for this project).
+Released (binaries in the [v0.15.0 release](https://github.com/slaapliedje/retrowp/releases/tag/v0.15.0)):
+the Atari ST, Amiga, Mac Classic and DOS. In progress: the Atari 8-bit,
+the Apple IIGS and the Commodore 900.
 
 | Backend | Status | Rendering |
 | --- | --- | --- |
-| Atari ST | ✅ | Real VDI text + indexed-bitmap blit |
-| Amiga (MUI) | ✅ | Real graphics.library text + indexed-bitmap blit |
-| Mac Classic | ✅ | Real QuickDraw text + dithered 1-bit blit |
-| DOS (text-mode) | ✅ | Real B800 text; images shown as a bracketed marker (no addressable graphics exist in text mode) |
-| Apple IIGS | 🚧 planned | — |
+| Atari ST | ✅ released | Real VDI text + indexed-bitmap blit |
+| Amiga (MUI) | ✅ released | Real graphics.library text + indexed-bitmap blit |
+| Mac Classic | ✅ released | Real QuickDraw text + dithered 1-bit blit |
+| DOS (text-mode) | ✅ released | Real B800 text; images shown as a bracketed marker (no addressable graphics exist in text mode) |
+| Atari 8-bit ([gem4xe](https://github.com/slaapliedje/gem4xe)) | 🚧 runs on the machine, not yet released | The ST's GEM shell, on GEM for a 65816-accelerated XL/XE — see [`docs/gem4xe-port.md`](docs/gem4xe-port.md) |
+| Apple IIGS | 🚧 engine compiles (ORCA/C); backend not started | — |
+| Commodore 900 | 🚧 planned; compiler not yet confirmed | — |
+
+The Mac Classic build cannot currently be relinked here: Retro68's `ld`
+was built against an older Boost than the system now has. That is an
+upstream toolchain problem, not this project's; the released binary is
+unaffected.
 
 ## Repository Layout
 

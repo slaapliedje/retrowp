@@ -1047,7 +1047,7 @@ matter:
 Checked in both kits directly rather than taken on report, because the claim
 arrived as a correction and the two readings are each right about a different
 kit. The engine and retroplat sources remain under their own licences either way;
-retroplat itself is LGPL-2.1-or-later as of its own `4528294`.
+retroplat itself is LGPL-2.1-or-later as of its own `0ef337c`.
 
 `memcmp` and `memchr` are written in `clib_gem4xe.c` rather than taken from
 `clib-lc-ld.a` for the same reason the kit writes its own `memcpy`: Calypsi's come
