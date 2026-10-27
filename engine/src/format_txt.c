@@ -15,11 +15,15 @@ static wp_status import_add_line(wp_document *doc, wp_section *sec,
     if (st != WP_OK) return st;
     para = wp_section_paragraph_get(sec, para_idx);
 
-    st = wp_strpool_append(&doc->strings, line, line_len, &span);
-    if (st != WP_OK) return st;
+    /* A blank line is a paragraph with no runs, the same shape editing
+       produces for one, not a paragraph holding a run of no text. */
+    if (line_len > 0) {
+        st = wp_strpool_append(&doc->strings, line, line_len, &span);
+        if (st != WP_OK) return st;
 
-    st = wp_paragraph_run_add(para, span, doc->default_cstyle, &run_idx);
-    if (st != WP_OK) return st;
+        st = wp_paragraph_run_add(para, span, doc->default_cstyle, &run_idx);
+        if (st != WP_OK) return st;
+    }
 
     wp_paragraph_pstyle_set(para, doc->default_pstyle);
     return WP_OK;

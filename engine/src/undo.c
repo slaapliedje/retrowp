@@ -485,13 +485,20 @@ wp_status wp_edit_delete_selection(wp_document *doc, wp_undo_journal *journal,
            would instead SPLICE that paragraph's full content into the
            survivor, the opposite of what a delete needs. */
         for (mid = end.paragraph - 1; mid > start.paragraph; mid--) {
-            const wp_paragraph *p = &sec->paras[mid];
-            while (p->run_count > 0) {
-                u16 last_run = (u16)(p->run_count - 1);
-                st = wp_edit_delete_range(doc, journal, start.section, mid, last_run,
-                                           0, p->runs[last_run].text.length);
+            /* Last run first, so a removal only ever shifts indices the
+               loop has already passed. A zero-length run is skipped, not
+               deleted: wp_edit_delete_range rejects an empty range, and
+               a blank line read from a file arrives as exactly that
+               (one run of no text). Stopping on it left the document
+               half-deleted on the Amiga -- the merges below absorb the
+               empty run along with the paragraph. */
+            for (r = sec->paras[mid].run_count; r > 0; r--) {
+                const wp_paragraph *p = &sec->paras[mid];
+                u32 hi = p->runs[r - 1].text.length;
+
+                if (hi == 0) continue;
+                st = wp_edit_delete_range(doc, journal, start.section, mid, (u16)(r - 1), 0, hi);
                 if (st != WP_OK) { wp_undo_group_end(journal); return st; }
-                p = &sec->paras[mid];
             }
         }
 

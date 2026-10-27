@@ -340,6 +340,78 @@ void test_actions_cut_then_paste_gives_the_document_back(void)
     ctx_teardown(&doc, &journal, &ctx);
 }
 
+/* Like ctx_setup, but the text goes through the plain-text importer,
+   so a '\n' makes a paragraph (ctx_setup keeps the whole string in one
+   run). That is the shape a document has after File > Open. */
+static void ctx_setup_imported(wp_document *doc, wp_undo_journal *journal,
+                               wp_app_ctx *ctx, const char *text)
+{
+    ASSERT_TRUE(format_txt_import((const u8 *)text, (u32)strlen(text), doc) == WP_OK);
+    wp_undo_journal_init(journal);
+    wp_app_ctx_init(ctx, WP_KEYMAP_VI, doc, journal);
+    ctx->doc_loaded = WP_TRUE;
+}
+
+/* Found on the Amiga, reading the saved file back: Cut of the sample
+   document left its third and fifth paragraphs standing. Every blank
+   line had come out of the importer as a paragraph holding one run of
+   no text, and wp_edit_delete_selection stopped at the first of them. */
+void test_actions_cut_takes_every_paragraph_of_an_opened_file(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[128];
+
+    ctx_setup_imported(&doc, &journal, &ctx, "One two\n\nThree four\n\nFive six\n\nSeven\n");
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "\n");
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_PASTE)->handler(&ctx) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "One two\n\nThree four\n\nFive six\n\nSeven\n");
+
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "\n");
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "One two\n\nThree four\n\nFive six\n\nSeven\n");
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* The importer no longer makes such a run, but other paths can leave a
+   run with no text behind, so the delete must cope with one on its own. */
+void test_actions_cut_copes_with_a_run_of_no_text(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_section *sec;
+    wp_span span;
+    u16 run_idx;
+    char text[64];
+
+    ctx_setup_imported(&doc, &journal, &ctx, "One\n\nTwo\n");
+    sec = wp_document_section_get(&doc, 0);
+    ASSERT_TRUE(sec->paras[1].run_count == 0);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"", 0, &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(&sec->paras[1], span, doc.default_cstyle, &run_idx) == WP_OK);
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "\n");
+
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "One\n\nTwo\n");
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
 void test_actions_cut_is_one_undo_step(void)
 {
     wp_document doc;

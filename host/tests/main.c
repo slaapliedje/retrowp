@@ -280,6 +280,8 @@ void test_actions_file_quit_sets_flag(void);
 void test_actions_edit_copy_sets_clipboard(void);
 void test_actions_format_size_uses_dialog_choice(void);
 void test_actions_cut_then_paste_gives_the_document_back(void);
+void test_actions_cut_takes_every_paragraph_of_an_opened_file(void);
+void test_actions_cut_copes_with_a_run_of_no_text(void);
 void test_actions_cut_is_one_undo_step(void);
 void test_actions_cut_keeps_a_document_the_clipboard_cannot_hold(void);
 void test_actions_paste_inserts_at_the_cursor(void);
@@ -826,6 +828,8 @@ static const test_case g_cases[] = {
     { "actions_edit_copy_sets_clipboard", test_actions_edit_copy_sets_clipboard },
     { "actions_format_size_uses_dialog_choice", test_actions_format_size_uses_dialog_choice },
     { "actions_cut_then_paste_gives_the_document_back", test_actions_cut_then_paste_gives_the_document_back },
+    { "actions_cut_takes_every_paragraph_of_an_opened_file", test_actions_cut_takes_every_paragraph_of_an_opened_file },
+    { "actions_cut_copes_with_a_run_of_no_text", test_actions_cut_copes_with_a_run_of_no_text },
     { "actions_cut_is_one_undo_step", test_actions_cut_is_one_undo_step },
     { "actions_cut_keeps_a_document_the_clipboard_cannot_hold", test_actions_cut_keeps_a_document_the_clipboard_cannot_hold },
     { "actions_paste_inserts_at_the_cursor", test_actions_paste_inserts_at_the_cursor },
