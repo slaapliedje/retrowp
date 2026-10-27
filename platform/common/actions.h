@@ -148,4 +148,35 @@ const char *wp_action_help_node(wp_action_id id, u32 *len);
    the default and why a failed dialog answers "no". */
 wp_bool wp_action_confirm_discard(struct wp_app_ctx *ctx);
 
+/* Takes over *fresh as the whole document: frees the old one and its
+   undo journal, resets the active scheme, seeds the current input style
+   from the new document's defaults and marks it saved. The one swap
+   every load path on every backend uses -- New, Open, startup. Leaves
+   the cursor where wp_keymap_init puts it (document start); a backend
+   that wants it elsewhere moves it afterwards. Does not relayout. */
+void wp_action_replace_document(struct wp_app_ctx *ctx, wp_document *fresh);
+
+/* For every way out other than File > Quit: a scheme's own quit command
+   and a window's close box. Asks the same unsaved-changes question and
+   sets ctx->quit_requested only if it is safe to leave -- the backend's
+   loop decides on that flag, never on having been asked. */
+void wp_action_request_quit(struct wp_app_ctx *ctx);
+
+/* For save-and-quit (vi :wq, WordStar ^KX), called after the backend's
+   own Save: quits only if the document is no longer modified, so a
+   cancelled or failed save leaves the writer where they were. */
+void wp_action_request_quit_after_save(struct wp_app_ctx *ctx);
+
+/* Writes buf[0..len) to native_path, replacing the file. On success,
+   and only if marks_saved, the document is marked saved; an export the
+   program cannot read back (PDF) passes WP_FALSE. Any failure is told
+   to the writer, and the document stays modified. */
+wp_status wp_action_write_file(struct wp_app_ctx *ctx, const char *native_path,
+                                const u8 *buf, u32 len, wp_bool marks_saved);
+
+/* A one-line message with an OK button, through plat_dialog_choice --
+   the one dialog primitive every backend implements. Keep it short:
+   Amiga shows it as a requester title. */
+void wp_action_tell(struct wp_app_ctx *ctx, const char *msg);
+
 #endif /* WP_ACTIONS_H */

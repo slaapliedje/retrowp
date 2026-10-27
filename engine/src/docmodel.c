@@ -253,6 +253,11 @@ void wp_document_mark_saved(wp_document *doc)
     if (doc != NULL) doc->modified = 0;
 }
 
+void wp_document_mark_modified(wp_document *doc)
+{
+    if (doc != NULL) doc->modified = 1;
+}
+
 void wp_document_free(wp_document *doc)
 {
     u32 i;

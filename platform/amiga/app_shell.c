@@ -293,29 +293,19 @@ static void amiga_relayout_after_edit(void)
     relayout_document(g_content_width_twips);
 }
 
-static void set_document_from_text(const u8 *utf8, u32 len)
+static wp_bool set_document_from_text(const u8 *utf8, u32 len)
 {
     wp_document new_doc;
 
-    if (format_txt_import(utf8, len, &new_doc) != WP_OK) return;
-    if (g_ctx.doc_loaded) wp_document_free(&g_amiga_doc);
-    g_amiga_doc = new_doc;
-    /* M10: re-points the active scheme's own .doc/.journal at the new
-       document -- keymap_id itself never changes here, only re-selects
-       the same arm. Matches this function's own pre-M10 behavior
-       exactly, including NOT calling wp_keymap_free first (unlike
-       platform/atari/app_shell.c's own replace_document, which does --
-       a real, pre-existing asymmetry between the two backends, not
-       introduced by this refactor and not fixed here either). */
-    wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id, &g_amiga_doc, &g_amiga_journal);
-    (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_start(&g_amiga_doc);
-    g_ctx.doc_loaded = WP_TRUE;
-    /* Every load path lands here, and none leaves unsaved WORK behind:
-       the document now matches the thing it was built from. */
-    wp_document_mark_saved(&g_amiga_doc);
-    /* No "document is new" flag to set: every paragraph format_txt_import
-       just built has layout == NULL, which relayout_document already
-       treats as needing a rebuild -- see g_content_width_twips's comment. */
+    if (format_txt_import(utf8, len, &new_doc) != WP_OK) return WP_FALSE;
+    /* The portable swap: frees the old document AND its undo journal and
+       resets the scheme. This shell used to do the swap by hand and
+       skipped the journal, so an Undo after Open replayed the previous
+       document's edits against freed memory. The new document's
+       paragraphs have layout == NULL, which relayout_document already
+       treats as needing a rebuild. */
+    wp_action_replace_document(&g_ctx, &new_doc);
+    return WP_TRUE;
 }
 
 static void load_sample_document(void)
@@ -373,6 +363,7 @@ static void do_file_open(void)
     plat_file *f;
     u32 size, read_len;
     u8 *buf;
+    wp_bool loaded = WP_FALSE;
 
     /* Opening replaces the whole document, so it asks before discarding
        unsaved work -- BEFORE the picker, so the writer is not made to
@@ -388,8 +379,16 @@ static void do_file_open(void)
     if (!wp_keymap_take_pending_path(fullpath, (u32)sizeof(fullpath))) {
         if (!run_asl_file_requester(WP_FALSE, fullpath, (u32)sizeof(fullpath))) return;
     }
-    if (plat_file_open(fullpath, PLAT_FILE_READ, &f) != WP_OK) return;
-    if (plat_file_size(f, &size) != WP_OK) { plat_file_close(f); return; }
+    /* Every way this can fail now says so; it used to return quietly. */
+    if (plat_file_open(fullpath, PLAT_FILE_READ, &f) != WP_OK) {
+        wp_action_tell(&g_ctx, "Couldn't open that file");
+        return;
+    }
+    if (plat_file_size(f, &size) != WP_OK) {
+        plat_file_close(f);
+        wp_action_tell(&g_ctx, "Couldn't read that file");
+        return;
+    }
 
     buf = (u8 *)mem_alloc(size + 1);
     if (buf != NULL) {
@@ -401,27 +400,22 @@ static void do_file_open(void)
             if (format_ws_looks_like(buf, read_len)) {
                 wp_document ws_doc;
                 if (format_ws_import(buf, read_len, &ws_doc) == WP_OK) {
-                    if (g_ctx.doc_loaded) wp_document_free(&g_amiga_doc);
-                    g_amiga_doc = ws_doc;
-                    wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id,
-                                    &g_amiga_doc, &g_amiga_journal);
-                    (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_start(&g_amiga_doc);
-                    g_ctx.doc_loaded = WP_TRUE;
-                    wp_document_mark_saved(&g_amiga_doc);
+                    wp_action_replace_document(&g_ctx, &ws_doc);
+                    loaded = WP_TRUE;
                 }
             } else {
-                set_document_from_text(buf, read_len);
+                loaded = set_document_from_text(buf, read_len);
             }
         }
         mem_free(buf);
     }
     plat_file_close(f);
+    if (!loaded) wp_action_tell(&g_ctx, "Couldn't load that file");
 }
 
 static void do_file_save(void)
 {
     char fullpath[256];
-    plat_file *f;
     u32 needed;
     u8 *buf;
 
@@ -438,43 +432,17 @@ static void do_file_save(void)
 
     format_txt_export(&g_amiga_doc, NULL, 0, &needed);
     buf = (u8 *)mem_alloc(needed);
-    if (buf == NULL) return;
+    if (buf == NULL) {
+        wp_action_tell(&g_ctx, "Not enough memory to save");
+        return;
+    }
 
     if (format_txt_export(&g_amiga_doc, buf, needed, &needed) == WP_OK) {
-        if (plat_file_open(fullpath, PLAT_FILE_WRITE, &f) == WP_OK) {
-            plat_file_write(f, buf, needed);
-            plat_file_close(f);
-            /* Only now is the document really on disk. Marking it clean
-               any earlier would let a failed save quietly convince the
-               app there was nothing left to lose. */
-            wp_document_mark_saved(&g_amiga_doc);
-        }
+        /* Marks the document saved only once the write has landed, and
+           says so when it has not. */
+        (void)wp_action_write_file(&g_ctx, fullpath, buf, needed, WP_TRUE);
     }
     mem_free(buf);
-}
-
-/* Cut/Paste operate on the whole document, matching platform/atari/
-   app_shell.c's do_edit_cut/do_edit_paste exactly (same "no selection
-   model yet" scope note -- see actions.c's act_edit_copy comment).
-   Copy itself has a real portable handler already (act_edit_copy in
-   platform/common/actions.c), invoked via act->handler below. */
-static void do_edit_cut(void)
-{
-    static const char empty_text[] = "\n";
-
-    if (!g_ctx.doc_loaded) return;
-    wp_action_find(WP_ACT_EDIT_COPY)->handler(&g_ctx);
-    set_document_from_text((const u8 *)empty_text, (u32)strlen(empty_text));
-}
-
-static void do_edit_paste(void)
-{
-    u8 buf[4096];
-    u32 out_len;
-
-    if (!g_ctx.doc_loaded) return;
-    if (plat_clipboard_get_text(buf, (u32)sizeof(buf), &out_len) != WP_OK) return;
-    set_document_from_text(buf, out_len);
 }
 
 /* M9 Phase 6: opens the real help pager at the named node (falling back
@@ -1160,8 +1128,6 @@ static void invoke_backend_action(wp_action_id id)
     switch (id) {
     case WP_ACT_FILE_OPEN:      do_file_open(); break;
     case WP_ACT_FILE_SAVE:      do_file_save(); break;
-    case WP_ACT_EDIT_CUT:       do_edit_cut(); break;
-    case WP_ACT_EDIT_PASTE:     do_edit_paste(); break;
     case WP_ACT_TOOLS_THESAURUS:    do_thesaurus(); break;
     case WP_ACT_TOOLS_GRAMMARCHECK: do_grammar_check(); break;
     case WP_ACT_TOOLS_CHAT:         do_chat(); break;
@@ -1339,10 +1305,15 @@ static wp_bool amiga_dispatch_key(wp_key_event ev)
 
     switch ((wp_keymap_result_kind)outcome.kind) {
     case WP_KEYMAP_RESULT_QUIT:
-        return WP_TRUE;
+        /* A scheme's quit (vi :q, ^KQ, C-x C-c ...) asks the same
+           unsaved-changes question File > Quit does; quit_requested,
+           returned below, is the answer. */
+        wp_action_request_quit(&g_ctx);
+        break;
     case WP_KEYMAP_RESULT_SAVE_QUIT:
         do_file_save();
-        return WP_TRUE;
+        wp_action_request_quit_after_save(&g_ctx);
+        break;
     case WP_KEYMAP_RESULT_ACTION:
         /* T172: an ex command may have named a file (":w foo", ":e foo").
            invoke_action carries no payload -- a menu pick has nothing to
@@ -2228,8 +2199,12 @@ void app_shell_run(void)
         return;
     }
 
+    /* The close gadget is File > Quit by another name: it goes through
+       the same action, so it asks about unsaved changes first. It used
+       to return MUIV_Application_ReturnID_Quit and leave at once. */
     DoMethod(g_win, MUIM_Notify, MUIA_Window_CloseRequest, TRUE,
-             g_app, 2, MUIM_Application_ReturnID, (LONG)MUIV_Application_ReturnID_Quit);
+             g_app, 2, MUIM_Application_ReturnID,
+             (LONG)(WP_RETURNID_ACTION_BASE + WP_ACT_FILE_QUIT));
 
     set(g_win, MUIA_Window_Open, TRUE);
     get(g_win, MUIA_Window_Open, &open);
@@ -2283,7 +2258,11 @@ void app_shell_run(void)
 
     MUI_DisposeObject(g_app);
     MUI_DeleteCustomClass(g_editor_class);
-    if (g_ctx.doc_loaded) wp_document_free(&g_amiga_doc);
+    if (g_ctx.doc_loaded) {
+        wp_keymap_free(&g_ctx);
+        wp_undo_journal_free(&g_amiga_journal);
+        wp_document_free(&g_amiga_doc);
+    }
     if (g_help_doc_loaded) wp_help_doc_free(&g_help_doc);
     close_libraries();
 }

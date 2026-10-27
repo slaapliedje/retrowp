@@ -1052,61 +1052,28 @@ static void relayout_document(i32 content_width_twips)
 /* Replaces the currently-open document (if any) with new_doc (already
    built and owned by the caller -- this function takes it over),
    resetting the cursor to its end and the undo journal to empty. Shared
-   by every "load this as the whole document" path: startup, Paste,
-   and both Open formats (plaintext via set_document_from_text below,
+   by every "load this as the whole document" path: startup and every
+   Open format (plaintext via set_document_from_text below,
    RTF via do_file_open directly, since RTF import has its own error
    path that doesn't fit set_document_from_text's void-return shape). */
 static void replace_document(wp_document *new_doc, i32 content_width_twips)
 {
-    const wp_char_style *def_cs;
-    const wp_para_style *def_ps;
-
-    if (g_ctx.doc_loaded) {
-        wp_undo_journal_free(&g_journal);
-        wp_document_free(&g_doc);
-    }
-
-    g_doc = *new_doc;
-    g_ctx.doc_loaded = WP_TRUE;
-    wp_undo_journal_init(&g_journal);
+    /* The swap itself -- old document and journal freed, scheme reset,
+       input style seeded, marked saved -- is the portable one every
+       backend shares. What is left is native: the relayout, and this
+       app's habit of putting the cursor at the end of what it loaded. */
+    wp_action_replace_document(&g_ctx, new_doc);
     relayout_document(content_width_twips);
-
-    /* M8.5/M10: a whole-document swap invalidates any Insert/Visual/
-       pending-operator state the active keymap scheme was holding for
-       the PREVIOUS document (its cursor, register contents, etc. --
-       none of it means anything once the tree underneath has been freed
-       and replaced), so the scheme is reset the same way the undo
-       journal above already is, not just resynced. wp_keymap_init's own
-       cursor default (doc start) is overridden right after to match
-       this app's existing "cursor sits at the end of a freshly loaded
-       document" behavior. Safe to call unconditionally: wp_app_ctx_init
-       (app_shell_run) already ran wp_keymap_init once before the first
-       possible replace_document call, so the scheme's own owned memory
-       is always a valid wp_keymap_free target here, populated or not. */
-    wp_keymap_free(&g_ctx);
-    wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id, &g_doc, &g_journal);
     (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_end(&g_doc);
-
-    def_cs = wp_document_cstyle_get(&g_doc, g_doc.default_cstyle);
-    g_ctx.style_flags = def_cs->flags;
-    g_ctx.current_size_twips = def_cs->size_twips;
-
-    def_ps = wp_document_pstyle_get(&g_doc, g_doc.default_pstyle);
-    g_ctx.align = def_ps->align;
-
-    /* Every load path -- Open, the startup sample, Paste -- lands here,
-       and none of them leaves unsaved WORK behind: the document now
-       matches the thing it was built from. Marking clean here rather
-       than in each caller means a new load path cannot forget. */
-    wp_document_mark_saved(&g_doc);
 }
 
-static void set_document_from_text(const u8 *utf8, u32 len, i32 content_width_twips)
+static wp_bool set_document_from_text(const u8 *utf8, u32 len, i32 content_width_twips)
 {
     wp_document new_doc;
 
-    if (format_txt_import(utf8, len, &new_doc) != WP_OK) return;
+    if (format_txt_import(utf8, len, &new_doc) != WP_OK) return WP_FALSE;
     replace_document(&new_doc, content_width_twips);
+    return WP_TRUE;
 }
 
 static void load_sample_document(i32 content_width_twips)
@@ -1586,8 +1553,13 @@ static void apply_alignment(u8 align)
     style = *cur;
     style.align = align;
 
-    if (wp_document_pstyle_find_or_add(&g_doc, &style, &handle) == WP_OK) {
+    /* Not journaled, so it marks the document modified itself -- but
+       only for a real change, or picking the alignment it already has
+       would make Quit ask about work that does not exist. */
+    if (wp_document_pstyle_find_or_add(&g_doc, &style, &handle) == WP_OK &&
+        handle != para->style) {
         wp_paragraph_pstyle_set(para, handle);
+        wp_document_mark_modified(&g_doc);
     }
 }
 
@@ -1785,7 +1757,6 @@ static void do_odt_pdf_save(const char *fullpath, u8 format_id)
     u8 *req_buf;
     offload_request req;
     offload_response resp;
-    plat_file *f;
 
     if (!g_ctx.doc_loaded) return;
     if (!require_offload_for_convert()) return;
@@ -1818,12 +1789,10 @@ static void do_odt_pdf_save(const char *fullpath, u8 format_id)
         return;
     }
 
-    if (plat_file_open(fullpath, PLAT_FILE_WRITE, &f) == WP_OK) {
-        plat_file_write(f, resp.result, resp.result_len);
-        plat_file_close(f);
-    } else {
-        form_alert(1, FA_ERROR "[Couldn't write that file to disk.][ OK ]");
-    }
+    /* ODT reads back in, so it is a save; PDF does not, so it is an
+       export and the document stays modified. */
+    (void)wp_action_write_file(&g_ctx, fullpath, resp.result, resp.result_len,
+                                (wp_bool)(format_id == (u8)WP_ATARI_FORMAT_ODT));
     offload_response_free(&resp);
 }
 
@@ -1835,6 +1804,7 @@ static void do_file_open(void)
     plat_file *f;
     u32 size, read_len;
     u8 *buf;
+    wp_bool loaded = WP_FALSE;
 
     /* Opening replaces the whole document, so it asks before discarding
        unsaved work -- BEFORE the file picker, so the writer is not made
@@ -1860,8 +1830,17 @@ static void do_file_open(void)
         return;
     }
 
-    if (plat_file_open(fullpath, PLAT_FILE_READ, &f) != WP_OK) return;
-    if (plat_file_size(f, &size) != WP_OK) { plat_file_close(f); return; }
+    /* Every way this can fail now says so. It used to return quietly,
+       which on a slow floppy looks exactly like "still loading". */
+    if (plat_file_open(fullpath, PLAT_FILE_READ, &f) != WP_OK) {
+        form_alert(1, FA_ERROR "[Couldn't open that file.][ OK ]");
+        return;
+    }
+    if (plat_file_size(f, &size) != WP_OK) {
+        plat_file_close(f);
+        form_alert(1, FA_ERROR "[Couldn't read that file.][ OK ]");
+        return;
+    }
 
     buf = (u8 *)mem_alloc(size + 1);
     if (buf != NULL) {
@@ -1877,6 +1856,7 @@ static void do_file_open(void)
                 wp_document ws_doc;
                 if (format_ws_import(buf, read_len, &ws_doc) == WP_OK) {
                     replace_document(&ws_doc, g_content_width_twips);
+                    loaded = WP_TRUE;
                 }
             } else if (str_ends_with_ci(fullpath, ".RTF")) {
                 wp_document new_doc;
@@ -1884,14 +1864,16 @@ static void do_file_open(void)
                 atari_image_sink_init(&sink);
                 if (format_rtf_import_images(buf, read_len, &new_doc, &sink) == WP_OK) {
                     replace_document(&new_doc, g_content_width_twips);
+                    loaded = WP_TRUE;
                 }
             } else {
-                set_document_from_text(buf, read_len, g_content_width_twips);
+                loaded = set_document_from_text(buf, read_len, g_content_width_twips);
             }
         }
         mem_free(buf);
     }
     plat_file_close(f);
+    if (!loaded) form_alert(1, FA_ERROR "[Couldn't load that file.|The document is unchanged.][ OK ]");
 }
 
 /* Hands the RTF exporter one image's pixels, a row at a time.
@@ -1931,7 +1913,6 @@ static void do_file_save(void)
     char path[128];
     char fname[16];
     char fullpath[144];
-    plat_file *f;
     u32 needed;
     u8 *buf;
     wp_bool as_rtf;
@@ -1969,71 +1950,18 @@ static void do_file_save(void)
         format_txt_export(&g_doc, NULL, 0, &needed);
     }
     buf = (u8 *)mem_alloc(needed);
-    if (buf == NULL) return;
+    if (buf == NULL) {
+        form_alert(1, FA_ERROR "[Not enough memory to save.][ OK ]");
+        return;
+    }
 
     if ((as_rtf ? format_rtf_export_images(&g_doc, buf, needed, &needed, &img_src)
                 : format_txt_export(&g_doc, buf, needed, &needed)) == WP_OK) {
-        if (plat_file_open(fullpath, PLAT_FILE_WRITE, &f) == WP_OK) {
-            plat_file_write(f, buf, needed);
-            plat_file_close(f);
-            /* Only now is the document really on disk. Marking it clean
-               any earlier -- on entry, or after export but before the
-               write -- would have a failed save quietly convince the app
-               there was nothing left to lose. */
-            wp_document_mark_saved(&g_doc);
-        }
+        /* Marks the document saved only once the write has landed, and
+           says so when it has not. */
+        (void)wp_action_write_file(&g_ctx, fullpath, buf, needed, WP_TRUE);
     }
     mem_free(buf);
-}
-
-/* Cut/Copy/Paste operate on the WHOLE document, not a selection: there
-   is no selection model yet (docs/editing.md notes the same gap for
-   multi-run deletes), and inventing one is out of scope for wiring the
-   platform.h clipboard seam. Copy exports the document as plaintext to
-   the clipboard; Cut does that and then clears the document; Paste
-   replaces the document with the clipboard's content -- the same
-   "load this text as the whole document" path Open and startup use. */
-static void do_edit_copy(void)
-{
-    u32 needed;
-    u8 *buf;
-
-    if (!g_ctx.doc_loaded) return;
-
-    format_txt_export(&g_doc, NULL, 0, &needed);
-    buf = (u8 *)mem_alloc(needed);
-    if (buf == NULL) return;
-
-    if (format_txt_export(&g_doc, buf, needed, &needed) == WP_OK) {
-        plat_clipboard_set_text(buf, needed);
-    }
-    mem_free(buf);
-}
-
-static void do_edit_cut(void)
-{
-    static const char empty_text[] = "\n";
-
-    if (!g_ctx.doc_loaded) return;
-    do_edit_copy();
-    set_document_from_text((const u8 *)empty_text, (u32)strlen(empty_text), g_content_width_twips);
-}
-
-static void do_edit_paste(void)
-{
-    /* Static, not automatic: 4 KB is an unremarkable stack frame on a
-       68000 and an impossible one on a 65816, where the stack lives in
-       bank $00 by hardware and gem4xe gives an application a 2 KB pool
-       there for its stack and near data together (gem4xe/lib/gemapp.scm).
-       Nothing here recurses -- a paste is a menu action, dispatched one
-       at a time from the event loop -- and the buffer is written and read
-       within the one call, so it holds nothing between them. */
-    static u8 buf[4096];
-    u32 out_len;
-
-    if (!g_ctx.doc_loaded) return;
-    if (plat_clipboard_get_text(buf, (u32)sizeof(buf), &out_len) != WP_OK) return;
-    set_document_from_text(buf, out_len, g_content_width_twips);
 }
 
 /* Spell Check: like everything else that touches the whole document
@@ -4277,8 +4205,6 @@ static void invoke_backend_action(short window_handle, VdiHdl vdi, wp_action_id 
     switch (id) {
     case WP_ACT_FILE_OPEN:         do_file_open(); break;
     case WP_ACT_FILE_SAVE:         do_file_save(); break;
-    case WP_ACT_EDIT_CUT:          do_edit_cut(); break;
-    case WP_ACT_EDIT_PASTE:        do_edit_paste(); break;
     case WP_ACT_TOOLS_SPELLCHECK:  do_spell_check(); break;
     case WP_ACT_TOOLS_THESAURUS:   do_thesaurus(); break;
     case WP_ACT_TOOLS_GRAMMARCHECK: do_grammar_check(); break;
@@ -4410,10 +4336,15 @@ wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key, short kstate
 
     switch ((wp_keymap_result_kind)outcome.kind) {
     case WP_KEYMAP_RESULT_QUIT:
-        return WP_TRUE;
+        /* A scheme's quit (vi :q, ^KQ, C-x C-c ...) asks the same
+           unsaved-changes question File > Quit does; quit_requested,
+           checked below, is the answer. */
+        wp_action_request_quit(&g_ctx);
+        break;
     case WP_KEYMAP_RESULT_SAVE_QUIT:
         do_file_save();
-        return WP_TRUE;
+        wp_action_request_quit_after_save(&g_ctx);
+        break;
     case WP_KEYMAP_RESULT_ACTION:
         /* T172: an ex command may have named a file (":w foo", ":e foo").
            invoke_action carries no payload -- a menu pick has nothing to
@@ -4630,7 +4561,11 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
         return dispatch_menu_item(window_handle, vdi, msg[4]);
 
     case WM_CLOSED:
-        return WP_TRUE;
+        /* The close box is a way out like any other: it asks first. */
+        wp_action_request_quit(&g_ctx);
+        if (g_ctx.quit_requested) return WP_TRUE;
+        redraw_window(window_handle, vdi);
+        return WP_FALSE;
 
     case WM_TOPPED:
         wind_set(window_handle, WF_TOP, 0, 0, 0, 0);

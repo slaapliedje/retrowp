@@ -206,3 +206,121 @@ void test_edit_insert_image_undo_redo(void)
 
     ASSERT_EQ_U32(mem_host_live_count(), 0);
 }
+
+/* -- Joining paragraphs across a picture ------------------------------ */
+
+/* "Hello World" with a picture inserted at offset 5:
+   [0] "Hello"  [1] picture  [2] " World". */
+static void build_text_image_text(wp_document *doc, wp_undo_journal *journal,
+                                  wp_image *out_handle)
+{
+    wp_paragraph *para;
+    wp_image_desc desc;
+    wp_pos pos;
+    wp_section *sec;
+
+    build_single_run_doc(doc, "Hello World", &para);
+    wp_undo_journal_init(journal);
+    fill_test_desc(&desc, 8, 8);
+    pos.section = 0; pos.paragraph = 0; pos.run = 0; pos.offset = 5;
+    ASSERT_TRUE(wp_edit_insert_image(doc, journal, pos, &desc) == WP_OK);
+    sec = wp_document_section_get(doc, 0);
+    ASSERT_EQ_U32(sec->para_count, 3);
+    *out_handle = wp_section_paragraph_get(sec, 1)->image;
+}
+
+/* Joining "Hello" with the picture after it deletes the picture, and
+   undo must bring it back as a picture. It used to come back as an empty
+   text paragraph: the merge journal had no notion of pictures. */
+void test_image_merge_absorbing_a_picture_undoes_to_the_picture(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_section *sec;
+    wp_image handle;
+
+    build_text_image_text(&doc, &journal, &handle);
+    sec = wp_document_section_get(&doc, 0);
+
+    ASSERT_TRUE(wp_edit_merge_paragraph(&doc, &journal, 0, 0, NULL) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 2);
+    ASSERT_TRUE(wp_section_paragraph_get(sec, 0)->kind == (u8)WP_PARA_TEXT);
+    ASSERT_TRUE(wp_section_paragraph_get(sec, 1)->kind == (u8)WP_PARA_TEXT);
+
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 3);
+    ASSERT_TRUE(wp_section_paragraph_get(sec, 1)->kind == (u8)WP_PARA_IMAGE);
+    ASSERT_EQ_U32(wp_section_paragraph_get(sec, 1)->image, handle);
+
+    ASSERT_TRUE(wp_edit_redo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 2);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* Joining " World" onto the picture before it (Backspace at the start
+   of " World") used to append the text to the picture paragraph, where
+   nothing draws or exports it. Now the picture goes and the text stays
+   visible -- and undo restores both. */
+void test_image_merge_text_onto_a_picture_keeps_the_text(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_section *sec;
+    wp_paragraph *p;
+    wp_image handle;
+    char buf[64];
+
+    build_text_image_text(&doc, &journal, &handle);
+    sec = wp_document_section_get(&doc, 0);
+
+    ASSERT_TRUE(wp_edit_merge_paragraph(&doc, &journal, 0, 1, NULL) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 2);
+    p = wp_section_paragraph_get(sec, 1);
+    ASSERT_TRUE(p->kind == (u8)WP_PARA_TEXT);
+    dump_para_text(&doc, p, buf);
+    ASSERT_EQ_STR(buf, " World");
+
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 3);
+    p = wp_section_paragraph_get(sec, 1);
+    ASSERT_TRUE(p->kind == (u8)WP_PARA_IMAGE);
+    ASSERT_EQ_U32(p->image, handle);
+    ASSERT_EQ_U32(p->run_count, 0);
+    dump_para_text(&doc, wp_section_paragraph_get(sec, 2), buf);
+    ASSERT_EQ_STR(buf, " World");
+
+    ASSERT_TRUE(wp_edit_redo(&doc, &journal) == WP_OK);
+    ASSERT_TRUE(wp_section_paragraph_get(sec, 1)->kind == (u8)WP_PARA_TEXT);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* An Enter on the picture, undone, is a merge of the picture with the
+   empty paragraph the Enter made. Nothing is joined onto it, so it must
+   stay a picture. */
+void test_image_undoing_enter_on_a_picture_keeps_the_picture(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_section *sec;
+    wp_pos pos;
+    wp_image handle;
+
+    build_text_image_text(&doc, &journal, &handle);
+    sec = wp_document_section_get(&doc, 0);
+
+    pos.section = 0; pos.paragraph = 1; pos.run = 0; pos.offset = 0;
+    ASSERT_TRUE(wp_edit_split_paragraph(&doc, &journal, pos, NULL) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 4);
+
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(sec->para_count, 3);
+    ASSERT_TRUE(wp_section_paragraph_get(sec, 1)->kind == (u8)WP_PARA_IMAGE);
+    ASSERT_EQ_U32(wp_section_paragraph_get(sec, 1)->image, handle);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}

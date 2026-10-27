@@ -505,6 +505,19 @@ wp_status wp_document_merge_paragraph_raw(wp_document *doc, u32 section,
         join_pos.offset = first->runs[join_pos.run].text.length;
     }
 
+    /* M15: a picture paragraph has no runs, so joining text onto one
+       would append that text to a paragraph nothing ever draws as text
+       -- every consumer skips an image paragraph's runs. Joining a
+       picture to text deletes the picture instead, whichever side it is
+       on: absorbed, it simply goes (it has no runs to move); surviving,
+       it becomes the text paragraph. A survivor with nothing to absorb
+       stays a picture, which is what undoing an Enter on one needs. */
+    if (first->kind == (u8)WP_PARA_IMAGE && second->kind != (u8)WP_PARA_IMAGE &&
+        second->run_count > 0) {
+        first->kind = (u8)WP_PARA_TEXT;
+        first->image = 0;
+    }
+
     second_count = second->run_count;
     for (i = 0; i < second_count; i++) {
         u16 dummy;

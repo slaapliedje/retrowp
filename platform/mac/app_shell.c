@@ -244,29 +244,19 @@ static void relayout_document(i32 content_width_twips)
     }
 }
 
-static void set_document_from_text(const u8 *utf8, u32 len)
+static wp_bool set_document_from_text(const u8 *utf8, u32 len)
 {
     wp_document new_doc;
 
-    if (format_txt_import(utf8, len, &new_doc) != WP_OK) return;
-    if (g_ctx.doc_loaded) wp_document_free(&g_mac_doc);
-    g_mac_doc = new_doc;
-    /* Re-points the active scheme's own .doc/.journal at the new
-       document -- keymap_id itself never changes here, only re-selects
-       the same arm. Matches platform/amiga/app_shell.c's own
-       set_document_from_text exactly, including NOT calling
-       wp_keymap_free first (a real, pre-existing asymmetry vs. Atari's
-       own replace_document, not introduced here and not fixed here
-       either -- see that file's own comment). */
-    wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id, &g_mac_doc, &g_mac_journal);
-    (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_start(&g_mac_doc);
-    g_ctx.doc_loaded = WP_TRUE;
-    /* Every load path lands here, and none leaves unsaved WORK behind:
-       the document now matches the thing it was built from. */
-    wp_document_mark_saved(&g_mac_doc);
-    /* No "document is new" flag to set: every paragraph format_txt_import
-       just built has layout == NULL, which relayout_document already
-       treats as needing a rebuild -- see g_content_width_twips's comment. */
+    if (format_txt_import(utf8, len, &new_doc) != WP_OK) return WP_FALSE;
+    /* The portable swap: frees the old document AND its undo journal and
+       resets the scheme. This shell used to do the swap by hand and
+       skipped the journal, so an Undo after Open replayed the previous
+       document's edits against freed memory. The new document's
+       paragraphs have layout == NULL, which relayout_document already
+       treats as needing a rebuild. */
+    wp_action_replace_document(&g_ctx, &new_doc);
+    return WP_TRUE;
 }
 
 static void load_sample_document(void)
@@ -361,6 +351,7 @@ static void do_file_open(void)
     plat_file *f;
     u32 size, read_len;
     u8 *buf;
+    wp_bool loaded = WP_FALSE;
 
     /* Opening replaces the whole document, so it asks before discarding
        unsaved work -- BEFORE the picker, so the writer is not made to
@@ -376,8 +367,16 @@ static void do_file_open(void)
     if (!wp_keymap_take_pending_path(fullpath, (u32)sizeof(fullpath))) {
         if (!run_sf_get_file(fullpath, (u32)sizeof(fullpath))) return;
     }
-    if (plat_file_open(fullpath, PLAT_FILE_READ, &f) != WP_OK) return;
-    if (plat_file_size(f, &size) != WP_OK) { plat_file_close(f); return; }
+    /* Every way this can fail now says so; it used to return quietly. */
+    if (plat_file_open(fullpath, PLAT_FILE_READ, &f) != WP_OK) {
+        wp_action_tell(&g_ctx, "Couldn't open that file");
+        return;
+    }
+    if (plat_file_size(f, &size) != WP_OK) {
+        plat_file_close(f);
+        wp_action_tell(&g_ctx, "Couldn't read that file");
+        return;
+    }
 
     buf = (u8 *)mem_alloc(size + 1);
     if (buf != NULL) {
@@ -389,27 +388,22 @@ static void do_file_open(void)
             if (format_ws_looks_like(buf, read_len)) {
                 wp_document ws_doc;
                 if (format_ws_import(buf, read_len, &ws_doc) == WP_OK) {
-                    if (g_ctx.doc_loaded) wp_document_free(&g_mac_doc);
-                    g_mac_doc = ws_doc;
-                    wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id,
-                                    &g_mac_doc, &g_mac_journal);
-                    (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_start(&g_mac_doc);
-                    g_ctx.doc_loaded = WP_TRUE;
-                    wp_document_mark_saved(&g_mac_doc);
+                    wp_action_replace_document(&g_ctx, &ws_doc);
+                    loaded = WP_TRUE;
                 }
             } else {
-                set_document_from_text(buf, read_len);
+                loaded = set_document_from_text(buf, read_len);
             }
         }
         mem_free(buf);
     }
     plat_file_close(f);
+    if (!loaded) wp_action_tell(&g_ctx, "Couldn't load that file");
 }
 
 static void do_file_save(void)
 {
     char fullpath[256];
-    plat_file *f;
     u32 needed;
     u8 *buf;
 
@@ -426,45 +420,17 @@ static void do_file_save(void)
 
     format_txt_export(&g_mac_doc, NULL, 0, &needed);
     buf = (u8 *)mem_alloc(needed);
-    if (buf == NULL) return;
+    if (buf == NULL) {
+        wp_action_tell(&g_ctx, "Not enough memory to save");
+        return;
+    }
 
     if (format_txt_export(&g_mac_doc, buf, needed, &needed) == WP_OK) {
-        if (plat_file_open(fullpath, PLAT_FILE_WRITE, &f) == WP_OK) {
-            plat_file_write(f, buf, needed);
-            plat_file_close(f);
-            /* Only now is the document really on disk. Marking it clean
-               any earlier would let a failed save quietly convince the
-               app there was nothing left to lose. */
-            wp_document_mark_saved(&g_mac_doc);
-        }
+        /* Marks the document saved only once the write has landed, and
+           says so when it has not. */
+        (void)wp_action_write_file(&g_ctx, fullpath, buf, needed, WP_TRUE);
     }
     mem_free(buf);
-}
-
-/* Cut/Paste operate on the whole document, matching platform/atari/
-   app_shell.c's/platform/amiga/app_shell.c's do_edit_cut/do_edit_paste
-   exactly (same "no selection model yet" scope note -- see actions.c's
-   act_edit_copy comment). Copy itself has a real portable handler
-   already (act_edit_copy in platform/common/actions.c). */
-static void do_edit_cut(void)
-{
-    static const char empty_text[] = "\n";
-    const wp_action *copy_act;
-
-    if (!g_ctx.doc_loaded) return;
-    copy_act = wp_action_find(WP_ACT_EDIT_COPY);
-    if (copy_act != NULL && copy_act->handler != NULL) copy_act->handler(&g_ctx);
-    set_document_from_text((const u8 *)empty_text, (u32)strlen(empty_text));
-}
-
-static void do_edit_paste(void)
-{
-    u8 buf[4096];
-    u32 out_len;
-
-    if (!g_ctx.doc_loaded) return;
-    if (plat_clipboard_get_text(buf, (u32)sizeof(buf), &out_len) != WP_OK) return;
-    set_document_from_text(buf, out_len);
 }
 
 /* Phase 5: opens the real help pager at the named node (falling back to
@@ -665,8 +631,6 @@ static void invoke_backend_action(wp_action_id id)
     switch (id) {
     case WP_ACT_FILE_OPEN:     do_file_open(); break;
     case WP_ACT_FILE_SAVE:     do_file_save(); break;
-    case WP_ACT_EDIT_CUT:      do_edit_cut(); break;
-    case WP_ACT_EDIT_PASTE:    do_edit_paste(); break;
     case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
     case WP_ACT_TOOLS_DICTATE:
         /* This backend has no message-dialog helper of its own -- every
@@ -943,10 +907,15 @@ static wp_bool mac_dispatch_key(wp_key_event ev)
 
     switch ((wp_keymap_result_kind)outcome.kind) {
     case WP_KEYMAP_RESULT_QUIT:
-        return WP_TRUE;
+        /* A scheme's quit (vi :q, ^KQ, C-x C-c ...) asks the same
+           unsaved-changes question File > Quit does; quit_requested,
+           returned below, is the answer. */
+        wp_action_request_quit(&g_ctx);
+        break;
     case WP_KEYMAP_RESULT_SAVE_QUIT:
         do_file_save();
-        return WP_TRUE;
+        wp_action_request_quit_after_save(&g_ctx);
+        break;
     case WP_KEYMAP_RESULT_ACTION:
         /* T172: an ex command may have named a file (":w foo", ":e foo").
            invoke_action carries no payload -- a menu pick has nothing to
@@ -1541,7 +1510,10 @@ void app_shell_run(void)
                     DragWindow(whichWindow, e.where, &qd.screenBits.bounds);
                     break;
                 case inGoAway:
-                    if (TrackGoAway(whichWindow, e.where)) g_quit = WP_TRUE;
+                    /* The close box asks about unsaved changes, as
+                       File > Quit does; quit_requested, checked after
+                       dispatch, is the answer. */
+                    if (TrackGoAway(whichWindow, e.where)) wp_action_request_quit(&g_ctx);
                     break;
                 case inContent:
                     if (whichWindow != FrontWindow()) SelectWindow(whichWindow);
@@ -1574,6 +1546,7 @@ void app_shell_run(void)
 
     if (g_ctx.doc_loaded) {
         wp_keymap_free(&g_ctx);
+        wp_undo_journal_free(&g_mac_journal);
         wp_document_free(&g_mac_doc);
     }
     if (g_help_doc_loaded) wp_help_doc_free(&g_help_doc);

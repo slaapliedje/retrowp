@@ -121,18 +121,12 @@ wp_bool wp_action_confirm_discard(wp_app_ctx *ctx)
  * that destroys the current text and THEN discovers it cannot allocate
  * a replacement would be the worst possible failure for a word
  * processor, and on a 1MB ST an allocation failure is a real
- * possibility, not a theoretical one.
- *
- * No "save your changes first?" prompt yet -- there is no dirty flag in
- * the document model to drive one. Worth having, and deliberately not
- * faked here. */
+ * possibility, not a theoretical one. */
 static wp_status act_file_new(wp_app_ctx *ctx)
 {
     wp_document fresh;
     u32 sec_idx, para_idx;
     wp_section *sec;
-    const wp_char_style *def_cs;
-    const wp_para_style *def_ps;
 
     if (ctx == NULL || ctx->doc == NULL || ctx->journal == NULL) return WP_ERR;
     if (!wp_action_confirm_discard(ctx)) return WP_OK;   /* the writer said no */
@@ -149,15 +143,32 @@ static wp_status act_file_new(wp_app_ctx *ctx)
     }
 
     /* Past this point nothing can fail, so the swap is safe to commit. */
-    wp_undo_journal_free(ctx->journal);
-    wp_document_free(ctx->doc);
-    *ctx->doc = fresh;
+    wp_action_replace_document(ctx, &fresh);
+    return WP_OK;
+}
+
+/* One swap for every path that loads a whole document -- New, Open,
+   startup -- on every backend. It used to be four hand-written copies,
+   and two of them (Amiga, Mac) never reset the undo journal: an Undo
+   after Open replayed the previous document's edits against memory that
+   had just been freed. One copy cannot drift like that. */
+void wp_action_replace_document(wp_app_ctx *ctx, wp_document *fresh)
+{
+    const wp_char_style *def_cs;
+    const wp_para_style *def_ps;
+
+    if (ctx->doc_loaded) {
+        wp_undo_journal_free(ctx->journal);
+        wp_document_free(ctx->doc);
+    }
+    *ctx->doc = *fresh;
     wp_undo_journal_init(ctx->journal);
 
     /* The active keymap scheme was holding a cursor, registers and
        possibly pending operator state for a document that no longer
-       exists -- reset it rather than resync it, exactly as
-       replace_document does on Open. */
+       exists -- reset it rather than resync it. wp_app_ctx_init already
+       ran wp_keymap_init once, so there is always something valid to
+       free here, even on the very first load. */
     wp_keymap_free(ctx);
     wp_keymap_init(ctx, (wp_keymap_id)ctx->keymap_id, ctx->doc, ctx->journal);
 
@@ -170,8 +181,9 @@ static wp_status act_file_new(wp_app_ctx *ctx)
     if (def_ps != NULL) ctx->align = def_ps->align;
 
     ctx->doc_loaded = WP_TRUE;
-    wp_document_mark_saved(ctx->doc);   /* empty and untouched, not "unsaved work" */
-    return WP_OK;
+    /* The document now matches what it was built from -- a file, or
+       nothing at all for New -- so there is no unsaved work in it. */
+    wp_document_mark_saved(ctx->doc);
 }
 
 static wp_status act_format_bold(wp_app_ctx *ctx)
@@ -263,27 +275,41 @@ static wp_status act_format_align(wp_app_ctx *ctx)
         if (cur == NULL) return WP_OK;
         style = *cur;
         style.align = ctx->align;
-        if (wp_document_pstyle_find_or_add(ctx->doc, &style, &handle) == WP_OK) {
+        /* Not journaled, so it marks the document modified itself -- but
+           only for a real change, or picking the alignment it already has
+           would make Quit ask about work that does not exist. */
+        if (wp_document_pstyle_find_or_add(ctx->doc, &style, &handle) == WP_OK &&
+            handle != para->style) {
             wp_paragraph_pstyle_set(para, handle);
+            wp_document_mark_modified(ctx->doc);
         }
     }
     return WP_OK;
 }
 
-/* Copy is fully portable: read-only, only touches plat_clipboard_*.
-   Cut and Paste both need to REPLACE the whole document (this app has
-   no selection-scoped clipboard yet -- see docs/atari-platform.md) and
-   trigger a backend-specific relayout/repaint afterward, which this
-   pass doesn't abstract; each backend supplies those two directly
-   (app_shell.c's existing do_edit_cut/do_edit_paste), consulted the
-   same backend-supplied way as FILE_OPEN/FILE_SAVE. */
-static wp_status act_edit_copy(wp_app_ctx *ctx)
+/* Edit > Copy / Cut / Paste.
+ *
+ * Copy and Cut still act on the WHOLE document -- there is no
+ * selection-scoped clipboard yet. Paste inserts at the cursor.
+ *
+ * All three are portable now. Cut and Paste used to be four per-backend
+ * copies that replaced the whole document, and between them they could
+ * lose it: Cut emptied the document whether or not the copy had worked,
+ * Paste threw the document away for whatever the clipboard held, and
+ * both then marked the result saved, so quitting afterwards did not
+ * warn either. Here both are ordinary journaled edits -- one undo step
+ * each, and they mark the document modified like any other edit.
+ * edit.c marks the touched paragraphs dirty, and every backend
+ * relayouts dirty paragraphs before its next paint. */
+
+/* Exports the whole document as plain text and puts it on the
+   clipboard. On success *out_text, when non-NULL, receives the exported
+   bytes for the caller to mem_free. */
+static wp_status copy_document(wp_app_ctx *ctx, u8 **out_text, u32 *out_len)
 {
     u32 needed;
     u8 *buf;
     wp_status st;
-
-    if (!ctx->doc_loaded) return WP_OK;
 
     format_txt_export(ctx->doc, NULL, 0, &needed);
     buf = (u8 *)mem_alloc(needed);
@@ -291,7 +317,110 @@ static wp_status act_edit_copy(wp_app_ctx *ctx)
 
     st = format_txt_export(ctx->doc, buf, needed, &needed);
     if (st == WP_OK) st = plat_clipboard_set_text(buf, needed);
-    mem_free(buf);
+    if (st == WP_OK && out_text != NULL) {
+        *out_text = buf;
+        *out_len = needed;
+    } else {
+        mem_free(buf);
+    }
+    return st;
+}
+
+/* Does the clipboard hold exactly text[0..len)? A backend may keep less
+   than it was handed and still report success: Atari, Amiga and Mac
+   convert through a 1 KB buffer and keep what fits, and a character the
+   native charset cannot hold comes back as '?'. Copy can live with that.
+   Cut cannot, because it is about to delete the original -- so it reads
+   the clipboard back rather than trusting the status. The buffer is one
+   byte longer than the text so a clipboard holding MORE shows up too. */
+static wp_bool clipboard_holds(const u8 *text, u32 len)
+{
+    u8 *back;
+    u32 back_len = 0;
+    wp_bool same;
+
+    back = (u8 *)mem_alloc(len + 1);
+    if (back == NULL) return WP_FALSE;
+    same = (wp_bool)(plat_clipboard_get_text(back, len + 1, &back_len) == WP_OK &&
+                     back_len == len && memcmp(back, text, len) == 0);
+    mem_free(back);
+    return same;
+}
+
+static wp_status act_edit_copy(wp_app_ctx *ctx)
+{
+    if (!ctx->doc_loaded) return WP_OK;
+    return copy_document(ctx, NULL, NULL);
+}
+
+static wp_status act_edit_cut(wp_app_ctx *ctx)
+{
+    u8 *text = NULL;
+    u32 len = 0;
+    wp_selection all;
+    wp_pos at;
+    wp_status st;
+
+    if (ctx == NULL || ctx->doc == NULL || ctx->journal == NULL) return WP_ERR;
+    if (!ctx->doc_loaded) return WP_OK;
+
+    st = copy_document(ctx, &text, &len);
+    if (st == WP_OK && !clipboard_holds(text, len)) st = WP_RANGE;
+    if (text != NULL) mem_free(text);
+    if (st != WP_OK) {
+        wp_action_tell(ctx, "Clipboard can't hold it all; nothing was cut");
+        return st;
+    }
+
+    all.anchor = wp_pos_doc_start(ctx->doc);
+    all.caret = wp_pos_doc_end(ctx->doc);
+    st = wp_edit_delete_selection(ctx->doc, ctx->journal, all, &at);
+    if (st == WP_OK) *wp_keymap_cursor(ctx) = at;
+    return st;
+}
+
+/* Static, not automatic: 4 KB is an impossible stack frame on two of
+   the targets -- an Amiga program started from the Shell gets a 4 KB
+   stack in total, and gem4xe gives an application 2 KB of bank $00 for
+   its stack and near data together. Nothing here recurses, and the
+   buffer holds nothing between calls. 4 KB is more than any backend's
+   clipboard returns. */
+static u8 g_paste_buf[4096];
+
+static wp_status act_edit_paste(wp_app_ctx *ctx)
+{
+    u32 len = 0, i, n;
+    wp_pos *cursor;
+    wp_pos at;
+    wp_status st;
+
+    if (ctx == NULL || ctx->doc == NULL || ctx->journal == NULL) return WP_ERR;
+    if (!ctx->doc_loaded) return WP_OK;
+    if (plat_clipboard_get_text(g_paste_buf, (u32)sizeof(g_paste_buf), &len) != WP_OK) return WP_OK;
+
+    /* Line endings to '\n', the only paragraph break wp_edit_paste_text
+       knows: CRLF from DOS, a bare CR from a Mac. Then drop one final
+       '\n', which ends the last line rather than starting a new one --
+       format_txt_import reads a file the same way, so a Cut followed by
+       a Paste gives back the document it took, not one with an extra
+       empty paragraph. */
+    n = 0;
+    for (i = 0; i < len; i++) {
+        if (g_paste_buf[i] == '\r') {
+            if (i + 1 < len && g_paste_buf[i + 1] == '\n') continue;
+            g_paste_buf[n++] = '\n';
+        } else {
+            g_paste_buf[n++] = g_paste_buf[i];
+        }
+    }
+    if (n > 0 && g_paste_buf[n - 1] == '\n') n--;
+    if (n == 0) return WP_OK;
+
+    cursor = wp_keymap_cursor(ctx);
+    wp_undo_group_begin(ctx->journal);
+    st = wp_edit_paste_text(ctx->doc, ctx->journal, *cursor, g_paste_buf, n, &at);
+    wp_undo_group_end(ctx->journal);
+    *cursor = at;   /* set even on failure: it is where the paste got to */
     return st;
 }
 
@@ -334,6 +463,47 @@ static wp_status act_file_quit(wp_app_ctx *ctx)
     return WP_OK;
 }
 
+/* Every other way out -- a scheme's own quit command (vi :q, WordStar
+   ^KQ, Emacs C-x C-c, ...), a window's close box -- used to leave at
+   once, without the question File > Quit asks. They come here instead. */
+void wp_action_request_quit(wp_app_ctx *ctx)
+{
+    (void)act_file_quit(ctx);
+}
+
+/* vi :wq and WordStar ^KX: the backend has just run its own Save. Leave
+   only if that save really landed. A cancelled picker or a failed write
+   both leave the document modified, and quitting then would throw away
+   exactly the work the writer asked to keep. */
+void wp_action_request_quit_after_save(wp_app_ctx *ctx)
+{
+    if (ctx->doc_loaded && wp_document_is_modified(ctx->doc)) return;
+    ctx->quit_requested = WP_TRUE;
+}
+
+/* The tail end of every backend's Save. plat_file_open for writing
+   truncates, so a write that fails halfway has already cost the old
+   file; the least this can do is say so, and leave the document marked
+   modified so nothing later assumes it is safe on disk. */
+wp_status wp_action_write_file(wp_app_ctx *ctx, const char *native_path,
+                                const u8 *buf, u32 len, wp_bool marks_saved)
+{
+    plat_file *f;
+    wp_status st;
+
+    st = plat_file_open(native_path, PLAT_FILE_WRITE, &f);
+    if (st == WP_OK) {
+        st = plat_file_write(f, buf, len);
+        plat_file_close(f);
+    }
+    if (st != WP_OK) {
+        wp_action_tell(ctx, "Couldn't save that file");
+        return st;
+    }
+    if (marks_saved) wp_document_mark_saved(ctx->doc);
+    return WP_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /* The registry                                                         */
 /* ------------------------------------------------------------------ */
@@ -357,7 +527,7 @@ static wp_status act_file_quit(wp_app_ctx *ctx)
    this would be a new required primitive on all four backends. A single
    "OK" option is the honest way to say something with what already
    exists everywhere. */
-static void dictate_message(wp_app_ctx *ctx, const char *title)
+void wp_action_tell(wp_app_ctx *ctx, const char *title)
 {
     const u8 *labels[1];
     u32 lens[1];
@@ -389,7 +559,7 @@ wp_status wp_action_dictate(wp_app_ctx *ctx)
     if (ctx == NULL || !ctx->doc_loaded) return WP_ERR;
 
     if (!offload_available()) {
-        dictate_message(ctx, "Dictate: no offload device connected");
+        wp_action_tell(ctx, "Dictate: no offload device connected");
         return WP_ERR;
     }
 
@@ -399,7 +569,7 @@ wp_status wp_action_dictate(wp_app_ctx *ctx)
        recording into a void for 15 seconds first. */
     if (offload_query(&caps) != WP_OK ||
         (caps.ops_supported & (1uL << (u32)OFFLOAD_DICTATE)) == 0) {
-        dictate_message(ctx, "This gateway doesn't offer Dictate");
+        wp_action_tell(ctx, "This gateway doesn't offer Dictate");
         return WP_UNSUPPORTED;
     }
 
@@ -432,12 +602,12 @@ wp_status wp_action_dictate(wp_app_ctx *ctx)
     req.timeout_ms = (u32)WP_DICTATE_TIMEOUT_MS;
 
     if (offload_submit(&req, &resp) != WP_OK) {
-        dictate_message(ctx, "Dictation failed or timed out");
+        wp_action_tell(ctx, "Dictation failed or timed out");
         return WP_ERR;
     }
     if (resp.status != OFFLOAD_OK) {
         offload_response_free(&resp);
-        dictate_message(ctx, "The gateway couldn't transcribe that");
+        wp_action_tell(ctx, "The gateway couldn't transcribe that");
         return WP_ERR;
     }
     /* Empty payload with OFFLOAD_OK is "listened, heard nothing" -- a
@@ -447,7 +617,7 @@ wp_status wp_action_dictate(wp_app_ctx *ctx)
        writer to distrust a feature that worked correctly. */
     if (resp.result_len == 0) {
         offload_response_free(&resp);
-        dictate_message(ctx, "Heard nothing -- nothing inserted");
+        wp_action_tell(ctx, "Heard nothing -- nothing inserted");
         return WP_OK;
     }
 
@@ -462,7 +632,7 @@ wp_status wp_action_dictate(wp_app_ctx *ctx)
     if (st == WP_OK) *cursor = new_pos;
     offload_response_free(&resp);
 
-    if (st != WP_OK) dictate_message(ctx, "Couldn't insert the dictated text");
+    if (st != WP_OK) wp_action_tell(ctx, "Couldn't insert the dictated text");
     return st;
 }
 
@@ -471,9 +641,9 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_FILE_OPEN,         WP_MENU_FILE,   "Open",           "Ctrl+O", 0x0F, NULL, NULL },
     { WP_ACT_FILE_SAVE,         WP_MENU_FILE,   "Save",           "Ctrl+S", 0x13, NULL, NULL },
     { WP_ACT_FILE_QUIT,         WP_MENU_FILE,   "Quit",           "Ctrl+Q", 0x11, act_file_quit, NULL },
-    { WP_ACT_EDIT_CUT,          WP_MENU_EDIT,   "Cut",            "Ctrl+X", 0x18, NULL, NULL },
+    { WP_ACT_EDIT_CUT,          WP_MENU_EDIT,   "Cut",            "Ctrl+X", 0x18, act_edit_cut, NULL },
     { WP_ACT_EDIT_COPY,         WP_MENU_EDIT,   "Copy",           "Ctrl+C", 0x03, act_edit_copy, NULL },
-    { WP_ACT_EDIT_PASTE,        WP_MENU_EDIT,   "Paste",          "Ctrl+V", 0x16, NULL, NULL },
+    { WP_ACT_EDIT_PASTE,        WP_MENU_EDIT,   "Paste",          "Ctrl+V", 0x16, act_edit_paste, NULL },
     { WP_ACT_EDIT_UNDO,       WP_MENU_EDIT,   "Undo",           0,        0,    act_edit_undo, NULL },
     { WP_ACT_FORMAT_BOLD,       WP_MENU_FORMAT, "Bold",           "Ctrl+B", 0x02, act_format_bold, NULL },
     { WP_ACT_FORMAT_ITALIC,     WP_MENU_FORMAT, "Italic",         "Ctrl+I", 0x09, act_format_italic, NULL },

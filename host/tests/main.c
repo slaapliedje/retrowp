@@ -279,6 +279,16 @@ void test_actions_format_bold_toggles_style_flags(void);
 void test_actions_file_quit_sets_flag(void);
 void test_actions_edit_copy_sets_clipboard(void);
 void test_actions_format_size_uses_dialog_choice(void);
+void test_actions_cut_then_paste_gives_the_document_back(void);
+void test_actions_cut_is_one_undo_step(void);
+void test_actions_cut_keeps_a_document_the_clipboard_cannot_hold(void);
+void test_actions_paste_inserts_at_the_cursor(void);
+void test_actions_request_quit_asks_when_modified(void);
+void test_actions_save_quit_stays_when_the_save_did_not_land(void);
+void test_actions_replace_document_resets_the_journal(void);
+void test_actions_write_file_marks_saved_only_when_it_lands(void);
+void test_actions_align_marks_the_document_modified(void);
+void test_actions_cut_with_an_image_paragraph(void);
 
 /* test_statusline.c */
 void test_statusline_paint_does_not_crash_with_various_views(void);
@@ -432,6 +442,9 @@ void test_docmodel_pstyle_and_cstyle_set(void);
 
 /* test_image.c (M15 Phase 1) */
 void test_image_add_get_roundtrip(void);
+void test_image_merge_absorbing_a_picture_undoes_to_the_picture(void);
+void test_image_merge_text_onto_a_picture_keeps_the_text(void);
+void test_image_undoing_enter_on_a_picture_keeps_the_picture(void);
 void test_image_add_survives_growth(void);
 void test_edit_insert_image_splits_paragraph(void);
 void test_edit_insert_image_undo_redo(void);
@@ -812,6 +825,16 @@ static const test_case g_cases[] = {
     { "actions_file_quit_sets_flag", test_actions_file_quit_sets_flag },
     { "actions_edit_copy_sets_clipboard", test_actions_edit_copy_sets_clipboard },
     { "actions_format_size_uses_dialog_choice", test_actions_format_size_uses_dialog_choice },
+    { "actions_cut_then_paste_gives_the_document_back", test_actions_cut_then_paste_gives_the_document_back },
+    { "actions_cut_is_one_undo_step", test_actions_cut_is_one_undo_step },
+    { "actions_cut_keeps_a_document_the_clipboard_cannot_hold", test_actions_cut_keeps_a_document_the_clipboard_cannot_hold },
+    { "actions_paste_inserts_at_the_cursor", test_actions_paste_inserts_at_the_cursor },
+    { "actions_request_quit_asks_when_modified", test_actions_request_quit_asks_when_modified },
+    { "actions_save_quit_stays_when_the_save_did_not_land", test_actions_save_quit_stays_when_the_save_did_not_land },
+    { "actions_replace_document_resets_the_journal", test_actions_replace_document_resets_the_journal },
+    { "actions_write_file_marks_saved_only_when_it_lands", test_actions_write_file_marks_saved_only_when_it_lands },
+    { "actions_align_marks_the_document_modified", test_actions_align_marks_the_document_modified },
+    { "actions_cut_with_an_image_paragraph", test_actions_cut_with_an_image_paragraph },
 
     { "statusline_paint_does_not_crash_with_various_views", test_statusline_paint_does_not_crash_with_various_views },
 
@@ -936,6 +959,9 @@ static const test_case g_cases[] = {
     { "docmodel_pstyle_and_cstyle_set", test_docmodel_pstyle_and_cstyle_set },
 
     { "image_add_get_roundtrip", test_image_add_get_roundtrip },
+    { "image_merge_absorbing_a_picture_undoes_to_the_picture", test_image_merge_absorbing_a_picture_undoes_to_the_picture },
+    { "image_merge_text_onto_a_picture_keeps_the_text", test_image_merge_text_onto_a_picture_keeps_the_text },
+    { "image_undoing_enter_on_a_picture_keeps_the_picture", test_image_undoing_enter_on_a_picture_keeps_the_picture },
     { "image_add_survives_growth", test_image_add_survives_growth },
     { "edit_insert_image_splits_paragraph", test_edit_insert_image_splits_paragraph },
     { "edit_insert_image_undo_redo", test_edit_insert_image_undo_redo },

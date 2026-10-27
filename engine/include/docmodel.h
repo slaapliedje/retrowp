@@ -236,6 +236,10 @@ wp_status wp_document_init(wp_document *doc);
    New). */
 wp_bool   wp_document_is_modified(const wp_document *doc);
 void      wp_document_mark_saved(wp_document *doc);
+/* For a change made outside the journal -- a paragraph's alignment set
+   straight on its style handle -- so quitting afterwards still warns.
+   Journaled edits set the flag themselves and never need this. */
+void      wp_document_mark_modified(wp_document *doc);
 void      wp_document_free(wp_document *doc);
 
 /* -- Style table management (T1.1) ------------------------------------- */

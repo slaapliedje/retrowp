@@ -2,6 +2,7 @@
 #include <string.h>
 #include "test.h"
 #include "actions.h"
+#include "format_txt.h"
 
 static void build_doc_with_text(wp_document *doc, const char *text)
 {
@@ -289,4 +290,269 @@ void test_actions_bold_on_an_all_bold_selection_clears_it(void)
     wp_keymap_free(&ctx);
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
+}
+
+/* -- Data-loss guards: Cut, Paste, quitting, saving ------------------- */
+
+static void doc_text(const wp_document *doc, char *out, u32 cap)
+{
+    u32 len = 0;
+
+    ASSERT_TRUE(format_txt_export(doc, (u8 *)out, cap - 1, &len) == WP_OK);
+    out[len] = '\0';
+}
+
+static void ctx_setup(wp_document *doc, wp_undo_journal *journal, wp_app_ctx *ctx,
+                      const char *text)
+{
+    build_doc_with_text(doc, text);
+    wp_undo_journal_init(journal);
+    wp_app_ctx_init(ctx, WP_KEYMAP_VI, doc, journal);
+    ctx->doc_loaded = WP_TRUE;
+}
+
+static void ctx_teardown(wp_document *doc, wp_undo_journal *journal, wp_app_ctx *ctx)
+{
+    wp_keymap_free(ctx);
+    wp_undo_journal_free(journal);
+    wp_document_free(doc);
+}
+
+void test_actions_cut_then_paste_gives_the_document_back(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    ctx_setup(&doc, &journal, &ctx, "Hello World");
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "\n");
+    /* A Cut is unsaved work, not a fresh load: quitting must still warn. */
+    ASSERT_TRUE(wp_document_is_modified(&doc));
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_PASTE)->handler(&ctx) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Hello World\n");   /* no extra empty paragraph */
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_cut_is_one_undo_step(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    ctx_setup(&doc, &journal, &ctx, "Hello World");
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Hello World\n");
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* The host clipboard refuses more than 4096 bytes. Cut used to empty the
+   document anyway, and that is how a long document was lost on DOS. */
+void test_actions_cut_keeps_a_document_the_clipboard_cannot_hold(void)
+{
+    static char big[5001];
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+
+    memset(big, 'a', sizeof(big) - 1);
+    big[sizeof(big) - 1] = '\0';
+    ctx_setup(&doc, &journal, &ctx, big);
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) != WP_OK);
+    ASSERT_EQ_U32(wp_section_paragraph_get(wp_document_section_get(&doc, 0), 0)->runs[0].text.length,
+                  5000);
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_paste_inserts_at_the_cursor(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    ctx_setup(&doc, &journal, &ctx, "AB");
+    wp_keymap_cursor(&ctx)->offset = 1;
+    ASSERT_TRUE(plat_clipboard_set_text((const u8 *)"x\r\ny", 4) == WP_OK);
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_PASTE)->handler(&ctx) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Ax\nyB\n");   /* CRLF became one paragraph break */
+    ASSERT_TRUE(wp_document_is_modified(&doc));
+
+    /* One undo step takes the whole paste back out. */
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "AB\n");
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* The host's plat_dialog_choice always takes the default, and Cancel is
+   the default of the unsaved-changes question -- so on the host a
+   modified document is a writer who said "keep it". */
+void test_actions_request_quit_asks_when_modified(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+
+    ctx_setup(&doc, &journal, &ctx, "Hello");
+    wp_action_request_quit(&ctx);
+    ASSERT_TRUE(ctx.quit_requested);   /* clean: leaves without asking */
+
+    ctx.quit_requested = WP_FALSE;
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, wp_pos_doc_start(&doc),
+                                    (const u8 *)"x", 1, NULL) == WP_OK);
+    wp_action_request_quit(&ctx);
+    ASSERT_TRUE(!ctx.quit_requested);  /* modified: the answer was Cancel */
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_save_quit_stays_when_the_save_did_not_land(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+
+    ctx_setup(&doc, &journal, &ctx, "Hello");
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, wp_pos_doc_start(&doc),
+                                    (const u8 *)"x", 1, NULL) == WP_OK);
+    wp_action_request_quit_after_save(&ctx);
+    ASSERT_TRUE(!ctx.quit_requested);
+
+    wp_document_mark_saved(&doc);       /* what a save that landed does */
+    wp_action_request_quit_after_save(&ctx);
+    ASSERT_TRUE(ctx.quit_requested);
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_replace_document_resets_the_journal(void)
+{
+    wp_document doc, fresh;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    ctx_setup(&doc, &journal, &ctx, "Old");
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, wp_pos_doc_start(&doc),
+                                    (const u8 *)"x", 1, NULL) == WP_OK);
+    ASSERT_TRUE(wp_undo_can_undo(&journal));
+
+    build_doc_with_text(&fresh, "New");
+    wp_action_replace_document(&ctx, &fresh);
+
+    /* An Undo here used to replay "insert x" against the freed document. */
+    ASSERT_TRUE(!wp_undo_can_undo(&journal));
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "New\n");
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_write_file_marks_saved_only_when_it_lands(void)
+{
+    static const char good[] = "build/test_actions_write_file.txt";
+    static const char bad[] = "build/no-such-directory/x.txt";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_bool exists = WP_FALSE;
+
+    ctx_setup(&doc, &journal, &ctx, "Hello");
+    wp_document_mark_modified(&doc);
+
+    ASSERT_TRUE(wp_action_write_file(&ctx, bad, (const u8 *)"Hello\n", 6, WP_TRUE) != WP_OK);
+    ASSERT_TRUE(wp_document_is_modified(&doc));
+
+    ASSERT_TRUE(wp_action_write_file(&ctx, good, (const u8 *)"Hello\n", 6, WP_FALSE) == WP_OK);
+    ASSERT_TRUE(wp_document_is_modified(&doc));   /* an export, not a save */
+
+    ASSERT_TRUE(wp_action_write_file(&ctx, good, (const u8 *)"Hello\n", 6, WP_TRUE) == WP_OK);
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+    ASSERT_TRUE(plat_file_exists(good, &exists) == WP_OK && exists);
+    plat_file_delete(good);
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_align_marks_the_document_modified(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+
+    ctx_setup(&doc, &journal, &ctx, "Hello");
+    /* format_txt_import gives every paragraph the default style; the
+       bare fixture leaves handle 0, which Align skips as unstyled. */
+    wp_paragraph_pstyle_set(wp_section_paragraph_get(wp_document_section_get(&doc, 0), 0),
+                            doc.default_pstyle);
+
+    /* The host dialog keeps the current choice: the same alignment
+       again is not a change. */
+    ASSERT_TRUE(wp_action_find(WP_ACT_FORMAT_ALIGN)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+
+    /* The dialog defaults to ctx.align, so this picks Center. */
+    ctx.align = WP_ALIGN_CENTER;
+    ASSERT_TRUE(wp_action_find(WP_ACT_FORMAT_ALIGN)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(wp_document_is_modified(&doc));
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* Cut deletes through wp_edit_delete_selection, which was written for
+   text. A document with a picture in it must still come out of Cut
+   empty, and one Undo must bring every paragraph back -- the picture
+   included, since the clipboard only ever holds the text. */
+void test_actions_cut_with_an_image_paragraph(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_image_desc desc;
+    wp_pos pos;
+    char text[64];
+    u32 before;
+
+    ctx_setup(&doc, &journal, &ctx, "Hello World");
+    memset(&desc, 0, sizeof(desc));
+    desc.width_px = 8;
+    desc.height_px = 8;
+    desc.display_width_twips = 120;
+    desc.display_height_twips = 120;
+    desc.palette_count = 2;
+    desc.palette[1][0] = desc.palette[1][1] = desc.palette[1][2] = 255;
+    pos.section = 0; pos.paragraph = 0; pos.run = 0; pos.offset = 5;
+    ASSERT_TRUE(wp_edit_insert_image(&doc, &journal, pos, &desc) == WP_OK);
+    before = wp_document_section_get(&doc, 0)->para_count;
+    ASSERT_EQ_U32(before, 3);   /* "Hello", the picture, " World" */
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(wp_document_section_get(&doc, 0)->para_count, 1);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "\n");
+
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(wp_document_section_get(&doc, 0)->para_count, before);
+    ASSERT_TRUE(wp_section_paragraph_get(wp_document_section_get(&doc, 0), 1)->kind ==
+                (u8)WP_PARA_IMAGE);
+
+    ctx_teardown(&doc, &journal, &ctx);
 }

@@ -227,6 +227,7 @@ wp_status wp_edit_merge_paragraph(wp_document *doc, wp_undo_journal *journal,
     wp_paragraph *absorbed;
     wp_pos local_out;
     wp_pstyle absorbed_style;
+    wp_image absorbed_image, survivor_image;
     wp_op *op;
 
     /* Capture the absorbed (second) paragraph's own style BEFORE the
@@ -240,6 +241,20 @@ wp_status wp_edit_merge_paragraph(wp_document *doc, wp_undo_journal *journal,
     if (absorbed == NULL) return WP_RANGE;
     absorbed_style = absorbed->style;
 
+    /* A merge can delete a picture (see wp_document_merge_paragraph_raw):
+       the absorbed paragraph if it is one, or the survivor if text is
+       joined onto it. Neither can be read back afterwards, so each
+       handle is journaled -- 0, never a real image, means "was text". */
+    absorbed_image = (absorbed->kind == (u8)WP_PARA_IMAGE) ? absorbed->image : 0;
+    survivor_image = 0;
+    {
+        const wp_paragraph *survivor = wp_section_paragraph_get(sec, paragraph);
+        if (survivor != NULL && survivor->kind == (u8)WP_PARA_IMAGE &&
+            absorbed->kind != (u8)WP_PARA_IMAGE && absorbed->run_count > 0) {
+            survivor_image = survivor->image;
+        }
+    }
+
     st = wp_document_merge_paragraph_raw(doc, section, paragraph, &local_out);
     if (st != WP_OK) return st;
 
@@ -250,10 +265,12 @@ wp_status wp_edit_merge_paragraph(wp_document *doc, wp_undo_journal *journal,
     op->at = local_out;             /* the join point -- exactly what a
                                         re-split needs to undo this */
     op->text.offset = 0;            /* unused for this kind */
-    op->text.length = 0;
+    op->text.length = survivor_image;   /* the same field-reuse trick
+                                            INSERT_IMAGE plays with
+                                            style_before */
     op->style_before = absorbed_style;  /* restored onto the resurrected
                                             paragraph on undo */
-    op->style_after = 0;
+    op->style_after = absorbed_image;
 
     commit_edit(doc, journal);
     op->next = journal->undo_top;
@@ -588,6 +605,19 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
            recover it after the fact. */
         resurrected = wp_section_paragraph_get(sec, op->at.paragraph + 1);
         wp_paragraph_pstyle_set(resurrected, (wp_pstyle)op->style_before);
+        /* And either picture the merge deleted. The re-split left both
+           paragraphs as text; a picture's has no runs, which the split
+           at the join point already guarantees. */
+        if (op->style_after != 0) {
+            resurrected->kind = (u8)WP_PARA_IMAGE;
+            resurrected->image = (wp_image)op->style_after;
+        }
+        if (op->text.length != 0) {
+            wp_paragraph *survivor = wp_section_paragraph_get(sec, op->at.paragraph);
+            survivor->kind = (u8)WP_PARA_IMAGE;
+            survivor->image = (wp_image)op->text.length;
+            survivor->layout_dirty = WP_TRUE;
+        }
     } else if (op->kind == (u8)WP_OP_INSERT_IMAGE) {
         /* Inverse of insert: remove the image paragraph this created (at
            at.paragraph + 1) and merge the split-off tail paragraph back

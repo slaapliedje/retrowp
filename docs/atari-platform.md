@@ -751,6 +751,15 @@ narrowing, not an oversight -- the alternative (a real selection UI) is a
 substantially bigger task that belongs with real interactive editing
 polish, not this milestone.
 
+*Since superseded.* Cut and Paste are portable actions now
+(`platform/common/actions.c`), and both are ordinary undoable edits. Cut
+still takes the whole document. But it first reads the clipboard back,
+and refuses if the clipboard didn't keep everything: this backend's
+clipboard converts through a 1 KB buffer and keeps only what fits. Paste
+inserts at the cursor instead of replacing the document. The old pair
+could lose a document, and then marked the result saved, so quitting
+afterwards didn't warn.
+
 **Keyboard editing is scoped to a single paragraph.** `wp_dispatch_key()`
 handles Backspace (delete before cursor) and printable ASCII (insert at
 cursor) by threading a tracked `wp_pos` cursor through `wp_edit_insert_text`/

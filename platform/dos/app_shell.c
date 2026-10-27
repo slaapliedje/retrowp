@@ -250,46 +250,23 @@ static void relayout_document(i32 content_width_twips)
 
 /* Replaces the currently-open document with new_doc (already built and
    owned by the caller), resetting the cursor to end-of-document and the
-   undo journal to empty -- mirrors platform/atari/app_shell.c's own
-   replace_document exactly. */
+   undo journal to empty. */
 static void replace_document(wp_document *new_doc, i32 content_width_twips)
 {
-    const wp_char_style *def_cs;
-    const wp_para_style *def_ps;
-
-    if (g_ctx.doc_loaded) {
-        wp_undo_journal_free(&g_journal);
-        wp_document_free(&g_doc);
-    }
-
-    g_doc = *new_doc;
-    g_ctx.doc_loaded = WP_TRUE;
-    wp_undo_journal_init(&g_journal);
+    /* The swap itself is the portable one every backend shares; what is
+       left is the relayout and the cursor-at-the-end habit. */
+    wp_action_replace_document(&g_ctx, new_doc);
     relayout_document(content_width_twips);
-
-    wp_keymap_free(&g_ctx);
-    wp_keymap_init(&g_ctx, (wp_keymap_id)g_ctx.keymap_id, &g_doc, &g_journal);
     (*wp_keymap_cursor(&g_ctx)) = wp_pos_doc_end(&g_doc);
-
-    def_cs = wp_document_cstyle_get(&g_doc, g_doc.default_cstyle);
-    g_ctx.style_flags = def_cs->flags;
-    g_ctx.current_size_twips = def_cs->size_twips;
-
-    def_ps = wp_document_pstyle_get(&g_doc, g_doc.default_pstyle);
-    g_ctx.align = def_ps->align;
-
-    /* Every load path -- Open, the startup sample, Paste -- lands here,
-       and none leaves unsaved WORK behind: the document now matches the
-       thing it was built from. */
-    wp_document_mark_saved(&g_doc);
 }
 
-static void set_document_from_text(const u8 *utf8, u32 len, i32 content_width_twips)
+static wp_bool set_document_from_text(const u8 *utf8, u32 len, i32 content_width_twips)
 {
     wp_document new_doc;
 
-    if (format_txt_import(utf8, len, &new_doc) != WP_OK) return;
+    if (format_txt_import(utf8, len, &new_doc) != WP_OK) return WP_FALSE;
     replace_document(&new_doc, content_width_twips);
+    return WP_TRUE;
 }
 
 static void load_sample_document(i32 content_width_twips)
@@ -695,45 +672,6 @@ static void redraw_screen(void)
 /* Actions                                                              */
 /* ------------------------------------------------------------------ */
 
-static void do_edit_copy(void)
-{
-    /* Whole-document copy -- no selection model yet, mirrors every
-       other backend's own identical "no selection model yet" scope
-       (platform/common/actions.c's own act_edit_copy does the same for
-       the portable actions; File-scope Cut/Paste below are backend-
-       supplied since they touch the document, not just the clipboard). */
-    u32 needed;
-    u8 *buf;
-
-    if (!g_ctx.doc_loaded) return;
-    format_txt_export(&g_doc, NULL, 0, &needed);
-    buf = (u8 *)mem_alloc(needed);
-    if (buf == NULL) return;
-    if (format_txt_export(&g_doc, buf, needed, &needed) == WP_OK) {
-        plat_clipboard_set_text(buf, needed);
-    }
-    mem_free(buf);
-}
-
-static void do_edit_cut(void)
-{
-    static const char empty_text[] = "\n";
-
-    if (!g_ctx.doc_loaded) return;
-    do_edit_copy();
-    set_document_from_text((const u8 *)empty_text, (u32)strlen(empty_text), g_content_width_twips);
-}
-
-static void do_edit_paste(void)
-{
-    u8 buf[4096];
-    u32 out_len;
-
-    if (!g_ctx.doc_loaded) return;
-    if (plat_clipboard_get_text(buf, (u32)sizeof(buf), &out_len) != WP_OK) return;
-    set_document_from_text(buf, out_len, g_content_width_twips);
-}
-
 /* Free-text filename entry on the status row -- platform.h's own
    plat_dialog_choice explicitly has "no free-text entry variant"
    (nothing else in this project needed one before File Open/Save), so
@@ -785,6 +723,7 @@ static void do_file_open(void)
     plat_file *f;
     u32 size, read_len;
     u8 *buf;
+    wp_bool loaded = WP_FALSE;
 
     /* Opening replaces the whole document, so it asks before discarding
        unsaved work -- BEFORE the picker, so the writer is not made to
@@ -801,8 +740,16 @@ static void do_file_open(void)
         if (!prompt_for_filename("Open: ", path, (u32)sizeof(path))) return;
     }
 
-    if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) return;
-    if (plat_file_size(f, &size) != WP_OK) { plat_file_close(f); return; }
+    /* Every way this can fail now says so; it used to return quietly. */
+    if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) {
+        wp_action_tell(&g_ctx, "Couldn't open that file");
+        return;
+    }
+    if (plat_file_size(f, &size) != WP_OK) {
+        plat_file_close(f);
+        wp_action_tell(&g_ctx, "Couldn't read that file");
+        return;
+    }
 
     buf = (u8 *)mem_alloc(size + 1);
     if (buf != NULL) {
@@ -815,20 +762,21 @@ static void do_file_open(void)
                 wp_document ws_doc;
                 if (format_ws_import(buf, read_len, &ws_doc) == WP_OK) {
                     replace_document(&ws_doc, g_content_width_twips);
+                    loaded = WP_TRUE;
                 }
             } else {
-                set_document_from_text(buf, read_len, g_content_width_twips);
+                loaded = set_document_from_text(buf, read_len, g_content_width_twips);
             }
         }
         mem_free(buf);
     }
     plat_file_close(f);
+    if (!loaded) wp_action_tell(&g_ctx, "Couldn't load that file");
 }
 
 static void do_file_save(void)
 {
     char path[64];
-    plat_file *f;
     u32 needed;
     u8 *buf;
 
@@ -845,17 +793,15 @@ static void do_file_save(void)
 
     format_txt_export(&g_doc, NULL, 0, &needed);
     buf = (u8 *)mem_alloc(needed);
-    if (buf == NULL) return;
+    if (buf == NULL) {
+        wp_action_tell(&g_ctx, "Not enough memory to save");
+        return;
+    }
     if (format_txt_export(&g_doc, buf, needed, &needed) != WP_OK) { mem_free(buf); return; }
 
-    if (plat_file_open(path, PLAT_FILE_WRITE, &f) == WP_OK) {
-        plat_file_write(f, buf, needed);
-        plat_file_close(f);
-        /* Only now is the document really on disk. Marking it clean any
-           earlier would let a failed save quietly convince the app there
-           was nothing left to lose. */
-        wp_document_mark_saved(&g_doc);
-    }
+    /* Marks the document saved only once the write has landed, and says
+       so when it has not. */
+    (void)wp_action_write_file(&g_ctx, path, buf, needed, WP_TRUE);
     mem_free(buf);
 }
 
@@ -1086,8 +1032,6 @@ static void invoke_backend_action(wp_action_id id)
     switch (id) {
     case WP_ACT_FILE_OPEN:         do_file_open(); break;
     case WP_ACT_FILE_SAVE:         do_file_save(); break;
-    case WP_ACT_EDIT_CUT:          do_edit_cut(); break;
-    case WP_ACT_EDIT_PASTE:        do_edit_paste(); break;
     case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
     case WP_ACT_TOOLS_DICTATE:
         if (!ensure_offload()) {
@@ -1193,10 +1137,14 @@ static wp_bool dos_dispatch_key(void)
 
     switch ((wp_keymap_result_kind)outcome.kind) {
     case WP_KEYMAP_RESULT_QUIT:
-        return WP_TRUE;
+        /* A scheme's quit (vi :q, ^KQ, C-x C-c ...) asks the same
+           unsaved-changes question File > Quit does. */
+        wp_action_request_quit(&g_ctx);
+        return g_ctx.quit_requested;
     case WP_KEYMAP_RESULT_SAVE_QUIT:
         do_file_save();
-        return WP_TRUE;
+        wp_action_request_quit_after_save(&g_ctx);
+        return g_ctx.quit_requested;
     case WP_KEYMAP_RESULT_ACTION:
         /* T172: an ex command may have named a file (":w foo", ":e foo").
            invoke_action carries no payload -- a menu pick has nothing to
@@ -1207,8 +1155,10 @@ static wp_bool dos_dispatch_key(void)
            into a later unrelated File > Open. */
         wp_keymap_set_pending_path(outcome.path, (u32)outcome.path_len);
         invoke_action((wp_action_id)outcome.action_id);
-        if (outcome.action_id == (u8)WP_ACT_FILE_QUIT) return WP_TRUE;
-        return WP_FALSE;
+        /* The flag, not the action id: Quit sets it only if the writer
+           did not cancel the unsaved-changes question. Returning WP_TRUE
+           for the id alone quit even after "Cancel". */
+        return g_ctx.quit_requested;
     case WP_KEYMAP_RESULT_NONE:
     case WP_KEYMAP_RESULT_BEEP:
     default:
