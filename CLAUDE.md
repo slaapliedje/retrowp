@@ -54,10 +54,15 @@ headers — so a backend reaching back into this engine fails to compile. No bui
 includes an application can catch that, because there the application's headers are already
 on the path. Absent cross-toolchains skip, not fail.
 
-Known broken here and NOT caused by anything in this repo: the Retro68 `ld` is linked
-against Boost 1.91 while the system has 1.92, so the Mac CMake build fails at CMake's own
-compiler test, before it reads a line of this project. `make seam-check-mac` still passes,
-because compiling is fine and only linking is broken.
+The Mac build works again: the Retro68 `ld`/Boost mismatch that used to fail CMake's own
+compiler test went away when the toolchain was rebuilt (2026-09-01), and
+`cmake --build build/mac` now links RETROWP.APPL, mac_smoke.APPL and rwpci_launcher.APPL.
+What is broken, and NOT by anything in this repo, is the Mac *gate*: as of 2026-10-27
+`host/tools/ci_mac_matrix.sh` fails on both ROMs because BasiliskII boots the fixture to
+the Finder and the Startup Items launcher never runs, so no marker file appears. It fails
+the same way on the previous commit; `make gem4xe-check` ("no read finished") is in the
+same state. Run a red Mac or gem4xe gate on the previous commit before treating it as a
+regression -- the Atari, Amiga and DOS matrices are the ones that currently mean something.
 
 ## Architecture Layers
 - `engine/`   Portable C. Document model, editing, layout, formats, offload client.
