@@ -9,6 +9,11 @@
 #include "viewport.h"
 #include "platform.h"
 
+/* Room for a native path in wp_app_ctx. Longer than any target needs
+   (8.3 names on the ST and DOS; AmigaDOS and the Mac stay well under)
+   and still small against test_keymap.c's sizeof(wp_app_ctx) ceiling. */
+#define WP_APP_PATH_MAX 256
+
 /* Shared application state threaded through the action registry
    (actions.h). This is real, in-scope refactor work, not incidental:
    before M8.5, every Atari handler (toggle_style_flag, change_font_size,
@@ -52,6 +57,14 @@ typedef struct wp_app_ctx {
                            view.line_px after wp_app_ctx_init and records
                            view.view_h_px in its painter; everything else is
                            shared code. */
+
+    char doc_path[WP_APP_PATH_MAX]; /* the file the document came from or was
+                                       last saved to, as a native path; "" for
+                                       a document that has no file yet (New,
+                                       the startup sample). Save writes here
+                                       without asking; Save As and Open
+                                       replace it. Kept by actions.c's file
+                                       flow, read by wp_action_document_name. */
 
     wp_bool doc_loaded;
     wp_bool quit_requested; /* WP_ACT_FILE_QUIT sets this; the backend's own event

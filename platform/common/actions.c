@@ -3,6 +3,8 @@
 #include "actions.h"
 #include "app_ctx.h"
 #include "format_txt.h"
+#include "format_rtf.h"
+#include "format_ws.h"
 #include "offload.h"
 #include "keymap.h"
 #include "editing.h"
@@ -172,8 +174,11 @@ void wp_action_replace_document(wp_app_ctx *ctx, wp_document *fresh)
     wp_keymap_free(ctx);
     wp_keymap_init(ctx, (wp_keymap_id)ctx->keymap_id, ctx->doc, ctx->journal);
     /* A new document starts at its top, however far down the old one
-       was scrolled. */
+       was scrolled, and has no file until a load or a save gives it
+       one -- so a Save after New asks for a name rather than writing
+       over the file the previous document came from. */
     wp_viewport_reset(&ctx->view);
+    ctx->doc_path[0] = '\0';
 
     def_cs = wp_document_cstyle_get(ctx->doc, ctx->doc->default_cstyle);
     if (def_cs != NULL) {
@@ -690,6 +695,7 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_FILE_NEW,        WP_MENU_FILE,   "New",            "Ctrl+N", 0x0E, act_file_new, NULL },
     { WP_ACT_FILE_OPEN,         WP_MENU_FILE,   "Open",           "Ctrl+O", 0x0F, NULL, NULL },
     { WP_ACT_FILE_SAVE,         WP_MENU_FILE,   "Save",           "Ctrl+S", 0x13, NULL, NULL },
+    { WP_ACT_FILE_SAVE_AS,      WP_MENU_FILE,   "Save As...",     "",       0,    NULL, NULL },
     { WP_ACT_FILE_QUIT,         WP_MENU_FILE,   "Quit",           "Ctrl+Q", 0x11, act_file_quit, NULL },
     { WP_ACT_EDIT_CUT,          WP_MENU_EDIT,   "Cut",            "Ctrl+X", 0x18, act_edit_cut, NULL },
     { WP_ACT_EDIT_COPY,         WP_MENU_EDIT,   "Copy",           "Ctrl+C", 0x03, act_edit_copy, NULL },
@@ -775,4 +781,182 @@ const wp_action *wp_action_find_by_shortcut(u8 ascii)
         if (g_wp_actions[i].shortcut_ascii == ascii) return &g_wp_actions[i];
     }
     return NULL;
+}
+
+/* ---- Files (see actions.h) ------------------------------------------ */
+
+wp_bool wp_path_ends_with_ci(const char *path, const char *suffix)
+{
+    u32 plen = (u32)strlen(path);
+    u32 slen = (u32)strlen(suffix);
+    u32 i;
+
+    if (plen < slen) return WP_FALSE;
+    for (i = 0; i < slen; i++) {
+        char a = path[plen - slen + i];
+        char b = suffix[i];
+
+        if (a >= 'a' && a <= 'z') a = (char)(a - 32);
+        if (b >= 'a' && b <= 'z') b = (char)(b - 32);
+        if (a != b) return WP_FALSE;
+    }
+    return WP_TRUE;
+}
+
+void wp_action_remember_path(wp_app_ctx *ctx, const char *native_path)
+{
+    u32 n = (u32)strlen(native_path);
+
+    /* A path too long to keep is not kept: the next Save asks again,
+       which beats saving to a truncated name. */
+    if (n >= (u32)WP_APP_PATH_MAX) {
+        ctx->doc_path[0] = '\0';
+        return;
+    }
+    memcpy(ctx->doc_path, native_path, n + 1);
+}
+
+const char *wp_action_document_name(const wp_app_ctx *ctx)
+{
+    const char *p = ctx->doc_path;
+    const char *name = p;
+
+    /* Every target's separator: '\\' on the ST and DOS, '/' and ':' on
+       AmigaDOS (SYS:Docs/a.txt), ':' on the Mac (Volume:a.txt). */
+    for (; *p != '\0'; p++) {
+        if (*p == '\\' || *p == '/' || *p == ':') name = p + 1;
+    }
+    return name;
+}
+
+wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image_sink *sink)
+{
+    plat_file *f;
+    u32 size = 0, read_len = 0;
+    u8 *buf;
+    wp_document fresh;
+    wp_status st;
+
+    if (plat_file_open(native_path, PLAT_FILE_READ, &f) != WP_OK) {
+        wp_action_tell(ctx, "Couldn't open that file");
+        return WP_ERR;
+    }
+    if (plat_file_size(f, &size) != WP_OK) {
+        plat_file_close(f);
+        wp_action_tell(ctx, "Couldn't read that file");
+        return WP_ERR;
+    }
+    buf = (u8 *)mem_alloc(size + 1);
+    if (buf == NULL) {
+        plat_file_close(f);
+        wp_action_tell(ctx, "Not enough memory to open that file");
+        return WP_NOMEM;
+    }
+    st = plat_file_read(f, buf, size, &read_len);
+    plat_file_close(f);
+
+    if (st == WP_OK) {
+        /* WordStar is detected by CONTENT, not by name: those files
+           carry no magic number and no reserved extension (.WS, .DOC,
+           none at all), and the sniff never claims plain ASCII. RTF is
+           by name: its "{\rtf" opening is as good as a magic number,
+           but a writer who names a plain-text file .rtf wants it read
+           as RTF and told what is wrong, not silently shown as text.
+           See docs/formats/. */
+        if (format_ws_looks_like(buf, read_len)) {
+            st = format_ws_import(buf, read_len, &fresh);
+        } else if (wp_path_ends_with_ci(native_path, ".RTF")) {
+            st = (sink != NULL) ? format_rtf_import_images(buf, read_len, &fresh, sink)
+                                : format_rtf_import(buf, read_len, &fresh);
+        } else {
+            st = format_txt_import(buf, read_len, &fresh);
+        }
+    }
+    mem_free(buf);
+
+    if (st != WP_OK) {
+        wp_action_tell(ctx, "Couldn't load that file; the document is unchanged");
+        return st;
+    }
+    wp_action_replace_document(ctx, &fresh);
+    wp_action_remember_path(ctx, native_path);
+    return WP_OK;
+}
+
+wp_status wp_action_save_file(wp_app_ctx *ctx, const char *native_path, wp_image_source *img_src)
+{
+    wp_bool as_rtf = wp_path_ends_with_ci(native_path, ".RTF");
+    u32 needed = 0;
+    u8 *buf;
+    wp_status st;
+
+    if (!ctx->doc_loaded) return WP_OK;
+
+    /* The two-call sizing convention every exporter shares. */
+    if (as_rtf) {
+        if (img_src != NULL) format_rtf_export_images(ctx->doc, NULL, 0, &needed, img_src);
+        else                 format_rtf_export(ctx->doc, NULL, 0, &needed);
+    } else {
+        format_txt_export(ctx->doc, NULL, 0, &needed);
+    }
+    buf = (u8 *)mem_alloc(needed > 0 ? needed : 1);
+    if (buf == NULL) {
+        wp_action_tell(ctx, "Not enough memory to save");
+        return WP_NOMEM;
+    }
+
+    if (as_rtf) {
+        st = (img_src != NULL) ? format_rtf_export_images(ctx->doc, buf, needed, &needed, img_src)
+                               : format_rtf_export(ctx->doc, buf, needed, &needed);
+    } else {
+        st = format_txt_export(ctx->doc, buf, needed, &needed);
+    }
+    if (st == WP_OK) {
+        st = wp_action_write_file(ctx, native_path, buf, needed, WP_TRUE);
+    } else {
+        wp_action_tell(ctx, "Couldn't build the file to save");
+    }
+    mem_free(buf);
+
+    if (st == WP_OK) wp_action_remember_path(ctx, native_path);
+    return st;
+}
+
+wp_status wp_action_file_open(wp_app_ctx *ctx, wp_pick_path_fn pick, wp_image_sink *sink)
+{
+    char path[WP_APP_PATH_MAX];
+
+    /* Opening replaces the whole document, so it asks before discarding
+       unsaved work -- BEFORE the picker, so the writer is not made to
+       choose a file and only then told they cannot have it. */
+    if (!wp_action_confirm_discard(ctx)) return WP_OK;
+
+    /* An ex command may already have named the file (":e foo"); then
+       the picker is skipped, which is the whole point: never leave the
+       keyboard to name a file. */
+    if (!wp_keymap_take_pending_path(path, (u32)sizeof(path))) {
+        if (pick == NULL || !pick(ctx, WP_FALSE, path, (u32)sizeof(path))) return WP_OK;
+    }
+    return wp_action_load_file(ctx, path, sink);
+}
+
+wp_bool wp_action_save_path(wp_app_ctx *ctx, wp_bool save_as, wp_pick_path_fn pick,
+                            char *path_out, u32 cap)
+{
+    if (!ctx->doc_loaded) return WP_FALSE;
+    if (wp_keymap_take_pending_path(path_out, cap)) return WP_TRUE;
+    if (!save_as && ctx->doc_path[0] != '\0' && strlen(ctx->doc_path) < cap) {
+        strcpy(path_out, ctx->doc_path);
+        return WP_TRUE;
+    }
+    return (wp_bool)(pick != NULL && pick(ctx, WP_TRUE, path_out, cap));
+}
+
+wp_status wp_action_file_save(wp_app_ctx *ctx, wp_bool save_as, wp_pick_path_fn pick,
+                              wp_image_source *img_src)
+{
+    char path[WP_APP_PATH_MAX];
+
+    if (!wp_action_save_path(ctx, save_as, pick, path, (u32)sizeof(path))) return WP_OK;
+    return wp_action_save_file(ctx, path, img_src);
 }

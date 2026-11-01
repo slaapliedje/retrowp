@@ -84,6 +84,8 @@ Visual mode selects a range of text to operate on.
   d  x         delete the selection
   y            yank the selection
   c            change the selection (delete, then Insert mode)
+  Ctrl+X Ctrl+C  cut or copy the selection to the system clipboard
+  Ctrl+V       paste over the selection (Edit menu does the same)
   Escape        cancel, back to Normal mode
 
 {Back to Main|Main}
@@ -93,7 +95,9 @@ Visual mode selects a range of text to operate on.
 Press ":" to open the command line, or "/" to search forward.
 
 Ex commands:
-  :w      save
+  :w      save (to the file the document came from, or ask for a name)
+  :w name save under that name, which the document then keeps
+  :e name open that file (.rtf is read as RTF, WordStar by content)
   :q      quit
   :wq     save and quit
   :x      save and quit (same as :wq)

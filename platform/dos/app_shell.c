@@ -671,6 +671,15 @@ static void redraw_screen(void)
         for (p = "RetroWP -- DOS (F1: Help, "; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
         for (p = quit_key_hint(); *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
         for (p = ": Quit)"; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
+        /* The document's file, so the writer knows where Save goes. */
+        {
+            const char *name = wp_action_document_name(&g_ctx);
+
+            if (name[0] != '\0') {
+                for (p = "  "; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
+                for (p = name; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
+            }
+        }
         while (n < DOS_SCREEN_COLS) title[n++] = ' ';
         title[n] = '\0';
 
@@ -766,92 +775,25 @@ static wp_bool prompt_for_filename(const char *prompt, char *out, u32 out_cap)
     }
 }
 
-static void do_file_open(void)
+/* The status-row prompt, in the shape the shared file flow wants. */
+static wp_bool dos_pick_path(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
 {
-    char path[64];
-    plat_file *f;
-    u32 size, read_len;
-    u8 *buf;
-    wp_bool loaded = WP_FALSE;
-
-    /* Opening replaces the whole document, so it asks before discarding
-       unsaved work -- BEFORE the picker, so the writer is not made to
-       choose a file and only then told they cannot have it. */
-    if (!wp_action_confirm_discard(&g_ctx)) return;
-
-    /* T172: an ex command may already have named the file (":w foo" /
-       ":e foo"), in which case the native picker is skipped entirely --
-       that is the whole point: never leave the keyboard to name a file.
-       Everything below this line is unchanged and already path-driven,
-       including format selection by extension, so ":w notes.rtf" saves
-       RTF exactly as picking that name in the requester would. */
-    if (!wp_keymap_take_pending_path(path, (u32)sizeof(path))) {
-        if (!prompt_for_filename("Open: ", path, (u32)sizeof(path))) return;
-    }
-
-    /* Every way this can fail now says so; it used to return quietly. */
-    if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) {
-        wp_action_tell(&g_ctx, "Couldn't open that file");
-        return;
-    }
-    if (plat_file_size(f, &size) != WP_OK) {
-        plat_file_close(f);
-        wp_action_tell(&g_ctx, "Couldn't read that file");
-        return;
-    }
-
-    buf = (u8 *)mem_alloc(size + 1);
-    if (buf != NULL) {
-        if (plat_file_read(f, buf, size, &read_len) == WP_OK) {
-            /* WordStar is detected by CONTENT, not by name -- those
-               files carry no magic number and no reserved extension.
-               The sniff never claims plain ASCII. See
-               docs/formats/wordstar.md. */
-            if (format_ws_looks_like(buf, read_len)) {
-                wp_document ws_doc;
-                if (format_ws_import(buf, read_len, &ws_doc) == WP_OK) {
-                    replace_document(&ws_doc, g_content_width_twips);
-                    loaded = WP_TRUE;
-                }
-            } else {
-                loaded = set_document_from_text(buf, read_len, g_content_width_twips);
-            }
-        }
-        mem_free(buf);
-    }
-    plat_file_close(f);
-    if (!loaded) wp_action_tell(&g_ctx, "Couldn't load that file");
+    WP_UNUSED(ctx);
+    return prompt_for_filename(save ? "Save: " : "Open: ", out, cap);
 }
 
-static void do_file_save(void)
+static void do_file_open(void)
 {
-    char path[64];
-    u32 needed;
-    u8 *buf;
+    /* The whole flow -- the unsaved-changes question, a name from an ex
+       command or the prompt, the format by content and name (WordStar,
+       RTF, plain text), the swap, the remembered name -- is shared
+       (actions.c). The title row shows the name (redraw_screen). */
+    (void)wp_action_file_open(&g_ctx, dos_pick_path, NULL);
+}
 
-    if (!g_ctx.doc_loaded) return;
-    /* T172: an ex command may already have named the file (":w foo" /
-       ":e foo"), in which case the native picker is skipped entirely --
-       that is the whole point: never leave the keyboard to name a file.
-       Everything below this line is unchanged and already path-driven,
-       including format selection by extension, so ":w notes.rtf" saves
-       RTF exactly as picking that name in the requester would. */
-    if (!wp_keymap_take_pending_path(path, (u32)sizeof(path))) {
-        if (!prompt_for_filename("Save: ", path, (u32)sizeof(path))) return;
-    }
-
-    format_txt_export(&g_doc, NULL, 0, &needed);
-    buf = (u8 *)mem_alloc(needed);
-    if (buf == NULL) {
-        wp_action_tell(&g_ctx, "Not enough memory to save");
-        return;
-    }
-    if (format_txt_export(&g_doc, buf, needed, &needed) != WP_OK) { mem_free(buf); return; }
-
-    /* Marks the document saved only once the write has landed, and says
-       so when it has not. */
-    (void)wp_action_write_file(&g_ctx, path, buf, needed, WP_TRUE);
-    mem_free(buf);
+static void do_file_save(wp_bool save_as)
+{
+    (void)wp_action_file_save(&g_ctx, save_as, dos_pick_path, NULL);
 }
 
 static wp_bool g_dos_offload_init_attempted = WP_FALSE;
@@ -1080,7 +1022,8 @@ static void invoke_backend_action(wp_action_id id)
 
     switch (id) {
     case WP_ACT_FILE_OPEN:         do_file_open(); break;
-    case WP_ACT_FILE_SAVE:         do_file_save(); break;
+    case WP_ACT_FILE_SAVE:         do_file_save(WP_FALSE); break;
+    case WP_ACT_FILE_SAVE_AS:      do_file_save(WP_TRUE); break;
     case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
     case WP_ACT_TOOLS_DICTATE:
         if (!ensure_offload()) {
@@ -1191,7 +1134,7 @@ static wp_bool dos_dispatch_key(void)
         wp_action_request_quit(&g_ctx);
         return g_ctx.quit_requested;
     case WP_KEYMAP_RESULT_SAVE_QUIT:
-        do_file_save();
+        do_file_save(WP_FALSE);
         wp_action_request_quit_after_save(&g_ctx);
         return g_ctx.quit_requested;
     case WP_KEYMAP_RESULT_ACTION:

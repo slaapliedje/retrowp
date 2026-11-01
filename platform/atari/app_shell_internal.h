@@ -215,7 +215,10 @@
    change, and wp_menu_tree_selfcheck walks that chain. */
 #define WP_MENU_OBJ_FILE_NEW             45
 #define WP_MENU_OBJ_EDIT_UNDO            46
-#define WP_MENU_OBJ_COUNT        47
+/* File > Save As. Appended, like New and Undo: array order is nothing
+   to the AES. OF_LASTOB moves to this final object. */
+#define WP_MENU_OBJ_FILE_SAVE_AS         47
+#define WP_MENU_OBJ_COUNT        48
 
 extern WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 

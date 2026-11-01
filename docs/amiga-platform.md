@@ -897,7 +897,8 @@ than Atari's own `.HYP` research spike was.
 - Known gap: Spellcheck stays a no-op (a local, file-based dictionary
   feature with no offload dependency at all, so it was never in T9.3's
   scope, and this app has no dictionary file on its fixture yet); RTF
-  file support isn't wired into Open/Save yet (plain text only); Grammar
+  Open/Save arrived later with the shared file flow in `actions.c`
+  (by extension, text only -- no image sink on this backend yet); Grammar
   Check is a reduced-scope report-only version, not Atari's interactive
   apply loop (see Phase 4's own notes above). The Help menu action now
   opens the real help viewer as of Phase 6 (see Phase 6's own notes

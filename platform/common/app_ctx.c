@@ -18,6 +18,7 @@ void wp_app_ctx_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
     ctx->style_flags = 0;
 
     wp_viewport_init(&ctx->view, NULL);
+    ctx->doc_path[0] = '\0';
 
     ctx->doc_loaded = WP_FALSE;
     ctx->quit_requested = WP_FALSE;

@@ -146,10 +146,10 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_DESK_DUMMY5,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 20, 1 },
     { WP_MENU_OBJ_DESK_DUMMY6,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 20, 1 },
     { WP_MENU_OBJ_DESK_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  7, 20, 1 },
-    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_NEW,    WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 6,  0, 8,  4 },
-    { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 8,  1 },
-    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 8,  1 },
-    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  3, 8,  1 },
+    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_NEW,    WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 6,  0, 12, 5 },
+    { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 12, 1 },
+    { WP_MENU_OBJ_FILE_SAVE_AS,  -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 12, 1 },
+    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  4, 12, 1 },
     { WP_MENU_OBJ_TOOLS_BOX,     WP_MENU_OBJ_EDIT_UNDO,   WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 12, 0, 8,  4 },
     { WP_MENU_OBJ_EDIT_COPY,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 8,  1 },
     { WP_MENU_OBJ_EDIT_PASTE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 8,  1 },
@@ -183,12 +183,18 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
        child of the File box, so its ob_next is Open, not the box -- only
        the LAST sibling in a chain wraps back to its parent. OF_LASTOB
        lives here now, on the final array entry, and nowhere else. */
-    { WP_MENU_OBJ_FILE_OPEN,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  0, 8,  1 },
+    { WP_MENU_OBJ_FILE_OPEN,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  0, 12, 1 },
     /* Edit > Undo, appended for the same reason File > New above was:
        array position is nothing to the AES, and renumbering is what has
        broken this tree twice. First child of the Edit box, so its
        ob_next is Cut. OF_LASTOB lives here now. */
-    { WP_MENU_OBJ_EDIT_CUT,      -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  0, 8,  1 }
+    { WP_MENU_OBJ_EDIT_CUT,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  0, 8,  1 },
+    /* File > Save As, appended for the same reason as New above: the
+       AES walks ob_next, not array order. Third in the File chain, so
+       its ob_next is Quit (y 3, Quit moved to y 4, the box to five rows
+       and twelve columns for the longer label). OF_LASTOB lives here
+       now, on the final array entry, and nowhere else. */
+    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  3, 12, 1 }
 };
 
 /* T169: how many text fragments the paint loop has actually drawn since
@@ -206,6 +212,7 @@ static WP_AES_NEAR char g_text_tools[] = " Tools ";
 static WP_AES_NEAR char g_text_new[]   = "  New";
 static WP_AES_NEAR char g_text_open[]  = "  Open";
 static WP_AES_NEAR char g_text_save[]  = "  Save";
+static WP_AES_NEAR char g_text_save_as[] = "  Save As...";
 static WP_AES_NEAR char g_text_quit[]  = "  Quit";
 static WP_AES_NEAR char g_text_undo[]  = "  Undo";
 static WP_AES_NEAR char g_text_cut[]   = "  Cut";
@@ -325,6 +332,7 @@ void wp_menu_tree_init(short wcell, short hcell,
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_NEW],  g_text_new);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_OPEN],  g_text_open);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE],  g_text_save);
+    OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS], g_text_save_as);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_QUIT],  g_text_quit);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO],  g_text_undo);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_CUT],  g_text_cut);
@@ -701,8 +709,10 @@ wp_bool wp_menu_tree_selfcheck(void)
 
     if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_next != WP_MENU_OBJ_FILE_SAVE) return WP_FALSE;
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_OPEN], g_text_open)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_next != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_next != WP_MENU_OBJ_FILE_SAVE_AS) return WP_FALSE;
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE], g_text_save)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_next != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS], g_text_save_as)) return WP_FALSE;
     if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_next != WP_MENU_OBJ_FILE_BOX) return WP_FALSE;
     if ((wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_QUIT], g_text_quit)) return WP_FALSE;
@@ -1787,6 +1797,7 @@ static void do_odt_open(const char *fullpath)
         atari_image_sink_init(&sink);
         if (format_rtf_import_images(resp.result, resp.result_len, &new_doc, &sink) == WP_OK) {
             replace_document(&new_doc, g_content_width_twips);
+            wp_action_remember_path(&g_ctx, fullpath);
         } else {
             form_alert(1, FA_ERROR "[The gateway's reply couldn't be read|as a document.][ OK ]");
         }
@@ -1840,89 +1851,72 @@ static void do_odt_pdf_save(const char *fullpath, u8 format_id)
 
     /* ODT reads back in, so it is a save; PDF does not, so it is an
        export and the document stays modified. */
-    (void)wp_action_write_file(&g_ctx, fullpath, resp.result, resp.result_len,
-                                (wp_bool)(format_id == (u8)WP_ATARI_FORMAT_ODT));
+    if (wp_action_write_file(&g_ctx, fullpath, resp.result, resp.result_len,
+                             (wp_bool)(format_id == (u8)WP_ATARI_FORMAT_ODT)) == WP_OK &&
+        format_id == (u8)WP_ATARI_FORMAT_ODT) {
+        wp_action_remember_path(&g_ctx, fullpath);
+    }
     offload_response_free(&resp);
+}
+
+static short g_window_handle = -1; /* the document window, for its title */
+
+/* fsel_input, in the shape the shared file flow wants. */
+static wp_bool atari_pick_path(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
+{
+    char path[128];
+    char fname[16];
+
+    WP_UNUSED(ctx);
+    /* "*.*" (not "*.TXT") so RTF/ODT files are visible too. */
+    strcpy(path, "C:\\*.*");
+    strcpy(fname, save ? "UNTITLED.TXT" : "");
+    return run_file_selector(path, fname, out, cap);
+}
+
+/* The window title carries the document's name, so the writer knows
+   where Save will go; set only when it changed (wind_set redraws). */
+static void atari_show_document_name(void)
+{
+    static char shown[WP_APP_PATH_MAX];
+    static char title[48];
+    const char *name = wp_action_document_name(&g_ctx);
+
+    if (g_window_handle < 0 || strcmp(shown, name) == 0) return;
+    strcpy(shown, name);
+    strcpy(title, "RetroWP");
+    if (name[0] != '\0') {
+        strcat(title, " - ");
+        strncat(title, name, sizeof(title) - strlen(title) - 1);
+    }
+    wind_set_str(g_window_handle, WF_NAME, title);
 }
 
 static void do_file_open(void)
 {
-    char path[128];
-    char fname[16];
-    char fullpath[144];
-    plat_file *f;
-    u32 size, read_len;
-    u8 *buf;
-    wp_bool loaded = WP_FALSE;
+    char fullpath[WP_APP_PATH_MAX];
+    wp_image_sink sink;
 
     /* Opening replaces the whole document, so it asks before discarding
        unsaved work -- BEFORE the file picker, so the writer is not made
        to choose a file and only then told they cannot have it. */
     if (!wp_action_confirm_discard(&g_ctx)) return;
 
-    /* T172: an ex command may already have named the file (":w foo" /
-       ":e foo"), in which case the native picker is skipped entirely --
-       that is the whole point: never leave the keyboard to name a file.
-       Everything below this line is unchanged and already path-driven,
-       including format selection by extension, so ":w notes.rtf" saves
-       RTF exactly as picking that name in the requester would. */
-    if (!wp_keymap_take_pending_path(fullpath, (u32)sizeof(fullpath))) {
-        /* "*.*" (not "*.TXT") so RTF/ODT files are visible too -- see
-           str_ends_with_ci above for how the format is actually picked. */
-        strcpy(path, "C:\\*.*");
-        fname[0] = '\0';
-        if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
-    }
+    /* An ex command may already have named the file (":e foo"); then no
+       picker. ODT goes through the gateway and stays this backend's own;
+       everything else -- WordStar by content, RTF by name, plain text
+       otherwise -- is the shared loader (actions.c), handed this
+       backend's image sink so RTF pictures land in the cache. */
+    if (!wp_keymap_take_pending_path(fullpath, (u32)sizeof(fullpath)) &&
+        !atari_pick_path(&g_ctx, WP_FALSE, fullpath, (u32)sizeof(fullpath))) return;
 
     if (str_ends_with_ci(fullpath, ".ODT")) {
         do_odt_open(fullpath);
         return;
     }
 
-    /* Every way this can fail now says so. It used to return quietly,
-       which on a slow floppy looks exactly like "still loading". */
-    if (plat_file_open(fullpath, PLAT_FILE_READ, &f) != WP_OK) {
-        form_alert(1, FA_ERROR "[Couldn't open that file.][ OK ]");
-        return;
-    }
-    if (plat_file_size(f, &size) != WP_OK) {
-        plat_file_close(f);
-        form_alert(1, FA_ERROR "[Couldn't read that file.][ OK ]");
-        return;
-    }
-
-    buf = (u8 *)mem_alloc(size + 1);
-    if (buf != NULL) {
-        if (plat_file_read(f, buf, size, &read_len) == WP_OK) {
-                /* WordStar is detected by CONTENT, not by name: those
-                   files carry no magic number and no reserved extension
-                   -- commonly .WS, .DOC (colliding with Word), or none
-                   at all. The sniff is conservative and never claims
-                   plain ASCII, which is what WordStar's own
-                   non-document mode produced. See
-                   docs/formats/wordstar.md. */
-            if (format_ws_looks_like(buf, read_len)) {
-                wp_document ws_doc;
-                if (format_ws_import(buf, read_len, &ws_doc) == WP_OK) {
-                    replace_document(&ws_doc, g_content_width_twips);
-                    loaded = WP_TRUE;
-                }
-            } else if (str_ends_with_ci(fullpath, ".RTF")) {
-                wp_document new_doc;
-                wp_image_sink sink;
-                atari_image_sink_init(&sink);
-                if (format_rtf_import_images(buf, read_len, &new_doc, &sink) == WP_OK) {
-                    replace_document(&new_doc, g_content_width_twips);
-                    loaded = WP_TRUE;
-                }
-            } else {
-                loaded = set_document_from_text(buf, read_len, g_content_width_twips);
-            }
-        }
-        mem_free(buf);
-    }
-    plat_file_close(f);
-    if (!loaded) form_alert(1, FA_ERROR "[Couldn't load that file.|The document is unchanged.][ OK ]");
+    atari_image_sink_init(&sink);
+    (void)wp_action_load_file(&g_ctx, fullpath, &sink);
 }
 
 /* Hands the RTF exporter one image's pixels, a row at a time.
@@ -1957,29 +1951,16 @@ static wp_status atari_read_image_row(void *user, wp_span blob_path, u32 offset,
     return st;
 }
 
-static void do_file_save(void)
+static void do_file_save(wp_bool save_as)
 {
-    char path[128];
-    char fname[16];
-    char fullpath[144];
-    u32 needed;
-    u8 *buf;
-    wp_bool as_rtf;
+    char fullpath[WP_APP_PATH_MAX];
     wp_image_source img_src;
 
-    if (!g_ctx.doc_loaded) return;
-
-    /* T172: an ex command may already have named the file (":w foo" /
-       ":e foo"), in which case the native picker is skipped entirely --
-       that is the whole point: never leave the keyboard to name a file.
-       Everything below this line is unchanged and already path-driven,
-       including format selection by extension, so ":w notes.rtf" saves
-       RTF exactly as picking that name in the requester would. */
-    if (!wp_keymap_take_pending_path(fullpath, (u32)sizeof(fullpath))) {
-        strcpy(path, "C:\\*.*");
-        strcpy(fname, "UNTITLED.TXT");
-        if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
-    }
+    /* A pending ex-command name (":w foo"), else the remembered one
+       (unless this is Save As), else the selector; nothing to do when
+       cancelled. ODT and PDF go through the gateway and stay this
+       backend's own; the rest is the shared exporter (actions.c). */
+    if (!wp_action_save_path(&g_ctx, save_as, atari_pick_path, fullpath, (u32)sizeof(fullpath))) return;
 
     if (str_ends_with_ci(fullpath, ".ODT")) {
         do_odt_pdf_save(fullpath, (u8)WP_ATARI_FORMAT_ODT);
@@ -1990,27 +1971,9 @@ static void do_file_save(void)
         return;
     }
 
-    as_rtf = str_ends_with_ci(fullpath, ".RTF");
     img_src.read = atari_read_image_row;
     img_src.user = NULL;
-    if (as_rtf) {
-        format_rtf_export_images(&g_doc, NULL, 0, &needed, &img_src);
-    } else {
-        format_txt_export(&g_doc, NULL, 0, &needed);
-    }
-    buf = (u8 *)mem_alloc(needed);
-    if (buf == NULL) {
-        form_alert(1, FA_ERROR "[Not enough memory to save.][ OK ]");
-        return;
-    }
-
-    if ((as_rtf ? format_rtf_export_images(&g_doc, buf, needed, &needed, &img_src)
-                : format_txt_export(&g_doc, buf, needed, &needed)) == WP_OK) {
-        /* Marks the document saved only once the write has landed, and
-           says so when it has not. */
-        (void)wp_action_write_file(&g_ctx, fullpath, buf, needed, WP_TRUE);
-    }
-    mem_free(buf);
+    (void)wp_action_save_file(&g_ctx, fullpath, &img_src);
 }
 
 /* Spell Check: like everything else that touches the whole document
@@ -4301,7 +4264,8 @@ static void invoke_backend_action(short window_handle, VdiHdl vdi, wp_action_id 
 
     switch (id) {
     case WP_ACT_FILE_OPEN:         do_file_open(); break;
-    case WP_ACT_FILE_SAVE:         do_file_save(); break;
+    case WP_ACT_FILE_SAVE:         do_file_save(WP_FALSE); break;
+    case WP_ACT_FILE_SAVE_AS:      do_file_save(WP_TRUE); break;
     case WP_ACT_TOOLS_SPELLCHECK:  do_spell_check(); break;
     case WP_ACT_TOOLS_THESAURUS:   do_thesaurus(); break;
     case WP_ACT_TOOLS_GRAMMARCHECK: do_grammar_check(); break;
@@ -4378,6 +4342,7 @@ static void invoke_action(short window_handle, VdiHdl vdi, wp_action_id id)
     } else {
         invoke_backend_action(window_handle, vdi, id);
     }
+    atari_show_document_name(); /* New, Open, Save and Save As all change it */
 }
 
 wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key, short kstate)
@@ -4443,7 +4408,7 @@ wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key, short kstate
         wp_action_request_quit(&g_ctx);
         break;
     case WP_KEYMAP_RESULT_SAVE_QUIT:
-        do_file_save();
+        do_file_save(WP_FALSE);
         wp_action_request_quit_after_save(&g_ctx);
         break;
     case WP_KEYMAP_RESULT_ACTION:
@@ -4488,6 +4453,7 @@ static const wp_menu_action_pair g_menu_actions[] = {
     { WP_MENU_OBJ_FILE_NEW,           WP_ACT_FILE_NEW },
     { WP_MENU_OBJ_FILE_OPEN,          WP_ACT_FILE_OPEN },
     { WP_MENU_OBJ_FILE_SAVE,          WP_ACT_FILE_SAVE },
+    { WP_MENU_OBJ_FILE_SAVE_AS,       WP_ACT_FILE_SAVE_AS },
     { WP_MENU_OBJ_FILE_QUIT,          WP_ACT_FILE_QUIT },
     { WP_MENU_OBJ_EDIT_UNDO,          WP_ACT_EDIT_UNDO },
     { WP_MENU_OBJ_EDIT_CUT,           WP_ACT_EDIT_CUT },
@@ -5014,6 +4980,7 @@ void app_shell_run(void)
        document; wp_dispatch_message turns their WM_ARROWED/WM_VSLID
        into viewport moves and redraw_window keeps the slider honest. */
     window_handle = wind_create_grect(NAME | MOVER | CLOSER | SIZER | VSLIDE | UPARROW | DNARROW, &desk);
+    g_window_handle = window_handle;
     wind_set_str(window_handle, WF_NAME, "RetroWP");
     wind_open_grect(window_handle, &desk);
 

@@ -4,6 +4,7 @@
 
 #include "types.h"
 #include "app_ctx.h"
+#include "format_rtf.h"
 
 /* Single canonical action registry (M8.5), replacing what was
    previously two independently-maintained switch statements in
@@ -34,6 +35,7 @@ typedef enum {
     WP_ACT_FILE_NEW = 0,
     WP_ACT_FILE_OPEN,
     WP_ACT_FILE_SAVE,
+    WP_ACT_FILE_SAVE_AS,
     WP_ACT_FILE_QUIT,
     WP_ACT_EDIT_CUT,
     WP_ACT_EDIT_COPY,
@@ -178,5 +180,69 @@ wp_status wp_action_write_file(struct wp_app_ctx *ctx, const char *native_path,
    the one dialog primitive every backend implements. Keep it short:
    Amiga shows it as a requester title. */
 void wp_action_tell(struct wp_app_ctx *ctx, const char *msg);
+
+/* ---- Files ------------------------------------------------------------
+   The whole of File > Open / Save / Save As except the picker, which is
+   the one genuinely native part. Every backend used to carry its own copy
+   of the read-sniff-import and export-write sequences, and they drifted:
+   three of the four could not open RTF (it came up as raw markup) and
+   wrote plain text whatever the name said, and none remembered the file
+   it was editing, so every Save was a Save As. Here the format follows
+   the name and the content the same way everywhere -- WordStar by sniff,
+   .RTF by extension, plain text otherwise -- and the path is kept in
+   ctx->doc_path. */
+
+/* The backend's native file picker. Fills path_out (cap bytes, NUL-
+   terminated) with a full native path and returns WP_TRUE, or WP_FALSE
+   when the writer cancelled. `save` picks the Save flavour. */
+typedef wp_bool (*wp_pick_path_fn)(struct wp_app_ctx *ctx, wp_bool save,
+                                   char *path_out, u32 cap);
+
+/* Reads native_path into a fresh document and makes it THE document
+   (wp_action_replace_document), then remembers the path. RTF pictures go
+   through `sink` when one is given (format_rtf_import_images) and are
+   dropped otherwise. Every failure is told to the writer and leaves the
+   document and the remembered path as they were. Does not ask about
+   unsaved work: the caller does, before its picker. */
+wp_status wp_action_load_file(struct wp_app_ctx *ctx, const char *native_path,
+                              wp_image_sink *sink);
+
+/* Exports by the name's extension (.rtf is RTF, anything else plain
+   text), writes through wp_action_write_file (so the document is marked
+   saved only once the bytes are on disk) and remembers the path. RTF
+   pictures come from `img_src` when given, else they are left out. */
+wp_status wp_action_save_file(struct wp_app_ctx *ctx, const char *native_path,
+                              wp_image_source *img_src);
+
+/* File > Open, whole: the unsaved-changes question, then a name from a
+   pending ex command (":e name") or the picker, then wp_action_load_file.
+   WP_OK when nothing was done (declined, cancelled). */
+wp_status wp_action_file_open(struct wp_app_ctx *ctx, wp_pick_path_fn pick,
+                              wp_image_sink *sink);
+
+/* Where a Save goes: a pending ex-command name (":w name") first; else,
+   unless save_as, the remembered name; else the picker. WP_FALSE means
+   there is nothing to do -- no document, or the writer cancelled. Split
+   out from wp_action_file_save for a backend that wants a look at the
+   name before the shared exporter sees it (the ST sends .ODT and .PDF to
+   its gateway). */
+wp_bool wp_action_save_path(struct wp_app_ctx *ctx, wp_bool save_as, wp_pick_path_fn pick,
+                            char *path_out, u32 cap);
+
+/* File > Save (save_as false) or Save As (true), whole. */
+wp_status wp_action_file_save(struct wp_app_ctx *ctx, wp_bool save_as, wp_pick_path_fn pick,
+                              wp_image_source *img_src);
+
+/* For a backend that loaded or saved the document by a route of its own
+   (the ST's ODT round trip through the gateway). */
+void wp_action_remember_path(struct wp_app_ctx *ctx, const char *native_path);
+
+/* The remembered path's last component -- what a title bar shows -- or
+   "" when the document has no file. */
+const char *wp_action_document_name(const struct wp_app_ctx *ctx);
+
+/* Case-insensitive "ends with", for extensions: wp_path_ends_with_ci(p,
+   ".RTF") matches "notes.rtf" and "NOTES.RTF" alike. */
+wp_bool wp_path_ends_with_ci(const char *path, const char *suffix);
 
 #endif /* WP_ACTIONS_H */

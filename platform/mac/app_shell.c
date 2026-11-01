@@ -346,92 +346,46 @@ static wp_bool run_sf_put_file(char *out_path, u32 out_cap)
     return build_full_path(reply.vRefNum, reply.fName, out_path, out_cap);
 }
 
-static void do_file_open(void)
+/* Standard File, in the shape the shared file flow wants. */
+static wp_bool mac_pick_path(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
 {
-    char fullpath[256];
-    plat_file *f;
-    u32 size, read_len;
-    u8 *buf;
-    wp_bool loaded = WP_FALSE;
-
-    /* Opening replaces the whole document, so it asks before discarding
-       unsaved work -- BEFORE the picker, so the writer is not made to
-       choose a file and only then told they cannot have it. */
-    if (!wp_action_confirm_discard(&g_ctx)) return;
-
-    /* T172: an ex command may already have named the file (":w foo" /
-       ":e foo"), in which case the native picker is skipped entirely --
-       that is the whole point: never leave the keyboard to name a file.
-       Everything below this line is unchanged and already path-driven,
-       including format selection by extension, so ":w notes.rtf" saves
-       RTF exactly as picking that name in the requester would. */
-    if (!wp_keymap_take_pending_path(fullpath, (u32)sizeof(fullpath))) {
-        if (!run_sf_get_file(fullpath, (u32)sizeof(fullpath))) return;
-    }
-    /* Every way this can fail now says so; it used to return quietly. */
-    if (plat_file_open(fullpath, PLAT_FILE_READ, &f) != WP_OK) {
-        wp_action_tell(&g_ctx, "Couldn't open that file");
-        return;
-    }
-    if (plat_file_size(f, &size) != WP_OK) {
-        plat_file_close(f);
-        wp_action_tell(&g_ctx, "Couldn't read that file");
-        return;
-    }
-
-    buf = (u8 *)mem_alloc(size + 1);
-    if (buf != NULL) {
-        if (plat_file_read(f, buf, size, &read_len) == WP_OK) {
-            /* WordStar is detected by CONTENT, not by name -- those
-               files carry no magic number and no reserved extension.
-               The sniff never claims plain ASCII. See
-               docs/formats/wordstar.md. */
-            if (format_ws_looks_like(buf, read_len)) {
-                wp_document ws_doc;
-                if (format_ws_import(buf, read_len, &ws_doc) == WP_OK) {
-                    wp_action_replace_document(&g_ctx, &ws_doc);
-                    loaded = WP_TRUE;
-                }
-            } else {
-                loaded = set_document_from_text(buf, read_len);
-            }
-        }
-        mem_free(buf);
-    }
-    plat_file_close(f);
-    if (!loaded) wp_action_tell(&g_ctx, "Couldn't load that file");
+    WP_UNUSED(ctx);
+    return save ? run_sf_put_file(out, cap) : run_sf_get_file(out, cap);
 }
 
-static void do_file_save(void)
+/* The window title carries the document's name, so the writer knows
+   where Save will go; set only when it changed. */
+static void mac_show_document_name(void)
 {
-    char fullpath[256];
-    u32 needed;
-    u8 *buf;
+    static char shown[WP_APP_PATH_MAX];
+    const char *name = wp_action_document_name(&g_ctx);
+    char title[64];
+    unsigned char ptitle[256];
 
-    if (!g_ctx.doc_loaded) return;
-    /* T172: an ex command may already have named the file (":w foo" /
-       ":e foo"), in which case the native picker is skipped entirely --
-       that is the whole point: never leave the keyboard to name a file.
-       Everything below this line is unchanged and already path-driven,
-       including format selection by extension, so ":w notes.rtf" saves
-       RTF exactly as picking that name in the requester would. */
-    if (!wp_keymap_take_pending_path(fullpath, (u32)sizeof(fullpath))) {
-        if (!run_sf_put_file(fullpath, (u32)sizeof(fullpath))) return;
+    if (strcmp(shown, name) == 0) return;
+    strcpy(shown, name);
+    strcpy(title, "RetroWP");
+    if (name[0] != '\0') {
+        strcat(title, " - ");
+        strncat(title, name, sizeof(title) - strlen(title) - 1);
     }
+    c_to_pstr(title, ptitle);
+    if (g_win != NULL) SetWTitle(g_win, ptitle);
+}
 
-    format_txt_export(&g_mac_doc, NULL, 0, &needed);
-    buf = (u8 *)mem_alloc(needed);
-    if (buf == NULL) {
-        wp_action_tell(&g_ctx, "Not enough memory to save");
-        return;
-    }
+static void do_file_open(void)
+{
+    /* The whole flow -- the unsaved-changes question, a name from an ex
+       command or Standard File, the format by content and name
+       (WordStar, RTF, plain text), the swap, the remembered name -- is
+       shared (actions.c). No image sink here yet: RTF pictures are
+       dropped on this backend. */
+    (void)wp_action_file_open(&g_ctx, mac_pick_path, NULL);
+}
 
-    if (format_txt_export(&g_mac_doc, buf, needed, &needed) == WP_OK) {
-        /* Marks the document saved only once the write has landed, and
-           says so when it has not. */
-        (void)wp_action_write_file(&g_ctx, fullpath, buf, needed, WP_TRUE);
-    }
-    mem_free(buf);
+static void do_file_save(wp_bool save_as)
+{
+    (void)wp_action_file_save(&g_ctx, save_as, mac_pick_path, NULL);
 }
 
 /* Phase 5: opens the real help pager at the named node (falling back to
@@ -631,7 +585,8 @@ static void invoke_backend_action(wp_action_id id)
 
     switch (id) {
     case WP_ACT_FILE_OPEN:     do_file_open(); break;
-    case WP_ACT_FILE_SAVE:     do_file_save(); break;
+    case WP_ACT_FILE_SAVE:     do_file_save(WP_FALSE); break;
+    case WP_ACT_FILE_SAVE_AS:  do_file_save(WP_TRUE); break;
     case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
     case WP_ACT_TOOLS_DICTATE:
         /* This backend has no message-dialog helper of its own -- every
@@ -674,6 +629,7 @@ static void invoke_action(const wp_action *act)
     } else {
         invoke_backend_action(act->id);
     }
+    mac_show_document_name(); /* New, Open, Save and Save As all change it */
 }
 
 /* -- Menu construction: folds g_wp_actions[] grouped by .group into
@@ -917,7 +873,7 @@ static wp_bool mac_dispatch_key(wp_key_event ev)
         wp_action_request_quit(&g_ctx);
         break;
     case WP_KEYMAP_RESULT_SAVE_QUIT:
-        do_file_save();
+        do_file_save(WP_FALSE);
         wp_action_request_quit_after_save(&g_ctx);
         break;
     case WP_KEYMAP_RESULT_ACTION:

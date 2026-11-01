@@ -783,3 +783,208 @@ void test_actions_cut_in_visual_line_takes_whole_paragraphs(void)
 
     ctx_teardown(&doc, &journal, &ctx);
 }
+
+/* ---- The shared file flow ----------------------------------------- */
+
+static u32 g_pick_calls;
+static const char *g_pick_path;
+
+static wp_bool pick_gives(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
+{
+    (void)ctx; (void)save;
+    g_pick_calls++;
+    if (strlen(g_pick_path) >= cap) return WP_FALSE;
+    strcpy(out, g_pick_path);
+    return WP_TRUE;
+}
+
+static wp_bool pick_cancels(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
+{
+    (void)ctx; (void)save; (void)out; (void)cap;
+    g_pick_calls++;
+    return WP_FALSE;
+}
+
+static void read_whole_file(const char *path, char *out, u32 cap)
+{
+    plat_file *f;
+    u32 n = 0;
+
+    ASSERT_TRUE(plat_file_open(path, PLAT_FILE_READ, &f) == WP_OK);
+    ASSERT_TRUE(plat_file_read(f, (u8 *)out, cap - 1, &n) == WP_OK);
+    plat_file_close(f);
+    out[n] = '\0';
+}
+
+void test_actions_save_file_picks_the_format_by_extension_and_remembers(void)
+{
+    static const char txt[] = "build/test_actions_doc.txt";
+    static const char rtf[] = "build/test_actions_doc.rtf";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char back[256];
+
+    ctx_setup(&doc, &journal, &ctx, "Hello World");
+    ASSERT_EQ_STR(wp_action_document_name(&ctx), "");
+
+    ASSERT_TRUE(wp_action_save_file(&ctx, txt, NULL) == WP_OK);
+    read_whole_file(txt, back, sizeof(back));
+    ASSERT_EQ_STR(back, "Hello World\n");
+    ASSERT_EQ_STR(ctx.doc_path, txt);
+    ASSERT_EQ_STR(wp_action_document_name(&ctx), "test_actions_doc.txt");
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+
+    ASSERT_TRUE(wp_action_save_file(&ctx, rtf, NULL) == WP_OK);
+    read_whole_file(rtf, back, sizeof(back));
+    ASSERT_TRUE(strncmp(back, "{\\rtf", 5) == 0);
+    ASSERT_EQ_STR(wp_action_document_name(&ctx), "test_actions_doc.rtf");
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_save_goes_to_the_remembered_name_without_asking(void)
+{
+    static const char first[] = "build/test_actions_pick1.txt";
+    static const char second[] = "build/test_actions_pick2.txt";
+    static const char named[] = "build/test_actions_pick3.txt";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_pos at;
+    char back[64];
+
+    ctx_setup(&doc, &journal, &ctx, "One");
+
+    /* No name yet: Save asks. */
+    g_pick_calls = 0;
+    g_pick_path = first;
+    ASSERT_TRUE(wp_action_file_save(&ctx, WP_FALSE, pick_gives, NULL) == WP_OK);
+    ASSERT_EQ_U32(g_pick_calls, 1);
+    ASSERT_EQ_STR(ctx.doc_path, first);
+
+    /* With a name: Save writes there and asks nothing. */
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, *wp_keymap_cursor(&ctx), (const u8 *)"!", 1, &at) == WP_OK);
+    ASSERT_TRUE(wp_action_file_save(&ctx, WP_FALSE, pick_cancels, NULL) == WP_OK);
+    ASSERT_EQ_U32(g_pick_calls, 1);
+    read_whole_file(first, back, sizeof(back));
+    ASSERT_EQ_STR(back, "!One\n");
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+
+    /* Save As always asks, and the answer becomes the name. */
+    g_pick_path = second;
+    ASSERT_TRUE(wp_action_file_save(&ctx, WP_TRUE, pick_gives, NULL) == WP_OK);
+    ASSERT_EQ_U32(g_pick_calls, 2);
+    ASSERT_EQ_STR(ctx.doc_path, second);
+
+    /* A cancelled Save As changes nothing. */
+    ASSERT_TRUE(wp_action_file_save(&ctx, WP_TRUE, pick_cancels, NULL) == WP_OK);
+    ASSERT_EQ_STR(ctx.doc_path, second);
+
+    /* ":w name" names the file itself, and that name sticks. */
+    wp_keymap_set_pending_path((const u8 *)named, (u32)strlen(named));
+    ASSERT_TRUE(wp_action_file_save(&ctx, WP_FALSE, pick_cancels, NULL) == WP_OK);
+    ASSERT_EQ_STR(ctx.doc_path, named);
+    read_whole_file(named, back, sizeof(back));
+    ASSERT_EQ_STR(back, "!One\n");
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_load_file_reads_text_and_rtf_and_keeps_the_name(void)
+{
+    static const char txt[] = "build/test_actions_load.txt";
+    static const char rtf[] = "build/test_actions_load.rtf";
+    static const char missing[] = "build/no-such-directory/x.txt";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    /* Through the importer, so "Alpha" and "Beta" are two paragraphs
+       (ctx_setup would keep the '\n' inside one run). */
+    ctx_setup_imported(&doc, &journal, &ctx, "Alpha\nBeta\n");
+    ASSERT_TRUE(wp_action_save_file(&ctx, txt, NULL) == WP_OK);
+    ASSERT_TRUE(wp_action_save_file(&ctx, rtf, NULL) == WP_OK);
+    ctx_teardown(&doc, &journal, &ctx);
+
+    ctx_setup(&doc, &journal, &ctx, "Something else");
+    ASSERT_TRUE(wp_action_load_file(&ctx, txt, NULL) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Alpha\nBeta\n");
+    ASSERT_EQ_STR(ctx.doc_path, txt);
+    ASSERT_EQ_U32(wp_keymap_cursor(&ctx)->paragraph, 0);
+    ASSERT_EQ_U32(wp_keymap_cursor(&ctx)->offset, 0);
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+
+    /* RTF by name: the exporter's own output reads back as the text. */
+    ASSERT_TRUE(wp_action_load_file(&ctx, rtf, NULL) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Alpha\nBeta\n");
+    ASSERT_EQ_STR(ctx.doc_path, rtf);
+
+    /* A file that cannot be opened leaves document and name alone. */
+    ASSERT_TRUE(wp_action_load_file(&ctx, missing, NULL) != WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Alpha\nBeta\n");
+    ASSERT_EQ_STR(ctx.doc_path, rtf);
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_file_open_asks_picks_and_a_new_document_forgets_the_name(void)
+{
+    static const char txt[] = "build/test_actions_open.txt";
+    wp_document doc, fresh;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    ctx_setup(&doc, &journal, &ctx, "Saved");
+    ASSERT_TRUE(wp_action_save_file(&ctx, txt, NULL) == WP_OK);
+    ctx_teardown(&doc, &journal, &ctx);
+
+    ctx_setup(&doc, &journal, &ctx, "Current");
+    g_pick_calls = 0;
+    g_pick_path = txt;
+
+    /* Cancelled at the picker: nothing changes. */
+    ASSERT_TRUE(wp_action_file_open(&ctx, pick_cancels, NULL) == WP_OK);
+    ASSERT_EQ_U32(g_pick_calls, 1);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Current\n");
+    ASSERT_EQ_STR(ctx.doc_path, "");
+
+    ASSERT_TRUE(wp_action_file_open(&ctx, pick_gives, NULL) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Saved\n");
+    ASSERT_EQ_STR(ctx.doc_path, txt);
+
+    /* New: no file, so the next Save must ask rather than overwrite. */
+    ASSERT_TRUE(format_txt_import((const u8 *)"", 0, &fresh) == WP_OK);
+    wp_action_replace_document(&ctx, &fresh);
+    ASSERT_EQ_STR(ctx.doc_path, "");
+    ASSERT_EQ_STR(wp_action_document_name(&ctx), "");
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_document_name_is_the_last_path_component(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+
+    ctx_setup(&doc, &journal, &ctx, "x");
+    wp_action_remember_path(&ctx, "C:\\DOCS\\LETTER.TXT");
+    ASSERT_EQ_STR(wp_action_document_name(&ctx), "LETTER.TXT");
+    wp_action_remember_path(&ctx, "Work:Docs/letter.rtf");
+    ASSERT_EQ_STR(wp_action_document_name(&ctx), "letter.rtf");
+    wp_action_remember_path(&ctx, "Macintosh HD:letter");
+    ASSERT_EQ_STR(wp_action_document_name(&ctx), "letter");
+    ASSERT_TRUE(wp_path_ends_with_ci("notes.rtf", ".RTF"));
+    ASSERT_TRUE(wp_path_ends_with_ci("NOTES.RTF", ".rtf"));
+    ASSERT_TRUE(!wp_path_ends_with_ci("notes.txt", ".RTF"));
+    ASSERT_TRUE(!wp_path_ends_with_ci("rtf", ".RTF"));
+    ctx_teardown(&doc, &journal, &ctx);
+}

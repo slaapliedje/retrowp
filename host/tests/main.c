@@ -297,6 +297,11 @@ void test_actions_cut_takes_only_the_selection(void);
 void test_actions_paste_replaces_the_selection(void);
 void test_actions_copy_and_cut_with_nothing_selected_do_nothing(void);
 void test_actions_cut_in_visual_line_takes_whole_paragraphs(void);
+void test_actions_save_file_picks_the_format_by_extension_and_remembers(void);
+void test_actions_save_goes_to_the_remembered_name_without_asking(void);
+void test_actions_load_file_reads_text_and_rtf_and_keeps_the_name(void);
+void test_actions_file_open_asks_picks_and_a_new_document_forgets_the_name(void);
+void test_actions_document_name_is_the_last_path_component(void);
 void test_selspan_marks_the_lines_a_selection_crosses(void);
 void test_selspan_within_one_line(void);
 void test_selspan_starting_at_a_line_end_shows_nothing_there(void);
@@ -861,6 +866,11 @@ static const test_case g_cases[] = {
     { "actions_paste_replaces_the_selection", test_actions_paste_replaces_the_selection },
     { "actions_copy_and_cut_with_nothing_selected_do_nothing", test_actions_copy_and_cut_with_nothing_selected_do_nothing },
     { "actions_cut_in_visual_line_takes_whole_paragraphs", test_actions_cut_in_visual_line_takes_whole_paragraphs },
+    { "actions_save_file_picks_the_format_by_extension_and_remembers", test_actions_save_file_picks_the_format_by_extension_and_remembers },
+    { "actions_save_goes_to_the_remembered_name_without_asking", test_actions_save_goes_to_the_remembered_name_without_asking },
+    { "actions_load_file_reads_text_and_rtf_and_keeps_the_name", test_actions_load_file_reads_text_and_rtf_and_keeps_the_name },
+    { "actions_file_open_asks_picks_and_a_new_document_forgets_the_name", test_actions_file_open_asks_picks_and_a_new_document_forgets_the_name },
+    { "actions_document_name_is_the_last_path_component", test_actions_document_name_is_the_last_path_component },
     { "selspan_marks_the_lines_a_selection_crosses", test_selspan_marks_the_lines_a_selection_crosses },
     { "selspan_within_one_line", test_selspan_within_one_line },
     { "selspan_starting_at_a_line_end_shows_nothing_there", test_selspan_starting_at_a_line_end_shows_nothing_there },

@@ -766,14 +766,19 @@ narrowing, not an oversight -- the alternative (a real selection UI) is a
 substantially bigger task that belongs with real interactive editing
 polish, not this milestone.
 
-*Since superseded.* Cut and Paste are portable actions now
-(`platform/common/actions.c`), and both are ordinary undoable edits. Cut
-still takes the whole document. But it first reads the clipboard back,
-and refuses if the clipboard didn't keep everything: this backend's
-clipboard converts through a 1 KB buffer and keeps only what fits. Paste
-inserts at the cursor instead of replacing the document. The old pair
-could lose a document, and then marked the result saved, so quitting
-afterwards didn't warn.
+*Since superseded.* Cut, Copy and Paste are portable actions now
+(`platform/common/actions.c`) and work on the selection -- the active
+scheme's own one, through `wp_keymap_selection` (vi Visual and Visual
+Line, WordStar's block markers, Emacs's mark, WordPerfect's Block, Word's
+Shift+motion) -- which every backend now paints inverted
+(`platform/common/selspan.h` says which part of each display line is
+selected; this backend XORs it with `v_bar` in `MD_XOR`). With nothing
+selected, Cut and Copy say so and do nothing. Cut reads the clipboard back
+first and refuses if it did not keep everything: this backend's clipboard
+converts through a 1 KB buffer and keeps only what fits. Paste inserts at
+the caret, replacing a selection if there is one, and both are ordinary
+undoable edits. The old pair could lose a document, and then marked the
+result saved, so quitting afterwards didn't warn.
 
 **Keyboard editing is scoped to a single paragraph.** `wp_dispatch_key()`
 handles Backspace (delete before cursor) and printable ASCII (insert at
@@ -1684,10 +1689,8 @@ missed follow-up).
 looks the action up by id via `wp_action_find()` at its own call site
 and dispatches to its own existing implementation): File Open/Save
 (needs a native file picker -- `fsel_input()` on Atari today), Edit
-Cut/Paste (both need to replace the *whole document* and trigger a
-backend-specific relayout/repaint this pass doesn't abstract -- this app
-still has no selection-scoped clipboard, see `do_edit_cut`/
-`do_edit_paste`), and all four Tools actions (Spell Check, Thesaurus,
+Cut/Paste (at the time; both are portable, selection-scoped actions in
+`actions.c` now), and all four Tools actions (Spell Check, Thesaurus,
 Grammar Check, Chat). The Tools actions are a **deliberate scope
 decision, not an oversight**: each is currently a multi-hundred-line
 Atari-specific function (dialog loops, offload-gateway round-trips,
