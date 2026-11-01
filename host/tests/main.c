@@ -292,6 +292,12 @@ void test_viewport_page_lands_mid_paragraph_on_a_wrapped_line(void);
 void test_viewport_scroll_by_hand_holds_until_a_keystroke(void);
 void test_viewport_page_keys_work_under_every_scheme(void);
 void test_viewport_replace_document_goes_back_to_the_top(void);
+void test_viewport_finds_the_line_under_y_and_the_position_under_a_click(void);
+void test_viewport_click_moves_or_extends_under_every_scheme(void);
+void test_tools_grammar_check_reports_locally_without_a_gateway(void);
+void test_tools_grammar_and_chat_want_a_paragraph_with_text(void);
+void test_tools_gateway_tools_say_when_there_is_no_device(void);
+void test_tools_spell_check_names_the_first_unknown_word(void);
 void test_actions_copy_takes_only_the_selection(void);
 void test_actions_cut_takes_only_the_selection(void);
 void test_actions_paste_replaces_the_selection(void);
@@ -396,6 +402,7 @@ void test_layout_editing_one_paragraph_does_not_remeasure_whole_document(void);
 
 /* justify.c */
 void test_justify_non_justify_align_returns_zero(void);
+void test_justify_pos_at_x_finds_the_nearest_boundary(void);
 void test_justify_last_line_of_paragraph_returns_zero(void);
 void test_justify_computes_extra_per_gap(void);
 void test_justify_single_word_line_has_no_gap(void);
@@ -861,6 +868,12 @@ static const test_case g_cases[] = {
     { "viewport_scroll_by_hand_holds_until_a_keystroke", test_viewport_scroll_by_hand_holds_until_a_keystroke },
     { "viewport_page_keys_work_under_every_scheme", test_viewport_page_keys_work_under_every_scheme },
     { "viewport_replace_document_goes_back_to_the_top", test_viewport_replace_document_goes_back_to_the_top },
+    { "viewport_finds_the_line_under_y_and_the_position_under_a_click", test_viewport_finds_the_line_under_y_and_the_position_under_a_click },
+    { "viewport_click_moves_or_extends_under_every_scheme", test_viewport_click_moves_or_extends_under_every_scheme },
+    { "tools_grammar_check_reports_locally_without_a_gateway", test_tools_grammar_check_reports_locally_without_a_gateway },
+    { "tools_grammar_and_chat_want_a_paragraph_with_text", test_tools_grammar_and_chat_want_a_paragraph_with_text },
+    { "tools_gateway_tools_say_when_there_is_no_device", test_tools_gateway_tools_say_when_there_is_no_device },
+    { "tools_spell_check_names_the_first_unknown_word", test_tools_spell_check_names_the_first_unknown_word },
     { "actions_copy_takes_only_the_selection", test_actions_copy_takes_only_the_selection },
     { "actions_cut_takes_only_the_selection", test_actions_cut_takes_only_the_selection },
     { "actions_paste_replaces_the_selection", test_actions_paste_replaces_the_selection },
@@ -943,6 +956,7 @@ static const test_case g_cases[] = {
     { "layout_editing_one_paragraph_does_not_remeasure_whole_document", test_layout_editing_one_paragraph_does_not_remeasure_whole_document },
 
     { "justify_non_justify_align_returns_zero", test_justify_non_justify_align_returns_zero },
+    { "justify_pos_at_x_finds_the_nearest_boundary", test_justify_pos_at_x_finds_the_nearest_boundary },
     { "justify_last_line_of_paragraph_returns_zero", test_justify_last_line_of_paragraph_returns_zero },
     { "justify_computes_extra_per_gap", test_justify_computes_extra_per_gap },
     { "justify_single_word_line_has_no_gap", test_justify_single_word_line_has_no_gap },

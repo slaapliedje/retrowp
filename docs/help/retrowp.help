@@ -5,6 +5,8 @@ Welcome to RetroWP, the portable word processor.
 
 RetroWP is edited with a vi-style modal editor: most keys are
 commands, not typed text, until you press "i" to start typing.
+With a mouse, a click puts the caret where you clicked and a
+Shift+click selects from the caret to there.
 
 Pick a topic:
 

@@ -1215,6 +1215,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
     i32 ascent_px = 0;
+    u8 text_r = 0, text_g = 0, text_b = 0;
     wp_selection sel;
     wp_pos sel_from, sel_to;
     wp_bool have_sel;
@@ -1396,6 +1397,12 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                                 ascent_px = atari_twips_to_px_y(fm.ascent);
                                 cached_style = run->style;
                                 have_font = WP_TRUE;
+                                /* The run's colour travels with its font:
+                                   saved and written by RTF, never drawn
+                                   until now. */
+                                text_r = cs->color_r;
+                                text_g = cs->color_g;
+                                text_b = cs->color_b;
                             } else {
                                 font = NULL;
                             }
@@ -1409,7 +1416,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                     if (!frag.is_space) {
                         g_atari_painted_frags++;
                         plat_draw_text((plat_gc *)&gc, font, x_px, y_px + ascent_px,
-                                        bytes + frag.byte_start, frag_len, 0, 0, 0);
+                                        bytes + frag.byte_start, frag_len, text_r, text_g, text_b);
                     }
 
                     x_px += atari_twips_to_px_x(frag_width_twips);
@@ -4620,6 +4627,31 @@ static wp_bool menu_action_map_selfcheck(void)
     return WP_TRUE;
 }
 
+/* A left click in the work area: the caret goes to the nearest character
+   boundary (wp_viewport_hit_test, measured the way the caret is painted,
+   so click and caret agree to the pixel); with Shift held it extends the
+   selection there instead. Clicks on the slider and the window frame
+   never arrive here -- the AES turns those into WM_ARROWED, WM_VSLID,
+   WM_TOPPED and the like. */
+static void atari_click(short window_handle, VdiHdl vdi, short mx, short my, short kstate)
+{
+    GRECT work;
+    i32 bar_h_px;
+    wp_pos pos;
+
+    if (!g_ctx.doc_loaded || g_help_active) return;
+    wind_get_grect(window_handle, WF_WORKXYWH, &work);
+    bar_h_px = statusline_height_px();
+    if (mx < work.g_x || mx >= work.g_x + work.g_w) return;
+    if (my < work.g_y || my >= work.g_y + work.g_h - bar_h_px) return;
+
+    if (!wp_viewport_hit_test(&g_ctx.view, &g_doc, g_content_width_twips,
+                              (i32)(mx - work.g_x), (i32)(my - work.g_y),
+                              atari_px_to_twips_x, atari_twips_to_px_x, &pos)) return;
+    wp_keymap_click(&g_ctx, pos, (wp_bool)((kstate & 0x03) != 0));
+    redraw_window(window_handle, vdi);
+}
+
 wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
 {
     switch (msg[0]) {
@@ -5000,7 +5032,10 @@ void app_shell_run(void)
 
     quit = WP_FALSE;
     while (!quit) {
-        events = WP_EVNT_MULTI(MU_MESAG | MU_KEYBD, 1, 1, 1,
+        /* MU_BUTTON with clicks 1, mask 1, state 1: the left button
+           going down, once -- a click in the work area to place the
+           caret (atari_click). */
+        events = WP_EVNT_MULTI(MU_MESAG | MU_KEYBD | MU_BUTTON, 1, 1, 1,
                              0, 0, 0, 0, 0,
                              0, 0, 0, 0, 0,
                              msg, 0L,
@@ -5010,6 +5045,9 @@ void app_shell_run(void)
         }
         if (!quit && (events & MU_KEYBD)) {
             quit = wp_dispatch_key(window_handle, vdi_handle, mkey, mkstate);
+        }
+        if (!quit && (events & MU_BUTTON)) {
+            atari_click(window_handle, vdi_handle, mx, my, mkstate);
         }
         /* Heartbeat, after dispatch rather than before: a dispatch that
            crashes or wedges must NOT be able to bump the count first. */

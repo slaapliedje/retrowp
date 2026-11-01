@@ -175,6 +175,21 @@ wp_bool wp_keymap_selection(const struct wp_app_ctx *ctx, wp_selection *out);
    back to Normal. A no-op without a selection. */
 void wp_keymap_clear_selection(struct wp_app_ctx *ctx);
 
+/* Makes anchor..caret the active scheme's selection, in its own terms
+   (vi enters Visual mode, WordStar sets both block markers, Emacs sets
+   the mark, WordPerfect enters Block, Word starts extending) and moves
+   its cursor to caret. For the mouse: a Shift+click selects from where
+   the caret was to where it landed, whatever the scheme. */
+void wp_keymap_set_selection(struct wp_app_ctx *ctx, wp_pos anchor, wp_pos caret);
+
+/* A mouse click at `pos` (from wp_viewport_hit_test): moves the caret
+   there and drops any selection -- or, with `extend` (Shift held),
+   selects from the selection's anchor if there is one, else from where
+   the caret was, up to `pos`. Also releases a scroll by hand, since the
+   writer is working at the caret again. One call for every backend's
+   mouse handler, so a click means the same thing under every scheme. */
+void wp_keymap_click(struct wp_app_ctx *ctx, wp_pos pos, wp_bool extend);
+
 /* T172: parks the filename from an ex command (":w name" / ":e name")
    for the backend's own do_file_open/do_file_save to collect, since
    every backend's invoke_action(action_id) dispatcher carries no

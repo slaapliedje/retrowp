@@ -67,6 +67,31 @@ u32 wp_viewport_cursor_line(wp_document *doc, const wp_pos *cursor, u32 *total_o
 wp_bool wp_viewport_line_at(wp_document *doc, u32 index,
                             u32 *section_out, u32 *paragraph_out, u32 *line_out);
 
+/* The display line under y_px, measured from the top of the view (the
+   painter's first line top, so a backend subtracts its own top margin
+   first). *y_top_out gets that line's own top, for a caller that wants
+   the offset within it. A y below the last line gives the last line
+   (so a click in the blank space under the text goes to the document's
+   end), a y above 0 the top line; WP_FALSE only for a document with no
+   lines at all. */
+wp_bool wp_viewport_line_at_y(const wp_viewport *vp, wp_document *doc, i32 y_px,
+                              u32 *section_out, u32 *paragraph_out, u32 *line_out,
+                              i32 *y_top_out);
+
+/* A click, turned into a document position: the line under y_px
+   (above), then the nearest codepoint boundary to x_px on it, measured
+   the way the caret and the selection highlight are (so all three agree
+   to the pixel). x_px and y_px are relative to the painter's line origin
+   and first line top; content_width_twips is the column the lines were
+   laid out in; the two conversions are the backend's own x-axis
+   twips<->px pair (on DOS, twips<->columns). WP_FALSE for a document
+   with no lines. */
+typedef i32 (*wp_viewport_x_conv_fn)(i32);
+wp_bool wp_viewport_hit_test(const wp_viewport *vp, wp_document *doc, i32 content_width_twips,
+                             i32 x_px, i32 y_px,
+                             wp_viewport_x_conv_fn px_to_twips_x, wp_viewport_x_conv_fn twips_to_px_x,
+                             wp_pos *out);
+
 /* Moves top_line the least that brings the cursor's line fully into
    view, and keeps it inside the document (a document that just got
    shorter). Returns WP_TRUE if it changed, i.e. the whole view needs

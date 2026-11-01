@@ -335,3 +335,52 @@ void test_justify_cursor_x_in_skipped_zero_length_run(void)
 
     wp_document_free(&doc);
 }
+
+/* The click's inverse of the caret measurement: with the host stub's
+   120-twip cells, "The quick" has boundaries at 0, 120, ... 1080. */
+void test_justify_pos_at_x_finds_the_nearest_boundary(void)
+{
+    wp_document doc;
+    wp_paragraph *para;
+    const wp_line *line;
+    static const char *text = "The quick\n";
+    u32 run = 9, off = 9;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)text, (u32)strlen(text), &doc) == WP_OK);
+    para = wp_section_paragraph_get(wp_document_section_get(&doc, 0), 0);
+    ASSERT_TRUE(wp_paragraph_relayout(&doc, para, 2000) == WP_OK);
+    line = &((wp_paragraph_layout *)para->layout)->lines[0];
+
+    ASSERT_TRUE(wp_line_pos_at_x_twips(&doc, para, line, -5, 0, &run, &off));
+    ASSERT_EQ_U32(run, 0); ASSERT_EQ_U32(off, 0);
+    ASSERT_TRUE(wp_line_pos_at_x_twips(&doc, para, line, 0, 0, &run, &off));
+    ASSERT_EQ_U32(off, 0);
+    ASSERT_TRUE(wp_line_pos_at_x_twips(&doc, para, line, 50, 0, &run, &off));
+    ASSERT_EQ_U32(off, 0);      /* left half of 'T' */
+    ASSERT_TRUE(wp_line_pos_at_x_twips(&doc, para, line, 70, 0, &run, &off));
+    ASSERT_EQ_U32(off, 1);      /* right half of 'T' */
+    ASSERT_TRUE(wp_line_pos_at_x_twips(&doc, para, line, 120, 0, &run, &off));
+    ASSERT_EQ_U32(off, 1);
+    /* Halfway through the space after "The": the tie goes to the earlier edge. */
+    ASSERT_TRUE(wp_line_pos_at_x_twips(&doc, para, line, 420, 0, &run, &off));
+    ASSERT_EQ_U32(off, 3);
+    ASSERT_TRUE(wp_line_pos_at_x_twips(&doc, para, line, 430, 0, &run, &off));
+    ASSERT_EQ_U32(off, 4);
+    ASSERT_TRUE(wp_line_pos_at_x_twips(&doc, para, line, 1000, 0, &run, &off));
+    ASSERT_EQ_U32(off, 8);
+    /* Past the end: the line's end. */
+    ASSERT_TRUE(wp_line_pos_at_x_twips(&doc, para, line, 5000, 0, &run, &off));
+    ASSERT_EQ_U32(run, line->end_run); ASSERT_EQ_U32(off, line->end_offset);
+
+    /* The two directions agree: every boundary maps to itself. */
+    {
+        u32 o;
+        for (o = 0; o <= 9; o++) {
+            i32 x = wp_line_cursor_x_twips(&doc, para, line, 0, o, 0);
+            ASSERT_TRUE(wp_line_pos_at_x_twips(&doc, para, line, x, 0, &run, &off));
+            ASSERT_EQ_U32(off, o);
+        }
+    }
+
+    wp_document_free(&doc);
+}

@@ -272,3 +272,78 @@ void wp_viewport_scroll_by(wp_viewport *vp, wp_document *doc, i32 delta_lines)
     }
     wp_viewport_scroll_to(vp, doc, target);
 }
+
+wp_bool wp_viewport_line_at_y(const wp_viewport *vp, wp_document *doc, i32 y_px,
+                              u32 *section_out, u32 *paragraph_out, u32 *line_out,
+                              i32 *y_top_out)
+{
+    line_walk w;
+    i32 top = 0;
+    wp_bool have = WP_FALSE;
+
+    if (!walk_to(&w, doc, vp->top_line)) {
+        /* top_line past the end (a document that shrank): the last line. */
+        if (!walk_to(&w, doc, 0)) return WP_FALSE;
+    }
+    do {
+        i32 h = line_height(vp, &w);
+
+        have = WP_TRUE;
+        *section_out = w.si;
+        *paragraph_out = w.pi;
+        *line_out = w.li;
+        if (y_top_out != NULL) *y_top_out = top;
+        if (y_px < top + h) break;      /* on this line (or above the first) */
+        top += h;
+    } while (walk_next(&w));
+    return have;
+}
+
+/* The same LEFT/CENTER/RIGHT arithmetic every painter applies to a
+   line's x origin; JUSTIFY starts at the left like LEFT. */
+static i32 align_offset_twips(u8 align, i32 content_width_twips, i32 line_width_twips)
+{
+    i32 extra = content_width_twips - line_width_twips;
+
+    if (extra <= 0) return 0;
+    if (align == WP_ALIGN_CENTER) return extra / 2;
+    if (align == WP_ALIGN_RIGHT) return extra;
+    return 0;
+}
+
+wp_bool wp_viewport_hit_test(const wp_viewport *vp, wp_document *doc, i32 content_width_twips,
+                             i32 x_px, i32 y_px,
+                             wp_viewport_x_conv_fn px_to_twips_x, wp_viewport_x_conv_fn twips_to_px_x,
+                             wp_pos *out)
+{
+    u32 si, pi, li;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_paragraph_layout *layout;
+    const wp_line *line;
+    const wp_para_style *pstyle;
+    u8 align;
+    i32 origin_px, x_twips, extra_twips;
+    u32 run = 0, offset = 0;
+
+    if (!wp_viewport_line_at_y(vp, doc, y_px, &si, &pi, &li, NULL)) return WP_FALSE;
+    sec = wp_document_section_get(doc, si);
+    para = wp_section_paragraph_get(sec, pi);
+    layout = (wp_paragraph_layout *)para->layout;
+    line = &layout->lines[li];
+    pstyle = wp_document_pstyle_get(doc, para->style);
+    align = (pstyle != NULL) ? pstyle->align : WP_ALIGN_LEFT;
+
+    origin_px = twips_to_px_x(align_offset_twips(align, content_width_twips, line->width_twips));
+    x_twips = (x_px > origin_px) ? px_to_twips_x(x_px - origin_px) : 0;
+    extra_twips = wp_justify_space_extra_twips(doc, para, line, align,
+                                               (wp_bool)(li == layout->line_count - 1),
+                                               content_width_twips);
+    (void)wp_line_pos_at_x_twips(doc, para, line, x_twips, extra_twips, &run, &offset);
+
+    out->section = si;
+    out->paragraph = pi;
+    out->run = run;
+    out->offset = offset;
+    return WP_TRUE;
+}

@@ -160,4 +160,15 @@ i32 wp_justify_space_extra_twips(wp_document *doc, wp_paragraph *para, const wp_
 i32 wp_line_cursor_x_twips(wp_document *doc, wp_paragraph *para, const wp_line *line,
                             u32 cursor_run, u32 cursor_offset, i32 space_extra_twips);
 
+/* The inverse, for a mouse click: the (run, offset) on `line` nearest
+   to x_twips measured from the line's own drawing origin (the same
+   origin wp_line_cursor_x_twips is relative to), with the same
+   space_extra_twips. A click left of the line gives its start, right of
+   it its end, inside a glyph the nearer of its two edges. Measures
+   through plat_measure_text like its counterpart. Always sets both outs;
+   returns WP_TRUE (the result is never undefined). */
+wp_bool wp_line_pos_at_x_twips(wp_document *doc, wp_paragraph *para, const wp_line *line,
+                               i32 x_twips, i32 space_extra_twips,
+                               u32 *run_out, u32 *offset_out);
+
 #endif /* WP_LAYOUT_H */

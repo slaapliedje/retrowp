@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <i86.h>
+#include <conio.h>
 #include <string.h>
 #include "app_shell.h"
 #include "app_shell_internal.h"
@@ -14,6 +15,7 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "selspan.h"
+#include "tools.h"
 #include "menucheck.h"
 #include "config.h"
 #include "statusline.h"
@@ -152,6 +154,61 @@ static u8 get_shift_status(void)
     regs.h.ah = 0x02;
     int86(0x16, &regs, &regs);
     return regs.h.al;
+}
+
+/* The mouse, through the INT 33h driver every DOS mouse ships with
+   (and DOSBox provides). In text mode the driver reports virtual pixels
+   -- eight per cell both ways -- and draws its own reverse-video block
+   cursor straight into video memory, which is why redraw_screen hides
+   it before writing cells and shows it after: a cell written under the
+   driver's cursor is restored to the OLD contents when the cursor next
+   moves. No driver, no mouse: every call below is a no-op then. */
+static wp_bool g_dos_mouse = WP_FALSE;
+
+static void dos_mouse_init(void)
+{
+    union REGS regs;
+
+    regs.x.ax = 0x0000;
+    int86(0x33, &regs, &regs);
+    g_dos_mouse = (wp_bool)(regs.x.ax == 0xFFFF);
+}
+
+static void dos_mouse_show(wp_bool show)
+{
+    union REGS regs;
+
+    if (!g_dos_mouse) return;
+    regs.x.ax = show ? 0x0001 : 0x0002;
+    int86(0x33, &regs, &regs);
+}
+
+/* WP_TRUE once per press of the left button, with the cell it was
+   pressed in. Function 5 (button press information) rather than 3
+   (status): it counts presses since the last call and reports where the
+   last one was, so a click whose press and release both fall between
+   two polls -- an ordinary quick click does -- is still seen. */
+static wp_bool dos_mouse_pressed(int *col_out, int *row_out)
+{
+    union REGS regs;
+
+    if (!g_dos_mouse) return WP_FALSE;
+    regs.x.ax = 0x0005;
+    regs.x.bx = 0x0000;   /* the left button */
+    int86(0x33, &regs, &regs);
+    if (regs.x.bx == 0) return WP_FALSE;
+    *col_out = regs.x.cx / 8;
+    *row_out = regs.x.dx / 8;
+    return WP_TRUE;
+}
+
+/* Lets DOS and whatever sits under it (a TSR, the emulator's host)
+   breathe while the loop below waits for a key or a click. */
+static void dos_idle(void)
+{
+    union REGS regs;
+
+    int86(0x28, &regs, &regs);
 }
 
 /* Real PC scan codes (set 1) -- the standard, universally-documented
@@ -444,6 +501,7 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
     plat_font *font = NULL;
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
+    u8 text_r = 0xAA, text_g = 0xAA, text_b = 0xAA;
     wp_selection sel;
     wp_pos sel_from, sel_to;
     wp_bool have_sel = wp_keymap_selection(&g_ctx, &sel);
@@ -556,6 +614,16 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                                                 cs->flags, &font) == WP_OK) {
                                 cached_style = run->style;
                                 have_font = WP_TRUE;
+                                /* The run's colour, when it has one; black
+                                   text keeps the screen's light grey,
+                                   since black on black is nothing. */
+                                if ((cs->color_r | cs->color_g | cs->color_b) != 0) {
+                                    text_r = cs->color_r;
+                                    text_g = cs->color_g;
+                                    text_b = cs->color_b;
+                                } else {
+                                    text_r = text_g = text_b = 0xAA;
+                                }
                             } else {
                                 font = NULL;
                             }
@@ -565,7 +633,7 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                     if (frag_len > 0 && font != NULL && !frag.is_space) {
                         g_dos_painted_frags++;
                         plat_draw_text(gc, font, col, row, bytes + frag.byte_start, frag_len,
-                                        0xAA, 0xAA, 0xAA);
+                                        text_r, text_g, text_b);
                     }
 
                     col += (int)frag_len;
@@ -654,6 +722,7 @@ static void redraw_screen(void)
     int cursor_row = DOS_DOC_TOP_ROW;
     int cursor_col = 0;
 
+    dos_mouse_show(WP_FALSE);
     clear_rows(DOS_TITLE_ROW, DOS_SCREEN_ROWS - 1, DOS_ATTR_NORMAL);
     {
         /* This line used to hardcode "Ctrl+Q: Quit" for every keymap. It
@@ -724,6 +793,7 @@ static void redraw_screen(void)
 
     plat_window_destroy(win);
     move_cursor(cursor_row, cursor_col);
+    dos_mouse_show(WP_TRUE);
 }
 
 /* ------------------------------------------------------------------ */
@@ -815,6 +885,16 @@ static wp_bool offload_caps_supports(const offload_capabilities *caps, offload_o
 static void dos_show_message(const char *msg)
 {
     plat_dialog_message(NULL, PLAT_DIALOG_OK, (const u8 *)msg, (u32)strlen(msg), NULL);
+}
+
+#define WP_DOS_SPELL_DICT_PATH "C:\\WPSPELL.DIC"
+
+/* The presenter for tools.h: the same message prompt. */
+static void dos_tools_show(wp_app_ctx *ctx, const char *title, const char *msg)
+{
+    WP_UNUSED(ctx);
+    WP_UNUSED(title);
+    dos_show_message(msg);
 }
 
 /* Insert Image (M15 T15.4): prompt for a source path via the same
@@ -1025,6 +1105,12 @@ static void invoke_backend_action(wp_action_id id)
     case WP_ACT_FILE_SAVE:         do_file_save(WP_FALSE); break;
     case WP_ACT_FILE_SAVE_AS:      do_file_save(WP_TRUE); break;
     case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
+    /* The four checks are the portable ones (tools.h); this shell adds
+       the link, the dictionary's path and the message prompt. */
+    case WP_ACT_TOOLS_SPELLCHECK:   (void)wp_tools_spell_check(&g_ctx, WP_DOS_SPELL_DICT_PATH, dos_tools_show); break;
+    case WP_ACT_TOOLS_THESAURUS:    (void)ensure_offload(); (void)wp_tools_thesaurus(&g_ctx, dos_tools_show); break;
+    case WP_ACT_TOOLS_GRAMMARCHECK: (void)ensure_offload(); (void)wp_tools_grammar_check(&g_ctx, dos_tools_show); break;
+    case WP_ACT_TOOLS_CHAT:         (void)ensure_offload(); (void)wp_tools_chat(&g_ctx, dos_tools_show); break;
     case WP_ACT_TOOLS_DICTATE:
         if (!ensure_offload()) {
             dos_show_message("No offload device available.");
@@ -1071,6 +1157,35 @@ static void open_help_node(const char *node_name, u32 node_name_len)
    backend's identical choice); while Help is active every key goes to
    wp_help_view_feed_key instead. Returns WP_TRUE if the app should
    quit. */
+/* A left click on a document row: the caret goes to the nearest
+   character boundary (wp_viewport_hit_test, in columns here, the way
+   the caret column is counted); with Shift held it extends the
+   selection there instead. */
+/* The column conversions in the viewport's own i32 -> i32 shape (int is
+   16 bits under this compiler, so the shell's int-returning helper
+   cannot be passed as is). */
+static i32 dos_cols_to_twips_conv(i32 cols)
+{
+    return dos_col_to_twips(cols);
+}
+
+static i32 dos_twips_to_cols_conv(i32 twips)
+{
+    return (i32)dos_twips_to_col(twips);
+}
+
+static void dos_click(int col, int row)
+{
+    wp_pos pos;
+
+    if (!g_ctx.doc_loaded || g_help_active) return;
+    if (row < DOS_DOC_TOP_ROW || row > DOS_DOC_BOTTOM_ROW) return;
+    if (!wp_viewport_hit_test(&g_ctx.view, &g_doc, g_content_width_twips,
+                              (i32)col, (i32)(row - DOS_DOC_TOP_ROW),
+                              dos_cols_to_twips_conv, dos_twips_to_cols_conv, &pos)) return;
+    wp_keymap_click(&g_ctx, pos, (wp_bool)((get_shift_status() & 0x03) != 0));
+}
+
 static wp_bool dos_dispatch_key(void)
 {
     unsigned char ascii, scan;
@@ -1243,8 +1358,21 @@ void app_shell_run(void)
     g_dos_ci_active = dos_ci_mode();
     if (g_dos_ci_active) dos_ci_write_alive();
 
+    dos_mouse_init();
+    dos_mouse_show(WP_TRUE);
+
     while (!quit) {
-        quit = dos_dispatch_key();
+        int col, row;
+
+        /* A key or a click; otherwise yield and look again. */
+        if (kbhit()) {
+            quit = dos_dispatch_key();
+        } else if (dos_mouse_pressed(&col, &row)) {
+            dos_click(col, row);
+        } else {
+            dos_idle();
+            continue;
+        }
         redraw_screen();
         /* After dispatch and repaint, never before: a dispatch or paint
            that crashes or wedges must not get to bump the count first. */

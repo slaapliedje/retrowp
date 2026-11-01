@@ -22,6 +22,7 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "selspan.h"
+#include "tools.h"
 #include "menucheck.h"
 #include "metrics_mac_internal.h"
 #include "offload.h"
@@ -566,6 +567,17 @@ static void do_insert_image(void)
     }
 }
 
+#define WP_MAC_SPELL_DICT_PATH "WPSPELL.DIC"   /* next to the application */
+
+/* The presenter for tools.h: the one dialog this backend implements
+   (plat_dialog_choice, through wp_action_tell), the same door Dictate
+   reports through. */
+static void mac_tools_show(wp_app_ctx *ctx, const char *title, const char *msg)
+{
+    (void)title;
+    wp_action_tell(ctx, msg);
+}
+
 static void invoke_backend_action(wp_action_id id)
 {
     /* Every Help entry opens the same document at a different node, so
@@ -588,6 +600,12 @@ static void invoke_backend_action(wp_action_id id)
     case WP_ACT_FILE_SAVE:     do_file_save(WP_FALSE); break;
     case WP_ACT_FILE_SAVE_AS:  do_file_save(WP_TRUE); break;
     case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
+    /* The four checks are the portable ones (tools.h); this shell adds
+       the link, the dictionary's name on this volume and the alert. */
+    case WP_ACT_TOOLS_SPELLCHECK:   (void)wp_tools_spell_check(&g_ctx, WP_MAC_SPELL_DICT_PATH, mac_tools_show); break;
+    case WP_ACT_TOOLS_THESAURUS:    (void)ensure_offload(); (void)wp_tools_thesaurus(&g_ctx, mac_tools_show); break;
+    case WP_ACT_TOOLS_GRAMMARCHECK: (void)ensure_offload(); (void)wp_tools_grammar_check(&g_ctx, mac_tools_show); break;
+    case WP_ACT_TOOLS_CHAT:         (void)ensure_offload(); (void)wp_tools_chat(&g_ctx, mac_tools_show); break;
     case WP_ACT_TOOLS_DICTATE:
         /* This backend has no message-dialog helper of its own -- every
            do_insert_image error path above just returns silently. That
@@ -1069,6 +1087,7 @@ static void draw_document(WindowPtr w)
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
     i32 ascent_px = 0;
+    u8 text_r = 0, text_g = 0, text_b = 0;
     wp_selection sel;
     wp_pos sel_from, sel_to;
     wp_bool have_sel = WP_FALSE;
@@ -1275,6 +1294,12 @@ static void draw_document(WindowPtr w)
                                 ascent_px = mac_twips_to_px(fm.ascent);
                                 cached_style = run->style;
                                 have_font = WP_TRUE;
+                                /* The run's colour travels with its font:
+                                   saved and written by RTF, never drawn
+                                   until now. */
+                                text_r = cs->color_r;
+                                text_g = cs->color_g;
+                                text_b = cs->color_b;
                             } else {
                                 font = NULL;
                             }
@@ -1288,7 +1313,7 @@ static void draw_document(WindowPtr w)
                     if (!frag.is_space) {
                         g_mac_painted_frags++;
                         plat_draw_text((plat_gc *)&gc, font, x_px, y + ascent_px,
-                                        bytes + frag.byte_start, frag_len, 0, 0, 0);
+                                        bytes + frag.byte_start, frag_len, text_r, text_g, text_b);
                     }
 
                     x_px += mac_twips_to_px(frag_width_twips);
@@ -1356,6 +1381,27 @@ static void draw_document(WindowPtr w)
     paint_status_line_mac(w, r, bar_h_px);
 
     EndUpdate(w);
+}
+
+/* A click in the content area: the caret goes to the nearest character
+   boundary (wp_viewport_hit_test, measured the way the caret is
+   painted, so click and caret agree to the pixel); with Shift held it
+   extends the selection there instead. */
+static void mac_click(Point where, wp_bool extend)
+{
+    Point pt = where;
+    wp_pos pos;
+    i32 bar_h_px;
+
+    if (!g_ctx.doc_loaded || g_help_active || g_content_width_twips <= 0) return;
+    SetPort(g_win);
+    GlobalToLocal(&pt);
+    bar_h_px = statusline_height_px();
+    if (pt.v >= g_win->portRect.bottom - bar_h_px) return;   /* the status strip */
+    if (!wp_viewport_hit_test(&g_ctx.view, &g_mac_doc, g_content_width_twips,
+                              (i32)pt.h - WP_DOC_LEFT_MARGIN_PX, (i32)pt.v - WP_DOC_TOP_MARGIN_PX,
+                              mac_px_to_twips, mac_twips_to_px, &pos)) return;
+    wp_keymap_click(&g_ctx, pos, extend);
 }
 
 /* -- Window/menu construction + event loop ---------------------------
@@ -1510,7 +1556,12 @@ void app_shell_run(void)
                     if (TrackGoAway(whichWindow, e.where)) wp_action_request_quit(&g_ctx);
                     break;
                 case inContent:
-                    if (whichWindow != FrontWindow()) SelectWindow(whichWindow);
+                    if (whichWindow != FrontWindow()) {
+                        SelectWindow(whichWindow);
+                    } else if (whichWindow == g_win) {
+                        mac_click(e.where, (wp_bool)((e.modifiers & shiftKey) != 0));
+                        InvalRect(&g_win->portRect);
+                    }
                     break;
                 default:
                     break;
@@ -1544,6 +1595,7 @@ void app_shell_run(void)
         wp_document_free(&g_mac_doc);
     }
     if (g_help_doc_loaded) wp_help_doc_free(&g_help_doc);
+    wp_tools_shutdown();
     DisposeWindow(g_win);
 }
 

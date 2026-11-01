@@ -423,6 +423,24 @@ slider with the keyboard mouse emulation; the gem4xe AES handles the same
 messages (its `gem.h` spells the size mode `WF_VSLSIZ`, which the shell
 maps).
 
+**Files.** Open, Save and Save As are the shared flow in
+`platform/common/actions.c` (`wp_action_file_open`, `wp_action_save_path`,
+`wp_action_save_file`): the format follows the content and the name --
+WordStar by sniff, `.RTF` by extension, plain text otherwise -- and the
+document remembers its path in `wp_app_ctx.doc_path`, so a plain Save
+(`:w`, Ctrl+S, File > Save) rewrites the file it came from without the
+selector, while Save As and `:w name` ask or take the name and keep it.
+New forgets the name. The window title shows it (`atari_show_document_name`,
+`WF_NAME`). What stays in this shell is the selector itself
+(`atari_pick_path` around `fsel_input`), the image sink and source that
+give RTF its pictures, and the `.ODT`/`.PDF` round trips through the
+gateway, which run before the shared exporter sees the name. The other
+three shells carry only their picker (ASL, Standard File, the DOS status-
+row prompt) and gained RTF by the same move; their RTF is text-only until
+they grow an image sink. Checked under Hatari by saving, editing, saving
+again (the file grew by the one typed byte, no selector) and under DOSBox
+and amiberry the same way plus an RTF save and `:e` of it.
+
 ### Fixed: menu title text was rendering as real glyph noise (post-M8)
 
 The earlier note here ("likely a EmuTOS-desktop or Hatari screenshot-capture

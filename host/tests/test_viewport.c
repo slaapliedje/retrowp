@@ -339,3 +339,114 @@ void test_viewport_replace_document_goes_back_to_the_top(void)
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
 }
+
+/* The x-axis stand-in for the hit test: the same 20 twips per pixel. */
+static i32 px_to_twips(i32 px)
+{
+    return px * VP_PX_PER_TWIP_DIV;
+}
+
+void test_viewport_finds_the_line_under_y_and_the_position_under_a_click(void)
+{
+    wp_document doc;
+    wp_viewport vp;
+    u32 si = 9, pi = 9, li = 9;
+    i32 top = -1;
+    wp_pos p;
+    const wp_line *l1;
+
+    build_laid_out_doc(&doc);
+    viewport_for(&vp);   /* 15 px lines */
+
+    ASSERT_TRUE(wp_viewport_line_at_y(&vp, &doc, 0, &si, &pi, &li, &top));
+    ASSERT_EQ_U32(pi, 0); ASSERT_EQ_U32(li, 0); ASSERT_EQ_U32((u32)top, 0);
+    ASSERT_TRUE(wp_viewport_line_at_y(&vp, &doc, 14, &si, &pi, &li, &top));
+    ASSERT_EQ_U32(li, 0);
+    ASSERT_TRUE(wp_viewport_line_at_y(&vp, &doc, 15, &si, &pi, &li, &top));
+    ASSERT_EQ_U32(li, 1); ASSERT_EQ_U32((u32)top, 15);
+    ASSERT_TRUE(wp_viewport_line_at_y(&vp, &doc, 40, &si, &pi, &li, &top));
+    ASSERT_EQ_U32(pi, 0); ASSERT_EQ_U32(li, 2);
+    /* Below everything: the last line. Above: the first. */
+    ASSERT_TRUE(wp_viewport_line_at_y(&vp, &doc, 500, &si, &pi, &li, &top));
+    ASSERT_EQ_U32(pi, 3); ASSERT_EQ_U32((u32)top, 90);
+    ASSERT_TRUE(wp_viewport_line_at_y(&vp, &doc, -10, &si, &pi, &li, &top));
+    ASSERT_EQ_U32(pi, 0); ASSERT_EQ_U32(li, 0);
+
+    /* Scrolled: y counts from the top line in view. */
+    vp.top_line = 3;
+    ASSERT_TRUE(wp_viewport_line_at_y(&vp, &doc, 0, &si, &pi, &li, &top));
+    ASSERT_EQ_U32(pi, 1);
+    ASSERT_TRUE(wp_viewport_line_at_y(&vp, &doc, 16, &si, &pi, &li, &top));
+    ASSERT_EQ_U32(pi, 2); ASSERT_EQ_U32(li, 0);
+    vp.top_line = 0;
+
+    /* A click on "cccc dddd" (line 1 of paragraph 0), 14 px in: cells
+       are 6 px wide, so 280 twips is nearest the boundary at 240, two
+       characters into the line. */
+    l1 = &((wp_paragraph_layout *)wp_section_paragraph_get(wp_document_section_get(&doc, 0), 0)->layout)->lines[1];
+    ASSERT_TRUE(wp_viewport_hit_test(&vp, &doc, VP_WIDTH_TWIPS, 14, 20, px_to_twips, twips_to_px, &p));
+    ASSERT_EQ_U32(p.paragraph, 0);
+    ASSERT_EQ_U32(p.run, 0);
+    ASSERT_EQ_U32(p.offset, l1->start_offset + 2);
+    /* Far right of a line: its end. Left of it: its start. */
+    ASSERT_TRUE(wp_viewport_hit_test(&vp, &doc, VP_WIDTH_TWIPS, 400, 20, px_to_twips, twips_to_px, &p));
+    ASSERT_EQ_U32(p.offset, l1->end_offset);
+    ASSERT_TRUE(wp_viewport_hit_test(&vp, &doc, VP_WIDTH_TWIPS, -3, 20, px_to_twips, twips_to_px, &p));
+    ASSERT_EQ_U32(p.offset, l1->start_offset);
+    /* The blank paragraph: its one empty line, start. */
+    ASSERT_TRUE(wp_viewport_hit_test(&vp, &doc, VP_WIDTH_TWIPS, 50, 50, px_to_twips, twips_to_px, &p));
+    ASSERT_EQ_U32(p.paragraph, 1); ASSERT_EQ_U32(p.offset, 0);
+
+    wp_document_free(&doc);
+}
+
+void test_viewport_click_moves_or_extends_under_every_scheme(void)
+{
+    static const wp_keymap_id schemes[] = {
+        WP_KEYMAP_VI, WP_KEYMAP_WORDSTAR, WP_KEYMAP_EMACS, WP_KEYMAP_WORDPERFECT, WP_KEYMAP_MSWORD
+    };
+    u32 s;
+
+    for (s = 0; s < sizeof(schemes) / sizeof(schemes[0]); s++) {
+        wp_document doc;
+        wp_undo_journal journal;
+        wp_app_ctx ctx;
+        wp_selection sel;
+        wp_pos a = pos_at(0, 2), b = pos_at(2, 3);
+
+        build_laid_out_doc(&doc);
+        wp_undo_journal_init(&journal);
+        wp_app_ctx_init(&ctx, schemes[s], &doc, &journal);
+        ctx.doc_loaded = WP_TRUE;
+        viewport_for(&ctx.view);
+        wp_viewport_scroll_by(&ctx.view, &doc, 2);
+        ASSERT_TRUE(ctx.view.manual);
+
+        /* A plain click: caret moves, no selection, the view is released. */
+        wp_keymap_click(&ctx, a, WP_FALSE);
+        ASSERT_EQ_U32(wp_keymap_cursor(&ctx)->offset, 2);
+        ASSERT_TRUE(!wp_keymap_selection(&ctx, &sel));
+        ASSERT_TRUE(!ctx.view.manual);
+
+        /* Shift+click: from where the caret was to here. */
+        wp_keymap_click(&ctx, b, WP_TRUE);
+        ASSERT_TRUE(wp_keymap_selection(&ctx, &sel));
+        ASSERT_EQ_U32(sel.anchor.paragraph, 0); ASSERT_EQ_U32(sel.anchor.offset, 2);
+        ASSERT_EQ_U32(sel.caret.paragraph, 2);  ASSERT_EQ_U32(sel.caret.offset, 3);
+        ASSERT_EQ_U32(wp_keymap_cursor(&ctx)->paragraph, 2);
+
+        /* Another Shift+click keeps the anchor and moves the far end. */
+        wp_keymap_click(&ctx, pos_at(3, 1), WP_TRUE);
+        ASSERT_TRUE(wp_keymap_selection(&ctx, &sel));
+        ASSERT_EQ_U32(sel.anchor.offset, 2);
+        ASSERT_EQ_U32(sel.caret.paragraph, 3);
+
+        /* A plain click ends it. */
+        wp_keymap_click(&ctx, a, WP_FALSE);
+        ASSERT_TRUE(!wp_keymap_selection(&ctx, &sel));
+
+        wp_keymap_free(&ctx);
+        wp_undo_journal_free(&journal);
+        wp_document_free(&doc);
+    }
+}

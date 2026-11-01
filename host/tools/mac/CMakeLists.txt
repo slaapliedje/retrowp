@@ -46,6 +46,10 @@ file(GLOB RETROWP_ENGINE_SRC ${RETROWP_ROOT}/engine/src/*.c)
 file(GLOB RETROPLAT_PORTABLE_SRC ${RETROPLAT_ROOT}/src/*.c)
 list(APPEND RETROWP_ENGINE_SRC ${RETROPLAT_PORTABLE_SRC})
 file(GLOB RETROWP_TRANSPORT_SRC ${RETROWP_ROOT}/offload/transport/*.c)
+# The spell and grammar services, which the portable Tools actions
+# (platform/common/tools.c) call; matching MAC_SERVICES_OBJ in the
+# top-level Makefile.
+file(GLOB RETROWP_SERVICES_SRC ${RETROWP_ROOT}/services/spell/*.c ${RETROWP_ROOT}/services/grammar/*.c)
 
 # config.c/help_doc.c/help_view.c/statusline.c (Phase 5): the retrofit
 # that wires config-driven keymap selection, the help pager, and the
@@ -57,6 +61,7 @@ set(RETROWP_COMMON_SRC
     ${RETROWP_ROOT}/platform/common/keymap.c
     ${RETROWP_ROOT}/platform/common/viewport.c
     ${RETROWP_ROOT}/platform/common/selspan.c
+    ${RETROWP_ROOT}/platform/common/tools.c
     ${RETROWP_ROOT}/platform/common/config.c
     ${RETROWP_ROOT}/platform/common/help_doc.c
     ${RETROWP_ROOT}/platform/common/help_view.c
@@ -77,6 +82,8 @@ set(RETROWP_INCLUDES
     ${RETROPLAT_ROOT}/backends/mac
     ${RETROWP_ROOT}/platform/mac
     ${RETROWP_ROOT}/platform/common
+    ${RETROWP_ROOT}/services/spell
+    ${RETROWP_ROOT}/services/grammar
     ${RETROWP_ROOT}/offload/transport
     ${RETROWP_ROOT}/build/generated
 )
@@ -88,7 +95,7 @@ add_application(mac_smoke
     ${RETROWP_MAC_PLATFORM_SRC}
     ${RETROWP_COMMON_SRC}
     ${RETROWP_ENGINE_SRC}
-    ${RETROWP_TRANSPORT_SRC}
+    ${RETROWP_TRANSPORT_SRC} ${RETROWP_SERVICES_SRC}
 )
 target_include_directories(mac_smoke PRIVATE ${RETROWP_INCLUDES})
 
@@ -98,6 +105,6 @@ add_application(RETROWP
     ${RETROWP_MAC_PLATFORM_SRC}
     ${RETROWP_COMMON_SRC}
     ${RETROWP_ENGINE_SRC}
-    ${RETROWP_TRANSPORT_SRC}
+    ${RETROWP_TRANSPORT_SRC} ${RETROWP_SERVICES_SRC}
 )
 target_include_directories(RETROWP PRIVATE ${RETROWP_INCLUDES})

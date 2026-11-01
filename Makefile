@@ -225,7 +225,7 @@ ATARICC ?= m68k-atari-mint-gcc
 # docs/atari-platform.md.
 ATARI_STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror -O2 $(DEPFLAGS)
 ATARI_RELAXED_CFLAGS = -Wall -Wextra -O2 $(DEPFLAGS)
-ATARI_INCLUDES       = -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -Iplatform/common -Ioffload/transport -I$(GENERATED)
+ATARI_INCLUDES       = -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -Iplatform/common -Ioffload/transport -I$(GENERATED) -Iservices/spell -Iservices/grammar
 
 ATARI_BUILD = build/atari
 ATARI_BIN   = bin/atari
@@ -429,7 +429,7 @@ AMIGA_CPU = -m68000 -msoft-float -fbbb=abcefilmnprsz0
 
 AMIGA_STRICT_CFLAGS  = -std=c89 -pedantic -Wall -Wextra -Werror $(AMIGA_CPU) $(DEPFLAGS)
 AMIGA_RELAXED_CFLAGS = -Wall -Wextra $(AMIGA_CPU) $(DEPFLAGS)
-AMIGA_INCLUDES       = -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/amiga -Iplatform/amiga -Iplatform/common -Ioffload/transport -I$(GENERATED)
+AMIGA_INCLUDES       = -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/amiga -Iplatform/amiga -Iplatform/common -Ioffload/transport -I$(GENERATED) -Iservices/spell -Iservices/grammar
 
 AMIGA_BUILD = build/amiga
 AMIGA_BIN   = bin/amiga
@@ -679,7 +679,7 @@ DOS_RELAXED_CFLAGS = -0 -ml -bt=dos -wx
 # moved with the file: endian.h now lives in $(RETROPLAT)/include, which
 # is still ahead of $(DOS_TOOLROOT)/h below, which is what matters. Never
 # reorder $(DOS_TOOLROOT)/h earlier.
-DOS_INCLUDES       = -i=engine/include -i=$(RETROPLAT)/include -i=$(RETROPLAT)/backends/dos -i=platform/dos -i=platform/common -i=offload/transport -i=$(GENERATED) -i=$(DOS_TOOLROOT)/h
+DOS_INCLUDES       = -i=engine/include -i=$(RETROPLAT)/include -i=$(RETROPLAT)/backends/dos -i=platform/dos -i=platform/common -i=offload/transport -i=$(GENERATED) -i=$(DOS_TOOLROOT)/h -i=services/spell -i=services/grammar
 
 DOS_BUILD = build/dos
 DOS_BIN   = bin/dos

@@ -198,3 +198,92 @@ i32 wp_line_cursor_x_twips(wp_document *doc, wp_paragraph *para, const wp_line *
     if (slot.valid) plat_font_close(slot.font);
     return x_twips;
 }
+
+/* The inverse of wp_line_cursor_x_twips, for a click: the same fragment
+   walk, stopping in the fragment that contains x and then stepping
+   through it a codepoint at a time until the nearest boundary. Nearest,
+   not "the boundary before x": a click on the right half of a glyph
+   lands after it, which is where every editor puts the caret. */
+wp_bool wp_line_pos_at_x_twips(wp_document *doc, wp_paragraph *para, const wp_line *line,
+                               i32 x_twips, i32 space_extra_twips,
+                               u32 *run_out, u32 *offset_out)
+{
+    wp_line_fragment_iter iter;
+    wp_line_fragment frag;
+    cursor_font_slot slot;
+    i32 x_acc = 0;
+    wp_bool found = WP_FALSE;
+
+    slot.handle = 0;
+    slot.font = NULL;
+    slot.valid = WP_FALSE;
+
+    *run_out = line->start_run;
+    *offset_out = line->start_offset;
+    if (para->kind == (u8)WP_PARA_IMAGE) return WP_TRUE;
+    if (x_twips <= 0) return WP_TRUE;
+
+    wp_line_fragment_iter_init(&iter, line);
+    while (!found && wp_line_next_fragment(doc, para, line, &iter, &frag)) {
+        const wp_run *run = wp_paragraph_run_get(para, (u16)frag.run_index);
+        const u8 *bytes;
+        plat_font *font;
+        u32 frag_len = frag.byte_end - frag.byte_start;
+        i32 width_twips = 0;
+        i32 advance;
+
+        /* The end of this fragment is a boundary the click may land on
+           even when the fragment itself cannot be measured. */
+        *run_out = frag.run_index;
+        *offset_out = frag.byte_end;
+
+        if (run == NULL) continue;
+        bytes = wp_strpool_get(&doc->strings, run->text);
+        if (bytes == NULL || frag_len == 0) continue;
+
+        font = cursor_slot_font(doc, run->style, &slot);
+        if (font == NULL) continue;
+        if (plat_measure_text(font, bytes + frag.byte_start, frag_len, &width_twips) != WP_OK) continue;
+        advance = width_twips + (frag.is_space ? space_extra_twips : 0);
+
+        if (x_twips < x_acc + advance) {
+            /* Inside this fragment: find the codepoint boundary nearest
+               to x by measuring growing prefixes. Stretched gaps of a
+               justified line count once, at the fragment's end. */
+            u32 off = frag.byte_start;
+            i32 prev_x = x_acc;
+
+            while (off < frag.byte_end) {
+                u32 next = utf8_next(bytes, frag.byte_end, off);
+                i32 w = 0;
+
+                if (next <= off) next = frag.byte_end; /* malformed: take the rest */
+                if (plat_measure_text(font, bytes + frag.byte_start, next - frag.byte_start, &w) != WP_OK) {
+                    break;
+                }
+                if (x_twips < x_acc + w) {
+                    /* x lies in [prev_x, x_acc + w): nearer edge wins. */
+                    *offset_out = ((x_twips - prev_x) <= (x_acc + w - x_twips)) ? off : next;
+                    found = WP_TRUE;
+                    break;
+                }
+                prev_x = x_acc + w;
+                off = next;
+            }
+            if (!found) {
+                *offset_out = frag.byte_end;
+                found = WP_TRUE;
+            }
+            *run_out = frag.run_index;
+            break;
+        }
+        x_acc += advance;
+    }
+
+    if (!found) {
+        *run_out = line->end_run;
+        *offset_out = line->end_offset;
+    }
+    if (slot.valid) plat_font_close(slot.font);
+    return WP_TRUE;
+}

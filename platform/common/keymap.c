@@ -559,6 +559,58 @@ wp_bool wp_keymap_selection(const wp_app_ctx *ctx, wp_selection *out)
     return WP_TRUE;
 }
 
+void wp_keymap_set_selection(wp_app_ctx *ctx, wp_pos anchor, wp_pos caret)
+{
+    switch ((wp_keymap_id)ctx->keymap_id) {
+    case WP_KEYMAP_WORDSTAR:
+        ctx->km.ws.block_begin = anchor;
+        ctx->km.ws.block_end = caret;
+        ctx->km.ws.block_begin_set = WP_TRUE;
+        ctx->km.ws.block_end_set = WP_TRUE;
+        ctx->km.ws.cursor = caret;
+        break;
+    case WP_KEYMAP_EMACS:
+        ctx->km.em.mark = anchor;
+        ctx->km.em.mark_set = WP_TRUE;
+        ctx->km.em.cursor = caret;
+        break;
+    case WP_KEYMAP_WORDPERFECT:
+        ctx->km.wp5.block_start = anchor;
+        ctx->km.wp5.block_active = WP_TRUE;
+        ctx->km.wp5.cursor = caret;
+        break;
+    case WP_KEYMAP_MSWORD:
+        ctx->km.mw.anchor = anchor;
+        ctx->km.mw.selecting = WP_TRUE;
+        ctx->km.mw.cursor = caret;
+        break;
+    case WP_KEYMAP_VI:
+    default:
+        /* From Insert or the command line as well: a Shift+click is a
+           Visual selection wherever it happens, as in gvim. */
+        ctx->km.vi.mode = (u8)WP_VIMODE_VISUAL;
+        ctx->km.vi.visual.anchor = anchor;
+        ctx->km.vi.visual.caret = caret;
+        ctx->km.vi.cursor = caret;
+        break;
+    }
+}
+
+void wp_keymap_click(wp_app_ctx *ctx, wp_pos pos, wp_bool extend)
+{
+    ctx->view.manual = WP_FALSE;
+    if (extend) {
+        wp_selection sel;
+        wp_pos anchor = *wp_keymap_cursor(ctx);
+
+        if (wp_keymap_selection(ctx, &sel)) anchor = sel.anchor;
+        wp_keymap_set_selection(ctx, anchor, pos);
+    } else {
+        wp_keymap_clear_selection(ctx);
+        *wp_keymap_cursor(ctx) = pos;
+    }
+}
+
 void wp_keymap_clear_selection(wp_app_ctx *ctx)
 {
     switch ((wp_keymap_id)ctx->keymap_id) {
