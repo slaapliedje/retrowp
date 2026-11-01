@@ -116,6 +116,7 @@ int main(void)
     nf_log("ATARI SMOKE: starting\r\n");
 
     check(appl_init() >= 0, "appl_init");
+    atari_register_ap_term(); /* a real shel_write(SWM_NEWMSG) under XaAES (the AFROS gate) */
 
     /* graf_handle() must run before wp_menu_tree_init() -- its
        wcell/hcell out-params are how a hand-built menu tree's logical
@@ -236,6 +237,12 @@ int main(void)
     msg[0] = WM_CLOSED;
     check(wp_dispatch_message(window_handle, vdi_handle, msg) == WP_TRUE,
           "dispatch(WM_CLOSED) requests quit");
+
+    /* The AES's own request to leave (XaAES's task manager, shutdown):
+       with nothing unsaved it is honoured at once, no question asked. */
+    msg[0] = AP_TERM; msg[5] = AP_TERM;
+    check(wp_dispatch_message(window_handle, vdi_handle, msg) == WP_TRUE,
+          "dispatch(AP_TERM) requests quit");
 
     menu_bar(wp_menu_tree, MENU_REMOVE);
     wind_close(window_handle);

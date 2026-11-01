@@ -414,8 +414,20 @@ void wp_menu_tree_init(short wcell, short hcell,
     wp_menu_tree[WP_MENU_OBJ_BAR].ob_width = screen_w_px;
     wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_width = screen_w_px;
 
+    /* The dropdowns hang from the bottom of the active area, hcell + 3
+       pixels down -- where every RCS-built menu puts them (an RSC file
+       says y = 1 character + 3 pixels for this box). Flush at hcell, as
+       this tree first had it, a box's 1-pixel outline is drawn at
+       hcell - 1, inside the title row, and the AES never puts that row
+       back: menu_sr() (FALCON.AES GEMMNLIB.C, and EmuTOS the same) grows
+       the saved rectangle left, right and DOWN by MTH but never up. In
+       RCS geometry the row it skips is the bar's own bottom border, so
+       nothing shows; here it left a line under every title the pointer
+       had opened, until the next full redraw. Seen under EmuTOS in
+       Hatari, 2026-11-01, and present since the tree was first built. */
+    wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_y = (short)(hcell + 3);
     wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_width = screen_w_px;
-    wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_height = (short)(screen_h_px - hcell);
+    wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_height = (short)(screen_h_px - hcell - 3);
 
     /* Bar and active-area heights, straight from RCSMENU.C's
        fix_menu_bar() -- the "+2 pixels for a border line" the
@@ -4508,9 +4520,65 @@ static void atari_click(short window_handle, VdiHdl vdi, short mx, short my, sho
     redraw_window(window_handle, vdi);
 }
 
+/* A multitasking AES (XaAES, MagiC, N.AES) asks a program to leave with
+   AP_TERM -- from its task manager, or at shutdown and resolution change
+   -- but only a program that has said it understands the message; one
+   that has not is treated as a pre-4.0 program and, under XaAES, killed
+   outright, unsaved work and all. The registration is shel_write mode 9
+   (SWM_NEWMSG, bit 0 = NM_APTERM), which exists from AES 4.0; MagiC
+   reports 3.99 and supports it, which is why the test is 0x0399 rather
+   than 0x0400. Plain TOS and EmuTOS report less and never send AP_TERM,
+   so nothing changes there. gem4xe's AES is single-application and sends
+   none of the shutdown handshake (its gem.h says so), so its build skips
+   both halves. */
+#ifndef GEM4XE_APP_GEM_H
+#ifndef SWM_NEWMSG
+#define SWM_NEWMSG 9
+#endif
+#ifndef NM_APTERM
+#define NM_APTERM 0x0001
+#endif
+#ifndef SWM_AESMSG
+#define SWM_AESMSG 10
+#endif
+#define WP_ATARI_AES_HAS_NEWMSG 0x0399
+#endif
+
+void atari_register_ap_term(void)
+{
+#ifndef GEM4XE_APP_GEM_H
+    if ((unsigned short)_AESversion >= WP_ATARI_AES_HAS_NEWMSG) {
+        shel_write(SWM_NEWMSG, NM_APTERM, 0, NULL, NULL);
+    }
+#endif
+}
+
+/* The answer to an AP_TERM the writer declined: the AES stops the
+   shutdown rather than waiting on, or killing, a program that stayed. */
+static void atari_refuse_ap_term(void)
+{
+#ifndef GEM4XE_APP_GEM_H
+    short reply[8];
+
+    memset(reply, 0, sizeof(reply));
+    reply[0] = AP_TFAIL;
+    reply[1] = 0;   /* no error: the writer chose to stay */
+    shel_write(SWM_AESMSG, 0, 0, (char *)reply, NULL);
+#endif
+}
+
 wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
 {
     switch (msg[0]) {
+    case AP_TERM:
+        /* The AES asking us to leave: the same question as every other
+           way out, and an honest "no" when the writer keeps their work. */
+        wp_action_request_quit(&g_ctx);
+        if (g_ctx.quit_requested) return WP_TRUE;
+        atari_refuse_ap_term();
+        redraw_window(window_handle, vdi);
+        return WP_FALSE;
+
     case MN_SELECTED:
         menu_tnormal(wp_menu_tree, msg[3], UNHIGHLIGHT);
         return dispatch_menu_item(window_handle, vdi, msg[4]);
@@ -4784,6 +4852,7 @@ void app_shell_run(void)
     wp_bool quit;
 
     appl_init();
+    atari_register_ap_term();
 
     /* M10: read once at startup, fixed for the process lifetime -- see
        WP_ATARI_CONFIG_PATH's own comment and docs/keymaps.md. Missing/

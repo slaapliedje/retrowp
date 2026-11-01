@@ -281,9 +281,16 @@ wp_bool wp_atari_menu_selfcheck(void);
 /* Handles one AES message as delivered in evnt_multi's MesagBuf (msg[0]
    is the message type; the rest depend on type -- see the AES message
    layout in gem.h/mt_gem.h). Returns WP_TRUE if the app should quit
-   (Quit menu item selected, or the window was closed). vdi is needed
-   because WM_REDRAW repaints through the VDI clip/fill seam. */
+   (Quit menu item selected, the window was closed, or the AES sent
+   AP_TERM and the writer agreed). vdi is needed because WM_REDRAW
+   repaints through the VDI clip/fill seam. */
 wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8]);
+
+/* Tells an AES 4.0+ (XaAES, MagiC, N.AES) that this program understands
+   AP_TERM, so its task manager and shutdown ask instead of killing.
+   Does nothing on an older AES, and nothing in the gem4xe build. Call
+   once, right after appl_init. */
+void atari_register_ap_term(void);
 
 /* T4.2: imports a short multi-word paragraph, relayouts it at a column
    width deliberately narrow enough to force wrapping, and checks two
