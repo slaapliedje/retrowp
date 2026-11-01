@@ -21,6 +21,7 @@
 #include "keymap.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "selspan.h"
 #include "menucheck.h"
 #include "metrics_mac_internal.h"
 #include "offload.h"
@@ -667,6 +668,7 @@ static void invoke_backend_action(wp_action_id id)
 static void invoke_action(const wp_action *act)
 {
     if (act == NULL) return;
+    g_ctx.view.manual = WP_FALSE; /* a menu pick acts at the caret: show it */
     if (act->handler != NULL) {
         act->handler(&g_ctx);
     } else {
@@ -847,6 +849,8 @@ static void translate_mac_key(EventRecord *e, wp_key_event *out)
     case 0x7C: out->special = (u16)WP_KEY_RIGHT;     return;
     case 0x7D: out->special = (u16)WP_KEY_DOWN;      return;
     case 0x7E: out->special = (u16)WP_KEY_UP;        return;
+    case 0x74: out->special = (u16)WP_KEY_PAGE_UP;   return; /* Extended keyboard */
+    case 0x79: out->special = (u16)WP_KEY_PAGE_DOWN; return;
     case 0x7A: out->special = (u16)WP_KEY_F1;        return;
     case 0x78: out->special = (u16)WP_KEY_F2;        return;
     case 0x63: out->special = (u16)WP_KEY_F3;        return;
@@ -1104,10 +1108,14 @@ static void draw_document(WindowPtr w)
     i32 content_width_px;
     i32 content_width_twips;
     u32 si, pi, li;
+    u32 flat = 0;   /* display-line index, the viewport's unit (viewport.h) */
     plat_font *font = NULL;
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
     i32 ascent_px = 0;
+    wp_selection sel;
+    wp_pos sel_from, sel_to;
+    wp_bool have_sel = WP_FALSE;
 
     SetPort(w);
     BeginUpdate(w);
@@ -1125,6 +1133,7 @@ static void draw_document(WindowPtr w)
         EndUpdate(w);
         return;
     }
+    have_sel = wp_keymap_selection(&g_ctx, &sel);
 
     /* Reserve a bottom strip for the status line (Phase 5), the same
        way platform/atari/app_shell.c's/platform/amiga/app_shell.c's own
@@ -1158,6 +1167,14 @@ static void draw_document(WindowPtr w)
     gc.window = w;
 
     y = (short)(r.top + WP_DOC_TOP_MARGIN_PX);
+
+    /* The view follows the caret before anything is painted, so a
+       keystroke that moved it below the window scrolls the document up
+       here (viewport.h). relayout_document above left the layouts
+       current. */
+    g_ctx.view.view_h_px = (i32)doc_bottom - (i32)y;
+    wp_viewport_follow_cursor(&g_ctx.view, &g_mac_doc, wp_keymap_cursor(&g_ctx));
+
     for (si = 0; si < g_mac_doc.section_count && y <= doc_bottom; si++) {
         wp_section *sec = wp_document_section_get(&g_mac_doc, si);
         u32 pc = (sec != NULL) ? sec->para_count : 0;
@@ -1192,6 +1209,9 @@ static void draw_document(WindowPtr w)
                 i32 extra_twips;
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
+
+                /* Scrolled off the top: walked, not drawn, y stays put. */
+                if (flat++ < g_ctx.view.top_line) continue;
 
                 x_px += mac_twips_to_px(
                     mac_align_offset_twips(align, content_width_twips, line->width_twips));
@@ -1353,6 +1373,23 @@ static void draw_document(WindowPtr w)
                     PaintRect(&mark);
                 }
 
+                /* The selection, inverted over this line's selected
+                   part (selspan.h), measured as the caret is; after
+                   the caret, so a caret inside it shows inverted. */
+                if (have_sel && wp_selspan_for_line(sel, si, pi, line, &sel_from, &sel_to)) {
+                    i32 hx0 = line_origin_px + mac_twips_to_px(
+                        wp_line_cursor_x_twips(&g_mac_doc, para, line, sel_from.run, sel_from.offset, extra_twips));
+                    i32 hx1 = line_origin_px + mac_twips_to_px(
+                        wp_line_cursor_x_twips(&g_mac_doc, para, line, sel_to.run, sel_to.offset, extra_twips));
+                    Rect hl;
+
+                    if (hx1 > hx0) {
+                        SetRect(&hl, (short)hx0, (short)y, (short)hx1,
+                                (short)(y + mac_twips_to_px(line->height_twips)));
+                        InvertRect(&hl);
+                    }
+                }
+
                 y = (short)(y + mac_twips_to_px(line->height_twips));
             }
         }
@@ -1446,6 +1483,7 @@ void app_shell_run(void)
        backend's own zero-config behavior exactly. */
     wp_config_load(WP_MAC_CONFIG_PATH, &cfg);
     wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_mac_doc, &g_mac_journal);
+    g_ctx.view.line_px = mac_twips_to_px; /* the conversion draw_document advances y with */
     load_sample_document();
 
     /* Phase 5: parsed ONCE at startup from the generated

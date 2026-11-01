@@ -167,6 +167,14 @@ wp_pos *wp_keymap_cursor(struct wp_app_ctx *ctx);
  * range taker normalize for themselves. */
 wp_bool wp_keymap_selection(const struct wp_app_ctx *ctx, wp_selection *out);
 
+/* Ends the active scheme's selection, in that scheme's own terms: vi
+   leaves Visual mode for Normal, WordStar forgets both block markers,
+   Emacs deactivates the mark, WordPerfect leaves Block, Word stops
+   extending. For after an action has consumed the selection -- Cut,
+   or a Paste that replaced it -- the same way `d` in Visual mode goes
+   back to Normal. A no-op without a selection. */
+void wp_keymap_clear_selection(struct wp_app_ctx *ctx);
+
 /* T172: parks the filename from an ex command (":w name" / ":e name")
    for the backend's own do_file_open/do_file_save to collect, since
    every backend's invoke_action(action_id) dispatcher carries no

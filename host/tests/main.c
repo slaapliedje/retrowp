@@ -284,6 +284,22 @@ void test_actions_cut_takes_every_paragraph_of_an_opened_file(void);
 void test_actions_cut_copes_with_a_run_of_no_text(void);
 void test_actions_cut_is_one_undo_step(void);
 void test_actions_cut_keeps_a_document_the_clipboard_cannot_hold(void);
+void test_viewport_counts_display_lines_across_paragraphs(void);
+void test_viewport_follows_the_cursor_with_the_least_scroll(void);
+void test_viewport_follow_keeps_the_top_inside_a_shorter_document(void);
+void test_viewport_page_moves_view_and_cursor_together(void);
+void test_viewport_page_lands_mid_paragraph_on_a_wrapped_line(void);
+void test_viewport_scroll_by_hand_holds_until_a_keystroke(void);
+void test_viewport_page_keys_work_under_every_scheme(void);
+void test_viewport_replace_document_goes_back_to_the_top(void);
+void test_actions_copy_takes_only_the_selection(void);
+void test_actions_cut_takes_only_the_selection(void);
+void test_actions_paste_replaces_the_selection(void);
+void test_actions_copy_and_cut_with_nothing_selected_do_nothing(void);
+void test_actions_cut_in_visual_line_takes_whole_paragraphs(void);
+void test_selspan_marks_the_lines_a_selection_crosses(void);
+void test_selspan_within_one_line(void);
+void test_selspan_starting_at_a_line_end_shows_nothing_there(void);
 void test_actions_paste_inserts_at_the_cursor(void);
 void test_actions_request_quit_asks_when_modified(void);
 void test_actions_save_quit_stays_when_the_save_did_not_land(void);
@@ -832,6 +848,22 @@ static const test_case g_cases[] = {
     { "actions_cut_copes_with_a_run_of_no_text", test_actions_cut_copes_with_a_run_of_no_text },
     { "actions_cut_is_one_undo_step", test_actions_cut_is_one_undo_step },
     { "actions_cut_keeps_a_document_the_clipboard_cannot_hold", test_actions_cut_keeps_a_document_the_clipboard_cannot_hold },
+    { "viewport_counts_display_lines_across_paragraphs", test_viewport_counts_display_lines_across_paragraphs },
+    { "viewport_follows_the_cursor_with_the_least_scroll", test_viewport_follows_the_cursor_with_the_least_scroll },
+    { "viewport_follow_keeps_the_top_inside_a_shorter_document", test_viewport_follow_keeps_the_top_inside_a_shorter_document },
+    { "viewport_page_moves_view_and_cursor_together", test_viewport_page_moves_view_and_cursor_together },
+    { "viewport_page_lands_mid_paragraph_on_a_wrapped_line", test_viewport_page_lands_mid_paragraph_on_a_wrapped_line },
+    { "viewport_scroll_by_hand_holds_until_a_keystroke", test_viewport_scroll_by_hand_holds_until_a_keystroke },
+    { "viewport_page_keys_work_under_every_scheme", test_viewport_page_keys_work_under_every_scheme },
+    { "viewport_replace_document_goes_back_to_the_top", test_viewport_replace_document_goes_back_to_the_top },
+    { "actions_copy_takes_only_the_selection", test_actions_copy_takes_only_the_selection },
+    { "actions_cut_takes_only_the_selection", test_actions_cut_takes_only_the_selection },
+    { "actions_paste_replaces_the_selection", test_actions_paste_replaces_the_selection },
+    { "actions_copy_and_cut_with_nothing_selected_do_nothing", test_actions_copy_and_cut_with_nothing_selected_do_nothing },
+    { "actions_cut_in_visual_line_takes_whole_paragraphs", test_actions_cut_in_visual_line_takes_whole_paragraphs },
+    { "selspan_marks_the_lines_a_selection_crosses", test_selspan_marks_the_lines_a_selection_crosses },
+    { "selspan_within_one_line", test_selspan_within_one_line },
+    { "selspan_starting_at_a_line_end_shows_nothing_there", test_selspan_starting_at_a_line_end_shows_nothing_there },
     { "actions_paste_inserts_at_the_cursor", test_actions_paste_inserts_at_the_cursor },
     { "actions_request_quit_asks_when_modified", test_actions_request_quit_asks_when_modified },
     { "actions_save_quit_stays_when_the_save_did_not_land", test_actions_save_quit_stays_when_the_save_did_not_land },

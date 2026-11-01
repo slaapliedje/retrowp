@@ -13,6 +13,7 @@
 #include "offload.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "selspan.h"
 #include "menucheck.h"
 #include "config.h"
 #include "statusline.h"
@@ -93,6 +94,21 @@ static void put_char(int row, int col, char ch, unsigned char attr)
 
     vmem[offset] = (unsigned char)ch;
     vmem[offset + 1] = attr;
+}
+
+/* The selection highlight: the cells of one row from c0 up to c1 go
+   black on light grey, the same inversion the title bar uses. The
+   characters stay; only the attribute byte changes. */
+static void invert_cells(int row, int c0, int c1)
+{
+    dos_video_ptr vmem = video_mem();
+    int c;
+
+    if (c0 < 0) c0 = 0;
+    if (c1 > DOS_SCREEN_COLS) c1 = DOS_SCREEN_COLS;
+    for (c = c0; c < c1; c++) {
+        vmem[(row * DOS_SCREEN_COLS + c) * 2 + 1] = DOS_ATTR_TITLE;
+    }
 }
 
 static void clear_rows(int first_row, int last_row, unsigned char attr)
@@ -405,19 +421,32 @@ static u32 dos_format_image_marker(u8 *buf, u32 cap, const wp_document *doc,
    start), not a plat_measure_text call -- correct specifically because
    DOS's font is genuinely, always monospace (see metrics_dos_
    internal.h), a simplification no proportional-font backend can make.
-   Stops at bottom_row -- there is no scrolling yet, matching every
-   other backend's own identical, honestly-documented MVP scope
-   ("there is no scrolling yet (T4.3+)", platform/atari/app_shell.c). */
+   Starts at the viewport's top display line (viewport.h) and stops at
+   bottom_row: scrolling on a text screen is nothing more than which
+   line lands on the first row. */
+
+/* The viewport's height conversion for this backend: every display
+   line is one text row, whatever its point size says. */
+static i32 dos_line_rows(i32 height_twips)
+{
+    WP_UNUSED(height_twips);
+    return 1;
+}
+
 static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                                  int *cursor_row_out, int *cursor_col_out)
 {
     u32 si, pi;
+    u32 flat = 0;   /* display-line index, the viewport's unit */
     int row = top_row;
     wp_pos *cursor = wp_keymap_cursor(&g_ctx);
     wp_bool cursor_found = WP_FALSE;
     plat_font *font = NULL;
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
+    wp_selection sel;
+    wp_pos sel_from, sel_to;
+    wp_bool have_sel = wp_keymap_selection(&g_ctx, &sel);
 
     *cursor_row_out = top_row;
     *cursor_col_out = 0;
@@ -437,10 +466,14 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
             for (li = 0; li < layout->line_count && row <= bottom_row; li++) {
                 wp_line *line = &layout->lines[li];
                 int col;
+                int sel_c0 = 0, sel_c1 = 0;
+                wp_bool sel_here = WP_FALSE;
                 i32 extra_twips;
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
 
+                /* Scrolled off the top: walked, not drawn, no row used. */
+                if (flat++ < g_ctx.view.top_line) continue;
 
                 col = dos_twips_to_col(
                     (align == WP_ALIGN_CENTER || align == WP_ALIGN_RIGHT)
@@ -475,6 +508,15 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                     *cursor_row_out = row;
                     *cursor_col_out = cursor_col_in_line(para, line, col, cursor->run, cursor->offset);
                     cursor_found = WP_TRUE;
+                }
+
+                /* The selection's columns on this row (selspan.h), by
+                   the same byte count the cursor column uses; the
+                   cells are inverted once the text is on them. */
+                if (have_sel && wp_selspan_for_line(sel, si, pi, line, &sel_from, &sel_to)) {
+                    sel_c0 = cursor_col_in_line(para, line, col, sel_from.run, sel_from.offset);
+                    sel_c1 = cursor_col_in_line(para, line, col, sel_to.run, sel_to.offset);
+                    sel_here = (wp_bool)(sel_c1 > sel_c0);
                 }
 
                 wp_line_fragment_iter_init(&iter, line);
@@ -530,6 +572,8 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                     if (frag.is_space) col += dos_twips_to_col(extra_twips);
                 }
 
+                if (sel_here) invert_cells(row, sel_c0, sel_c1);
+
                 row++;
             }
 
@@ -537,7 +581,7 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                 /* Empty paragraph (one zero-width line) or cursor sits
                    exactly at the paragraph's own end -- park on the
                    last row this paragraph actually used. */
-                *cursor_row_out = row - 1;
+                *cursor_row_out = (row - 1 >= top_row) ? row - 1 : top_row;
                 *cursor_col_out = 0;
             }
         }
@@ -660,6 +704,11 @@ static void redraw_screen(void)
            layout_dirty, so an unchanged document costs one flag test
            per paragraph rather than a full re-measure. */
         relayout_document(g_content_width_twips);
+        /* The view follows the caret before the body is painted, so a
+           keystroke that took the caret below the last row scrolls the
+           screen rather than hiding it (viewport.h). */
+        g_ctx.view.view_h_px = DOS_DOC_BOTTOM_ROW - DOS_DOC_TOP_ROW + 1;
+        wp_viewport_follow_cursor(&g_ctx.view, &g_doc, wp_keymap_cursor(&g_ctx));
         paint_document_body(DOS_DOC_TOP_ROW, DOS_DOC_BOTTOM_ROW, gc, &cursor_row, &cursor_col);
         paint_status_line(gc);
     }
@@ -1234,6 +1283,7 @@ void app_shell_run(void)
 
         wp_config_load(WP_DOS_CONFIG_PATH, &cfg);
         wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_doc, &g_journal);
+        g_ctx.view.line_px = dos_line_rows;
     }
 
     g_help_doc_loaded = (wp_bool)(wp_help_doc_parse(g_help_source_retrowp,

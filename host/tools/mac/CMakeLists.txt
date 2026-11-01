@@ -55,6 +55,8 @@ set(RETROWP_COMMON_SRC
     ${RETROWP_ROOT}/platform/common/actions.c
     ${RETROWP_ROOT}/platform/common/app_ctx.c
     ${RETROWP_ROOT}/platform/common/keymap.c
+    ${RETROWP_ROOT}/platform/common/viewport.c
+    ${RETROWP_ROOT}/platform/common/selspan.c
     ${RETROWP_ROOT}/platform/common/config.c
     ${RETROWP_ROOT}/platform/common/help_doc.c
     ${RETROWP_ROOT}/platform/common/help_view.c

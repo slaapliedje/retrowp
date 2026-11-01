@@ -6,6 +6,7 @@
 #include "docmodel.h"
 #include "editing.h"
 #include "keymap.h"
+#include "viewport.h"
 #include "platform.h"
 
 /* Shared application state threaded through the action registry
@@ -46,6 +47,11 @@ typedef struct wp_app_ctx {
                                 unchanged in spirit from pre-M8.5 g_current_size_twips */
     u8  align;
     u16 style_flags;    /* wp_style_flags bitfield */
+
+    wp_viewport view;   /* the scrolled view: see viewport.h. The backend sets
+                           view.line_px after wp_app_ctx_init and records
+                           view.view_h_px in its painter; everything else is
+                           shared code. */
 
     wp_bool doc_loaded;
     wp_bool quit_requested; /* WP_ACT_FILE_QUIT sets this; the backend's own event

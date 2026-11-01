@@ -420,6 +420,25 @@ static wp_keymap_outcome feed_key_mw(wp_app_ctx *ctx, wp_key_event ev)
 
 wp_keymap_outcome wp_keymap_feed_key(wp_app_ctx *ctx, wp_key_event ev, u8 raw_shortcut_byte)
 {
+    /* A keystroke ends a scroll by hand: the writer is back at the
+       caret, so the view goes back to following it (viewport.h). */
+    ctx->view.manual = WP_FALSE;
+
+    /* Page Up/Down belong to the view rather than to any scheme: none
+       of the five binds them, all five want the same thing from them,
+       and only the view knows how tall a page is. Handled here so every
+       backend and every scheme gets them from one place. */
+    if ((ev.special == (u16)WP_KEY_PAGE_UP || ev.special == (u16)WP_KEY_PAGE_DOWN) &&
+        ev.mods == 0) {
+        wp_keymap_outcome outcome;
+
+        memset(&outcome, 0, sizeof(outcome));
+        outcome.kind = (u8)WP_KEYMAP_RESULT_NONE;
+        wp_viewport_page(&ctx->view, ctx->doc, wp_keymap_cursor(ctx),
+                         (wp_bool)(ev.special == (u16)WP_KEY_PAGE_DOWN));
+        return outcome;
+    }
+
     switch ((wp_keymap_id)ctx->keymap_id) {
     case WP_KEYMAP_WORDSTAR:
         return feed_key_ws(ctx, ev);
@@ -450,6 +469,48 @@ wp_pos *wp_keymap_cursor(wp_app_ctx *ctx)
     default:
         return &ctx->km.vi.cursor;
     }
+}
+
+/* The same widening vimode.c's normalize_linewise_selection does for a
+   linewise operator: from the start of the earlier paragraph to the
+   start of the one after the later, so the paragraph break goes too;
+   when the later paragraph is the last, the range reaches back to the
+   end of the paragraph before the earlier one instead (vim's "dd on the
+   last line merges upward"), or to the document's start if there is
+   none. */
+static wp_selection widen_to_paragraphs(const wp_document *doc, wp_selection sel)
+{
+    wp_pos lo, hi, start, end;
+    wp_section *sec;
+
+    if (wp_pos_compare(sel.anchor, sel.caret) <= 0) { lo = sel.anchor; hi = sel.caret; }
+    else                                             { lo = sel.caret;  hi = sel.anchor; }
+
+    sec = wp_document_section_get((wp_document *)doc, hi.section);
+    start.section = lo.section;
+    start.paragraph = lo.paragraph;
+    start.run = 0;
+    start.offset = 0;
+    if (sec != NULL && hi.paragraph + 1 < sec->para_count) {
+        end.section = hi.section;
+        end.paragraph = hi.paragraph + 1;
+        end.run = 0;
+        end.offset = 0;
+    } else {
+        if (sec != NULL && lo.paragraph > 0) {
+            const wp_paragraph *prev = wp_section_paragraph_get(sec, lo.paragraph - 1);
+
+            start.paragraph = lo.paragraph - 1;
+            if (prev != NULL && prev->run_count > 0) {
+                start.run = (u32)(prev->run_count - 1);
+                start.offset = prev->runs[prev->run_count - 1].text.length;
+            }
+        }
+        end = wp_pos_doc_end(doc);
+    }
+    sel.anchor = start;
+    sel.caret = end;
+    return sel;
 }
 
 wp_bool wp_keymap_selection(const wp_app_ctx *ctx, wp_selection *out)
@@ -484,12 +545,44 @@ wp_bool wp_keymap_selection(const wp_app_ctx *ctx, wp_selection *out)
         if (ctx->km.vi.mode != (u8)WP_VIMODE_VISUAL &&
             ctx->km.vi.mode != (u8)WP_VIMODE_VISUAL_LINE) return WP_FALSE;
         sel = ctx->km.vi.visual;
+        /* Visual Line selects whole paragraphs: widen the pair the way
+           vimode.c's own operators do (normalize_linewise_selection),
+           so Cut and the highlight agree with what `d` would take. */
+        if (ctx->km.vi.mode == (u8)WP_VIMODE_VISUAL_LINE) {
+            sel = widen_to_paragraphs(ctx->doc, sel);
+        }
         break;
     }
 
     if (wp_pos_compare(sel.anchor, sel.caret) == 0) return WP_FALSE;
     if (out) *out = sel;
     return WP_TRUE;
+}
+
+void wp_keymap_clear_selection(wp_app_ctx *ctx)
+{
+    switch ((wp_keymap_id)ctx->keymap_id) {
+    case WP_KEYMAP_WORDSTAR:
+        ctx->km.ws.block_begin_set = WP_FALSE;
+        ctx->km.ws.block_end_set = WP_FALSE;
+        break;
+    case WP_KEYMAP_EMACS:
+        ctx->km.em.mark_set = WP_FALSE;
+        break;
+    case WP_KEYMAP_WORDPERFECT:
+        ctx->km.wp5.block_active = WP_FALSE;
+        break;
+    case WP_KEYMAP_MSWORD:
+        ctx->km.mw.selecting = WP_FALSE;
+        break;
+    case WP_KEYMAP_VI:
+    default:
+        if (ctx->km.vi.mode == (u8)WP_VIMODE_VISUAL ||
+            ctx->km.vi.mode == (u8)WP_VIMODE_VISUAL_LINE) {
+            ctx->km.vi.mode = (u8)WP_VIMODE_NORMAL;
+        }
+        break;
+    }
 }
 
 void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,

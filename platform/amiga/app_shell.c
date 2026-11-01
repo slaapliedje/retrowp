@@ -34,6 +34,7 @@
 #include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "selspan.h"
 #include "menucheck.h"
 #include "metrics_amiga_internal.h"
 #include "offload.h"
@@ -1172,6 +1173,9 @@ static void invoke_action(wp_action_id id)
        here rather than no-op. Cheap to rule out. */
     if (act == NULL) return;
 
+    /* A menu pick acts at the caret, so the view goes back to it. */
+    g_ctx.view.manual = WP_FALSE;
+
     if (act->handler != NULL) {
         act->handler(&g_ctx);
     } else {
@@ -1210,6 +1214,9 @@ static void translate_rawkey(struct IntuiMessage *imsg, wp_key_event *out)
     UBYTE buf[8];
     WORD n;
     u8 alt = (imsg->Qualifier & (IEQUALIFIER_LALT | IEQUALIFIER_RALT)) ? (u8)WP_MOD_ALT : 0;
+    /* No Amiga keyboard has Page Up/Down; Shift+Up/Down is the Amiga's
+       own convention for them (the Workbench and every editor use it). */
+    wp_bool shift = (wp_bool)((imsg->Qualifier & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT)) != 0);
 
     out->codepoint = 0;
     out->special = (u16)WP_KEY_NONE;
@@ -1225,8 +1232,8 @@ static void translate_rawkey(struct IntuiMessage *imsg, wp_key_event *out)
     case 0x44: out->special = (u16)WP_KEY_ENTER; goto done;
     case 0x45: out->special = (u16)WP_KEY_ESCAPE; goto done;
     case 0x46: out->special = (u16)WP_KEY_DELETE; goto done;
-    case 0x4C: out->special = (u16)WP_KEY_UP; goto done;
-    case 0x4D: out->special = (u16)WP_KEY_DOWN; goto done;
+    case 0x4C: out->special = (u16)(shift ? WP_KEY_PAGE_UP : WP_KEY_UP); goto done;
+    case 0x4D: out->special = (u16)(shift ? WP_KEY_PAGE_DOWN : WP_KEY_DOWN); goto done;
     case 0x4E: out->special = (u16)WP_KEY_RIGHT; goto done;
     case 0x4F: out->special = (u16)WP_KEY_LEFT; goto done;
     default: break;
@@ -1566,6 +1573,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
 {
     amiga_gc gc;
     u32 si, pi, li;
+    u32 flat = 0;   /* display-line index, the viewport's unit (viewport.h) */
     i32 y;
     i32 content_width_px;
     i32 content_width_twips;
@@ -1575,6 +1583,9 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
     i32 ascent_px = 0;
+    wp_selection sel;
+    wp_pos sel_from, sel_to;
+    wp_bool have_sel;
 
     DoSuperMethodA(cl, obj, (Msg)msg);
     if (!(msg->flags & MADF_DRAWOBJECT)) return 0;
@@ -1599,6 +1610,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     }
 
     if (!g_ctx.doc_loaded) return 0;
+    have_sel = wp_keymap_selection(&g_ctx, &sel);
 
     /* Real per-object pixel width, converted through the SAME twips<->px
        ratio metrics_amiga.c uses for measurement (T9.2's actual point:
@@ -1636,6 +1648,14 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     doc_bottom = (i32)_mbottom(obj) - bar_h_px;
 
     y = _mtop(obj) + WP_EDITOR_TOP_MARGIN_PX;
+
+    /* The view follows the caret before anything is painted: a
+       keystroke that moved it below the object's bottom scrolls the
+       document up here (viewport.h). The layouts are current -- every
+       key goes through amiga_relayout_after_edit before this redraw. */
+    g_ctx.view.view_h_px = doc_bottom - y + 1;
+    wp_viewport_follow_cursor(&g_ctx.view, &g_amiga_doc, wp_keymap_cursor(&g_ctx));
+
     for (si = 0; si < g_amiga_doc.section_count && y <= doc_bottom; si++) {
         wp_section *sec = wp_document_section_get(&g_amiga_doc, si);
 
@@ -1669,6 +1689,9 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                 i32 extra_twips;
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
+
+                /* Scrolled off the top: walked, not drawn, y stays put. */
+                if (flat++ < g_ctx.view.top_line) continue;
 
                 x_px += amiga_twips_to_px_x(
                     amiga_align_offset_twips(align, content_width_twips, line->width_twips));
@@ -1838,6 +1861,24 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                     SetAPen(gc.rp, (UBYTE)gc.dri->dri_Pens[FILLPEN]);
                     RectFill(gc.rp, caret_x_px, (LONG)y,
                              caret_x_px + 1, (LONG)(y + caret_h_px - 1));
+                }
+
+                /* The selection, inverted over this line's selected
+                   part (selspan.h), measured as the caret is so the
+                   two agree to the pixel; after the caret, so a caret
+                   inside it shows inverted rather than vanishing. */
+                if (have_sel && wp_selspan_for_line(sel, si, pi, line, &sel_from, &sel_to)) {
+                    i32 hx0 = line_origin_px + amiga_twips_to_px_x(
+                        wp_line_cursor_x_twips(&g_amiga_doc, para, line, sel_from.run, sel_from.offset, extra_twips));
+                    i32 hx1 = line_origin_px + amiga_twips_to_px_x(
+                        wp_line_cursor_x_twips(&g_amiga_doc, para, line, sel_to.run, sel_to.offset, extra_twips));
+                    i32 h_px = amiga_twips_to_px_y(line->height_twips);
+
+                    if (hx1 > hx0 && h_px > 0) {
+                        SetDrMd(gc.rp, COMPLEMENT);
+                        RectFill(gc.rp, hx0, (LONG)y, hx1 - 1, (LONG)(y + h_px - 1));
+                        SetDrMd(gc.rp, JAM1);
+                    }
                 }
 
                 y += amiga_twips_to_px_y(line->height_twips);
@@ -2133,6 +2174,7 @@ void app_shell_run(void)
        behaves exactly as it always has. */
     wp_config_load(WP_AMIGA_CONFIG_PATH, &cfg);
     wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_amiga_doc, &g_amiga_journal);
+    g_ctx.view.line_px = amiga_twips_to_px_y; /* the conversion editor_draw advances y with */
     load_sample_document();
 
     /* M9 Phase 6: parsed ONCE at startup from the generated
@@ -2522,6 +2564,8 @@ wp_bool wp_amiga_key_translate_selfcheck(void)
         { 0x45, (UWORD)IEQUALIFIER_LALT, (u16)WP_KEY_ESCAPE, (u8)WP_MOD_ALT },   /* Left Alt */
         { 0x45, (UWORD)IEQUALIFIER_RALT, (u16)WP_KEY_ESCAPE, (u8)WP_MOD_ALT },   /* Right Alt too */
         { 0x4C, (UWORD)IEQUALIFIER_LALT, (u16)WP_KEY_UP, (u8)WP_MOD_ALT },       /* Alt+Up -- a different special key */
+        { 0x4C, (UWORD)IEQUALIFIER_LSHIFT, (u16)WP_KEY_PAGE_UP, 0 },             /* Shift+Up is Page Up */
+        { 0x4D, (UWORD)IEQUALIFIER_RSHIFT, (u16)WP_KEY_PAGE_DOWN, 0 },           /* either Shift */
         { 0x50, (UWORD)IEQUALIFIER_LALT, (u16)WP_KEY_F1, (u8)WP_MOD_ALT },       /* Alt+F1 */
         { 0x45, (UWORD)IEQUALIFIER_CONTROL, (u16)WP_KEY_ESCAPE, 0 } /* an unrelated qualifier bit set, Alt clear -- must NOT set WP_MOD_ALT */
     };

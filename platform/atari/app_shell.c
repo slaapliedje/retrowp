@@ -19,11 +19,18 @@
 #include "offload.h"
 #include "endian.h"
 #include "keyevent.h"
+
+/* gem4xe's gem.h spells the slider-size mode WF_VSLSIZ where gemlib has
+   WF_VSLSIZE; the number (16) is the same AES mode on both. */
+#ifndef WF_VSLSIZE
+#define WF_VSLSIZE WF_VSLSIZ
+#endif
 #include "vimode.h"
 #include "keymap.h"
 #include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "selspan.h"
 #include "menucheck.h"
 #include "statusline.h"
 #include "help_doc.h"
@@ -1082,15 +1089,14 @@ static void load_sample_document(i32 content_width_twips)
                             content_width_twips);
 }
 
-/* Paints every laid-out line of every paragraph, top to bottom, from
-   the window's work-area origin. Called once per damaged rectangle in
-   redraw_window() -- correctness (not re-painting the whole document
-   needlessly) relies on VDI clipping (vs_clip, already set by the
-   caller) to crop each call, not on this function tracking rectangles
-   itself. A line whose top has scrolled past the work area's bottom
-   stops the paragraph's remaining lines -- there is no scrolling yet
-   (T4.3+), so anything past the first screenful is simply not drawn,
-   not wrapped around or overwritten. */
+/* Paints every laid-out line from the viewport's top display line
+   (g_ctx.view, viewport.h) down, from the window's work-area origin.
+   Called once per damaged rectangle in redraw_window() -- correctness
+   (not re-painting the whole document needlessly) relies on VDI
+   clipping (vs_clip, already set by the caller) to crop each call, not
+   on this function tracking rectangles itself. Lines above the view are
+   walked and skipped; a line whose top has passed the work area's
+   bottom stops the rest. */
 /* The pure arithmetic behind paint_document's per-line alignment
    offset, pulled out into its own function so wp_atari_format_selfcheck
    can verify it against hand-computed values without needing a real
@@ -1148,6 +1154,26 @@ static void fill_white_strip(VdiHdl vdi, i32 x, i32 y, i32 w, i32 h)
     v_bar(vdi, pxy);
 }
 
+/* Inverts a strip: the selection highlight. XOR, so painting it is its
+   own undo and a repaint over it needs nothing special; the perimeter
+   is off so the bar's outline is not XORed a second time. */
+static void atari_invert_rect(VdiHdl vdi, i32 x, i32 y, i32 w, i32 h)
+{
+    short pxy[4];
+
+    if (w <= 0 || h <= 0) return;
+    pxy[0] = (short)x;
+    pxy[1] = (short)y;
+    pxy[2] = (short)(x + w - 1);
+    pxy[3] = (short)(y + h - 1);
+    vswr_mode(vdi, MD_XOR);
+    vsf_interior(vdi, FIS_SOLID);
+    vsf_color(vdi, G_BLACK);
+    vsf_perimeter(vdi, 0);
+    v_bar(vdi, pxy);
+    vswr_mode(vdi, MD_REPLACE);
+}
+
 /* CLEARS AS IT DRAWS, rather than being handed an already-blanked area.
    This is why: redraw_window used to blank the entire work area with one
    v_bar and then repaint every visible line on top. That is right for a
@@ -1173,11 +1199,15 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 {
     atari_gc gc;
     u32 si, pi, li;
+    u32 flat = 0;   /* display-line index, the viewport's unit (viewport.h) */
     i32 y_px = area.g_y;
     plat_font *font = NULL;
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
     i32 ascent_px = 0;
+    wp_selection sel;
+    wp_pos sel_from, sel_to;
+    wp_bool have_sel;
 
     if (!g_ctx.doc_loaded) {
         fill_white_strip(vdi, area.g_x, area.g_y, area.g_w, area.g_h);
@@ -1186,6 +1216,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 
     gc.vdi = vdi;
     gc.window_handle = window_handle;
+    have_sel = wp_keymap_selection(&g_ctx, &sel);
 
     for (si = 0; si < g_doc.section_count; si++) {
         wp_section *sec = wp_document_section_get(&g_doc, si);
@@ -1227,6 +1258,9 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
 
+                /* Scrolling: the lines above the view are walked, not
+                   drawn, and y does not advance for them. */
+                if (flat++ < g_ctx.view.top_line) continue;
                 if (y_px > area.g_y + area.g_h) break;
 
                 /* Erase this line's strip right before drawing it (see
@@ -1415,6 +1449,21 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                     if (caret_h_px < 1) caret_h_px = 1;
                     plat_fill_rect((plat_gc *)&gc, caret_x_px, y_px,
                                     WP_ATARI_CARET_W_PX, caret_h_px, 0, 0, 0);
+                }
+
+                /* The selection, inverted over this line's selected
+                   part (selspan.h): measured with the same
+                   wp_line_cursor_x_twips the caret uses, so the two
+                   agree to the pixel. After the caret, so a caret
+                   inside the selection shows white on black rather
+                   than vanishing. */
+                if (have_sel && wp_selspan_for_line(sel, si, pi, line, &sel_from, &sel_to)) {
+                    i32 hx0 = line_origin_px + atari_twips_to_px_x(
+                        wp_line_cursor_x_twips(&g_doc, para, line, sel_from.run, sel_from.offset, extra_twips));
+                    i32 hx1 = line_origin_px + atari_twips_to_px_x(
+                        wp_line_cursor_x_twips(&g_doc, para, line, sel_to.run, sel_to.offset, extra_twips));
+
+                    atari_invert_rect(vdi, hx0, y_px, hx1 - hx0, atari_twips_to_px_y(line->height_twips));
                 }
 
                 y_px += atari_twips_to_px_y(line->height_twips);
@@ -3812,6 +3861,38 @@ static void paint_help(short window_handle, VdiHdl vdi)
    and then "restored" on first movement. On a 4-plane Medium-res screen
    the stale planes decode to a solid green rectangle, which is what made
    it look like an image-drawing bug rather than a cursor bug. */
+/* Keeps the window's vertical slider telling the truth about the view:
+   its size is the share of the document's display lines that fit, its
+   position how far down the top line is (both on the AES's 1..1000
+   scale). Only the calls that change something are made -- wind_set
+   redraws the slider, and this runs after every repaint. */
+static void atari_update_slider(short window_handle)
+{
+    static short last_size = -1;
+    static short last_pos = -1;
+    short size = 1000;
+    short pos = 1;
+
+    if (g_ctx.doc_loaded) {
+        u32 total = 0;
+        u32 page = wp_viewport_page_lines(&g_ctx.view, &g_doc);
+        u32 max_top = wp_viewport_max_top(&g_ctx.view, &g_doc);
+
+        (void)wp_viewport_cursor_line(&g_doc, wp_keymap_cursor(&g_ctx), &total);
+        if (total > page) size = (short)((1000UL * page) / total);
+        if (max_top > 0) pos = (short)(1 + (999UL * g_ctx.view.top_line) / max_top);
+    }
+    if (size < 1) size = 1;
+    if (size != last_size) {
+        wind_set(window_handle, WF_VSLSIZE, size, 0, 0, 0);
+        last_size = size;
+    }
+    if (pos != last_pos) {
+        wind_set(window_handle, WF_VSLIDE, pos, 0, 0, 0);
+        last_pos = pos;
+    }
+}
+
 static void redraw_window(short window_handle, VdiHdl vdi)
 {
     GRECT r, work, doc_area;
@@ -3854,6 +3935,16 @@ static void redraw_window(short window_handle, VdiHdl vdi)
     doc_area = work;
     doc_area.g_h = (short)(work.g_h - bar_h_px);
 
+    /* The view follows the caret, before any rectangle is painted: a
+       keystroke that moved the caret off-screen scrolls the whole view
+       here, and the rectangle loop below then paints the new top line
+       first. A scroll by hand (the slider) has set view.manual and is
+       left alone. */
+    if (g_ctx.doc_loaded) {
+        g_ctx.view.view_h_px = doc_area.g_h;
+        wp_viewport_follow_cursor(&g_ctx.view, &g_doc, wp_keymap_cursor(&g_ctx));
+    }
+
     wind_get_grect(window_handle, WF_FIRSTXYWH, &r);
     while (r.g_w > 0 && r.g_h > 0) {
         pxy[0] = r.g_x;
@@ -3876,6 +3967,8 @@ static void redraw_window(short window_handle, VdiHdl vdi)
 
     graf_mouse(M_ON, (const MFORM *)0);
     wind_update(END_UPDATE);
+
+    atari_update_slider(window_handle);
 }
 
 /* Translates one AES key into a portable wp_key_event (M8.5) --
@@ -3897,9 +3990,10 @@ static void redraw_window(short window_handle, VdiHdl vdi)
    host/tests/test_vimode.c's own feed_keys script helper already does,
    e.g. 0x02 => {codepoint:'b', mods:CTRL}, i.e. Ctrl+B), anything else
    is a plain printable codepoint. The ST keyboard has no dedicated Page
-   Up/Down or End key -- WP_KEY_PAGE_UP/PAGE_DOWN/END are simply never
-   produced here, matching the Compendium's own table (no such rows
-   exist), not an oversight.
+   Up/Down key, so Shift+Up/Down is Page Up/Down here, as it is in GEM
+   programs generally (kstate bits 0/1 are the two Shifts); End has no
+   key at all and WP_KEY_END is never produced, matching the
+   Compendium's own table.
 
    M10 Phase 2: kstate is evnt_multi's own kstate output (real AES
    bits: 0=Rshift, 1=Lshift, 2=Ctrl, 3=Alt -- Atari Compendium, same
@@ -3917,6 +4011,7 @@ static wp_key_event atari_translate_key(short key, short kstate)
     u8 ascii = (u8)(key & 0xFF);
     u8 scan  = (u8)((key >> 8) & 0xFF);
     u8 alt   = (kstate & 0x08) ? (u8)WP_MOD_ALT : 0;
+    wp_bool shift = (wp_bool)((kstate & 0x03) != 0);
     wp_key_event ev;
 
     ev.codepoint = 0;
@@ -3930,8 +4025,8 @@ static wp_key_event atari_translate_key(short key, short kstate)
     case 0x0F: ev.special = (u16)WP_KEY_TAB; goto done;
     case 0x0E: ev.special = (u16)WP_KEY_BACKSPACE; goto done;
     case 0x53: ev.special = (u16)WP_KEY_DELETE; goto done;
-    case 0x48: ev.special = (u16)WP_KEY_UP; goto done;
-    case 0x50: ev.special = (u16)WP_KEY_DOWN; goto done;
+    case 0x48: ev.special = (u16)(shift ? WP_KEY_PAGE_UP : WP_KEY_UP); goto done;
+    case 0x50: ev.special = (u16)(shift ? WP_KEY_PAGE_DOWN : WP_KEY_DOWN); goto done;
     case 0x4B: ev.special = (u16)WP_KEY_LEFT; goto done;
     case 0x4D: ev.special = (u16)WP_KEY_RIGHT; goto done;
     case 0x47: ev.special = (u16)WP_KEY_HOME; goto done;
@@ -4014,6 +4109,8 @@ wp_bool wp_atari_key_translate_selfcheck(void)
         { (short)((0x53 << 8) | 0x7F), 0, 0, (u16)WP_KEY_DELETE, 0 },
         { (short)((0x48 << 8) | 0x00), 0, 0, (u16)WP_KEY_UP, 0 },
         { (short)((0x50 << 8) | 0x00), 0, 0, (u16)WP_KEY_DOWN, 0 },
+        { (short)((0x48 << 8) | 0x00), 0x01, 0, (u16)WP_KEY_PAGE_UP, 0 },   /* Right Shift+Up */
+        { (short)((0x50 << 8) | 0x00), 0x02, 0, (u16)WP_KEY_PAGE_DOWN, 0 }, /* Left Shift+Down */
         { (short)((0x4B << 8) | 0x00), 0, 0, (u16)WP_KEY_LEFT, 0 },
         { (short)((0x4D << 8) | 0x00), 0, 0, (u16)WP_KEY_RIGHT, 0 },
         { (short)((0x47 << 8) | 0x00), 0, 0, (u16)WP_KEY_HOME, 0 },
@@ -4270,6 +4367,10 @@ static void invoke_action(short window_handle, VdiHdl vdi, wp_action_id id)
        us as a plain u8 out of wp_keymap_outcome -- so a stale or garbage
        action_id from any scheme would crash here rather than no-op. */
     if (act == NULL) return;
+
+    /* A menu pick acts at the caret, so the view goes back to it, as it
+       does after a keystroke. */
+    g_ctx.view.manual = WP_FALSE;
 
     if (act->handler != NULL) {
         act->handler(&g_ctx);
@@ -4588,6 +4689,34 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
         }
         return WP_FALSE;
 
+    /* The slider's arrows and page areas, and the slider itself: these
+       scroll the view by hand, which holds it where the writer put it
+       until the next keystroke (viewport.h). */
+    case WM_ARROWED:
+        if (g_ctx.doc_loaded) {
+            i32 page = (i32)wp_viewport_page_lines(&g_ctx.view, &g_doc);
+
+            switch (msg[4]) {
+            case WA_UPPAGE: wp_viewport_scroll_by(&g_ctx.view, &g_doc, -page); break;
+            case WA_DNPAGE: wp_viewport_scroll_by(&g_ctx.view, &g_doc, page);  break;
+            case WA_UPLINE: wp_viewport_scroll_by(&g_ctx.view, &g_doc, -1);    break;
+            case WA_DNLINE: wp_viewport_scroll_by(&g_ctx.view, &g_doc, 1);     break;
+            default: break;
+            }
+            redraw_window(window_handle, vdi);
+        }
+        return WP_FALSE;
+
+    case WM_VSLID:
+        if (g_ctx.doc_loaded) {
+            u32 max_top = wp_viewport_max_top(&g_ctx.view, &g_doc);
+            u32 where = (u32)((max_top * (u32)msg[4] + 500UL) / 1000UL); /* msg[4] is 0..1000 */
+
+            wp_viewport_scroll_to(&g_ctx.view, &g_doc, where);
+            redraw_window(window_handle, vdi);
+        }
+        return WP_FALSE;
+
     default:
         return WP_FALSE;
     }
@@ -4818,6 +4947,7 @@ void app_shell_run(void)
            dereferences them (mirrors how replace_document itself
            doesn't run until load_sample_document below). */
         wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_doc, &g_journal);
+        g_ctx.view.line_px = atari_twips_to_px_y; /* the conversion paint_document advances y with */
     }
 
     /* M8.5 Phase 10: parses the compiled-in help content once at
@@ -4880,7 +5010,10 @@ void app_shell_run(void)
        shrinks it to make room for the menu bar row. */
     wind_get_grect(0, WF_WORKXYWH, &desk);
 
-    window_handle = wind_create_grect(NAME | MOVER | CLOSER | SIZER, &desk);
+    /* The vertical slider and its arrows are the GEM way to scroll a
+       document; wp_dispatch_message turns their WM_ARROWED/WM_VSLID
+       into viewport moves and redraw_window keeps the slider honest. */
+    window_handle = wind_create_grect(NAME | MOVER | CLOSER | SIZER | VSLIDE | UPARROW | DNARROW, &desk);
     wind_set_str(window_handle, WF_NAME, "RetroWP");
     wind_open_grect(window_handle, &desk);
 

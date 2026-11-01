@@ -401,12 +401,27 @@ deliberate, documented gap, not a silent one.
 **The sample document.** `app_shell.c` hardcodes and imports one paragraph
 at startup (no Open dialog yet -- that's T4.3), lays it out against the
 window's current work-area width, and repaints it on every `WM_REDRAW`,
-relayouting again on `WM_SIZED`. There is no scrolling yet: content past
-the first screenful is simply not drawn (not wrapped around, not
-overwritten) -- correct behavior for a short demo document, not a real
-document view. Verified visually: a real screenshot shows the sample
-paragraph rendering with sensible word-boundary wrapping, filling the
-window without overflowing its right edge.
+relayouting again on `WM_SIZED`. Verified visually: a real screenshot shows
+the sample paragraph rendering with sensible word-boundary wrapping,
+filling the window without overflowing its right edge.
+
+**Scrolling.** The window scrolls through the shared viewport
+(`platform/common/viewport.h`, one `wp_viewport` in `wp_app_ctx`): the
+painter starts at the viewport's top display line and skips the lines
+above it, and `redraw_window` asks the viewport to follow the caret before
+it paints, so a keystroke that takes the caret off the bottom scrolls the
+view by the least amount that shows it again. Shift+Up/Down is Page
+Up/Down (the ST has no such keys), moving view and caret a page at a time
+through `wp_keymap_feed_key`, the same for every scheme. The window is
+created with `VSLIDE | UPARROW | DNARROW`; `WM_ARROWED` and `WM_VSLID`
+scroll by hand, which holds the view where the writer put it -- caret
+off-screen or not -- until the next keystroke or menu pick snaps it back.
+`atari_update_slider` sets `WF_VSLSIZE`/`WF_VSLIDE` after every repaint,
+only when they changed. Checked under Hatari (EmuTOS, 1MB ST) by pushing
+the caret 30 paragraphs down, paging with a held Shift, and clicking the
+slider with the keyboard mouse emulation; the gem4xe AES handles the same
+messages (its `gem.h` spells the size mode `WF_VSLSIZ`, which the shell
+maps).
 
 ### Fixed: menu title text was rendering as real glyph noise (post-M8)
 
@@ -860,11 +875,10 @@ can see the real numbers.
 
 **Known gap, consistent with the rest of M4**: this proves the *document
 model and platform.h plumbing* stay within budget at multi-page scale, not
-the on-screen editing UI at that scale -- there is still no scrolling
-(T4.2/T4.3), so a real user could not actually page through a document this
-long in the current UI, only load/edit/save it. Closing that gap is future
-polish, not part of this milestone's AC ("opens ... edits, saves -- within
-1MB TOS config ... without exhaustion").
+the on-screen editing UI at that scale. (At the time there was no
+scrolling, so a real user could not page through a document this long;
+the viewport described above closed that, but this budget pass has not
+been repeated with the scrolled UI.)
 
 This closes out M4: all four tasks (T4.1 AES shell, T4.2 VDI metrics/draw,
 T4.3 file/clipboard/timer, T4.4 memory budget) are done, each compiled with

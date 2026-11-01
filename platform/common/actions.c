@@ -171,6 +171,9 @@ void wp_action_replace_document(wp_app_ctx *ctx, wp_document *fresh)
        free here, even on the very first load. */
     wp_keymap_free(ctx);
     wp_keymap_init(ctx, (wp_keymap_id)ctx->keymap_id, ctx->doc, ctx->journal);
+    /* A new document starts at its top, however far down the old one
+       was scrolled. */
+    wp_viewport_reset(&ctx->view);
 
     def_cs = wp_document_cstyle_get(ctx->doc, ctx->doc->default_cstyle);
     if (def_cs != NULL) {
@@ -289,8 +292,10 @@ static wp_status act_format_align(wp_app_ctx *ctx)
 
 /* Edit > Copy / Cut / Paste.
  *
- * Copy and Cut still act on the WHOLE document -- there is no
- * selection-scoped clipboard yet. Paste inserts at the cursor.
+ * Copy and Cut act on the selection -- the active scheme's own notion
+ * of one, through wp_keymap_selection -- and Paste inserts at the
+ * cursor, replacing the selection if there is one. The clipboard carries
+ * plain text; a paragraph break travels as '\n'.
  *
  * All three are portable now. Cut and Paste used to be four per-backend
  * copies that replaced the whole document, and between them they could
@@ -302,20 +307,21 @@ static wp_status act_format_align(wp_app_ctx *ctx)
  * edit.c marks the touched paragraphs dirty, and every backend
  * relayouts dirty paragraphs before its next paint. */
 
-/* Exports the whole document as plain text and puts it on the
-   clipboard. On success *out_text, when non-NULL, receives the exported
-   bytes for the caller to mem_free. */
-static wp_status copy_document(wp_app_ctx *ctx, u8 **out_text, u32 *out_len)
+/* Extracts the selection as plain text (one '\n' per paragraph break,
+   none after the last paragraph -- wp_document_extract_text's own
+   convention) and puts it on the clipboard. On success *out_text, when
+   non-NULL, receives the bytes for the caller to mem_free. */
+static wp_status copy_selection(wp_app_ctx *ctx, wp_selection sel, u8 **out_text, u32 *out_len)
 {
-    u32 needed;
+    u32 needed = 0;
     u8 *buf;
     wp_status st;
 
-    format_txt_export(ctx->doc, NULL, 0, &needed);
-    buf = (u8 *)mem_alloc(needed);
+    (void)wp_document_extract_text(ctx->doc, sel, NULL, 0, &needed);
+    buf = (u8 *)mem_alloc(needed > 0 ? needed : 1);
     if (buf == NULL) return WP_NOMEM;
 
-    st = format_txt_export(ctx->doc, buf, needed, &needed);
+    st = wp_document_extract_text(ctx->doc, sel, buf, needed, &needed);
     if (st == WP_OK) st = plat_clipboard_set_text(buf, needed);
     if (st == WP_OK && out_text != NULL) {
         *out_text = buf;
@@ -324,6 +330,17 @@ static wp_status copy_document(wp_app_ctx *ctx, u8 **out_text, u32 *out_len)
         mem_free(buf);
     }
     return st;
+}
+
+/* Cut and Copy act on the selection, whatever the active scheme calls
+   one (wp_keymap_selection), and with none they say so rather than
+   guess: they used to take the whole document, which is not what any
+   writer pressing Ctrl+X means. */
+static wp_bool need_selection(wp_app_ctx *ctx, wp_selection *sel)
+{
+    if (wp_keymap_selection(ctx, sel)) return WP_TRUE;
+    wp_action_tell(ctx, "Nothing is selected");
+    return WP_FALSE;
 }
 
 /* Does the clipboard hold exactly text[0..len)? A backend may keep less
@@ -349,22 +366,32 @@ static wp_bool clipboard_holds(const u8 *text, u32 len)
 
 static wp_status act_edit_copy(wp_app_ctx *ctx)
 {
+    wp_selection sel;
+    wp_status st;
+
+    if (ctx == NULL || ctx->doc == NULL) return WP_ERR;
     if (!ctx->doc_loaded) return WP_OK;
-    return copy_document(ctx, NULL, NULL);
+    if (!need_selection(ctx, &sel)) return WP_OK;
+
+    /* The selection stays: the writer may want to style it next. */
+    st = copy_selection(ctx, sel, NULL, NULL);
+    if (st != WP_OK) wp_action_tell(ctx, "Could not copy to the clipboard");
+    return st;
 }
 
 static wp_status act_edit_cut(wp_app_ctx *ctx)
 {
     u8 *text = NULL;
     u32 len = 0;
-    wp_selection all;
+    wp_selection sel;
     wp_pos at;
     wp_status st;
 
     if (ctx == NULL || ctx->doc == NULL || ctx->journal == NULL) return WP_ERR;
     if (!ctx->doc_loaded) return WP_OK;
+    if (!need_selection(ctx, &sel)) return WP_OK;
 
-    st = copy_document(ctx, &text, &len);
+    st = copy_selection(ctx, sel, &text, &len);
     if (st == WP_OK && !clipboard_holds(text, len)) st = WP_RANGE;
     if (text != NULL) mem_free(text);
     if (st != WP_OK) {
@@ -372,10 +399,11 @@ static wp_status act_edit_cut(wp_app_ctx *ctx)
         return st;
     }
 
-    all.anchor = wp_pos_doc_start(ctx->doc);
-    all.caret = wp_pos_doc_end(ctx->doc);
-    st = wp_edit_delete_selection(ctx->doc, ctx->journal, all, &at);
-    if (st == WP_OK) *wp_keymap_cursor(ctx) = at;
+    st = wp_edit_delete_selection(ctx->doc, ctx->journal, sel, &at);
+    if (st == WP_OK) {
+        *wp_keymap_cursor(ctx) = at;
+        wp_keymap_clear_selection(ctx);
+    }
     return st;
 }
 
@@ -392,6 +420,7 @@ static wp_status act_edit_paste(wp_app_ctx *ctx)
     u32 len = 0, i, n;
     wp_pos *cursor;
     wp_pos at;
+    wp_selection sel;
     wp_status st;
 
     if (ctx == NULL || ctx->doc == NULL || ctx->journal == NULL) return WP_ERR;
@@ -399,11 +428,10 @@ static wp_status act_edit_paste(wp_app_ctx *ctx)
     if (plat_clipboard_get_text(g_paste_buf, (u32)sizeof(g_paste_buf), &len) != WP_OK) return WP_OK;
 
     /* Line endings to '\n', the only paragraph break wp_edit_paste_text
-       knows: CRLF from DOS, a bare CR from a Mac. Then drop one final
-       '\n', which ends the last line rather than starting a new one --
-       format_txt_import reads a file the same way, so a Cut followed by
-       a Paste gives back the document it took, not one with an extra
-       empty paragraph. */
+       knows: CRLF from DOS, a bare CR from a Mac. A final '\n' is kept:
+       Copy puts one there exactly when a paragraph break was selected
+       (Visual Line, a block spanning lines), and that break is part of
+       what the writer is moving. */
     n = 0;
     for (i = 0; i < len; i++) {
         if (g_paste_buf[i] == '\r') {
@@ -413,12 +441,34 @@ static wp_status act_edit_paste(wp_app_ctx *ctx)
             g_paste_buf[n++] = g_paste_buf[i];
         }
     }
-    if (n > 0 && g_paste_buf[n - 1] == '\n') n--;
     if (n == 0) return WP_OK;
 
+    /* Over a selection, Paste replaces it: one undo step for both the
+       removal and the insertion, like every editor these schemes copy. */
     cursor = wp_keymap_cursor(ctx);
     wp_undo_group_begin(ctx->journal);
+    if (wp_keymap_selection(ctx, &sel)) {
+        st = wp_edit_delete_selection(ctx->doc, ctx->journal, sel, &at);
+        if (st != WP_OK) {
+            wp_undo_group_end(ctx->journal);
+            return st;
+        }
+        *cursor = at;
+        wp_keymap_clear_selection(ctx);
+    }
     st = wp_edit_paste_text(ctx->doc, ctx->journal, *cursor, g_paste_buf, n, &at);
+    /* wp_edit_paste_text splits only BETWEEN lines, never on a final
+       '\n' (vi's charwise put wants that). Here a final '\n' is a
+       paragraph break the writer selected -- Visual Line, a block that
+       ended at a line's end -- so the pasted text ends its paragraph
+       and what followed the caret starts a new one, which is what a
+       cut-and-paste of whole lines has to give back. */
+    if (st == WP_OK && g_paste_buf[n - 1] == '\n') {
+        wp_pos after;
+
+        st = wp_edit_split_paragraph(ctx->doc, ctx->journal, at, &after);
+        if (st == WP_OK) at = after;
+    }
     wp_undo_group_end(ctx->journal);
     *cursor = at;   /* set even on failure: it is where the paste got to */
     return st;

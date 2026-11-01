@@ -21,6 +21,17 @@ static void build_doc_with_text(wp_document *doc, const char *text)
     ASSERT_TRUE(wp_paragraph_run_add(para, span, doc->default_cstyle, &run_idx) == WP_OK);
 }
 
+/* Cut and Copy act on the selection now: these put vi into Visual mode
+   over the whole document, which is what the whole-document tests below
+   mean by "cut". */
+static void select_all_vi(wp_app_ctx *ctx)
+{
+    ctx->km.vi.mode = (u8)WP_VIMODE_VISUAL;
+    ctx->km.vi.visual.anchor = wp_pos_doc_start(ctx->doc);
+    ctx->km.vi.visual.caret = wp_pos_doc_end(ctx->doc);
+    ctx->km.vi.cursor = ctx->km.vi.visual.caret;
+}
+
 void test_actions_find_by_id(void)
 {
     const wp_action *a = wp_action_find(WP_ACT_FORMAT_BOLD);
@@ -159,11 +170,12 @@ void test_actions_edit_copy_sets_clipboard(void)
     wp_app_ctx_init(&ctx, WP_KEYMAP_VI, &doc, &journal);
     ctx.doc_loaded = WP_TRUE;
 
+    select_all_vi(&ctx);
     ASSERT_TRUE(a->handler(&ctx) == WP_OK);
     ASSERT_TRUE(plat_clipboard_has_text());
     ASSERT_TRUE(plat_clipboard_get_text(buf, sizeof(buf), &len) == WP_OK);
     buf[len] = '\0';
-    ASSERT_EQ_STR((const char *)buf, "Hello World\n"); /* format_txt_export terminates every paragraph with '\n' */
+    ASSERT_EQ_STR((const char *)buf, "Hello World"); /* the selection, nothing after it */
 
     wp_keymap_free(&ctx);
     wp_undo_journal_free(&journal);
@@ -327,6 +339,7 @@ void test_actions_cut_then_paste_gives_the_document_back(void)
 
     ctx_setup(&doc, &journal, &ctx, "Hello World");
 
+    select_all_vi(&ctx);
     ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
     doc_text(&doc, text, sizeof(text));
     ASSERT_EQ_STR(text, "\n");
@@ -365,6 +378,7 @@ void test_actions_cut_takes_every_paragraph_of_an_opened_file(void)
 
     ctx_setup_imported(&doc, &journal, &ctx, "One two\n\nThree four\n\nFive six\n\nSeven\n");
 
+    select_all_vi(&ctx);
     ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
     doc_text(&doc, text, sizeof(text));
     ASSERT_EQ_STR(text, "\n");
@@ -401,6 +415,7 @@ void test_actions_cut_copes_with_a_run_of_no_text(void)
     ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"", 0, &span) == WP_OK);
     ASSERT_TRUE(wp_paragraph_run_add(&sec->paras[1], span, doc.default_cstyle, &run_idx) == WP_OK);
 
+    select_all_vi(&ctx);
     ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
     doc_text(&doc, text, sizeof(text));
     ASSERT_EQ_STR(text, "\n");
@@ -420,6 +435,7 @@ void test_actions_cut_is_one_undo_step(void)
     char text[64];
 
     ctx_setup(&doc, &journal, &ctx, "Hello World");
+    select_all_vi(&ctx);
     ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
     ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
     doc_text(&doc, text, sizeof(text));
@@ -441,6 +457,7 @@ void test_actions_cut_keeps_a_document_the_clipboard_cannot_hold(void)
     big[sizeof(big) - 1] = '\0';
     ctx_setup(&doc, &journal, &ctx, big);
 
+    select_all_vi(&ctx);
     ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) != WP_OK);
     ASSERT_EQ_U32(wp_section_paragraph_get(wp_document_section_get(&doc, 0), 0)->runs[0].text.length,
                   5000);
@@ -616,6 +633,7 @@ void test_actions_cut_with_an_image_paragraph(void)
     before = wp_document_section_get(&doc, 0)->para_count;
     ASSERT_EQ_U32(before, 3);   /* "Hello", the picture, " World" */
 
+    select_all_vi(&ctx);
     ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
     ASSERT_EQ_U32(wp_document_section_get(&doc, 0)->para_count, 1);
     doc_text(&doc, text, sizeof(text));
@@ -625,6 +643,143 @@ void test_actions_cut_with_an_image_paragraph(void)
     ASSERT_EQ_U32(wp_document_section_get(&doc, 0)->para_count, before);
     ASSERT_TRUE(wp_section_paragraph_get(wp_document_section_get(&doc, 0), 1)->kind ==
                 (u8)WP_PARA_IMAGE);
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* ---- The clipboard works on the selection ------------------------ */
+
+static void clipboard_text(char *out, u32 cap)
+{
+    u32 len = 0;
+
+    ASSERT_TRUE(plat_clipboard_get_text((u8 *)out, cap - 1, &len) == WP_OK);
+    out[len] = '\0';
+}
+
+void test_actions_copy_takes_only_the_selection(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    ctx_setup(&doc, &journal, &ctx, "Hello World");
+    select_vi_visual(&ctx, 0, 5);
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_COPY)->handler(&ctx) == WP_OK);
+    clipboard_text(text, sizeof(text));
+    ASSERT_EQ_STR(text, "Hello");
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Hello World\n");
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+    /* Copy leaves the selection standing. */
+    ASSERT_EQ_U32(ctx.km.vi.mode, (u32)WP_VIMODE_VISUAL);
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_cut_takes_only_the_selection(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    ctx_setup(&doc, &journal, &ctx, "Hello World");
+    select_vi_visual(&ctx, 6, 11);
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
+    clipboard_text(text, sizeof(text));
+    ASSERT_EQ_STR(text, "World");
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Hello \n");
+    ASSERT_EQ_U32(wp_keymap_cursor(&ctx)->offset, 6);
+    /* Cut consumed the selection: back in Normal mode, as after `d`. */
+    ASSERT_EQ_U32(ctx.km.vi.mode, (u32)WP_VIMODE_NORMAL);
+
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Hello World\n");
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_paste_replaces_the_selection(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    ctx_setup(&doc, &journal, &ctx, "Hello World");
+    ASSERT_TRUE(plat_clipboard_set_text((const u8 *)"Big", 3) == WP_OK);
+    select_vi_visual(&ctx, 0, 5);
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_PASTE)->handler(&ctx) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Big World\n");
+    ASSERT_EQ_U32(wp_keymap_cursor(&ctx)->offset, 3);
+    ASSERT_EQ_U32(ctx.km.vi.mode, (u32)WP_VIMODE_NORMAL);
+
+    /* The removal and the insertion are one undo step. */
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Hello World\n");
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_copy_and_cut_with_nothing_selected_do_nothing(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    ctx_setup(&doc, &journal, &ctx, "Hello");
+    ASSERT_TRUE(plat_clipboard_set_text((const u8 *)"keep", 4) == WP_OK);
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_COPY)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
+    clipboard_text(text, sizeof(text));
+    ASSERT_EQ_STR(text, "keep");
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Hello\n");
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* Visual Line selects paragraphs with their breaks, so what is cut can
+   be pasted back as the same lines: the '\n' rides along. */
+void test_actions_cut_in_visual_line_takes_whole_paragraphs(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    ctx_setup_imported(&doc, &journal, &ctx, "One\nTwo\nThree\n");
+    ctx.km.vi.mode = (u8)WP_VIMODE_VISUAL_LINE;
+    ctx.km.vi.visual.anchor.section = 0;
+    ctx.km.vi.visual.anchor.paragraph = 1;
+    ctx.km.vi.visual.anchor.run = 0;
+    ctx.km.vi.visual.anchor.offset = 1;
+    ctx.km.vi.visual.caret = ctx.km.vi.visual.anchor;
+    ctx.km.vi.cursor = ctx.km.vi.visual.caret;
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_CUT)->handler(&ctx) == WP_OK);
+    clipboard_text(text, sizeof(text));
+    ASSERT_EQ_STR(text, "Two\n");
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "One\nThree\n");
+    ASSERT_EQ_U32(wp_keymap_cursor(&ctx)->paragraph, 1);
+    ASSERT_EQ_U32(wp_keymap_cursor(&ctx)->offset, 0);
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_PASTE)->handler(&ctx) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "One\nTwo\nThree\n");
 
     ctx_teardown(&doc, &journal, &ctx);
 }
