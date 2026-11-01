@@ -5,6 +5,7 @@
 #include "format_txt.h"
 #include "format_rtf.h"
 #include "format_ws.h"
+#include "format_md.h"
 #include "offload.h"
 #include "keymap.h"
 #include "editing.h"
@@ -829,13 +830,125 @@ const char *wp_action_document_name(const wp_app_ctx *ctx)
     return name;
 }
 
+/* ---- ODT and PDF, through the gateway --------------------------------
+   OFFLOAD_CONVERT_IMPORT/EXPORT ship a WHOLE file as one request and one
+   response (unlike Thesaurus's single words), so they get their own
+   bounds. Real RS-232 at 9600 baud moves about 960 bytes a second (8N1
+   is 10 bits a byte), so a few KB of document genuinely takes tens of
+   seconds each way: the timeout is sized for that line, not for a fast
+   local one. The response side is bounded regardless by offload_client.c's
+   OFFLOAD_MAX_RESPONSE_PAYLOAD. RTF is the interchange both ways (the
+   gateway speaks it; docs/formats/offload-protocol.md), without pictures:
+   the gateway's converter does not carry them, and the payload cap is
+   better spent on text. */
+#define WP_ACTION_CONVERT_MAX_FILE   60000uL   /* under WIRE_MAX_PAYLOAD with room for the id byte and framing */
+#define WP_ACTION_CONVERT_TIMEOUT_MS 120000uL  /* about two minutes; see above */
+
+/* The link, brought up the backend's way if it gave us one, else as it
+   stands. Tells the writer when there is none. */
+static wp_bool link_for_convert(wp_app_ctx *ctx)
+{
+    wp_bool up = (ctx->ensure_offload != NULL) ? ctx->ensure_offload() : offload_available();
+
+    if (!up) wp_action_tell(ctx, "ODT/PDF needs a connected gateway");
+    return up;
+}
+
+/* payload[0] is the format id, the file follows. The RTF that comes back
+   is read like a local .RTF, pictures through `sink` when there is one. */
+static wp_status convert_import(wp_app_ctx *ctx, u8 *payload, u32 payload_len,
+                                wp_document *fresh, wp_image_sink *sink)
+{
+    offload_request req;
+    offload_response resp;
+    wp_status st;
+
+    req.op = OFFLOAD_CONVERT_IMPORT;
+    req.payload = payload;
+    req.payload_len = payload_len;
+    req.timeout_ms = (u32)WP_ACTION_CONVERT_TIMEOUT_MS;
+
+    if (offload_submit(&req, &resp) != WP_OK) {
+        wp_action_tell(ctx, "Opening that file failed or timed out");
+        return WP_ERR;
+    }
+    if (resp.status != OFFLOAD_OK) {
+        offload_response_free(&resp);
+        wp_action_tell(ctx, "The gateway couldn't convert that file");
+        return WP_ERR;
+    }
+    st = (sink != NULL) ? format_rtf_import_images(resp.result, resp.result_len, fresh, sink)
+                        : format_rtf_import(resp.result, resp.result_len, fresh);
+    offload_response_free(&resp);
+    if (st != WP_OK) wp_action_tell(ctx, "The gateway's reply couldn't be read as a document");
+    return st;
+}
+
+/* The document as RTF behind a format id, to the gateway; what comes
+   back is the file, written as is. ODT reads back in, so it is a save
+   and the name sticks; PDF does not, so it is an export, the document
+   stays modified and keeps its own name. */
+static wp_status convert_export(wp_app_ctx *ctx, const char *native_path, u8 format_id)
+{
+    u32 rtf_len = 0;
+    u8 *payload;
+    offload_request req;
+    offload_response resp;
+    wp_status st;
+
+    format_rtf_export(ctx->doc, NULL, 0, &rtf_len);
+    if (rtf_len + 1 > WP_ACTION_CONVERT_MAX_FILE) {
+        wp_action_tell(ctx, "The document is too large to send to the gateway");
+        return WP_RANGE;
+    }
+    payload = (u8 *)mem_alloc(rtf_len + 1);
+    if (payload == NULL) {
+        wp_action_tell(ctx, "Not enough memory to save");
+        return WP_NOMEM;
+    }
+    payload[0] = format_id;
+    if (format_rtf_export(ctx->doc, payload + 1, rtf_len, &rtf_len) != WP_OK) {
+        mem_free(payload);
+        wp_action_tell(ctx, "Couldn't build the file to save");
+        return WP_ERR;
+    }
+
+    req.op = OFFLOAD_CONVERT_EXPORT;
+    req.payload = payload;
+    req.payload_len = rtf_len + 1;
+    req.timeout_ms = (u32)WP_ACTION_CONVERT_TIMEOUT_MS;
+
+    st = offload_submit(&req, &resp);
+    mem_free(payload);
+    if (st != WP_OK) {
+        wp_action_tell(ctx, "Saving that file failed or timed out");
+        return WP_ERR;
+    }
+    if (resp.status != OFFLOAD_OK) {
+        offload_response_free(&resp);
+        wp_action_tell(ctx, "The gateway couldn't produce that file format");
+        return WP_ERR;
+    }
+    st = wp_action_write_file(ctx, native_path, resp.result, resp.result_len,
+                              (wp_bool)(format_id == (u8)OFFLOAD_FORMAT_ODT));
+    offload_response_free(&resp);
+    if (st == WP_OK && format_id == (u8)OFFLOAD_FORMAT_ODT) wp_action_remember_path(ctx, native_path);
+    return st;
+}
+
 wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image_sink *sink)
 {
     plat_file *f;
     u32 size = 0, read_len = 0;
-    u8 *buf;
+    u8 *buf, *data;
+    wp_bool via_gateway = wp_path_ends_with_ci(native_path, ".ODT");
     wp_document fresh;
     wp_status st;
+
+    /* The link first, so a writer without one is told before any
+       waiting; the file is read straight into the request, behind its
+       format id, rather than copied there. */
+    if (via_gateway && !link_for_convert(ctx)) return WP_ERR;
 
     if (plat_file_open(native_path, PLAT_FILE_READ, &f) != WP_OK) {
         wp_action_tell(ctx, "Couldn't open that file");
@@ -846,36 +959,48 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
         wp_action_tell(ctx, "Couldn't read that file");
         return WP_ERR;
     }
-    buf = (u8 *)mem_alloc(size + 1);
+    if (via_gateway && size + 1 > WP_ACTION_CONVERT_MAX_FILE) {
+        plat_file_close(f);
+        wp_action_tell(ctx, "That file is too large to send to the gateway");
+        return WP_RANGE;
+    }
+    buf = (u8 *)mem_alloc(size + 2);
     if (buf == NULL) {
         plat_file_close(f);
         wp_action_tell(ctx, "Not enough memory to open that file");
         return WP_NOMEM;
     }
-    st = plat_file_read(f, buf, size, &read_len);
+    data = via_gateway ? buf + 1 : buf;
+    st = plat_file_read(f, data, size, &read_len);
     plat_file_close(f);
 
     if (st == WP_OK) {
         /* WordStar is detected by CONTENT, not by name: those files
            carry no magic number and no reserved extension (.WS, .DOC,
-           none at all), and the sniff never claims plain ASCII. RTF is
-           by name: its "{\rtf" opening is as good as a magic number,
-           but a writer who names a plain-text file .rtf wants it read
-           as RTF and told what is wrong, not silently shown as text.
-           See docs/formats/. */
-        if (format_ws_looks_like(buf, read_len)) {
-            st = format_ws_import(buf, read_len, &fresh);
+           none at all), and the sniff never claims plain ASCII. The
+           rest is by name: RTF's "{\rtf" opening is as good as a magic
+           number, but a writer who names a plain-text file .rtf wants
+           it read as RTF and told what is wrong, not silently shown as
+           text; Markdown and ODT have no opening at all. See
+           docs/formats/. */
+        if (via_gateway) {
+            buf[0] = (u8)OFFLOAD_FORMAT_ODT;
+            st = convert_import(ctx, buf, read_len + 1, &fresh, sink);
+        } else if (format_ws_looks_like(data, read_len)) {
+            st = format_ws_import(data, read_len, &fresh);
         } else if (wp_path_ends_with_ci(native_path, ".RTF")) {
-            st = (sink != NULL) ? format_rtf_import_images(buf, read_len, &fresh, sink)
-                                : format_rtf_import(buf, read_len, &fresh);
+            st = (sink != NULL) ? format_rtf_import_images(data, read_len, &fresh, sink)
+                                : format_rtf_import(data, read_len, &fresh);
+        } else if (wp_path_ends_with_ci(native_path, ".MD")) {
+            st = format_md_import(data, read_len, &fresh);
         } else {
-            st = format_txt_import(buf, read_len, &fresh);
+            st = format_txt_import(data, read_len, &fresh);
         }
     }
     mem_free(buf);
 
     if (st != WP_OK) {
-        wp_action_tell(ctx, "Couldn't load that file; the document is unchanged");
+        if (!via_gateway) wp_action_tell(ctx, "Couldn't load that file; the document is unchanged");
         return st;
     }
     wp_action_replace_document(ctx, &fresh);
@@ -886,16 +1011,26 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
 wp_status wp_action_save_file(wp_app_ctx *ctx, const char *native_path, wp_image_source *img_src)
 {
     wp_bool as_rtf = wp_path_ends_with_ci(native_path, ".RTF");
+    wp_bool as_md = wp_path_ends_with_ci(native_path, ".MD");
     u32 needed = 0;
     u8 *buf;
     wp_status st;
 
     if (!ctx->doc_loaded) return WP_OK;
 
+    if (wp_path_ends_with_ci(native_path, ".ODT") || wp_path_ends_with_ci(native_path, ".PDF")) {
+        if (!link_for_convert(ctx)) return WP_ERR;
+        return convert_export(ctx, native_path,
+                              wp_path_ends_with_ci(native_path, ".ODT") ? (u8)OFFLOAD_FORMAT_ODT
+                                                                        : (u8)OFFLOAD_FORMAT_PDF);
+    }
+
     /* The two-call sizing convention every exporter shares. */
     if (as_rtf) {
         if (img_src != NULL) format_rtf_export_images(ctx->doc, NULL, 0, &needed, img_src);
         else                 format_rtf_export(ctx->doc, NULL, 0, &needed);
+    } else if (as_md) {
+        format_md_export(ctx->doc, NULL, 0, &needed);
     } else {
         format_txt_export(ctx->doc, NULL, 0, &needed);
     }
@@ -908,6 +1043,8 @@ wp_status wp_action_save_file(wp_app_ctx *ctx, const char *native_path, wp_image
     if (as_rtf) {
         st = (img_src != NULL) ? format_rtf_export_images(ctx->doc, buf, needed, &needed, img_src)
                                : format_rtf_export(ctx->doc, buf, needed, &needed);
+    } else if (as_md) {
+        st = format_md_export(ctx->doc, buf, needed, &needed);
     } else {
         st = format_txt_export(ctx->doc, buf, needed, &needed);
     }

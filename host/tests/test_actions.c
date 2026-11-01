@@ -3,6 +3,8 @@
 #include "test.h"
 #include "actions.h"
 #include "format_txt.h"
+#include "offload.h"
+#include "gateway_harness.h"
 
 static void build_doc_with_text(wp_document *doc, const char *text)
 {
@@ -895,6 +897,7 @@ void test_actions_load_file_reads_text_and_rtf_and_keeps_the_name(void)
 {
     static const char txt[] = "build/test_actions_load.txt";
     static const char rtf[] = "build/test_actions_load.rtf";
+    static const char md[] = "build/test_actions_load.md";
     static const char missing[] = "build/no-such-directory/x.txt";
     wp_document doc;
     wp_undo_journal journal;
@@ -923,11 +926,82 @@ void test_actions_load_file_reads_text_and_rtf_and_keeps_the_name(void)
     ASSERT_EQ_STR(text, "Alpha\nBeta\n");
     ASSERT_EQ_STR(ctx.doc_path, rtf);
 
+    /* Markdown by name: paragraphs go out a blank line apart and come
+       back as paragraphs. */
+    ASSERT_TRUE(wp_action_save_file(&ctx, md, NULL) == WP_OK);
+    read_whole_file(md, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Alpha\n\nBeta\n");
+    ASSERT_TRUE(wp_action_load_file(&ctx, md, NULL) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Alpha\nBeta\n");
+    ASSERT_EQ_STR(ctx.doc_path, md);
+
     /* A file that cannot be opened leaves document and name alone. */
     ASSERT_TRUE(wp_action_load_file(&ctx, missing, NULL) != WP_OK);
     doc_text(&doc, text, sizeof(text));
     ASSERT_EQ_STR(text, "Alpha\nBeta\n");
-    ASSERT_EQ_STR(ctx.doc_path, rtf);
+    ASSERT_EQ_STR(ctx.doc_path, md);
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+static wp_bool no_link(void) { return WP_FALSE; }
+
+/* ODT and PDF through the real ODT gateway (the one test_convert.c
+   drives), by way of the shared file flow this time: the extension
+   alone chooses the route, the link is required and its absence is
+   told, ODT is a save and PDF an export. */
+void test_actions_odt_and_pdf_go_through_the_gateway(void)
+{
+    static const char odt[] = "build/test_actions_conv.odt";
+    static const char pdf[] = "build/test_actions_conv.pdf";
+    gateway_handle gw;
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_pos at;
+    char text[64];
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Alpha\nBeta\n");
+
+    /* No link: told, nothing remembered. */
+    ctx.ensure_offload = no_link;
+    ASSERT_TRUE(wp_action_save_file(&ctx, odt, NULL) != WP_OK);
+    ASSERT_EQ_STR(ctx.doc_path, "");
+
+    ASSERT_TRUE(gateway_start_bin("offload/gateway/odt_gateway.py", NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    ctx.ensure_offload = NULL;   /* the link as it stands */
+
+    /* ODT: a save. The file is a ZIP container, the name sticks, the
+       document is clean. */
+    ASSERT_TRUE(wp_action_save_file(&ctx, odt, NULL) == WP_OK);
+    read_whole_file(odt, text, sizeof(text));
+    ASSERT_TRUE(text[0] == 'P' && text[1] == 'K');
+    ASSERT_EQ_STR(ctx.doc_path, odt);
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+
+    /* PDF: an export. The document stays modified and keeps its name. */
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, *wp_keymap_cursor(&ctx), (const u8 *)"!", 1, &at) == WP_OK);
+    ASSERT_TRUE(wp_action_save_file(&ctx, pdf, NULL) == WP_OK);
+    read_whole_file(pdf, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "%PDF", 4) == 0);
+    ASSERT_EQ_STR(ctx.doc_path, odt);
+    ASSERT_TRUE(wp_document_is_modified(&doc));
+
+    /* ODT back in: the text the gateway was sent. */
+    ASSERT_TRUE(wp_action_load_file(&ctx, odt, NULL) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Alpha\nBeta\n");
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+
+    offload_shutdown();
+    gateway_stop(&gw);
+
+    /* Link gone: an ODT open is refused and the document is untouched. */
+    ASSERT_TRUE(wp_action_load_file(&ctx, odt, NULL) != WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Alpha\nBeta\n");
 
     ctx_teardown(&doc, &journal, &ctx);
 }

@@ -298,6 +298,13 @@ void test_tools_grammar_check_reports_locally_without_a_gateway(void);
 void test_tools_grammar_and_chat_want_a_paragraph_with_text(void);
 void test_tools_gateway_tools_say_when_there_is_no_device(void);
 void test_tools_spell_check_names_the_first_unknown_word(void);
+void test_format_md_headings_become_big_bold_paragraphs(void);
+void test_format_md_emphasis_makes_styled_runs(void);
+void test_format_md_joins_wrapped_lines_and_splits_blocks(void);
+void test_format_md_leaves_text_that_only_looks_like_markup(void);
+void test_format_md_nested_and_adjacent_emphasis(void);
+void test_format_md_export_round_trips_what_the_model_holds(void);
+void test_format_md_export_of_a_plain_document_is_its_paragraphs(void);
 void test_actions_copy_takes_only_the_selection(void);
 void test_actions_cut_takes_only_the_selection(void);
 void test_actions_paste_replaces_the_selection(void);
@@ -306,6 +313,7 @@ void test_actions_cut_in_visual_line_takes_whole_paragraphs(void);
 void test_actions_save_file_picks_the_format_by_extension_and_remembers(void);
 void test_actions_save_goes_to_the_remembered_name_without_asking(void);
 void test_actions_load_file_reads_text_and_rtf_and_keeps_the_name(void);
+void test_actions_odt_and_pdf_go_through_the_gateway(void);
 void test_actions_file_open_asks_picks_and_a_new_document_forgets_the_name(void);
 void test_actions_document_name_is_the_last_path_component(void);
 void test_selspan_marks_the_lines_a_selection_crosses(void);
@@ -874,6 +882,13 @@ static const test_case g_cases[] = {
     { "tools_grammar_and_chat_want_a_paragraph_with_text", test_tools_grammar_and_chat_want_a_paragraph_with_text },
     { "tools_gateway_tools_say_when_there_is_no_device", test_tools_gateway_tools_say_when_there_is_no_device },
     { "tools_spell_check_names_the_first_unknown_word", test_tools_spell_check_names_the_first_unknown_word },
+    { "format_md_headings_become_big_bold_paragraphs", test_format_md_headings_become_big_bold_paragraphs },
+    { "format_md_emphasis_makes_styled_runs", test_format_md_emphasis_makes_styled_runs },
+    { "format_md_joins_wrapped_lines_and_splits_blocks", test_format_md_joins_wrapped_lines_and_splits_blocks },
+    { "format_md_leaves_text_that_only_looks_like_markup", test_format_md_leaves_text_that_only_looks_like_markup },
+    { "format_md_nested_and_adjacent_emphasis", test_format_md_nested_and_adjacent_emphasis },
+    { "format_md_export_round_trips_what_the_model_holds", test_format_md_export_round_trips_what_the_model_holds },
+    { "format_md_export_of_a_plain_document_is_its_paragraphs", test_format_md_export_of_a_plain_document_is_its_paragraphs },
     { "actions_copy_takes_only_the_selection", test_actions_copy_takes_only_the_selection },
     { "actions_cut_takes_only_the_selection", test_actions_cut_takes_only_the_selection },
     { "actions_paste_replaces_the_selection", test_actions_paste_replaces_the_selection },
@@ -882,6 +897,7 @@ static const test_case g_cases[] = {
     { "actions_save_file_picks_the_format_by_extension_and_remembers", test_actions_save_file_picks_the_format_by_extension_and_remembers },
     { "actions_save_goes_to_the_remembered_name_without_asking", test_actions_save_goes_to_the_remembered_name_without_asking },
     { "actions_load_file_reads_text_and_rtf_and_keeps_the_name", test_actions_load_file_reads_text_and_rtf_and_keeps_the_name },
+    { "actions_odt_and_pdf_go_through_the_gateway", test_actions_odt_and_pdf_go_through_the_gateway },
     { "actions_file_open_asks_picks_and_a_new_document_forgets_the_name", test_actions_file_open_asks_picks_and_a_new_document_forgets_the_name },
     { "actions_document_name_is_the_last_path_component", test_actions_document_name_is_the_last_path_component },
     { "selspan_marks_the_lines_a_selection_crosses", test_selspan_marks_the_lines_a_selection_crosses },

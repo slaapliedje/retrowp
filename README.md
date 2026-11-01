@@ -69,7 +69,7 @@ is structural, not just documented.
 Every milestone through **M15 (image support)** is complete: document
 model, editing, layout/pagination, all four platform backends, five
 switchable keybinding schemes (vi, Emacs, WordStar, WordPerfect, MS
-Word–style), find & replace, RTF/ODT/PDF/TXT import-export, offload
+Word–style), find & replace, RTF/Markdown/ODT/PDF/TXT import-export, offload
 transport with grammar/spell/thesaurus/chat/image ops, and real (or
 honestly placeholder) image rendering on every backend. See
 [`docs/milestones.md`](docs/milestones.md) for the full history.
@@ -213,7 +213,7 @@ expensive way on real machines.
 - [`docs/editing.md`](docs/editing.md), [`docs/vimode.md`](docs/vimode.md),
   [`docs/keymaps.md`](docs/keymaps.md) — editing model and the five
   keybinding schemes.
-- [`docs/formats/`](docs/formats) — RTF, ODT, TXT, PDF, the offload wire
+- [`docs/formats/`](docs/formats) — RTF, Markdown, ODT, TXT, PDF, the offload wire
   protocol, and the vintage-native readers: WordStar (implemented) and
   Atari Works (researched, not yet built).
 - [`docs/*-platform.md`](docs) — per-backend bring-up notes, real bugs

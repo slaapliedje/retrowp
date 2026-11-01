@@ -10,6 +10,13 @@ same RTF subset `docs/formats/rtf.md` already documents. See
 `docs/formats/offload-protocol.md` for the wire contract and the design
 reasoning behind using RTF as the interchange format at all.
 
+In the application, ODT Open and Save are the shared file flow's
+(`platform/common/actions.c`, `wp_action_load_file`/`wp_action_save_file`):
+the `.odt` extension chooses the route, the backend's own `ensure_offload()`
+brings the link up through `ctx->ensure_offload`, and the writer is told
+when there is none. Until 2026-10-28 this was the Atari shell's alone;
+it is on every target now.
+
 ## Scope
 
 Reads/writes exactly the ODF subset that round-trips through the RTF

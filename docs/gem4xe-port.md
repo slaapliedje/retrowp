@@ -816,7 +816,9 @@ wide, and the callee is compiled — as all C here is — to be entered with six
 
 **`-O1` on that one file is the whole fix.** Verified on target: no BRK, and the document
 lays out and paints. The image stays three code banks and ~204 KB; `-O1` everywhere would
-need five banks and 220 KB for nothing. gem4xe is cataloguing it as B17, a sibling of
+need five banks and 220 KB for nothing. (Since 2026-10-28 the far code is ~169 KB,
+Markdown and the shared ODT/PDF route included, and the image is four code banks:
+`GEM4XE_CBANKS` in the Makefile, with the fourth bank a tenth used.) gem4xe is cataloguing it as B17, a sibling of
 B16 — the same width switch on the wrong side of an edge, across a call rather than a
 loop's back edge. It is **not** B16 itself: none of this tree's 45 translation units
 shows B16's listing signature.

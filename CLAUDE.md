@@ -14,7 +14,7 @@ over a serial/TCP link so low-RAM machines stay lean.
 1. The ENGINE contains zero platform calls. No GEM, no MUI, no Toolbox, no DOS.
    It talks to the outside world ONLY through interfaces defined in `platform.h`.
 2. The internal document model is the SINGLE SOURCE OF TRUTH. Every format
-   (plaintext, RTF, ODT, PDF) is an importer/exporter around it.
+   (plaintext, RTF, Markdown, ODT, PDF) is an importer/exporter around it.
 3. Never dump raw structs to disk or the wire. All persistence and all protocol
    messages use explicit, defined byte order (big-endian on disk/wire).
 4. Font metrics are reached ONLY through the metrics abstraction. Layout code

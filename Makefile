@@ -882,8 +882,9 @@ GEM4XE_CFLAGS   = --code-model=large --data-model=large -O2
 # lands before its back edge, and none of this tree's 46 translation units
 # shows its listing signature.  This one crosses a call.
 #
-# -O1 on this one file is the whole fix -- the image stays 3 code banks
-# and ~203 KB, where -O1 everywhere needs 5 banks and ~220 KB.
+# -O1 on this one file is the whole fix -- the image stayed 3 code banks
+# and ~203 KB (4 since Markdown, below), where -O1 everywhere needs 5
+# banks and ~220 KB.
 GEM4XE_O1_CFLAGS = --code-model=large --data-model=large -O1
 GEM4XE_INCLUDES = -I engine/include -I $(RETROPLAT)/include \
                   -I $(RETROPLAT)/backends/atari -I platform/atari \
@@ -891,12 +892,14 @@ GEM4XE_INCLUDES = -I engine/include -I $(RETROPLAT)/include \
                   -I services/spell -I services/grammar \
                   -I $(GEM4XE_SDK)/include -I $(GENERATED)
 
-# Three code banks: the far code measures ~155 KB and a bank holds just
-# under 64 KB.  app-layout-n is gemapp.scm's own mechanism for that, and
-# gem4xe's loader has been exercised on a spilled link (its test-m6).
-# STACK is raised from the kit's 256: the shell's own frames are small,
-# but the engine's call chains are not the kit's example programs'.
-GEM4XE_CBANKS ?= 3
+# Four code banks: the far code measures ~169 KB (it was ~155 KB before
+# Markdown and the shared ODT/PDF route, 2026-10-28) and a bank holds
+# just under 64 KB, so three banks left 5 KB unplaced.  app-layout-n is
+# gemapp.scm's own mechanism for that, and gem4xe's loader has been
+# exercised on a spilled link (its test-m6).  STACK is raised from the
+# kit's 256: the shell's own frames are small, but the engine's call
+# chains are not the kit's example programs'.
+GEM4XE_CBANKS ?= 4
 GEM4XE_FBANKS ?= 1
 # Raised from the kit's 2048/256: WP_AES_NEAR puts the menu tree and its
 # strings in bank $00 (they are handed to the AES, which reads only that

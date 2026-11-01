@@ -189,8 +189,13 @@ void wp_action_tell(struct wp_app_ctx *ctx, const char *msg);
    wrote plain text whatever the name said, and none remembered the file
    it was editing, so every Save was a Save As. Here the format follows
    the name and the content the same way everywhere -- WordStar by sniff,
-   .RTF by extension, plain text otherwise -- and the path is kept in
-   ctx->doc_path. */
+   .RTF, .MD, .ODT and .PDF by extension, plain text otherwise -- and the
+   path is kept in ctx->doc_path. ODT and PDF go through the offload
+   gateway (RTF both ways on the wire, see docs/formats/offload-protocol.md),
+   which the backend brings up through ctx->ensure_offload; without a
+   link the writer is told and nothing changes. The ST had this to itself
+   until 2026-10-28; the protocol being what the serial link was chosen
+   for, every target gets it now. */
 
 /* The backend's native file picker. Fills path_out (cap bytes, NUL-
    terminated) with a full native path and returns WP_TRUE, or WP_FALSE
@@ -199,18 +204,22 @@ typedef wp_bool (*wp_pick_path_fn)(struct wp_app_ctx *ctx, wp_bool save,
                                    char *path_out, u32 cap);
 
 /* Reads native_path into a fresh document and makes it THE document
-   (wp_action_replace_document), then remembers the path. RTF pictures go
-   through `sink` when one is given (format_rtf_import_images) and are
-   dropped otherwise. Every failure is told to the writer and leaves the
-   document and the remembered path as they were. Does not ask about
-   unsaved work: the caller does, before its picker. */
+   (wp_action_replace_document), then remembers the path. RTF pictures
+   (from a .RTF, or from the RTF a .ODT comes back as) go through `sink`
+   when one is given (format_rtf_import_images) and are dropped
+   otherwise. Every failure is told to the writer and leaves the document
+   and the remembered path as they were. Does not ask about unsaved work:
+   the caller does, before its picker. */
 wp_status wp_action_load_file(struct wp_app_ctx *ctx, const char *native_path,
                               wp_image_sink *sink);
 
-/* Exports by the name's extension (.rtf is RTF, anything else plain
-   text), writes through wp_action_write_file (so the document is marked
-   saved only once the bytes are on disk) and remembers the path. RTF
-   pictures come from `img_src` when given, else they are left out. */
+/* Exports by the name's extension (.rtf is RTF, .md Markdown, .odt and
+   .pdf through the gateway, anything else plain text), writes through
+   wp_action_write_file (so the document is marked saved only once the
+   bytes are on disk) and remembers the path -- except for PDF, which
+   the program cannot read back: that is an export, the document stays
+   modified and keeps its name. RTF pictures come from `img_src` when
+   given, else they are left out. */
 wp_status wp_action_save_file(struct wp_app_ctx *ctx, const char *native_path,
                               wp_image_source *img_src);
 
@@ -224,8 +233,7 @@ wp_status wp_action_file_open(struct wp_app_ctx *ctx, wp_pick_path_fn pick,
    unless save_as, the remembered name; else the picker. WP_FALSE means
    there is nothing to do -- no document, or the writer cancelled. Split
    out from wp_action_file_save for a backend that wants a look at the
-   name before the shared exporter sees it (the ST sends .ODT and .PDF to
-   its gateway). */
+   name before the shared exporter sees it. */
 wp_bool wp_action_save_path(struct wp_app_ctx *ctx, wp_bool save_as, wp_pick_path_fn pick,
                             char *path_out, u32 cap);
 
@@ -233,8 +241,7 @@ wp_bool wp_action_save_path(struct wp_app_ctx *ctx, wp_bool save_as, wp_pick_pat
 wp_status wp_action_file_save(struct wp_app_ctx *ctx, wp_bool save_as, wp_pick_path_fn pick,
                               wp_image_source *img_src);
 
-/* For a backend that loaded or saved the document by a route of its own
-   (the ST's ODT round trip through the gateway). */
+/* For a backend that loaded or saved the document by a route of its own. */
 void wp_action_remember_path(struct wp_app_ctx *ctx, const char *native_path);
 
 /* The remembered path's last component -- what a title bar shows -- or

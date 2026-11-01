@@ -389,7 +389,7 @@ static void do_file_open(void)
 {
     /* The whole flow -- the unsaved-changes question, a name from an ex
        command or the requester, the format by content and name
-       (WordStar, RTF, plain text), the swap, the remembered name -- is
+       (WordStar, RTF, Markdown, plain text; ODT and PDF through the gateway), the swap, the remembered name -- is
        shared (actions.c). No image sink here yet: RTF pictures are
        dropped on this backend. */
     (void)wp_action_file_open(&g_ctx, amiga_pick_path, NULL);
@@ -1811,6 +1811,7 @@ void app_shell_run(void)
        behaves exactly as it always has. */
     wp_config_load(WP_AMIGA_CONFIG_PATH, &cfg);
     wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_amiga_doc, &g_amiga_journal);
+    g_ctx.ensure_offload = ensure_offload; /* ODT/PDF in the shared file flow */
     g_ctx.view.line_px = amiga_twips_to_px_y; /* the conversion editor_draw advances y with */
     load_sample_document();
 

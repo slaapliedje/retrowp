@@ -1217,6 +1217,12 @@ here.
 
 ## ODT + PDF wired into the UI (M7 T7.4)
 
+*Since 2026-10-28 the route described here lives in the shared file flow
+(`platform/common/actions.c`): this shell only sets `g_ctx.ensure_offload`
+and the `.ODT`/`.PDF` name does the rest, on every target. The bandwidth
+reasoning, the timeouts and the size cap below are unchanged and now
+apply everywhere.*
+
 Closes M7's own T7.4 note ("Engine-side wiring: 'Open ODT' ships bytes,
 receives model") the same way Thesaurus closed T6.3's: File Open/Save
 now recognize `.ODT` (open and save, via `offload/gateway/odt_gateway.py`

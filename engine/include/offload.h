@@ -31,6 +31,11 @@ typedef enum {
                                  OFFLOAD_DICTATE section for the wire shape */
 } offload_op;
 
+/* The format_id byte that leads an OFFLOAD_CONVERT_IMPORT/EXPORT payload
+   (docs/formats/offload-protocol.md). PDF is export-only. */
+#define OFFLOAD_FORMAT_ODT 1u
+#define OFFLOAD_FORMAT_PDF 2u
+
 typedef enum {
     OFFLOAD_OK          = 0,
     OFFLOAD_TIMEOUT     = 1,

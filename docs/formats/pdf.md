@@ -9,6 +9,11 @@ is no `format_id` for "import a PDF" (`docs/formats/offload-protocol.md`
 explains why -- PDF has no general, reliable text-reconstruction
 guarantee).
 
+In the application, Save to a `.pdf` name is the shared file flow's
+(`platform/common/actions.c`): an export, not a save -- the document stays
+modified and keeps its own name, since the program cannot read the result
+back. Every target has it, through its own `ensure_offload()`.
+
 ## Why this is a genuinely different job from ODT
 
 ODT (and RTF) only need to carry already-tagged structured text -- a

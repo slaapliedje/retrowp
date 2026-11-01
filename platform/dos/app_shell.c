@@ -856,8 +856,9 @@ static void do_file_open(void)
 {
     /* The whole flow -- the unsaved-changes question, a name from an ex
        command or the prompt, the format by content and name (WordStar,
-       RTF, plain text), the swap, the remembered name -- is shared
-       (actions.c). The title row shows the name (redraw_screen). */
+       RTF, Markdown, plain text; ODT and PDF through the gateway), the
+       swap, the remembered name -- is shared (actions.c). The title row
+       shows the name (redraw_screen). */
     (void)wp_action_file_open(&g_ctx, dos_pick_path, NULL);
 }
 
@@ -1341,6 +1342,7 @@ void app_shell_run(void)
 
         wp_config_load(WP_DOS_CONFIG_PATH, &cfg);
         wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_doc, &g_journal);
+        g_ctx.ensure_offload = ensure_offload; /* ODT/PDF in the shared file flow */
         g_ctx.view.line_px = dos_line_rows;
     }
 

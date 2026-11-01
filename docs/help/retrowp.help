@@ -99,7 +99,10 @@ Press ":" to open the command line, or "/" to search forward.
 Ex commands:
   :w      save (to the file the document came from, or ask for a name)
   :w name save under that name, which the document then keeps
-  :e name open that file (.rtf is read as RTF, WordStar by content)
+          (.rtf writes RTF, .md Markdown, .odt and .pdf go through
+          the gateway; anything else is plain text)
+  :e name open that file (.rtf is read as RTF, .md as Markdown,
+          .odt through the gateway, WordStar by content)
   :q      quit
   :wq     save and quit
   :x      save and quit (same as :wq)

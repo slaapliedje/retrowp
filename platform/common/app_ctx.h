@@ -66,6 +66,12 @@ typedef struct wp_app_ctx {
                                        replace it. Kept by actions.c's file
                                        flow, read by wp_action_document_name. */
 
+    /* The backend's lazy-once offload bring-up (each has its own endpoint
+       string and its own ensure_offload()), for the shared code that
+       needs the link on demand: the file flow's ODT/PDF conversion.
+       NULL means the link is whatever offload_available() says. */
+    wp_bool (*ensure_offload)(void);
+
     wp_bool doc_loaded;
     wp_bool quit_requested; /* WP_ACT_FILE_QUIT sets this; the backend's own event
                                 loop checks it and performs its own native teardown
