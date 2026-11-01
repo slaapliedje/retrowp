@@ -30,6 +30,20 @@ static void report(const char *line)
     }
 }
 
+/* A trail, one line per check about to run, on the share as
+   mac_smoke.log: when the report never appears, this says which check
+   it was that hung or died. The gate reads only mac_smoke.out, so a
+   partial trail can never pass as a result. */
+static void progress(const char *what)
+{
+    FILE *f = fopen("Unix:mac_smoke.log", "a");
+    if (f) {
+        fwrite(what, 1, strlen(what), f);
+        fwrite("\n", 1, 1, f);
+        fclose(f);
+    }
+}
+
 int main(void)
 {
     /* Every selfcheck line is strcpy'd in with no bound check, so this
@@ -53,36 +67,43 @@ int main(void)
     InitGraf(&qd.thePort);
     InitFonts();
 
+    progress("file_clipboard");
     ok = wp_mac_file_clipboard_selfcheck();
     line = ok ? "file_clipboard: PASS\n" : "file_clipboard: FAIL\n";
     strcpy(buf + pos, line);
     pos += (u32)strlen(line);
 
+    progress("layout");
     ok = wp_mac_layout_selfcheck();
     line = ok ? "layout: PASS\n" : "layout: FAIL\n";
     strcpy(buf + pos, line);
     pos += (u32)strlen(line);
 
+    progress("transport");
     ok = wp_mac_transport_selfcheck();
     line = ok ? "transport: PASS\n" : "transport: FAIL\n";
     strcpy(buf + pos, line);
     pos += (u32)strlen(line);
 
+    progress("config");
     ok = wp_mac_config_selfcheck();
     line = ok ? "config: PASS\n" : "config: FAIL\n";
     strcpy(buf + pos, line);
     pos += (u32)strlen(line);
 
+    progress("help");
     ok = wp_mac_help_selfcheck();
     line = ok ? "help: PASS\n" : "help: FAIL\n";
     strcpy(buf + pos, line);
     pos += (u32)strlen(line);
 
+    progress("menu");
     ok = wp_mac_menu_selfcheck();
     line = ok ? "menu: PASS\n" : "menu: FAIL\n";
     strcpy(buf + pos, line);
     pos += (u32)strlen(line);
 
+    progress("image");
     ok = wp_mac_image_selfcheck();
     line = ok ? "image: PASS\n" : "image: FAIL\n";
     strcpy(buf + pos, line);

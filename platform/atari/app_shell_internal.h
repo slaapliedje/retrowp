@@ -255,6 +255,8 @@ void wp_menu_tree_init(short wcell, short hcell,
    error return in some AES implementations, so this is checked
    explicitly rather than trusted. */
 wp_bool wp_menu_tree_selfcheck(void);
+/* The app_shell.c line of the assertion that last failed it, 0 if none. */
+short   wp_menu_tree_selfcheck_fail_line(void);
 
 /* Dropdown placement, clamped so a box's right edge never leaves the
    screen -- Atari's own rule from RCSMENU.C's fix_menu_bar(), and a

@@ -54,15 +54,22 @@ headers — so a backend reaching back into this engine fails to compile. No bui
 includes an application can catch that, because there the application's headers are already
 on the path. Absent cross-toolchains skip, not fail.
 
-The Mac build works again: the Retro68 `ld`/Boost mismatch that used to fail CMake's own
-compiler test went away when the toolchain was rebuilt (2026-09-01), and
-`cmake --build build/mac` now links RETROWP.APPL, mac_smoke.APPL and rwpci_launcher.APPL.
-What is broken, and NOT by anything in this repo, is the Mac *gate*: as of 2026-10-27
-`host/tools/ci_mac_matrix.sh` fails on both ROMs because BasiliskII boots the fixture to
-the Finder and the Startup Items launcher never runs, so no marker file appears. It fails
-the same way on the previous commit; `make gem4xe-check` ("no read finished") is in the
-same state. Run a red Mac or gem4xe gate on the previous commit before treating it as a
-regression -- the Atari, Amiga and DOS matrices are the ones that currently mean something.
+All five emulator gates run green as of 2026-10-28 (Atari 8 TOS images, Amiga 3
+Kickstarts, DOS 3 machines, Mac 2 ROMs, gem4xe). Two of them were red for weeks for
+reasons outside this repo, and both are worth knowing because they can come back:
+- **Mac:** BasiliskII maps the Mac's modem port to `/dev/ttyS0` unless the prefs say
+  otherwise, and this user is in `uucp`, so the port opened for real and the smoke's
+  transport self-check (which assumes it cannot) blocked forever in BasiliskII's serial
+  read thread -- no window, no crash, no marker. `host/tools/mac_ci_lib.sh` now pins
+  `seriala`/`serialb` to a path that cannot open. The Retro68 `ld`/Boost mismatch that an
+  older version of this paragraph recorded is gone since the toolchain rebuild of
+  2026-09-01.
+- **gem4xe:** its shell renamed the desktop program `DESKTOP.PRG` (e9213f3, 2026-09-20)
+  and opens it by a bare name in the directory its boot batch changes into, so the gate's
+  disk now mirrors gem4xe's own product layout (`GEM>GEM.COM`, `CD >GEM|GEM`); and the
+  packed `.G4A` header no longer carries the near link address, which `tools/ci_gem4xe.py`
+  now takes from the ELF. If gem4xe's kit moves again, this gate is the first to notice.
+A red gate is still worth one run on the previous commit before it is read as a regression.
 
 ## Architecture Layers
 - `engine/`   Portable C. Document model, editing, layout, formats, offload client.

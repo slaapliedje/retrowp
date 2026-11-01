@@ -1028,7 +1028,12 @@ gem4xe: gem4xe-sdk-check $(GEM4XE_BIN)/RETROWP.G4A
 gem4xe-engine-check: $(filter $(GEM4XE_BUILD)/%,$(GEM4XE_OBJ))
 
 # BOOTING IT, which is the check this shell did not have.  RetroWP goes on
-# a floppy as DESKTOP.G4A and comes up under SpartaDOS X -- the cartridge
+# a floppy as GEM>DESKTOP.PRG, in the layout gem4xe's own product disk has
+# (GEM.COM, 816.COM, GEM4XE.CFG and the resources in a GEM directory the
+# boot batch changes into -- the shell opens the desktop by a bare name in
+# the current directory, so a root-level DESKTOP.PRG is APP_E_FILE; and
+# .PRG since gem4xe e9213f3, 2026-09-20: "a program is .PRG, not .G4A").
+# It comes up under SpartaDOS X -- the cartridge
 # supplies the DOS, the disk carries none -- so gem4xe's shell loop reads
 # it with far_read_file and hands it to app_load, running the whole loader
 # path: a format 4 header, a chunked copy of a 202 KB image, and fixups
@@ -1060,8 +1065,12 @@ $(GEM4XE_ATR): $(GEM4XE_BIN)/RETROWP.G4A $(GEM4XE_XEX)
 # 128 is nowhere near any limit; the DOS is the same SpartaDOS 3.2 either
 # way, and under SDX this disk is just D1:.
 	python3 $(GEM4XE_TREE)/tools/mkspdisk.py "$(GEM4XE_FIX)" $(GEM4XE_XEX) $@ \
-	    --sectors 4096 --name GEM.COM --boot GEM \
-	    --add $(GEM4XE_BIN)/RETROWP.G4A DESKTOP.G4A
+	    --sectors 4096 --name "GEM>GEM.COM" --boot "CD >GEM|GEM" --mkdir GEM \
+	    --add $(GEM4XE_BIN)/RETROWP.G4A "GEM>DESKTOP.PRG" \
+	    --add $(GEM4XE_TREE)/build/deskicon.rsc "GEM>DESKICON.RSC" \
+	    --add $(GEM4XE_TREE)/build/lang.rsc "GEM>LANG.RSC" \
+	    --add $(GEM4XE_TREE)/build/816.com "GEM>816.COM" \
+	    --add $(GEM4XE_TREE)/build/gem4xe.cfg "GEM>GEM4XE.CFG"
 
 gem4xe-check: $(GEM4XE_ATR)
 	@test -n "$(GEM4XE_CART)" || \

@@ -894,9 +894,11 @@ than Atari's own `.HYP` research spike was.
   `NewCLI` debug shell, since nothing in Phase 0 or the MUI install needed
   Workbench's own icon view). Doesn't affect T9.1b: MUI opens its own
   window regardless of Workbench's own icon rendering.
-- Known gap: Spellcheck stays a no-op (a local, file-based dictionary
-  feature with no offload dependency at all, so it was never in T9.3's
-  scope, and this app has no dictionary file on its fixture yet); RTF
+- Known gap (since closed): Spellcheck was a no-op (a local, file-based
+  dictionary feature with no offload dependency at all, so it was never
+  in T9.3's scope); it, Thesaurus, Chat and Grammar Check are the
+  portable `platform/common/tools.c` now, with `PROGDIR:WPSPELL.DIC` as
+  this backend's dictionary; RTF
   Open/Save arrived later with the shared file flow in `actions.c`
   (by extension, text only -- no image sink on this backend yet); Grammar
   Check is a reduced-scope report-only version, not Atari's interactive

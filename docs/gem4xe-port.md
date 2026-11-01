@@ -71,7 +71,8 @@ Taken with both confounds described further down removed: a GEM.COM built with
 Calypsi **5.18** from a clean gem4xe tree, the **patched** emulator (`KEYRAW`
 verified after a reboot), and a quiet machine (load about 1). The blob still lands at
 `$0443A4`. Each probe is a truncated prefix of the 5.18-built `RETROWP.G4A`, staged
-as `DESKTOP.G4A` on a SpartaDOS 3.2 floppy, with `sh_desk_len` read by symbol.
+as `DESKTOP.PRG` (`DESKTOP.G4A` until gem4xe renamed programs `.PRG` on
+2026-09-20) on a SpartaDOS 3.2 floppy, with `sh_desk_len` read by symbol.
 
 Series, three repetitions, interleaved:
 
@@ -385,11 +386,12 @@ make gem4xe
 cd ~/dev/gem4xe
 python3 tools/mkspdisk.py "<a SpartaDOS 3.2 .atr>" build/gem.xex /tmp/rwp.atr \
     --sectors 2560 --name GEM.COM --boot GEM \
-    --add ~/dev/retrowp/bin/gem4xe/RETROWP.G4A DESKTOP.G4A
+    --add ~/dev/retrowp/bin/gem4xe/RETROWP.G4A DESKTOP.PRG
 AltirraSDL --disk /tmp/rwp.atr ...        # or gem4xe's tools/a8test/launcher.py
 ```
 
-Staging RetroWP **as `DESKTOP.G4A`** makes GEM.COM's shell load it directly,
+Staging RetroWP **as `DESKTOP.PRG`** (the shell's `SH_DESKNAME`; it was
+`DESKTOP.G4A` before gem4xe e9213f3) makes GEM.COM's shell load it directly,
 which is the shortest path to seeing it run.
 
 **Take `gem.xex` from a quiet tree.** gem4xe's gate runs relink `build/gem.xex`

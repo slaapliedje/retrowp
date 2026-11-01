@@ -441,6 +441,39 @@ they grow an image sink. Checked under Hatari by saving, editing, saving
 again (the file grew by the one typed byte, no selector) and under DOSBox
 and amiberry the same way plus an RTF save and `:e` of it.
 
+**The mouse.** A left click in the work area puts the caret at the
+nearest character boundary, a Shift+click selects from the caret (or the
+selection's anchor) to the click, under every scheme (`wp_keymap_click`).
+The window asks for `MU_BUTTON` and `atari_click` turns the point into a
+position with `wp_viewport_hit_test` (viewport.h): the line under y by
+the same heights the painter advances by, then the boundary nearest x
+by `wp_line_pos_at_x_twips` (engine/src/justify.c), the exact inverse of
+the measurement that places the caret -- so click, caret and highlight
+agree to the pixel. Clicks on the slider and frame never reach the app;
+the AES turns those into `WM_ARROWED` and friends. The other shells do
+the same through their own event paths (MUI `IDCMP_MOUSEBUTTONS`, the
+Mac's `inContent`, the DOS INT 33h driver polled next to `kbhit`).
+Checked under Hatari with the keyboard mouse emulation (a Shift+click
+landed between "platform.h" and "VDI" and selected to the document's
+end) and under DOSBox (a click put a typed character where the block
+cursor was; a Shift+click selected to the second click). Under amiberry
+no click of any kind reached the Amiga -- not even one on the window's
+close gadget -- so the Amiga's handler is reviewed, not run; a human
+with a real mouse is the test there.
+
+**Tools on every target.** Thesaurus, Chat and Grammar Check (report
+only) and Spell Check are portable now (`platform/common/tools.c`); the
+Mac and DOS, whose Tools entries used to do nothing, and the Amiga,
+whose Spell Check was a no-op, call them with their own message dialog
+and dictionary path. This shell keeps its own four, since its Grammar
+Check applies fixes interactively and the rest predate the shared
+versions; the behaviour is the same.
+
+**Colour.** Every painter now draws a run in its character style's
+colour (`color_r/g/b`, read and written by RTF since M15 but never
+drawn); DOS keeps its light grey for black text, since black on black is
+nothing.
+
 ### Fixed: menu title text was rendering as real glyph noise (post-M8)
 
 The earlier note here ("likely a EmuTOS-desktop or Hatari screenshot-capture

@@ -491,7 +491,7 @@ static wp_bool child_chain_ok(short parent)
    the table nor the local-item list, i.e. drawn, highlightable, and
    silently inert. Bumping it remains the prompt to go wire the item up. */
 #define WP_ATARI_MENU_TITLES              6   /* Desk File Edit Tools Format Help */
-#define WP_ATARI_MENU_DISPATCHED_LEAVES  24   /* About + 4 File + 4 Edit + 4 Tools + 8 Format + 3 Help */
+#define WP_ATARI_MENU_DISPATCHED_LEAVES  25   /* About + 5 File + 4 Edit + 4 Tools + 8 Format + 3 Help */
 #define WP_ATARI_MENU_INERT_LEAVES        7   /* separator + 6 AES-reserved Desk slots */
 
 /* Defined next to the dispatch table it validates, far below -- this
@@ -525,6 +525,17 @@ static wp_bool menu_box_placed_ok(short title, short box)
     return WP_TRUE;
 }
 
+/* Which assertion of wp_menu_tree_selfcheck failed, as a line number of
+   this file, 0 when it passed: the smoke prints it, because "linkage" on
+   its own sent a menu edit down a two-hundred-line function by hand. */
+static short g_menu_tree_fail_line = 0;
+#define TREE_FAIL() do { g_menu_tree_fail_line = (short)__LINE__; return WP_FALSE; } while (0)
+
+short wp_menu_tree_selfcheck_fail_line(void)
+{
+    return g_menu_tree_fail_line;
+}
+
 wp_bool wp_menu_tree_selfcheck(void)
 {
     /* OF_LASTOB means "last object in the TREE", singular -- Atari
@@ -548,75 +559,75 @@ wp_bool wp_menu_tree_selfcheck(void)
         for (i = 0; i < WP_MENU_OBJ_COUNT; i++) {
             if (wp_menu_tree[i].ob_flags & OF_LASTOB) lastob_count++;
         }
-        if (lastob_count != 1) return WP_FALSE;
-        if ((wp_menu_tree[WP_MENU_OBJ_COUNT - 1].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+        if (lastob_count != 1) TREE_FAIL();
+        if ((wp_menu_tree[WP_MENU_OBJ_COUNT - 1].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
     }
 
-    if (!child_chain_ok(WP_MENU_OBJ_ROOT)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_BAR)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_ACTIVE)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_DROPDOWNS)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_DESK_BOX)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_FILE_BOX)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_EDIT_BOX)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_TOOLS_BOX)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_FORMAT_BOX)) return WP_FALSE;
-    if (!child_chain_ok(WP_MENU_OBJ_HELP_BOX)) return WP_FALSE;
+    if (!child_chain_ok(WP_MENU_OBJ_ROOT)) TREE_FAIL();
+    if (!child_chain_ok(WP_MENU_OBJ_BAR)) TREE_FAIL();
+    if (!child_chain_ok(WP_MENU_OBJ_ACTIVE)) TREE_FAIL();
+    if (!child_chain_ok(WP_MENU_OBJ_DROPDOWNS)) TREE_FAIL();
+    if (!child_chain_ok(WP_MENU_OBJ_DESK_BOX)) TREE_FAIL();
+    if (!child_chain_ok(WP_MENU_OBJ_FILE_BOX)) TREE_FAIL();
+    if (!child_chain_ok(WP_MENU_OBJ_EDIT_BOX)) TREE_FAIL();
+    if (!child_chain_ok(WP_MENU_OBJ_TOOLS_BOX)) TREE_FAIL();
+    if (!child_chain_ok(WP_MENU_OBJ_FORMAT_BOX)) TREE_FAIL();
+    if (!child_chain_ok(WP_MENU_OBJ_HELP_BOX)) TREE_FAIL();
 
     /* ROOT -> BAR (ob_head), DROPDOWNS (ob_tail). */
-    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_next != -1) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_head != WP_MENU_OBJ_BAR) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_tail != WP_MENU_OBJ_DROPDOWNS) return WP_FALSE;
-    if (WP_MENU_OBJ_ROOT != 0) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_type != G_IBOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_next != -1) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_head != WP_MENU_OBJ_BAR) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_tail != WP_MENU_OBJ_DROPDOWNS) TREE_FAIL();
+    if (WP_MENU_OBJ_ROOT != 0) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_ROOT].ob_type != G_IBOX) TREE_FAIL();
 
     /* BAR -> ACTIVE, its only child. menu_bar() draws index 1's subtree,
        so BAR must be array index 1 -- this is the whole fix; assert it
        explicitly rather than trusting the enum ordering above. */
-    if (WP_MENU_OBJ_BAR != 1) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_BAR].ob_next != WP_MENU_OBJ_DROPDOWNS) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_BAR].ob_head != WP_MENU_OBJ_ACTIVE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_BAR].ob_tail != WP_MENU_OBJ_ACTIVE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_BAR].ob_type != G_BOX) return WP_FALSE;
+    if (WP_MENU_OBJ_BAR != 1) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_BAR].ob_next != WP_MENU_OBJ_DROPDOWNS) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_BAR].ob_head != WP_MENU_OBJ_ACTIVE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_BAR].ob_tail != WP_MENU_OBJ_ACTIVE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_BAR].ob_type != G_BOX) TREE_FAIL();
 
     /* ACTIVE -> Desk/File/Edit/Tools/Format titles, in on-screen order. */
-    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_next != WP_MENU_OBJ_BAR) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_head != WP_MENU_OBJ_DESK_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_tail != WP_MENU_OBJ_HELP_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_type != G_BOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_next != WP_MENU_OBJ_BAR) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_head != WP_MENU_OBJ_DESK_TITLE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_tail != WP_MENU_OBJ_HELP_TITLE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_type != G_BOX) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_next != WP_MENU_OBJ_FILE_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_head != -1) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_tail != -1) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_type != G_TITLE) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_DESK_TITLE], g_text_desk)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_next != WP_MENU_OBJ_FILE_TITLE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_head != -1) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_tail != -1) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_type != G_TITLE) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_DESK_TITLE], g_text_desk)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_next != WP_MENU_OBJ_EDIT_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_type != G_TITLE) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_TITLE], g_text_file)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_next != WP_MENU_OBJ_EDIT_TITLE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_type != G_TITLE) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_TITLE], g_text_file)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_next != WP_MENU_OBJ_TOOLS_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_type != G_TITLE) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE], g_text_edit)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_next != WP_MENU_OBJ_TOOLS_TITLE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_type != G_TITLE) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE], g_text_edit)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_next != WP_MENU_OBJ_FORMAT_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_type != G_TITLE) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE], g_text_tools)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_next != WP_MENU_OBJ_FORMAT_TITLE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_type != G_TITLE) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE], g_text_tools)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_next != WP_MENU_OBJ_HELP_TITLE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_type != G_TITLE) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE], g_text_format)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_next != WP_MENU_OBJ_HELP_TITLE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_type != G_TITLE) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE], g_text_format)) TREE_FAIL();
 
     /* Help is the last title, so its ob_next closes the ring back to the
        parent -- the same "last sibling points at its parent" rule every
        other chain here ends with. Getting this wrong is not a visual
        glitch: the AES walks siblings until it sees the parent index, so
        a wrong value here is an unterminated walk. */
-    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_next != WP_MENU_OBJ_ACTIVE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_head != -1) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_tail != -1) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_type != G_TITLE) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_HELP_TITLE], g_text_help)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_next != WP_MENU_OBJ_ACTIVE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_head != -1) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_tail != -1) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_type != G_TITLE) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_HELP_TITLE], g_text_help)) TREE_FAIL();
 
     /* THE TITLES MUST BE CONTIGUOUS ARRAY INDICES FROM DESK_TITLE, in
        menu-bar order. The AES locates a title's dropdown box by walking
@@ -628,12 +639,12 @@ wp_bool wp_menu_tree_selfcheck(void)
        running off the end of the chain. Asserted as arithmetic on the
        whole run so inserting a seventh title in the wrong place fails
        here instead of on someone's screen. */
-    if (WP_MENU_OBJ_DESK_TITLE != WP_MENU_OBJ_ACTIVE + 1) return WP_FALSE;
-    if (WP_MENU_OBJ_FILE_TITLE != WP_MENU_OBJ_DESK_TITLE + 1) return WP_FALSE;
-    if (WP_MENU_OBJ_EDIT_TITLE != WP_MENU_OBJ_FILE_TITLE + 1) return WP_FALSE;
-    if (WP_MENU_OBJ_TOOLS_TITLE != WP_MENU_OBJ_EDIT_TITLE + 1) return WP_FALSE;
-    if (WP_MENU_OBJ_FORMAT_TITLE != WP_MENU_OBJ_TOOLS_TITLE + 1) return WP_FALSE;
-    if (WP_MENU_OBJ_HELP_TITLE != WP_MENU_OBJ_FORMAT_TITLE + 1) return WP_FALSE;
+    if (WP_MENU_OBJ_DESK_TITLE != WP_MENU_OBJ_ACTIVE + 1) TREE_FAIL();
+    if (WP_MENU_OBJ_FILE_TITLE != WP_MENU_OBJ_DESK_TITLE + 1) TREE_FAIL();
+    if (WP_MENU_OBJ_EDIT_TITLE != WP_MENU_OBJ_FILE_TITLE + 1) TREE_FAIL();
+    if (WP_MENU_OBJ_TOOLS_TITLE != WP_MENU_OBJ_EDIT_TITLE + 1) TREE_FAIL();
+    if (WP_MENU_OBJ_FORMAT_TITLE != WP_MENU_OBJ_TOOLS_TITLE + 1) TREE_FAIL();
+    if (WP_MENU_OBJ_HELP_TITLE != WP_MENU_OBJ_FORMAT_TITLE + 1) TREE_FAIL();
 
     /* And the same count of boxes, in the same order, since that walk
        pairs the Nth title with the Nth box positionally. */
@@ -643,17 +654,17 @@ wp_bool wp_menu_tree_selfcheck(void)
         short n = 0;
 
         while (t != WP_MENU_OBJ_ACTIVE && n <= WP_MENU_OBJ_COUNT) {
-            if (b < 0 || b >= WP_MENU_OBJ_COUNT) return WP_FALSE;
+            if (b < 0 || b >= WP_MENU_OBJ_COUNT) TREE_FAIL();
             /* Each box must be placed by the documented rule, and must
                fit on screen -- see menu_box_placed_ok. */
-            if (!menu_box_placed_ok(t, b)) return WP_FALSE;
+            if (!menu_box_placed_ok(t, b)) TREE_FAIL();
             t = wp_menu_tree[t].ob_next;
             b = wp_menu_tree[b].ob_next;
             n++;
         }
-        if (n != WP_ATARI_MENU_TITLES) return WP_FALSE;
+        if (n != WP_ATARI_MENU_TITLES) TREE_FAIL();
         /* Both chains must close on their own parent at the same step. */
-        if (b != WP_MENU_OBJ_DROPDOWNS) return WP_FALSE;
+        if (b != WP_MENU_OBJ_DROPDOWNS) TREE_FAIL();
     }
 
     /* Titles must not overlap, or two of them highlight as one region.
@@ -661,145 +672,145 @@ wp_bool wp_menu_tree_selfcheck(void)
        keeps holding at any cell width. */
     if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_x <
         wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_x +
-        wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_width) return WP_FALSE;
+        wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_width) TREE_FAIL();
 
     /* DROPDOWNS -> one G_BOX per title, same left-to-right order, each
        structurally unreachable from BAR's subtree (see the tree's own
        top-of-file comment for why that's the actual fix). */
-    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_next != WP_MENU_OBJ_ROOT) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_head != WP_MENU_OBJ_DESK_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_tail != WP_MENU_OBJ_HELP_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_type != G_IBOX) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_next != WP_MENU_OBJ_ROOT) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_head != WP_MENU_OBJ_DESK_BOX) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_tail != WP_MENU_OBJ_HELP_BOX) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DROPDOWNS].ob_type != G_IBOX) TREE_FAIL();
 
     /* Desk's dropdown: exactly 8 children (About, disabled separator, 6
        AES-reserved dummy slots), contiguous in the array -- menu_fixup()
        is understood to patch these by raw index arithmetic from
        tree[DROPDOWNS].ob_head, not by chain traversal, so contiguity is
        load-bearing, not cosmetic. */
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_next != WP_MENU_OBJ_FILE_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_head != WP_MENU_OBJ_DESK_ABOUT) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_tail != WP_MENU_OBJ_DESK_DUMMY6) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
-    if (WP_MENU_OBJ_DESK_DUMMY6 != WP_MENU_OBJ_DESK_ABOUT + 7) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_next != WP_MENU_OBJ_FILE_BOX) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_head != WP_MENU_OBJ_DESK_ABOUT) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_tail != WP_MENU_OBJ_DESK_DUMMY6) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_type != G_BOX) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_DESK_BOX].ob_flags & OF_HIDETREE) != 0) TREE_FAIL();
+    if (WP_MENU_OBJ_DESK_DUMMY6 != WP_MENU_OBJ_DESK_ABOUT + 7) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_ABOUT].ob_next != WP_MENU_OBJ_DESK_SEP) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_DESK_ABOUT], g_text_desk_about)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_SEP].ob_next != WP_MENU_OBJ_DESK_DUMMY1) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_SEP].ob_state != OS_DISABLED) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_DESK_SEP], g_text_desk_sep)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY1].ob_next != WP_MENU_OBJ_DESK_DUMMY2) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY1], g_text_desk_dummy1)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY2].ob_next != WP_MENU_OBJ_DESK_DUMMY3) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY3].ob_next != WP_MENU_OBJ_DESK_DUMMY4) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY4].ob_next != WP_MENU_OBJ_DESK_DUMMY5) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY5].ob_next != WP_MENU_OBJ_DESK_DUMMY6) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_next != WP_MENU_OBJ_DESK_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6], g_text_desk_dummy6)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_ABOUT].ob_next != WP_MENU_OBJ_DESK_SEP) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_DESK_ABOUT], g_text_desk_about)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_SEP].ob_next != WP_MENU_OBJ_DESK_DUMMY1) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_SEP].ob_state != OS_DISABLED) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_DESK_SEP], g_text_desk_sep)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY1].ob_next != WP_MENU_OBJ_DESK_DUMMY2) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY1], g_text_desk_dummy1)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY2].ob_next != WP_MENU_OBJ_DESK_DUMMY3) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY3].ob_next != WP_MENU_OBJ_DESK_DUMMY4) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY4].ob_next != WP_MENU_OBJ_DESK_DUMMY5) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY5].ob_next != WP_MENU_OBJ_DESK_DUMMY6) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_next != WP_MENU_OBJ_DESK_BOX) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_DESK_DUMMY6], g_text_desk_dummy6)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_next != WP_MENU_OBJ_EDIT_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_head != WP_MENU_OBJ_FILE_NEW) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_next != WP_MENU_OBJ_FILE_OPEN) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_NEW], g_text_new)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_tail != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
-    if (!menu_box_placed_ok(WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_FILE_BOX)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_next != WP_MENU_OBJ_EDIT_BOX) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_head != WP_MENU_OBJ_FILE_NEW) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_next != WP_MENU_OBJ_FILE_OPEN) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_NEW], g_text_new)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_tail != WP_MENU_OBJ_FILE_QUIT) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_type != G_BOX) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_flags & OF_HIDETREE) != 0) TREE_FAIL();
+    if (!menu_box_placed_ok(WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_FILE_BOX)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_next != WP_MENU_OBJ_FILE_SAVE) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_OPEN], g_text_open)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_next != WP_MENU_OBJ_FILE_SAVE_AS) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE], g_text_save)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_next != WP_MENU_OBJ_FILE_QUIT) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS], g_text_save_as)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_next != WP_MENU_OBJ_FILE_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_QUIT], g_text_quit)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_next != WP_MENU_OBJ_FILE_SAVE) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_OPEN], g_text_open)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_next != WP_MENU_OBJ_FILE_SAVE_AS) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE], g_text_save)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_next != WP_MENU_OBJ_FILE_QUIT) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS], g_text_save_as)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_next != WP_MENU_OBJ_FILE_BOX) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_QUIT], g_text_quit)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_head != WP_MENU_OBJ_EDIT_UNDO) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_next != WP_MENU_OBJ_EDIT_CUT) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO], g_text_undo)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_tail != WP_MENU_OBJ_EDIT_PASTE) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
-    if (!menu_box_placed_ok(WP_MENU_OBJ_EDIT_TITLE, WP_MENU_OBJ_EDIT_BOX)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_next != WP_MENU_OBJ_TOOLS_BOX) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_head != WP_MENU_OBJ_EDIT_UNDO) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_next != WP_MENU_OBJ_EDIT_CUT) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO], g_text_undo)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_tail != WP_MENU_OBJ_EDIT_PASTE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_type != G_BOX) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_flags & OF_HIDETREE) != 0) TREE_FAIL();
+    if (!menu_box_placed_ok(WP_MENU_OBJ_EDIT_TITLE, WP_MENU_OBJ_EDIT_BOX)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_CUT].ob_next != WP_MENU_OBJ_EDIT_COPY) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_CUT], g_text_cut)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_COPY].ob_next != WP_MENU_OBJ_EDIT_PASTE) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_COPY], g_text_copy)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_next != WP_MENU_OBJ_EDIT_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE], g_text_paste)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_CUT].ob_next != WP_MENU_OBJ_EDIT_COPY) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_CUT], g_text_cut)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_COPY].ob_next != WP_MENU_OBJ_EDIT_PASTE) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_COPY], g_text_copy)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_next != WP_MENU_OBJ_EDIT_BOX) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_PASTE], g_text_paste)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_next != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_head != WP_MENU_OBJ_TOOLS_SPELLCHECK) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_CHAT) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
-    if (!menu_box_placed_ok(WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_TOOLS_BOX)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_next != WP_MENU_OBJ_FORMAT_BOX) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_head != WP_MENU_OBJ_TOOLS_SPELLCHECK) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_CHAT) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_type != G_BOX) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_flags & OF_HIDETREE) != 0) TREE_FAIL();
+    if (!menu_box_placed_ok(WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_TOOLS_BOX)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_next != WP_MENU_OBJ_TOOLS_THESAURUS) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK], g_text_spellcheck)) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_next != WP_MENU_OBJ_TOOLS_THESAURUS) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK], g_text_spellcheck)) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_SPELLCHECK].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_next != WP_MENU_OBJ_TOOLS_GRAMMARCHECK) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS], g_text_thesaurus)) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_next != WP_MENU_OBJ_TOOLS_GRAMMARCHECK) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS], g_text_thesaurus)) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_THESAURUS].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_next != WP_MENU_OBJ_TOOLS_CHAT) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK], g_text_grammarcheck)) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_next != WP_MENU_OBJ_TOOLS_CHAT) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK], g_text_grammarcheck)) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_GRAMMARCHECK].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_next != WP_MENU_OBJ_TOOLS_BOX) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT], g_text_chat)) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_next != WP_MENU_OBJ_TOOLS_BOX) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT], g_text_chat)) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_next != WP_MENU_OBJ_HELP_BOX) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_head != WP_MENU_OBJ_FORMAT_BOLD) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_tail != WP_MENU_OBJ_FORMAT_ALIGN_RIGHT) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
-    if (!menu_box_placed_ok(WP_MENU_OBJ_FORMAT_TITLE, WP_MENU_OBJ_FORMAT_BOX)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_next != WP_MENU_OBJ_HELP_BOX) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_head != WP_MENU_OBJ_FORMAT_BOLD) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_tail != WP_MENU_OBJ_FORMAT_ALIGN_RIGHT) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_type != G_BOX) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_flags & OF_HIDETREE) != 0) TREE_FAIL();
+    if (!menu_box_placed_ok(WP_MENU_OBJ_FORMAT_TITLE, WP_MENU_OBJ_FORMAT_BOX)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOLD].ob_next != WP_MENU_OBJ_FORMAT_ITALIC) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_BOLD], g_text_bold)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ITALIC].ob_next != WP_MENU_OBJ_FORMAT_UNDERLINE) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_ITALIC], g_text_italic)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_UNDERLINE].ob_next != WP_MENU_OBJ_FORMAT_SIZE_UP) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_UNDERLINE], g_text_underline)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_UP].ob_next != WP_MENU_OBJ_FORMAT_SIZE_DOWN) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_UP], g_text_size_up)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_DOWN].ob_next != WP_MENU_OBJ_FORMAT_ALIGN_LEFT) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_DOWN], g_text_size_down)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_LEFT].ob_next != WP_MENU_OBJ_FORMAT_ALIGN_CENTER) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_LEFT], g_text_align_left)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_CENTER].ob_next != WP_MENU_OBJ_FORMAT_ALIGN_RIGHT) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_CENTER], g_text_align_center)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_next != WP_MENU_OBJ_FORMAT_BOX) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT], g_text_align_right)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOLD].ob_next != WP_MENU_OBJ_FORMAT_ITALIC) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_BOLD], g_text_bold)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ITALIC].ob_next != WP_MENU_OBJ_FORMAT_UNDERLINE) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_ITALIC], g_text_italic)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_UNDERLINE].ob_next != WP_MENU_OBJ_FORMAT_SIZE_UP) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_UNDERLINE], g_text_underline)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_UP].ob_next != WP_MENU_OBJ_FORMAT_SIZE_DOWN) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_UP], g_text_size_up)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_DOWN].ob_next != WP_MENU_OBJ_FORMAT_ALIGN_LEFT) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_SIZE_DOWN], g_text_size_down)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_LEFT].ob_next != WP_MENU_OBJ_FORMAT_ALIGN_CENTER) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_LEFT], g_text_align_left)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_CENTER].ob_next != WP_MENU_OBJ_FORMAT_ALIGN_RIGHT) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_CENTER], g_text_align_center)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_next != WP_MENU_OBJ_FORMAT_BOX) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT], g_text_align_right)) TREE_FAIL();
     /* Align Right used to carry OF_LASTOB as the final array entry. The
        Help objects are now the final entries, so it must NOT -- the
        whole-array count above already proves there is exactly one, but
        this pins WHICH object lost it, since a stray extra here is the
        exact shape of the bug that once hid every dropdown from the AES. */
-    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_next != WP_MENU_OBJ_DROPDOWNS) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_head != WP_MENU_OBJ_HELP_CONTENTS) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_tail != WP_MENU_OBJ_HELP_FORMAT) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_type != G_BOX) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
-    if (!menu_box_placed_ok(WP_MENU_OBJ_HELP_TITLE, WP_MENU_OBJ_HELP_BOX)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_next != WP_MENU_OBJ_DROPDOWNS) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_head != WP_MENU_OBJ_HELP_CONTENTS) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_tail != WP_MENU_OBJ_HELP_FORMAT) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_type != G_BOX) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_HELP_BOX].ob_flags & OF_HIDETREE) != 0) TREE_FAIL();
+    if (!menu_box_placed_ok(WP_MENU_OBJ_HELP_TITLE, WP_MENU_OBJ_HELP_BOX)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_HELP_CONTENTS].ob_next != WP_MENU_OBJ_HELP_KEYS) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_HELP_CONTENTS], g_text_help_contents)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_HELP_KEYS].ob_next != WP_MENU_OBJ_HELP_FORMAT) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_HELP_KEYS], g_text_help_keys)) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT].ob_next != WP_MENU_OBJ_HELP_BOX) return WP_FALSE;
-    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT], g_text_help_format)) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_CONTENTS].ob_next != WP_MENU_OBJ_HELP_KEYS) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_HELP_CONTENTS], g_text_help_contents)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_KEYS].ob_next != WP_MENU_OBJ_HELP_FORMAT) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_HELP_KEYS], g_text_help_keys)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT].ob_next != WP_MENU_OBJ_HELP_BOX) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT], g_text_help_format)) TREE_FAIL();
     /* Help > Format Keys used to be the final array entry and so carried
        OF_LASTOB. File > New was appended after it (T170), so the flag
        moved on; this now asserts it moved OFF here, which is the half a
@@ -808,15 +819,17 @@ wp_bool wp_menu_tree_selfcheck(void)
        an intermediate object was cleared rather than the count being
        satisfied some other way. This assertion is what caught the flag
        being left in two places during that very edit. */
-    if ((wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
+    if ((wp_menu_tree[WP_MENU_OBJ_HELP_FORMAT].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_type != G_STRING) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_head != -1) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_tail != -1) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_flags & OF_LASTOB) != 0) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_type != G_STRING) return WP_FALSE;
-    if ((wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_flags & OF_HIDETREE) != 0) return WP_FALSE;
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_type != G_STRING) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_head != -1) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_tail != -1) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Save As was appended */
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_type != G_STRING) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_type != G_STRING) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_flags & OF_HIDETREE) != 0) TREE_FAIL();
 
     /* Every item this menu bar shows must resolve to a real action, and
        every action the shared registry files under a group this backend
@@ -824,7 +837,7 @@ wp_bool wp_menu_tree_selfcheck(void)
        is the point of routing dispatch through the registry at all --
        one direction alone still permits a menu item that dispatches
        nothing, or a registered action no ST user can ever reach. */
-    if (!menu_action_map_selfcheck()) return WP_FALSE;
+    if (!menu_action_map_selfcheck()) TREE_FAIL();
 
     return WP_TRUE;
 }

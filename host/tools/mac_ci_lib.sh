@@ -38,8 +38,14 @@ run_mac_smoke_once() {
     _offset="$2"
     _modelid="$3"
     _cpu="$4"
-    _shared="$MAC_FIXTURE/shared"
     _scratch="$(mktemp -d)"
+    # The ExtFS ("Unix:") volume is served from a fresh directory under the
+    # scratch rather than from the fixture's own, so one run's leftovers
+    # (the Finder's Desktop Folder and Trash, a stray temp file) are never
+    # the next run's input. Nothing in that directory was ever needed
+    # between runs.
+    _shared="$_scratch/shared"
+    mkdir -p "$_shared/.finf" "$_shared/.rsrc"
     _boot_img="$_scratch/boot.img"
 
     # PID-derived AND offset-derived -- same collision reasoning
@@ -47,11 +53,19 @@ run_mac_smoke_once() {
     _xvfb_display=":$((97 + ($$ + _offset) % 400))"
 
     cp "$MAC_FIXTURE/boot_template.img" "$_boot_img"
-    rm -f "$_shared/mac_smoke.out" "$_shared/launcher_fsspec_fail.txt" "$_shared/launcher_launch_fail.txt"
+    rm -f "$_shared/mac_smoke.out" "$_shared/mac_smoke.log" "$_shared/launcher_fsspec_fail.txt" "$_shared/launcher_launch_fail.txt"
     cp bin/mac/mac_smoke.APPL "$_shared/CI_TARGET.APPL"
     cp bin/mac/.rsrc/mac_smoke.APPL "$_shared/.rsrc/CI_TARGET.APPL"
     cp bin/mac/.finf/mac_smoke.APPL "$_shared/.finf/CI_TARGET.APPL"
 
+    # seriala/serialb name a path that cannot be opened. Left unset,
+    # BasiliskII takes /dev/ttyS0 and /dev/ttyS1, and once this host had a
+    # ttyS0 it could open (2026-10), the transport self-check's OpenDriver
+    # SUCCEEDED, its HELLO handshake read a line nobody writes to, and
+    # BasiliskII's serial read thread blocked for good -- the smoke never
+    # reported and the gate said "no marker file ever appeared". The
+    # self-check documents "no seriala configured" as its assumption; this
+    # makes the gate honour it whatever the host has plugged in.
     cat > "$_scratch/prefs" <<EOF
 disk $_boot_img
 extfs $_shared
@@ -64,6 +78,8 @@ modelid $_modelid
 cpu $_cpu
 fpu true
 nocdrom true
+seriala /dev/retrowp-no-serial
+serialb /dev/retrowp-no-serial
 nosound true
 nogui true
 jit false
@@ -213,8 +229,14 @@ run_mac_app_once() {
     _offset="$2"
     _modelid="$3"
     _cpu="$4"
-    _shared="$MAC_FIXTURE/shared"
     _scratch="$(mktemp -d)"
+    # The ExtFS ("Unix:") volume is served from a fresh directory under the
+    # scratch rather than from the fixture's own, so one run's leftovers
+    # (the Finder's Desktop Folder and Trash, a stray temp file) are never
+    # the next run's input. Nothing in that directory was ever needed
+    # between runs.
+    _shared="$_scratch/shared"
+    mkdir -p "$_shared/.finf" "$_shared/.rsrc"
     _boot_img="$_scratch/boot.img"
     _xvfb_display=":$((97 + ($$ + _offset) % 400))"
 
@@ -225,6 +247,14 @@ run_mac_app_once() {
     cp build/mac/.finf/RETROWP.APPL "$_shared/.finf/CI_TARGET.APPL"
     echo "ci" > "$_shared/RETROWP.CI"
 
+    # seriala/serialb name a path that cannot be opened. Left unset,
+    # BasiliskII takes /dev/ttyS0 and /dev/ttyS1, and once this host had a
+    # ttyS0 it could open (2026-10), the transport self-check's OpenDriver
+    # SUCCEEDED, its HELLO handshake read a line nobody writes to, and
+    # BasiliskII's serial read thread blocked for good -- the smoke never
+    # reported and the gate said "no marker file ever appeared". The
+    # self-check documents "no seriala configured" as its assumption; this
+    # makes the gate honour it whatever the host has plugged in.
     cat > "$_scratch/prefs" <<EOF
 disk $_boot_img
 extfs $_shared
@@ -237,6 +267,8 @@ modelid $_modelid
 cpu $_cpu
 fpu true
 nocdrom true
+seriala /dev/retrowp-no-serial
+serialb /dev/retrowp-no-serial
 nosound true
 nogui true
 jit false

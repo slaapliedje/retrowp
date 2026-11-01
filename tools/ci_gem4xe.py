@@ -19,7 +19,10 @@ docs/gem4xe-port.md has the timeline and the withdrawal.  So this waits
 for a condition and reports how long it took, and a timeout says how far
 the read had got rather than just "failed".
 
-RETROWP GOES ON THE DISK AS DESKTOP.G4A.  gem4xe's shell loop reads that
+RETROWP GOES ON THE DISK AS DESKTOP.PRG (DESKTOP.G4A until gem4xe e9213f3 of
+2026-09-20 renamed every program .PRG; the gate read "no read finished" for a
+month because the shell was asking for a file that was not there).  gem4xe's
+shell loop reads that
 name off the boot disk and hands it to app_load, so the whole loader runs
 -- the format 4 header, the chunked image copy, the fixups across four
 banks.  SpartaDOS X supplies the DOS from the cartridge; the disk carries
@@ -88,9 +91,20 @@ def s16(v):
 
 
 def link_near_of(path):
-    """Where the near region was linked, from the .G4A header."""
+    """Where the near region was linked.  A format 3/4 header carries it
+    at offset 4; a packed (v5/v6) image carries the packed length there
+    and its real header inside the G4Z stream, so for those the answer
+    comes from the ELF the image was made from, the way mkg4a.py found
+    it in the first place."""
     with open(path, "rb") as f:
-        return struct.unpack("<H", f.read(8)[4:6])[0]
+        hdr = f.read(8)
+    if hdr[3] <= 4:
+        return struct.unpack("<H", hdr[4:6])[0]
+    import mkg4a                                  # gem4xe's own, on sys.path
+    elf = os.path.join(ROOT, "build", "gem4xe", "retrowp.elf")
+    segs, syms = mkg4a.read_elf_all(elf)
+    near_base, _near_end, _far_base, _far_end = mkg4a.extents(segs, syms)
+    return near_base
 
 
 def tree_link_of(path):

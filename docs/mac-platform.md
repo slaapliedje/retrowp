@@ -739,6 +739,18 @@ tuned to any fast-path timing; and `offload_init`/`offload_available`/
 
 `wp_mac_transport_selfcheck()` passes reliably in the standard fixture
 via `host/tools/ci_mac.sh` (`transport: PASS`, multiple clean runs).
+
+*The assumption above bit, 2026-10-28.* "No `seriala` configured" is not
+the same as "no serial port": BasiliskII's default `seriala` is
+`/dev/ttyS0`, and once this host's user was in `uucp` that device opened
+for real. `OpenDriver` then succeeded, `offload_init`'s HELLO read went
+to a line nobody writes to, and BasiliskII's serial thread blocked for
+good (the hang this section documents), so the smoke never reported and
+the whole Mac gate read "no marker file ever appeared" from September on.
+The smoke now writes a progress trail (`Unix:mac_smoke.log`, one line per
+check about to run) which is how this was found, and
+`host/tools/mac_ci_lib.sh` pins `seriala`/`serialb` to a path that cannot
+open, so the gate holds the self-check's assumption whatever the host has.
 Manually, against a real socat PTY wired in as `seriala`: `OpenDriver`/
 `SerReset`/`SerHShake`/`plat_transport_write` all confirmed working
 end-to-end (the read-timeout hang above is the one documented,
