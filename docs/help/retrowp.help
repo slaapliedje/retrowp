@@ -154,6 +154,9 @@ the mouse. Its buttons, left to right:
   Align Left, Center, Align Right, Justify
   Single, 1.5 and Double line spacing
   Indent Less, Indent More (half an inch at a time)
+  Page Break (the text after the caret starts a new page; at
+              the start of a paragraph it turns that paragraph's
+              break on or off)
 
 A button shown inverted is the one in force at the caret. The
 ruler under the buttons measures the page's text column in

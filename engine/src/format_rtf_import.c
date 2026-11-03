@@ -31,7 +31,7 @@ typedef struct {
     u8  slmult;         /* \slmultN: 1 = sl is a multiple (240ths), 0 = twips */
     u8  uc;             /* \ucN: fallback characters after each \uN */
     u8  hidden;         /* \v: text not imported */
-    u8  _pad;
+    u8  pagebb;         /* \pagebb: this paragraph starts a page */
     rtf_dest dest;
 } rtf_state;
 
@@ -74,6 +74,8 @@ typedef struct {
 
     u16 codepage;      /* \ansicpgN / \mac / \pc / \pca; \'hh decodes through it */
     u32 skip;          /* fallback characters still to skip after a \uN */
+    u8  break_next;    /* a \page or \sect was seen: the next paragraph starts a page */
+    u8  break_this;    /* ...and this is that paragraph */
 
     /* Tab stops of the paragraph being read. Kept here, not in the group
        state: \pard resets them and nothing scopes them to a group, and
@@ -136,6 +138,8 @@ static void rtf_ensure_paragraph(rtf_parser *p)
     if (wp_section_paragraph_add(sec, &new_idx) != WP_OK) { p->error = WP_NOMEM; return; }
     p->para_idx = new_idx;
     p->para_pending = WP_FALSE;
+    p->break_this = p->break_next;
+    p->break_next = 0;
 }
 
 static void rtf_flush_run(rtf_parser *p)
@@ -195,6 +199,8 @@ static void rtf_apply_pstyle_to_current_paragraph(rtf_parser *p)
         if (st->slmult && st->sl > 0) ps.line_spacing = (st->sl == 240) ? 0 : st->sl;
         else ps.line_spacing = -(st->sl < 0 ? -st->sl : st->sl);
     }
+    ps.page_break_before = (u8)(st->pagebb || p->break_this);
+    p->break_this = 0;
     ps.tab_count = p->tab_count;
     memcpy(ps.tab_kind, p->tab_kind, sizeof(ps.tab_kind));
     memcpy(ps.tab_pos, p->tab_pos, sizeof(ps.tab_pos));
@@ -551,6 +557,7 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         st->indent_left = 0; st->indent_right = 0; st->indent_first = 0;
         st->space_before = 0; st->space_after = 0;
         st->sl = 0; st->slmult = 0;
+        st->pagebb = 0;
         p->tab_count = 0;
         p->tab_kind_pending = (u8)WP_TAB_LEFT;
         return;
@@ -567,6 +574,7 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
     if (strcmp(name, "sb") == 0) { st->space_before = has_param ? param : 0; return; }
     if (strcmp(name, "sa") == 0) { st->space_after = has_param ? param : 0; return; }
     if (strcmp(name, "sl") == 0) { st->sl = has_param ? param : 0; return; }
+    if (strcmp(name, "pagebb") == 0) { st->pagebb = (u8)(!has_param || param != 0); return; }
     if (strcmp(name, "slmult") == 0) { st->slmult = (u8)(has_param && param != 0); return; }
     if (strcmp(name, "tqr") == 0) { p->tab_kind_pending = (u8)WP_TAB_RIGHT; return; }
     if (strcmp(name, "tqc") == 0) { p->tab_kind_pending = (u8)WP_TAB_CENTER; return; }
@@ -622,10 +630,17 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         rtf_end_paragraph(p);
         return;
     }
-    /* Page and section breaks end the paragraph; the model has neither
-       yet, so the text after one starts a new paragraph rather than
-       running on. */
-    if (strcmp(name, "page") == 0 || strcmp(name, "sect") == 0) { rtf_end_paragraph(p); return; }
+    /* A page or section break ends the paragraph, and the next one
+       starts a page (page_break_before; a section break's default,
+       \sbkpage, is a new page too). */
+    if (strcmp(name, "page") == 0 || strcmp(name, "sect") == 0) {
+        /* Straight after a \par (Word's usual "\par\page") there is no
+           paragraph to end -- ending one would add an empty paragraph at
+           every break. */
+        if (!p->para_pending || p->run_buf.length > 0) rtf_end_paragraph(p);
+        p->break_next = 1;
+        return;
+    }
 
     /* Character formatting. */
     if (strcmp(name, "plain") == 0) {

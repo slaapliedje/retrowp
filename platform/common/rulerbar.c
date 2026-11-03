@@ -10,7 +10,7 @@ typedef enum {
     WP_ICON_PASTE, WP_ICON_UNDO, WP_ICON_BOLD, WP_ICON_ITALIC,
     WP_ICON_UNDERLINE, WP_ICON_LEFT, WP_ICON_CENTER, WP_ICON_RIGHT,
     WP_ICON_JUSTIFY, WP_ICON_SINGLE, WP_ICON_ONEHALF, WP_ICON_DOUBLE,
-    WP_ICON_INDENT_LESS, WP_ICON_INDENT_MORE,
+    WP_ICON_INDENT_LESS, WP_ICON_INDENT_MORE, WP_ICON_PAGE_BREAK,
     WP_ICON_COUNT
 } wp_icon_id;
 
@@ -35,6 +35,7 @@ static const u16 g_icon_bits[WP_ICON_COUNT][16] = {
     /* DOUBLE */ { 0x7FF8, 0x7FF8, 0x0000, 0x0000, 0x0000, 0x7FF8, 0x7FF8, 0x0000, 0x0000, 0x0000, 0x7FF8, 0x7FF8, 0x0000, 0x0000, 0xE280, 0x6100 },
     /* INDENT_LESS */ { 0x0000, 0x0000, 0x7FF8, 0x0000, 0x03F8, 0x1000, 0x33F8, 0x7000, 0x33F8, 0x1000, 0x03F8, 0x0000, 0x7FF8, 0x0000, 0x0000, 0x0000 },
     /* INDENT_MORE */ { 0x0000, 0x0000, 0x7FF8, 0x0000, 0x03F8, 0x4000, 0x63F8, 0x7000, 0x63F8, 0x4000, 0x03F8, 0x0000, 0x7FF8, 0x0000, 0x0000, 0x0000 },
+    /* PAGE_BREAK */ { 0x0000, 0x3FF0, 0x2010, 0x2790, 0x2010, 0x2790, 0x3FF0, 0x0000, 0x5554, 0x0000, 0x3FF0, 0x2010, 0x2790, 0x2010, 0x2790, 0x3FF0 },
 };
 
 /* GENERATED: the 8-row icons for screens with tall pixels -- row pairs
@@ -60,6 +61,7 @@ static const u16 g_icon_bits8[WP_ICON_COUNT][8] = {
     /* DOUBLE */ { 0x7FF8, 0x0000, 0x0000, 0x7FF8, 0x0000, 0x0000, 0x7FF8, 0x0000 },
     /* INDENT_LESS */ { 0x7FF8, 0x03F8, 0x2000, 0x63F8, 0x2000, 0x03F8, 0x7FF8, 0x0000 },
     /* INDENT_MORE */ { 0x7FF8, 0x03F8, 0x4000, 0x63F8, 0x4000, 0x03F8, 0x7FF8, 0x0000 },
+    /* PAGE_BREAK */ { 0x3FF0, 0x2790, 0x3FF0, 0x5554, 0x3FF0, 0x2790, 0x3FF0, 0x0000 },
 };
 
 /* The buttons, left to right; a row with action WP_ACT_COUNT is a gap
@@ -94,7 +96,9 @@ static const rb_button g_buttons[] = {
     { WP_ACT_PARA_DOUBLE,       WP_ICON_DOUBLE,      '2' },
     { WP_ACT_COUNT,             0,                   0   },
     { WP_ACT_PARA_INDENT_LESS,  WP_ICON_INDENT_LESS, '<' },
-    { WP_ACT_PARA_INDENT_MORE,  WP_ICON_INDENT_MORE, '>' }
+    { WP_ACT_PARA_INDENT_MORE,  WP_ICON_INDENT_MORE, '>' },
+    { WP_ACT_COUNT,             0,                   0   },
+    { WP_ACT_PARA_PAGE_BREAK,   WP_ICON_PAGE_BREAK,  'P' }
 };
 #define RB_BUTTON_COUNT ((u32)(sizeof(g_buttons) / sizeof(g_buttons[0])))
 

@@ -60,11 +60,16 @@ nearly every paragraph; without it, a size or bold carried on.
 or the section forms `\pgwsxn`/`\pghsxn`/`\marglsxn`..., set the section's
 page.
 
-**Tables, page and section breaks** -- the model has no table, so a row
-comes in as one paragraph of tab-separated cells (`\cell` is a tab,
-`\row` ends the paragraph), which the ruler's tab stops can then line
-up. `\page` and `\sect` end the paragraph; the model has no page break
-yet.
+**Tables** -- the model has no table, so a row comes in as one
+paragraph of tab-separated cells (`\cell` is a tab, `\row` ends the
+paragraph), which the ruler's tab stops can then line up.
+
+**Page breaks** -- `wp_para_style.page_break_before`. `\pagebb` sets it
+(until `\pard`); `\page` and `\sect` end the paragraph (unless one just
+ended -- Word's `\par\page` adds no empty paragraph) and the next
+paragraph gets it, surviving the `\pard` Word puts after them. Export
+writes `\pagebb`. Sections are not separate yet: a section break is a
+page break.
 
 **Destinations recognized and captured**:
 - `\colortbl` -- up to 32 `\redN\greenN\blueN;` entries, referenced later

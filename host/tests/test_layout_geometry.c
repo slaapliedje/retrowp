@@ -235,3 +235,33 @@ void test_layout_geometry_styles_with_different_tabs_stay_apart(void)
 
     wp_document_free(&doc);
 }
+
+void test_layout_geometry_page_break_before_starts_a_page(void)
+{
+    wp_document doc;
+    wp_para_style ps;
+    wp_pstyle h;
+    wp_section *sec;
+    const wp_paragraph_layout *l1;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)"one\ntwo\n", 8, &doc) == WP_OK);
+    sec = wp_document_section_get(&doc, 0);
+    memset(&ps, 0, sizeof(ps));
+    ps.page_break_before = 1;
+    ASSERT_TRUE(wp_document_pstyle_find_or_add(&doc, &ps, &h) == WP_OK);
+    wp_paragraph_pstyle_set(&sec->paras[1], h);
+    ASSERT_TRUE(wp_paragraph_relayout(&doc, &sec->paras[0], 6000) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_relayout(&doc, &sec->paras[1], 6000) == WP_OK);
+
+    ASSERT_EQ_U32(wp_document_mark_pages(&doc), 2);
+    l1 = (const wp_paragraph_layout *)sec->paras[1].layout;
+    ASSERT_TRUE(l1->lines[0].page_start);
+    ASSERT_EQ_U32(l1->lines[0].page, 1);
+
+    /* A break before the document's first paragraph is no extra page. */
+    wp_paragraph_pstyle_set(&sec->paras[0], h);
+    ASSERT_TRUE(wp_paragraph_relayout(&doc, &sec->paras[0], 6000) == WP_OK);
+    ASSERT_EQ_U32(wp_document_mark_pages(&doc), 2);
+
+    wp_document_free(&doc);
+}

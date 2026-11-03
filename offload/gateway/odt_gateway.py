@@ -140,6 +140,7 @@ def odt_bytes_to_paragraphs(odt_bytes):
                     d['fi'] = twips_from_odf_len(pp.get(_q('fo', 'text-indent')))
                     d['sb'] = twips_from_odf_len(pp.get(_q('fo', 'margin-top')))
                     d['sa'] = twips_from_odf_len(pp.get(_q('fo', 'margin-bottom')))
+                    d['pagebb'] = (pp.get(_q('fo', 'break-before')) == 'page')
                 para_styles[name] = d
             elif family == 'text':
                 tp = st.find(_q('style', 'text-properties'))
@@ -272,6 +273,8 @@ def paragraphs_to_odt_bytes(paragraphs):
             pp_attrs.append('fo:margin-top="%s"' % odf_len_from_twips(p['sb']))
         if p.get('sa'):
             pp_attrs.append('fo:margin-bottom="%s"' % odf_len_from_twips(p['sa']))
+        if p.get('pagebb'):
+            pp_attrs.append('fo:break-before="page"')
         styles.append(
             '<style:style style:name="%s" style:family="paragraph" style:parent-style-name="Standard">'
             '<style:paragraph-properties %s/></style:style>' % (pstyle_name, ' '.join(pp_attrs)))
@@ -400,6 +403,8 @@ def paragraphs_to_rtf_bytes(paragraphs):
             parts.append('\\sb%d' % p['sb'])
         if p.get('sa'):
             parts.append('\\sa%d' % p['sa'])
+        if p.get('pagebb'):
+            parts.append('\\pagebb')
 
         for r in (p['runs'] or [_new_run()]):
             parts.append('{')
@@ -434,6 +439,7 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
     cur_para = _new_para()
     cur_run = _new_run()
     dest_stack = ['body']  # top = current (innermost) group's destination
+    break_next = False   # a \\page or \\sect: the next paragraph starts a page
     uc = 1          # \\ucN: fallback characters after each \\uN
     skip = 0        # fallback characters still to drop
     tab_kind = 'left'
@@ -517,7 +523,21 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
             cur_para['li'] = cur_para['ri'] = cur_para['fi'] = cur_para['sb'] = cur_para['sa'] = 0
             cur_para['sl'] = cur_para['slmult'] = 0
             cur_para['tabs'] = []
+            cur_para['pagebb'] = break_next   # a pending \\page survives Word's "\\page\\pard"
             tab_kind = 'left'
+        elif word == 'pagebb':
+            cur_para['pagebb'] = (n != 0)
+        elif word in ('page', 'sect'):
+            # Straight after a \\par there is nothing to end; otherwise
+            # this ends the paragraph. Either way the next one starts a page.
+            if cur_run['text'] or cur_para['runs']:
+                if cur_run['text']:
+                    cur_para['runs'].append(cur_run)
+                paragraphs.append(cur_para)
+                cur_para = _new_para()
+                cur_run = _new_run()
+            cur_para['pagebb'] = True
+            break_next = True
         elif word == 'tab':
             cur_run['text'] += '\t'
         elif word == 'sl':
@@ -577,6 +597,7 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
             paragraphs.append(cur_para)
             cur_para = _new_para()
             cur_run = _new_run()
+            break_next = False
         # anything else: ignored (forward compatible, matches the C importer)
 
     return paragraphs
@@ -1041,6 +1062,8 @@ def paragraphs_to_pdf_bytes(paragraphs, page=None):
         sa = para.get('sa', 0) / 20.0
         align = para.get('align', 'left')
 
+        if para.get('pagebb') and cur_ops:
+            new_page()   # the paragraph asks to start a page, and this one has text
         if pi > 0:
             ensure_room(sb)
             cur_y -= sb

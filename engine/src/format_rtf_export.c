@@ -383,6 +383,7 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
         if (ps->indent_first != 0)  { rtf_write_str(w, "\\fi"); rtf_write_i32(w, ps->indent_first); }
         if (ps->space_before != 0)  { rtf_write_str(w, "\\sb"); rtf_write_i32(w, ps->space_before); }
         if (ps->space_after != 0)   { rtf_write_str(w, "\\sa"); rtf_write_i32(w, ps->space_after); }
+        if (ps->page_break_before)  rtf_write_str(w, "\\pagebb");
         /* The model's line spacing back to RTF's (docmodel.h). */
         if (ps->line_spacing > 0) {
             rtf_write_str(w, "\\sl"); rtf_write_i32(w, ps->line_spacing); rtf_write_str(w, "\\slmult1");

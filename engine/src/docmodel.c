@@ -129,6 +129,7 @@ wp_status wp_document_pstyle_find_or_add(wp_document *doc, const wp_para_style *
             existing->line_spacing == style->line_spacing &&
             existing->style_name == style->style_name &&
             existing->tab_count == style->tab_count &&
+            existing->page_break_before == style->page_break_before &&
             (style->tab_count == 0 ||
              (memcmp(existing->tab_pos, style->tab_pos, (size_t)style->tab_count * sizeof(i32)) == 0 &&
               memcmp(existing->tab_kind, style->tab_kind, (size_t)style->tab_count) == 0))) {

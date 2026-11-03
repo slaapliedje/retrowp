@@ -109,7 +109,11 @@ Word's draft view -- relays out only what is dirty or was broken at a
 different width (`wp_paragraph_layout.wrap_twips`), then
 `wp_document_mark_pages` stamps each line with its page and whether it
 starts one, which the pixel shells draw as a dashed rule and every shell
-reports in the status line ("Page 2 of 5").
+reports in the status line ("Page 2 of 5"). A paragraph whose style has
+`page_break_before` starts a page unless it is already at the top of
+one -- in both `wp_document_mark_pages` and `wp_document_paginate`.
+Splitting such a paragraph leaves the break on the first half only, so
+Enter after a chapter heading does not start another page.
 
 **Words can span run boundaries.** Runs split for reasons unrelated to
 wrapping (e.g. `wp_document_insert_text_raw` always creates a new run

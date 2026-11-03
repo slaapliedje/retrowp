@@ -68,6 +68,10 @@ typedef enum {
     WP_ACT_PARA_DOUBLE,
     WP_ACT_PARA_INDENT_LESS,
     WP_ACT_PARA_INDENT_MORE,
+    /* Insert a page break at the caret: the paragraph is split there and
+       the part after it starts a new page (page_break_before). At the
+       start of a paragraph it toggles that paragraph's break instead. */
+    WP_ACT_PARA_PAGE_BREAK,
     WP_ACT_COUNT
 } wp_action_id;
 

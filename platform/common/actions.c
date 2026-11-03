@@ -369,6 +369,44 @@ static wp_status act_para_double(wp_app_ctx *ctx)  { return change_paragraphs(ct
 static wp_status act_para_indent_less(wp_app_ctx *ctx) { return change_paragraphs(ctx, shift_indent, -WP_DEFAULT_TAB_TWIPS); }
 static wp_status act_para_indent_more(wp_app_ctx *ctx) { return change_paragraphs(ctx, shift_indent, WP_DEFAULT_TAB_TWIPS); }
 
+static void toggle_page_break(wp_para_style *ps, i32 unused)
+{
+    (void)unused;
+    ps->page_break_before = (u8)!ps->page_break_before;
+}
+
+static wp_status act_para_page_break(wp_app_ctx *ctx)
+{
+    wp_pos *cur;
+    wp_pos after;
+    wp_section *sec;
+    wp_paragraph *para;
+    const wp_para_style *ps;
+    wp_para_style style;
+    wp_pstyle h;
+    wp_status st;
+
+    if (!ctx->doc_loaded) return WP_OK;
+    cur = wp_keymap_cursor(ctx);
+    if (cur->run == 0 && cur->offset == 0) return change_paragraphs(ctx, toggle_page_break, 0);
+
+    /* Mid-paragraph: split (one undo step), then the second half starts
+       the page. Undo merges the halves back, and the merged paragraph
+       keeps the first half's style, so the break goes with it. */
+    st = wp_edit_split_paragraph(ctx->doc, ctx->journal, *cur, &after);
+    if (st != WP_OK) return st;
+    *cur = after;
+    sec = wp_document_section_get(ctx->doc, after.section);
+    para = wp_section_paragraph_get(sec, after.paragraph);
+    ps = wp_document_pstyle_get(ctx->doc, para->style);
+    if (ps == NULL) return WP_OK;
+    style = *ps;
+    style.page_break_before = 1;
+    if (wp_document_pstyle_find_or_add(ctx->doc, &style, &h) != WP_OK) return WP_NOMEM;
+    wp_paragraph_pstyle_set(para, h);
+    return WP_OK;
+}
+
 static void toggle_tab(wp_para_style *ps, i32 x)
 {
     u8 i, j;
@@ -865,7 +903,8 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_PARA_ONEHALF,      WP_MENU_NONE,   "1.5 Spacing",    0,        0,    act_para_onehalf, NULL },
     { WP_ACT_PARA_DOUBLE,       WP_MENU_NONE,   "Double Spacing", 0,        0,    act_para_double, NULL },
     { WP_ACT_PARA_INDENT_LESS,  WP_MENU_NONE,   "Indent Less",    0,        0,    act_para_indent_less, NULL },
-    { WP_ACT_PARA_INDENT_MORE,  WP_MENU_NONE,   "Indent More",    0,        0,    act_para_indent_more, NULL }
+    { WP_ACT_PARA_INDENT_MORE,  WP_MENU_NONE,   "Indent More",    0,        0,    act_para_indent_more, NULL },
+    { WP_ACT_PARA_PAGE_BREAK,   WP_MENU_NONE,   "Page Break",     0,        0,    act_para_page_break, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

@@ -1180,3 +1180,45 @@ void test_rulerbar_signature_follows_what_the_bar_shows(void)
 
     ctx_teardown(&doc, &journal, &ctx);
 }
+
+void test_actions_page_break_splits_and_undo_merges(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Chapter one ends. Chapter two\n");
+    wp_keymap_cursor(&ctx)->paragraph = 0;
+    wp_keymap_cursor(&ctx)->run = 0;
+    wp_keymap_cursor(&ctx)->offset = 18;   /* before "Chapter two" */
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_PARA_PAGE_BREAK)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 2);
+    ASSERT_TRUE(!caret_pstyle(&ctx, 0)->page_break_before);
+    ASSERT_TRUE(caret_pstyle(&ctx, 1)->page_break_before);
+    ASSERT_EQ_U32(wp_keymap_cursor(&ctx)->paragraph, 1);
+
+    /* Enter at the end of the breaking paragraph: the new one does not break. */
+    ASSERT_TRUE(wp_edit_split_paragraph(&doc, &journal, *wp_keymap_cursor(&ctx), NULL) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 3);
+    ASSERT_TRUE(caret_pstyle(&ctx, 1)->page_break_before);
+    ASSERT_TRUE(!caret_pstyle(&ctx, 2)->page_break_before);
+
+    /* At a paragraph's start the button toggles that paragraph's break. */
+    wp_keymap_cursor(&ctx)->paragraph = 1;
+    wp_keymap_cursor(&ctx)->run = 0;
+    wp_keymap_cursor(&ctx)->offset = 0;
+    ASSERT_TRUE(wp_action_find(WP_ACT_PARA_PAGE_BREAK)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 3);
+    ASSERT_TRUE(!caret_pstyle(&ctx, 1)->page_break_before);
+
+    /* Undo the splits: one paragraph again, the text whole. */
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 1);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Chapter one ends. Chapter two\n");
+
+    ctx_teardown(&doc, &journal, &ctx);
+}

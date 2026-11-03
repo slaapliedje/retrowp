@@ -196,3 +196,37 @@ void test_rtf_modern_export_round_trips_the_new_properties(void)
     wp_document_free(&back);
     wp_document_free(&doc);
 }
+
+void test_rtf_modern_page_breaks_both_ways(void)
+{
+    wp_document doc, back;
+    u8 out[1024];
+    u32 len = 0;
+    char t[32];
+
+    /* Word's "\par\page\pard": no empty paragraph, and the break survives
+       the \pard; \pagebb is the same thing said as a property. */
+    ASSERT_TRUE(import("{\\rtf1\\ansi one\\par\\page\\pard two\\par\\pard\\pagebb three\\par four\\par}", &doc) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 4);
+    para_all(&doc, 1, t, sizeof(t));
+    ASSERT_EQ_STR(t, "two");
+    ASSERT_TRUE(!pstyle_of(&doc, 0)->page_break_before);
+    ASSERT_TRUE(pstyle_of(&doc, 1)->page_break_before);
+    ASSERT_TRUE(pstyle_of(&doc, 2)->page_break_before);
+    ASSERT_TRUE(pstyle_of(&doc, 3)->page_break_before);   /* \pagebb carries until \pard, as in RTF */
+
+    ASSERT_TRUE(format_rtf_export(&doc, out, sizeof(out) - 1, &len) == WP_OK);
+    out[len] = 0;
+    ASSERT_TRUE(strstr((const char *)out, "\\pagebb") != NULL);
+    ASSERT_TRUE(format_rtf_import(out, len, &back) == WP_OK);
+    ASSERT_TRUE(pstyle_of(&back, 1)->page_break_before);
+    ASSERT_TRUE(!pstyle_of(&back, 0)->page_break_before);
+    wp_document_free(&back);
+    wp_document_free(&doc);
+
+    /* A break mid-paragraph ends it there. */
+    ASSERT_TRUE(import("{\\rtf1\\ansi one\\page two\\par}", &doc) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 2);
+    ASSERT_TRUE(pstyle_of(&doc, 1)->page_break_before);
+    wp_document_free(&doc);
+}

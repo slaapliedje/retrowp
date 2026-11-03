@@ -319,6 +319,7 @@ void test_actions_paragraph_buttons_change_the_caret_paragraph(void);
 void test_actions_toggle_tab_adds_snaps_and_removes(void);
 void test_rulerbar_hit_test_finds_buttons_gaps_and_the_ruler(void);
 void test_rulerbar_signature_follows_what_the_bar_shows(void);
+void test_actions_page_break_splits_and_undo_merges(void);
 void test_actions_document_name_is_the_last_path_component(void);
 void test_selspan_marks_the_lines_a_selection_crosses(void);
 void test_selspan_within_one_line(void);
@@ -415,6 +416,7 @@ void test_layout_geometry_a_tab_can_start_a_line(void);
 void test_layout_geometry_right_and_centre_stops(void);
 void test_layout_geometry_fragments_caret_and_clicks_agree_on_tabs(void);
 void test_layout_geometry_styles_with_different_tabs_stay_apart(void);
+void test_layout_geometry_page_break_before_starts_a_page(void);
 void test_layout_single_word_wider_than_column_overflows(void);
 void test_layout_empty_paragraph_gets_one_zero_width_line(void);
 void test_layout_word_spanning_run_boundary_is_one_token(void);
@@ -527,6 +529,7 @@ void test_rtf_modern_table_rows_become_tabbed_paragraphs(void);
 void test_rtf_modern_line_spacing_tabs_and_page_setup(void);
 void test_rtf_modern_alike_paragraphs_share_one_style(void);
 void test_rtf_modern_export_round_trips_the_new_properties(void);
+void test_rtf_modern_page_breaks_both_ways(void);
 void test_format_rtf_import_simple_paragraph(void);
 void test_format_rtf_import_no_trailing_empty_paragraph(void);
 void test_format_rtf_import_blank_line_is_empty_paragraph(void);
@@ -596,6 +599,7 @@ void test_convert_odt_import_via_gateway(void);
 void test_convert_odt_export_roundtrip_via_gateway(void);
 void test_convert_pdf_export_via_gateway(void);
 void test_convert_pdf_export_uses_the_document_page(void);
+void test_convert_pdf_export_honours_page_breaks(void);
 void test_convert_unsupported_format_id_reports_unsupported(void);
 void test_convert_malformed_payload_is_error(void);
 
@@ -923,6 +927,7 @@ static const test_case g_cases[] = {
     { "actions_toggle_tab_adds_snaps_and_removes", test_actions_toggle_tab_adds_snaps_and_removes },
     { "rulerbar_hit_test_finds_buttons_gaps_and_the_ruler", test_rulerbar_hit_test_finds_buttons_gaps_and_the_ruler },
     { "rulerbar_signature_follows_what_the_bar_shows", test_rulerbar_signature_follows_what_the_bar_shows },
+    { "actions_page_break_splits_and_undo_merges", test_actions_page_break_splits_and_undo_merges },
     { "actions_document_name_is_the_last_path_component", test_actions_document_name_is_the_last_path_component },
     { "selspan_marks_the_lines_a_selection_crosses", test_selspan_marks_the_lines_a_selection_crosses },
     { "selspan_within_one_line", test_selspan_within_one_line },
@@ -998,6 +1003,7 @@ static const test_case g_cases[] = {
     { "layout_geometry_right_and_centre_stops", test_layout_geometry_right_and_centre_stops },
     { "layout_geometry_fragments_caret_and_clicks_agree_on_tabs", test_layout_geometry_fragments_caret_and_clicks_agree_on_tabs },
     { "layout_geometry_styles_with_different_tabs_stay_apart", test_layout_geometry_styles_with_different_tabs_stay_apart },
+    { "layout_geometry_page_break_before_starts_a_page", test_layout_geometry_page_break_before_starts_a_page },
     { "layout_single_word_wider_than_column_overflows", test_layout_single_word_wider_than_column_overflows },
     { "layout_empty_paragraph_gets_one_zero_width_line", test_layout_empty_paragraph_gets_one_zero_width_line },
     { "layout_word_spanning_run_boundary_is_one_token", test_layout_word_spanning_run_boundary_is_one_token },
@@ -1099,6 +1105,7 @@ static const test_case g_cases[] = {
     { "rtf_modern_line_spacing_tabs_and_page_setup", test_rtf_modern_line_spacing_tabs_and_page_setup },
     { "rtf_modern_alike_paragraphs_share_one_style", test_rtf_modern_alike_paragraphs_share_one_style },
     { "rtf_modern_export_round_trips_the_new_properties", test_rtf_modern_export_round_trips_the_new_properties },
+    { "rtf_modern_page_breaks_both_ways", test_rtf_modern_page_breaks_both_ways },
     { "format_rtf_import_simple_paragraph", test_format_rtf_import_simple_paragraph },
     { "format_rtf_import_no_trailing_empty_paragraph", test_format_rtf_import_no_trailing_empty_paragraph },
     { "format_rtf_import_blank_line_is_empty_paragraph", test_format_rtf_import_blank_line_is_empty_paragraph },
@@ -1162,6 +1169,7 @@ static const test_case g_cases[] = {
     { "convert_odt_export_roundtrip_via_gateway", test_convert_odt_export_roundtrip_via_gateway },
     { "convert_pdf_export_via_gateway", test_convert_pdf_export_via_gateway },
     { "convert_pdf_export_uses_the_document_page", test_convert_pdf_export_uses_the_document_page },
+    { "convert_pdf_export_honours_page_breaks", test_convert_pdf_export_honours_page_breaks },
     { "convert_unsupported_format_id_reports_unsupported", test_convert_unsupported_format_id_reports_unsupported },
     { "convert_malformed_payload_is_error", test_convert_malformed_payload_is_error },
 

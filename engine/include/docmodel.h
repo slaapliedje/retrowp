@@ -57,7 +57,8 @@ typedef enum {
 typedef struct {
     u8  align;          /* wp_align */
     u8  tab_count;      /* explicit stops in tab_pos/tab_kind, sorted by position */
-    u8  _pad[2];
+    u8  page_break_before;  /* start this paragraph on a new page (RTF \pagebb) */
+    u8  _pad;
     i32 indent_left;
     i32 indent_right;
     i32 indent_first;   /* first-line indent; may be negative */

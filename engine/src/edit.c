@@ -270,6 +270,18 @@ wp_status wp_document_split_paragraph_raw(wp_document *doc, wp_pos pos, wp_pos *
     para = &sec->paras[pos.paragraph];
     new_para = &sec->paras[new_idx];
     new_para->style = para->style;
+    {
+        /* A page break belongs before the paragraph's first line, so the
+           half that moves down does not inherit it -- or every Enter at
+           the end of a chapter heading would start another page. */
+        const wp_para_style *ps = wp_document_pstyle_get(doc, para->style);
+        if (ps != NULL && ps->page_break_before) {
+            wp_para_style plain = *ps;
+            wp_pstyle h;
+            plain.page_break_before = 0;
+            if (wp_document_pstyle_find_or_add(doc, &plain, &h) == WP_OK) new_para->style = h;
+        }
+    }
 
     moved_count = (u16)(para->run_count - split_run);
     for (i = 0; i < moved_count; i++) {

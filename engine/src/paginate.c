@@ -4,6 +4,14 @@
 #include "platform.h"
 #include "growth_internal.h"
 
+/* A paragraph whose style asks to start a new page (and is not already
+   at the top of one -- the callers check that). */
+static wp_bool para_breaks_page(const wp_document *doc, const wp_paragraph *para)
+{
+    const wp_para_style *ps = wp_document_pstyle_get(doc, para->style);
+    return (wp_bool)(ps != NULL && ps->page_break_before);
+}
+
 static wp_status pagination_add_page(wp_pagination *pagination)
 {
     wp_page *page;
@@ -92,8 +100,10 @@ wp_status wp_document_paginate(wp_document *doc, wp_pagination *out)
 
             for (l_idx = 0; l_idx < layout->line_count; l_idx++) {
                 wp_line *line = &layout->lines[l_idx];
-                wp_bool overflow = (wp_bool)(current_page_used_height + line->height_twips >
-                                              content_height && current_page_used_height > 0);
+                wp_bool overflow = (wp_bool)((current_page_used_height + line->height_twips >
+                                               content_height ||
+                                               (l_idx == 0 && para_breaks_page(doc, para))) &&
+                                              current_page_used_height > 0);
 
                 if (!have_current_page || overflow) {
                     st = pagination_add_page(out);
@@ -161,7 +171,9 @@ u32 wp_document_mark_pages(wp_document *doc)
                 if (!have_page) {
                     have_page = WP_TRUE;
                     starts = WP_TRUE;
-                } else if (used + line->height_twips > content_height && used > 0) {
+                } else if (used > 0 &&
+                           (used + line->height_twips > content_height ||
+                            (l_idx == 0 && para_breaks_page(doc, &sec->paras[p_idx])))) {
                     page++;
                     used = 0;
                     starts = WP_TRUE;

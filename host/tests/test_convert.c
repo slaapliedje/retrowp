@@ -417,3 +417,32 @@ void test_convert_pdf_export_uses_the_document_page(void)
     offload_shutdown();
     gateway_stop(&gw);
 }
+
+/* A page break before a paragraph starts a new PDF page. */
+void test_convert_pdf_export_honours_page_breaks(void)
+{
+    gateway_handle gw;
+    static const char rtf[] = "{\\rtf1\\ansi one\\par\\pard\\pagebb two\\par}";
+    u8 req_payload[128];
+    offload_request req;
+    offload_response resp;
+    u32 i, pages = 0;
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    req_payload[0] = FORMAT_PDF;
+    memcpy(req_payload + 1, rtf, sizeof(rtf) - 1);
+    req.op = OFFLOAD_CONVERT_EXPORT;
+    req.payload = req_payload;
+    req.payload_len = (u32)sizeof(rtf);
+    req.timeout_ms = 10000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+    for (i = 0; i + 12 <= resp.result_len; i++) {
+        if (memcmp(resp.result + i, "/Type /Page ", 12) == 0) pages++;
+    }
+    ASSERT_EQ_U32(pages, 2);
+    offload_response_free(&resp);
+    offload_shutdown();
+    gateway_stop(&gw);
+}
