@@ -39,6 +39,10 @@ same thing).
   `\tx` stop (right, centre and decimal stops placed once the line's
   text is known), or the next half inch; the text after a tab starts a
   text object of its own at the stop.
+- **Headers and footers**: the RTF's first `\header` and `\footer`
+  (`rtf_margin_texts`) are drawn halfway into the top and bottom margin
+  of every page, 10 pt, parts left/centre/right as the engine keeps
+  them, `#` replaced by the page number.
 - **Compressed**: page content streams and embedded font files are
   `/FlateDecode`, which is what keeps a real document inside one 64 KB
   link frame.

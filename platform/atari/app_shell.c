@@ -4446,6 +4446,13 @@ static wp_bool action_exempt_from_menu(wp_action_id id)
     case WP_ACT_FORMAT_SIZE:
     case WP_ACT_FORMAT_ALIGN:
         return WP_TRUE;
+    /* Header... and Footer...: on the ruler bar (rulerbar.c), the way
+       this backend reaches paragraph formatting, rather than one more
+       edit to the hand-built OBJECT tree. Amiga and Mac fold them into
+       their Format menus from the registry. */
+    case WP_ACT_PAGE_HEADER:
+    case WP_ACT_PAGE_FOOTER:
+        return WP_TRUE;
     /* Ctrl+G only, by design -- see actions.c's own comment on why this
        one stays off the hand-built OBJECT tree. */
     case WP_ACT_TOOLS_INSERTIMAGE:

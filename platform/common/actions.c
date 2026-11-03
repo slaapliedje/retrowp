@@ -407,6 +407,46 @@ static wp_status act_para_page_break(wp_app_ctx *ctx)
     return WP_OK;
 }
 
+/* Header and footer: the prompt's answer goes to every section (the
+   model allows one per section; nothing yet makes them differ). */
+static void set_margin_text(wp_app_ctx *ctx, const u8 *text, u32 len, wp_bool header)
+{
+    wp_span span;
+    u32 si;
+
+    span.offset = 0;
+    span.length = 0;
+    if (len > 0 && wp_strpool_append(&ctx->doc->strings, text, len, &span) != WP_OK) {
+        wp_action_tell(ctx, "Not enough memory for that");
+        return;
+    }
+    for (si = 0; si < ctx->doc->section_count; si++) {
+        wp_section *sec = wp_document_section_get(ctx->doc, si);
+        if (header) sec->header = span; else sec->footer = span;
+    }
+    wp_document_mark_modified(ctx->doc);
+}
+
+static void header_done(wp_app_ctx *ctx, const u8 *text, u32 len) { set_margin_text(ctx, text, len, WP_TRUE); }
+static void footer_done(wp_app_ctx *ctx, const u8 *text, u32 len) { set_margin_text(ctx, text, len, WP_FALSE); }
+
+static wp_status open_margin_prompt(wp_app_ctx *ctx, wp_bool header)
+{
+    const wp_section *sec;
+    wp_span cur;
+
+    if (!ctx->doc_loaded || ctx->doc->section_count == 0) return WP_OK;
+    sec = &ctx->doc->sections[0];
+    cur = header ? sec->header : sec->footer;
+    wp_prompt_begin(ctx, header ? "Header (left|centre|right, # = page):" : "Footer (left|centre|right, # = page):",
+                    (cur.length > 0) ? wp_strpool_get(&ctx->doc->strings, cur) : NULL, cur.length,
+                    header ? header_done : footer_done);
+    return WP_OK;
+}
+
+static wp_status act_page_header(wp_app_ctx *ctx) { return open_margin_prompt(ctx, WP_TRUE); }
+static wp_status act_page_footer(wp_app_ctx *ctx) { return open_margin_prompt(ctx, WP_FALSE); }
+
 static void toggle_tab(wp_para_style *ps, i32 x)
 {
     u8 i, j;
@@ -904,7 +944,9 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_PARA_DOUBLE,       WP_MENU_NONE,   "Double Spacing", 0,        0,    act_para_double, NULL },
     { WP_ACT_PARA_INDENT_LESS,  WP_MENU_NONE,   "Indent Less",    0,        0,    act_para_indent_less, NULL },
     { WP_ACT_PARA_INDENT_MORE,  WP_MENU_NONE,   "Indent More",    0,        0,    act_para_indent_more, NULL },
-    { WP_ACT_PARA_PAGE_BREAK,   WP_MENU_NONE,   "Page Break",     0,        0,    act_para_page_break, NULL }
+    { WP_ACT_PARA_PAGE_BREAK,   WP_MENU_NONE,   "Page Break",     0,        0,    act_para_page_break, NULL },
+    { WP_ACT_PAGE_HEADER,       WP_MENU_FORMAT, "Header...",      0,        0,    act_page_header, NULL },
+    { WP_ACT_PAGE_FOOTER,       WP_MENU_FORMAT, "Footer...",      0,        0,    act_page_footer, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

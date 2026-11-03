@@ -1222,3 +1222,57 @@ void test_actions_page_break_splits_and_undo_merges(void)
 
     ctx_teardown(&doc, &journal, &ctx);
 }
+
+static wp_key_event key_char(u32 cp)
+{
+    wp_key_event ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.codepoint = cp;
+    return ev;
+}
+
+static wp_key_event key_special(wp_special_key k)
+{
+    wp_key_event ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.special = (u16)k;
+    return ev;
+}
+
+void test_actions_header_prompt_types_edits_and_sets(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char status[96];
+    wp_vi_status_view view;
+    const char *typed = "Title|#x";
+    u32 i;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Body\n");
+    ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_HEADER)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(ctx.prompt.active);
+
+    /* Every key goes to the prompt, none to the document. */
+    for (i = 0; typed[i] != '\0'; i++) (void)wp_keymap_feed_key(&ctx, key_char((u8)typed[i]), 0);
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_BACKSPACE), 0);
+    wp_keymap_get_status_view(&ctx, status, sizeof(status), &view);
+    ASSERT_TRUE(view.mode_label_len > 0);
+    ASSERT_TRUE(strstr(status, "Title|#_") != NULL);
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
+    ASSERT_TRUE(!ctx.prompt.active);
+    ASSERT_EQ_U32(doc.sections[0].header.length, 7);
+    ASSERT_TRUE(memcmp(wp_strpool_get(&doc.strings, doc.sections[0].header), "Title|#", 7) == 0);
+    ASSERT_TRUE(wp_document_is_modified(&doc));
+
+    /* Escape leaves it as it was; the prompt starts from the current text. */
+    ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_HEADER)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(ctx.prompt.len, 7);
+    (void)wp_keymap_feed_key(&ctx, key_char('Z'), 0);
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ESCAPE), 0);
+    ASSERT_EQ_U32(doc.sections[0].header.length, 7);
+
+    ctx_teardown(&doc, &journal, &ctx);
+}

@@ -64,6 +64,16 @@ page.
 paragraph of tab-separated cells (`\cell` is a tab, `\row` ends the
 paragraph), which the ruler's tab stops can then line up.
 
+**Headers and footers** -- the first `\header` (or `\headerr`) and
+`\footer` (or `\footerr`) group become the section's running lines
+(`wp_section.header`/`footer`): a tab is a part break `|`, `\chpgn` or a
+`PAGE` field (`{\field{\*\fldinst PAGE}{\fldrslt 1}}`) the page number
+`#`, a paragraph end a space. A literal `|` or `#` in a header reads as
+`/` or `N`, so it cannot become a part break or a number. Left-page and
+first-page variants (`\headerl`, `\headerf`...) are skipped. Export
+writes `{\header\pard\plain ...\par}` with the parts on a centre and a
+right tab stop and `\chpgn` for `#`.
+
 **Page breaks** -- `wp_para_style.page_break_before`. `\pagebb` sets it
 (until `\pard`); `\page` and `\sect` end the paragraph (unless one just
 ended -- Word's `\par\page` adds no empty paragraph) and the next

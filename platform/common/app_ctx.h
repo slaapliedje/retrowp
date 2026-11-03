@@ -7,6 +7,7 @@
 #include "editing.h"
 #include "keymap.h"
 #include "viewport.h"
+#include "prompt.h"
 #include "platform.h"
 
 /* Room for a native path in wp_app_ctx. Longer than any target needs
@@ -71,6 +72,8 @@ typedef struct wp_app_ctx {
        needs the link on demand: the file flow's ODT/PDF conversion.
        NULL means the link is whatever offload_available() says. */
     wp_bool (*ensure_offload)(void);
+
+    wp_prompt prompt;   /* the status line's one-line text prompt (prompt.h) */
 
     wp_bool doc_loaded;
     wp_bool quit_requested; /* WP_ACT_FILE_QUIT sets this; the backend's own event

@@ -41,6 +41,8 @@ wp_status wp_document_section_add(wp_document *doc, u32 *out_index)
     sec->margin_right = 1440;
     sec->margin_top = 1440;
     sec->margin_bottom = 1440;
+    sec->header.offset = 0; sec->header.length = 0;
+    sec->footer.offset = 0; sec->footer.length = 0;
 
     *out_index = doc->section_count;
     doc->section_count++;

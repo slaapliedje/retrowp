@@ -62,6 +62,7 @@ set(RETROWP_COMMON_SRC
     ${RETROWP_ROOT}/platform/common/viewport.c
     ${RETROWP_ROOT}/platform/common/pageview.c
     ${RETROWP_ROOT}/platform/common/rulerbar.c
+    ${RETROWP_ROOT}/platform/common/prompt.c
     ${RETROWP_ROOT}/platform/common/selspan.c
     ${RETROWP_ROOT}/platform/common/tools.c
     ${RETROWP_ROOT}/platform/common/config.c

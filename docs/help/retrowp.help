@@ -157,6 +157,16 @@ the mouse. Its buttons, left to right:
   Page Break (the text after the caret starts a new page; at
               the start of a paragraph it turns that paragraph's
               break on or off)
+  Header, Footer (a line printed at the top or bottom of every
+              page; the Format menu has them too on the Amiga
+              and Mac)
+
+Header and Footer ask in the status line. Type the line and
+press Enter (Esc leaves it as it was). A | splits it into parts:
+one part is centred, two go left and right, three left, centre
+and right. A # is the page number. For example:
+
+  My Report|Page #
 
 A button shown inverted is the one in force at the caret. The
 ruler under the buttons measures the page's text column in

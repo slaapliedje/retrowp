@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <stddef.h>
+#include <string.h>
 #include "app_ctx.h"
 
 void wp_app_ctx_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
@@ -20,6 +21,7 @@ void wp_app_ctx_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
     wp_viewport_init(&ctx->view, NULL);
     ctx->doc_path[0] = '\0';
     ctx->ensure_offload = NULL;
+    memset(&ctx->prompt, 0, sizeof(ctx->prompt));
 
     ctx->doc_loaded = WP_FALSE;
     ctx->quit_requested = WP_FALSE;

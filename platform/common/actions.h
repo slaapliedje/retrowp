@@ -72,6 +72,11 @@ typedef enum {
        the part after it starts a new page (page_break_before). At the
        start of a paragraph it toggles that paragraph's break instead. */
     WP_ACT_PARA_PAGE_BREAK,
+    /* The running header and footer (docmodel.h, wp_section): a prompt
+       in the status line, pre-filled with the current text. '|' splits
+       left|centre|right, '#' is the page number. */
+    WP_ACT_PAGE_HEADER,
+    WP_ACT_PAGE_FOOTER,
     WP_ACT_COUNT
 } wp_action_id;
 

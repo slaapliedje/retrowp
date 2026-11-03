@@ -230,3 +230,48 @@ void test_rtf_modern_page_breaks_both_ways(void)
     ASSERT_TRUE(pstyle_of(&doc, 1)->page_break_before);
     wp_document_free(&doc);
 }
+
+static void span_text(wp_document *doc, wp_span sp, char *out, u32 cap)
+{
+    u32 n = (sp.length < cap - 1) ? sp.length : cap - 1;
+    if (n > 0) memcpy(out, wp_strpool_get(&doc->strings, sp), n);
+    out[n] = '\0';
+}
+
+void test_rtf_modern_headers_and_footers_both_ways(void)
+{
+    wp_document doc, back;
+    u8 out[2048];
+    u32 len = 0;
+    char t[64];
+
+    /* Word's shape: parts on tab stops, the page number as a PAGE field;
+       the left-page header is not the one taken; body untouched. */
+    ASSERT_TRUE(import("{\\rtf1\\ansi"
+                       "{\\headerl Left pages}"
+                       "{\\header \\pard\\plain\\tqc\\tx4680\\tqr\\tx9360 Report\\tab\\tab Page "
+                       "{\\field{\\*\\fldinst { PAGE }}{\\fldrslt {1}}}\\par}"
+                       "{\\footer \\pard\\qc - \\chpgn  -\\par}"
+                       "\\pard Body\\par}", &doc) == WP_OK);
+    span_text(&doc, doc.sections[0].header, t, sizeof(t));
+    ASSERT_EQ_STR(t, "Report||Page #");
+    span_text(&doc, doc.sections[0].footer, t, sizeof(t));
+    ASSERT_EQ_STR(t, "- # -");
+    ASSERT_EQ_U32(doc.sections[0].para_count, 1);
+    para_all(&doc, 0, t, sizeof(t));
+    ASSERT_EQ_STR(t, "Body");
+
+    /* And back: \header with \chpgn and tabs reads as the same text. */
+    ASSERT_TRUE(format_rtf_export(&doc, out, sizeof(out) - 1, &len) == WP_OK);
+    out[len] = 0;
+    ASSERT_TRUE(strstr((const char *)out, "{\\header") != NULL);
+    ASSERT_TRUE(strstr((const char *)out, "\\chpgn") != NULL);
+    ASSERT_TRUE(format_rtf_import(out, len, &back) == WP_OK);
+    span_text(&back, back.sections[0].header, t, sizeof(t));
+    ASSERT_EQ_STR(t, "Report||Page #");
+    span_text(&back, back.sections[0].footer, t, sizeof(t));
+    ASSERT_EQ_STR(t, "- # -");
+    ASSERT_EQ_U32(back.sections[0].para_count, 1);
+    wp_document_free(&back);
+    wp_document_free(&doc);
+}

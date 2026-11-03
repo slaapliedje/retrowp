@@ -146,6 +146,13 @@ typedef struct {
     i32 margin_right;
     i32 margin_top;
     i32 margin_bottom;
+    /* The running header and footer: one line of plain text each (a
+       span in the string pool; length 0 for none). A '|' splits it into
+       parts -- one part is centred, two go left and right, three left,
+       centre and right -- and '#' is the page number. Printed in the
+       top and bottom margins (PDF; RTF's \header/\footer). */
+    wp_span header;
+    wp_span footer;
     wp_paragraph *paras;
     u32           para_count;
     u32           para_capacity;

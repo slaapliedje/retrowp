@@ -17,7 +17,10 @@ typedef enum {
     RTF_DEST_NORMAL = 0,
     RTF_DEST_SKIP,       /* ignorable destination: fonttbl, info, etc. */
     RTF_DEST_COLORTBL,
-    RTF_DEST_PICT        /* \pict -- hex picture data, not document text */
+    RTF_DEST_PICT,       /* \pict -- hex picture data, not document text */
+    RTF_DEST_HEADER,     /* \header/\headerr: captured as the section's header */
+    RTF_DEST_FOOTER,     /* \footer/\footerr: its footer */
+    RTF_DEST_FLDINST     /* a field's instruction inside one of those: is it PAGE? */
 } rtf_dest;
 
 typedef struct {
@@ -75,6 +78,10 @@ typedef struct {
     u16 codepage;      /* \ansicpgN / \mac / \pc / \pca; \'hh decodes through it */
     u32 skip;          /* fallback characters still to skip after a \uN */
     u8  break_next;    /* a \page or \sect was seen: the next paragraph starts a page */
+    u8  star_pending;  /* \* just seen: the next control word may be one we read anyway */
+    u8  fld_is_page;   /* the last field instruction was PAGE */
+    rtf_buf margin_buf;   /* the header or footer being read */
+    rtf_buf fld_buf;      /* the field instruction being read */
     u8  break_this;    /* ...and this is that paragraph */
 
     /* Tab stops of the paragraph being read. Kept here, not in the group
@@ -254,6 +261,20 @@ static void rtf_emit_bytes(rtf_parser *p, const u8 *bytes, u32 n)
     if (st->dest == RTF_DEST_SKIP) return;
 
     if (st->dest == RTF_DEST_NORMAL && st->hidden) return;   /* \v */
+
+    if (st->dest == RTF_DEST_HEADER || st->dest == RTF_DEST_FOOTER || st->dest == RTF_DEST_FLDINST) {
+        rtf_buf *b = (st->dest == RTF_DEST_FLDINST) ? &p->fld_buf : &p->margin_buf;
+        if (st->hidden) return;
+        for (i = 0; i < n; i++) {
+            /* A literal '|' or '#' would read back as a part break or a
+               page number: keep it as text that cannot (a broken bar,
+               a number sign's fullwidth twin would be worse). */
+            u8 c = bytes[i];
+            if (b == &p->margin_buf && (c == '|' || c == '#')) c = (c == '|') ? '/' : 'N';
+            if (rtf_buf_append_byte(b, c) != WP_OK) { p->error = WP_NOMEM; return; }
+        }
+        return;
+    }
 
     if (st->dest == RTF_DEST_COLORTBL) {
         if (n == 1 && bytes[0] == ';') rtf_colortbl_commit(p);
@@ -467,6 +488,32 @@ static void rtf_pop(rtf_parser *p)
         (p->depth == 0 || p->stack[p->depth - 1].dest != RTF_DEST_PICT)) {
         rtf_finish_pict(p);
     }
+    /* Leaving a field instruction: was it the page number? */
+    if (p->stack[p->depth].dest == RTF_DEST_FLDINST && p->depth > 0 &&
+        p->stack[p->depth - 1].dest != RTF_DEST_FLDINST) {
+        u32 k;
+        p->fld_is_page = 0;
+        for (k = 0; k + 4 <= p->fld_buf.length; k++) {
+            if (memcmp(p->fld_buf.bytes + k, "PAGE", 4) == 0 &&
+                (k + 4 == p->fld_buf.length || p->fld_buf.bytes[k + 4] == ' ' ||
+                 p->fld_buf.bytes[k + 4] == '\\')) { p->fld_is_page = 1; break; }
+        }
+    }
+    /* Leaving the header or footer group: it becomes the section's,
+       unless one was already captured (the first of several wins). */
+    if ((p->stack[p->depth].dest == RTF_DEST_HEADER || p->stack[p->depth].dest == RTF_DEST_FOOTER) &&
+        p->depth > 0 && p->stack[p->depth - 1].dest != p->stack[p->depth].dest) {
+        wp_section *sec = wp_document_section_get(p->doc, p->section_idx);
+        wp_span *slot = (p->stack[p->depth].dest == RTF_DEST_HEADER) ? &sec->header : &sec->footer;
+        u32 len = p->margin_buf.length;
+
+        while (len > 0 && p->margin_buf.bytes[len - 1] == ' ') len--;
+        if (slot->length == 0 && len > 0 &&
+            wp_strpool_append(&p->doc->strings, p->margin_buf.bytes, len, slot) != WP_OK) {
+            p->error = WP_NOMEM;
+        }
+        p->margin_buf.length = 0;
+    }
     p->depth--;
     p->skip = 0;   /* nor does it outlive the group the \uN was in */
 }
@@ -501,7 +548,61 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         return;
     }
 
+    if (p->star_pending) {
+        p->star_pending = 0;
+        if (strcmp(name, "fldinst") == 0) {
+            st->dest = RTF_DEST_FLDINST;
+            p->fld_buf.length = 0;
+            return;
+        }
+    }
+
     if (st->dest == RTF_DEST_SKIP) return;
+
+    /* Inside a captured header or footer only a few words mean anything:
+       a tab is a part break ('|'), \chpgn or a PAGE field the page
+       number ('#'), \par a space; paragraph and character formatting
+       there must not reach the body's state, so the rest is ignored. */
+    if (st->dest == RTF_DEST_HEADER || st->dest == RTF_DEST_FOOTER) {
+        if (strcmp(name, "tab") == 0) { (void)rtf_buf_append_byte(&p->margin_buf, '|'); return; }
+        if (strcmp(name, "chpgn") == 0) { (void)rtf_buf_append_byte(&p->margin_buf, '#'); return; }
+        if (strcmp(name, "par") == 0 || strcmp(name, "line") == 0) {
+            if (p->margin_buf.length > 0) (void)rtf_buf_append_byte(&p->margin_buf, ' ');
+            return;
+        }
+        if (strcmp(name, "fldrslt") == 0) {
+            /* The field's last shown result: the page number itself when
+               the instruction was PAGE, which '#' stands for. */
+            if (p->fld_is_page) {
+                (void)rtf_buf_append_byte(&p->margin_buf, '#');
+                st->dest = RTF_DEST_SKIP;
+                p->fld_is_page = 0;
+            }
+            return;
+        }
+        if (strcmp(name, "u") == 0 && has_param) {
+            u8 enc[4];
+            u32 k, en = utf8_encode((u32)((param < 0) ? param + 65536 : param), enc);
+            for (k = 0; k < en; k++) (void)rtf_buf_append_byte(&p->margin_buf, enc[k]);
+            p->skip = st->uc;
+            return;
+        }
+        if (strcmp(name, "uc") == 0) { st->uc = (u8)((has_param && param >= 0 && param < 256) ? param : 1); return; }
+        if (strcmp(name, "v") == 0) { st->hidden = (u8)(!has_param || param != 0); return; }
+        return;
+    }
+    if (st->dest == RTF_DEST_FLDINST) return;
+
+    /* The header and footer (odd, or all, pages) are captured; the
+       left-page and first-page variants stay skipped below. */
+    if (strcmp(name, "header") == 0 || strcmp(name, "headerr") == 0 ||
+        strcmp(name, "footer") == 0 || strcmp(name, "footerr") == 0) {
+        rtf_flush_run(p);
+        st->dest = (name[0] == 'h') ? RTF_DEST_HEADER : RTF_DEST_FOOTER;
+        st->hidden = 0;
+        p->margin_buf.length = 0;
+        return;
+    }
 
     /* Destinations: recognized so their content is skipped rather than
        mis-imported as document text (docs/formats/rtf.md). */
@@ -512,10 +613,9 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
     if (strcmp(name, "fonttbl") == 0 || strcmp(name, "info") == 0 ||
         strcmp(name, "stylesheet") == 0 ||
         strcmp(name, "object") == 0 || strcmp(name, "footnote") == 0 ||
-        strcmp(name, "header") == 0 || strcmp(name, "footer") == 0 ||
-        strcmp(name, "headerl") == 0 || strcmp(name, "headerr") == 0 ||
+        strcmp(name, "headerl") == 0 ||
         strcmp(name, "headerf") == 0 || strcmp(name, "footerl") == 0 ||
-        strcmp(name, "footerr") == 0 || strcmp(name, "footerf") == 0 ||
+        strcmp(name, "footerf") == 0 ||
         strcmp(name, "pntext") == 0 || strcmp(name, "listtext") == 0 ||
         strcmp(name, "pn") == 0 || strcmp(name, "filetbl") == 0 ||
         strcmp(name, "revtbl") == 0 || strcmp(name, "fldinst") == 0) {
@@ -757,7 +857,14 @@ static void rtf_dispatch_control_symbol(rtf_parser *p, u8 sym)
     case '~': rtf_emit_char(p, ' '); return;  /* non-breaking space -> space (documented approximation) */
     case '-': return;                          /* optional hyphen -- dropped */
     case '_': rtf_emit_char(p, '-'); return;   /* non-breaking hyphen -> hyphen */
-    case '*': p->stack[p->depth].dest = RTF_DEST_SKIP; return;
+    case '*':
+        /* Inside a header or footer, \*\fldinst is read (to tell a page
+           number field); everywhere else a starred group is skipped. */
+        if (p->stack[p->depth].dest == RTF_DEST_HEADER || p->stack[p->depth].dest == RTF_DEST_FOOTER) {
+            p->star_pending = 1;
+        }
+        p->stack[p->depth].dest = RTF_DEST_SKIP;
+        return;
     case '\'': {
         u8 hi, lo;
         if (p->pos + 1 >= p->len) { p->error = WP_BADFMT; return; }
@@ -884,6 +991,8 @@ wp_status format_rtf_import_images(const u8 *bytes, u32 len, wp_document *doc,
     if (p->error == WP_OK) rtf_finish(p);
 
     rtf_buf_free(&p->run_buf);
+    rtf_buf_free(&p->margin_buf);
+    rtf_buf_free(&p->fld_buf);
     rtf_buf_free(&p->pict_buf);
 
     st = p->error;

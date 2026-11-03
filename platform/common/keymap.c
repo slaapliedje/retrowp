@@ -425,6 +425,17 @@ wp_keymap_outcome wp_keymap_feed_key(wp_app_ctx *ctx, wp_key_event ev, u8 raw_sh
        caret, so the view goes back to following it (viewport.h). */
     ctx->view.manual = WP_FALSE;
 
+    /* An open status-line prompt (a header, a footer) has every key,
+       ahead of any scheme. */
+    if (ctx->prompt.active) {
+        wp_keymap_outcome outcome;
+
+        memset(&outcome, 0, sizeof(outcome));
+        outcome.kind = (u8)WP_KEYMAP_RESULT_NONE;
+        (void)wp_prompt_feed(ctx, ev);
+        return outcome;
+    }
+
     /* Page Up/Down belong to the view rather than to any scheme: none
        of the five binds them, all five want the same thing from them,
        and only the view knows how tall a page is. Handled here so every
@@ -705,6 +716,12 @@ void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,
     out->pending_cmd_len = 0;
     out->where_utf8 = NULL;
     out->where_len = 0;
+
+    /* An open prompt is the whole status line. */
+    if (ctx->prompt.active) {
+        out->mode_label_len = wp_prompt_status(&ctx->prompt, buf, buf_cap);
+        return;
+    }
 
     /* Which page the caret is on, after the mode: the same buffer, past
        the mode text's terminator, so the caller's one buffer holds both. */

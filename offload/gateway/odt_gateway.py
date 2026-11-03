@@ -339,7 +339,7 @@ _CP1252_TO_UNICODE = {
 }
 _UNICODE_TO_CP1252 = {v: k for k, v in _CP1252_TO_UNICODE.items()}
 
-_RTF_TOKEN_RE = re.compile(rb"\\'([0-9a-fA-F]{2})|\\([a-zA-Z]+)(-?[0-9]+)?[ ]?|([{}])|([^\\{}\r\n]+)")
+_RTF_TOKEN_RE = re.compile(rb"\\'([0-9a-fA-F]{2})|\\([a-zA-Z]+)(-?[0-9]+)?[ ]?|([{}])|([^\\{}\r\n]+)|\\([^a-zA-Z'])")
 
 
 def _rtf_escape_text(s):
@@ -445,7 +445,19 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
     tab_kind = 'left'
 
     for m in _RTF_TOKEN_RE.finditer(rtf_bytes):
-        hexval, word, num, brace, text = m.groups()
+        hexval, word, num, brace, text, sym = m.groups()
+        if sym is not None:
+            # Control symbols: \\* marks a destination to skip (a field
+            # instruction, a list table...) -- this reader used to drop
+            # the star and keep the text; the escaped braces and
+            # backslash are text.
+            if sym == b'*':
+                dest_stack[-1] = 'skip'
+            elif sym in (b'{', b'}', b'\\') and dest_stack[-1] == 'body':
+                cur_run['text'] += sym.decode('ascii')
+            elif sym == b'~' and dest_stack[-1] == 'body':
+                cur_run['text'] += ' '
+            continue
         word = word.decode('ascii') if word is not None else None
         brace = brace.decode('ascii') if brace is not None else None
         dest = dest_stack[-1]
@@ -494,6 +506,13 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
 
         if word == 'fonttbl':
             dest_stack[-1] = 'fonttbl'
+            continue
+        # Headers, footers and the other non-body destinations are not
+        # body text (rtf_margin_texts reads the header and footer).
+        if word in ('header', 'headerr', 'headerl', 'headerf', 'footer', 'footerr', 'footerl',
+                    'footerf', 'info', 'stylesheet', 'pict', 'object', 'footnote', 'pntext',
+                    'listtext', 'pn', 'filetbl', 'revtbl'):
+            dest_stack[-1] = 'skip'
             continue
         if word == 'colortbl':
             dest_stack[-1] = 'colortbl'
@@ -626,6 +645,92 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
 # upright counterparts (italic is a shear of the same glyphs, not a
 # separate width table) -- verified against the real AFM files. Tier
 # 0's fallback whenever Tier 1 isn't available for a given style slot.
+def _rtf_group_at(rtf_bytes, start):
+    """The bytes of the group opening at rtf_bytes[start] ('{'), braces
+    balanced, escaped braces respected."""
+    depth, i = 0, start
+    while i < len(rtf_bytes):
+        c = rtf_bytes[i:i + 1]
+        if c == b'\\':
+            i += 2
+            continue
+        if c == b'{':
+            depth += 1
+        elif c == b'}':
+            depth -= 1
+            if depth == 0:
+                return rtf_bytes[start:i + 1]
+        i += 1
+    return rtf_bytes[start:]
+
+
+def _rtf_margin_text(group):
+    """One header/footer group as the engine keeps it (docmodel.h): a tab
+    is a part break '|', \\chpgn or a PAGE field the page number '#'."""
+    out = []
+    depth = 0
+    skip_depth = None
+    page_field = False
+    pending_skip_next = False
+    for m in _RTF_TOKEN_RE.finditer(group):
+        hexval, word, num, brace, text, sym = m.groups()
+        if brace == '{' or brace == b'{':
+            depth += 1
+            continue
+        if brace == '}' or brace == b'}':
+            if skip_depth is not None and depth == skip_depth:
+                skip_depth = None
+            depth -= 1
+            continue
+        if sym == b'*':
+            pending_skip_next = True
+            continue
+        if word is not None:
+            w = word.decode('ascii')
+            if pending_skip_next:
+                pending_skip_next = False
+                if w == 'fldinst':
+                    rest = group[m.end():m.end() + 40]
+                    page_field = b'PAGE' in rest.split(b'}')[0]
+                skip_depth = depth
+                continue
+            if skip_depth is not None:
+                continue
+            if w == 'fldrslt' and page_field:
+                out.append('#')
+                page_field = False
+                skip_depth = depth
+            elif w == 'tab':
+                out.append('|')
+            elif w == 'chpgn':
+                out.append('#')
+            elif w in ('par', 'line'):
+                out.append(' ')
+            elif w == 'u' and num:
+                n = int(num)
+                out.append(chr(n + 65536 if n < 0 else n))
+            continue
+        if skip_depth is not None:
+            continue
+        if hexval is not None:
+            b = int(hexval, 16)
+            out.append(chr(b) if b < 0x80 or b >= 0xA0 else chr(_CP1252_TO_UNICODE.get(b, ord('?'))))
+        elif text is not None:
+            out.append(text.decode('cp1252'))
+    return ''.join(out).strip()
+
+
+def rtf_margin_texts(rtf_bytes):
+    """(header, footer) the way the engine keeps them, '' for none: the
+    first \\header (or \\headerr) and \\footer (or \\footerr) group."""
+    found = {}
+    for m in re.finditer(rb"\{\\(header|headerr|footer|footerr)(?![a-z])", rtf_bytes):
+        kind = 'header' if m.group(1).startswith(b'header') else 'footer'
+        if kind not in found:
+            found[kind] = _rtf_margin_text(_rtf_group_at(rtf_bytes, m.start())[len(m.group(0)):-1])
+    return found.get('header', ''), found.get('footer', '')
+
+
 _RTF_PAGE_RE = re.compile(rb"\\(paperw|paperh|margl|margr|margt|margb)(-?[0-9]+)")
 
 
@@ -1025,9 +1130,38 @@ def _pdf_escape_str(text):
     return ''.join(out)
 
 
-def paragraphs_to_pdf_bytes(paragraphs, page=None):
+def _pdf_margin_ops(text, page_no, y, m_left, column_w, used_chars):
+    """A header or footer line on one page: '|' parts left, centre and
+    right (one part centred, two left and right), '#' the page number,
+    10 pt regular."""
+    if not text:
+        return []
+    parts = text.replace('#', str(page_no)).split('|')
+    if len(parts) == 1:
+        slots = [None, parts[0], None]
+    elif len(parts) == 2:
+        slots = [parts[0], None, parts[1]]
+    else:
+        slots = [parts[0], parts[1], '|'.join(parts[2:])]
+    run = {'size_twips': 200}
+    font_name, widths = _pdf_font_for_run(run)
+    ops = []
+    for idx, part in enumerate(slots):
+        if not part:
+            continue
+        w = _pdf_text_width_pt(part, widths, 10.0)
+        x = m_left + (0.0 if idx == 0 else (column_w - w) / 2.0 if idx == 1 else column_w - w)
+        ops += ['BT', '%s 10.00 Tf' % font_name, '0 0 0 rg', '%.2f %.2f Td' % (x, y),
+                '(%s) Tj' % _pdf_escape_str(part), 'ET']
+        used_chars[_pdf_run_slot(run)].update(part)
+    return ops
+
+
+def paragraphs_to_pdf_bytes(paragraphs, page=None, header='', footer=''):
     """page: (width, height, left, right, top, bottom) in points, as
-    rtf_page_setup returns it; None for US Letter with one-inch margins."""
+    rtf_page_setup returns it; None for US Letter with one-inch margins.
+    header/footer: the running lines (rtf_margin_texts), drawn halfway
+    into the top and bottom margins of every page."""
     page_w, page_h, m_left, m_right, m_top, m_bottom = page or (
         _PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT, _PDF_MARGIN, _PDF_MARGIN, _PDF_MARGIN, _PDF_MARGIN)
     column_w = max(72.0, page_w - m_left - m_right)
@@ -1166,6 +1300,9 @@ def paragraphs_to_pdf_bytes(paragraphs, page=None):
         cur_y -= sa
 
     pages.append(cur_ops)
+    for k, ops in enumerate(pages):
+        ops += _pdf_margin_ops(header, k + 1, page_h - m_top / 2.0, m_left, column_w, used_chars)
+        ops += _pdf_margin_ops(footer, k + 1, m_bottom / 2.0, m_left, column_w, used_chars)
     return _pdf_assemble(pages, used_chars, (page_w, page_h))
 
 
@@ -1299,7 +1436,8 @@ def handle_convert_export(payload):
     try:
         if format_id == FORMAT_ODT:
             return STATUS_OK, paragraphs_to_odt_bytes(paragraphs)
-        return STATUS_OK, paragraphs_to_pdf_bytes(paragraphs, rtf_page_setup(rtf_bytes))
+        header, footer = rtf_margin_texts(rtf_bytes)
+        return STATUS_OK, paragraphs_to_pdf_bytes(paragraphs, rtf_page_setup(rtf_bytes), header, footer)
     except Exception:
         return STATUS_ERR, b''
 

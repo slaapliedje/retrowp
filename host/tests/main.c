@@ -320,6 +320,7 @@ void test_actions_toggle_tab_adds_snaps_and_removes(void);
 void test_rulerbar_hit_test_finds_buttons_gaps_and_the_ruler(void);
 void test_rulerbar_signature_follows_what_the_bar_shows(void);
 void test_actions_page_break_splits_and_undo_merges(void);
+void test_actions_header_prompt_types_edits_and_sets(void);
 void test_actions_document_name_is_the_last_path_component(void);
 void test_selspan_marks_the_lines_a_selection_crosses(void);
 void test_selspan_within_one_line(void);
@@ -530,6 +531,7 @@ void test_rtf_modern_line_spacing_tabs_and_page_setup(void);
 void test_rtf_modern_alike_paragraphs_share_one_style(void);
 void test_rtf_modern_export_round_trips_the_new_properties(void);
 void test_rtf_modern_page_breaks_both_ways(void);
+void test_rtf_modern_headers_and_footers_both_ways(void);
 void test_format_rtf_import_simple_paragraph(void);
 void test_format_rtf_import_no_trailing_empty_paragraph(void);
 void test_format_rtf_import_blank_line_is_empty_paragraph(void);
@@ -928,6 +930,7 @@ static const test_case g_cases[] = {
     { "rulerbar_hit_test_finds_buttons_gaps_and_the_ruler", test_rulerbar_hit_test_finds_buttons_gaps_and_the_ruler },
     { "rulerbar_signature_follows_what_the_bar_shows", test_rulerbar_signature_follows_what_the_bar_shows },
     { "actions_page_break_splits_and_undo_merges", test_actions_page_break_splits_and_undo_merges },
+    { "actions_header_prompt_types_edits_and_sets", test_actions_header_prompt_types_edits_and_sets },
     { "actions_document_name_is_the_last_path_component", test_actions_document_name_is_the_last_path_component },
     { "selspan_marks_the_lines_a_selection_crosses", test_selspan_marks_the_lines_a_selection_crosses },
     { "selspan_within_one_line", test_selspan_within_one_line },
@@ -1106,6 +1109,7 @@ static const test_case g_cases[] = {
     { "rtf_modern_alike_paragraphs_share_one_style", test_rtf_modern_alike_paragraphs_share_one_style },
     { "rtf_modern_export_round_trips_the_new_properties", test_rtf_modern_export_round_trips_the_new_properties },
     { "rtf_modern_page_breaks_both_ways", test_rtf_modern_page_breaks_both_ways },
+    { "rtf_modern_headers_and_footers_both_ways", test_rtf_modern_headers_and_footers_both_ways },
     { "format_rtf_import_simple_paragraph", test_format_rtf_import_simple_paragraph },
     { "format_rtf_import_no_trailing_empty_paragraph", test_format_rtf_import_no_trailing_empty_paragraph },
     { "format_rtf_import_blank_line_is_empty_paragraph", test_format_rtf_import_blank_line_is_empty_paragraph },

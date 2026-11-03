@@ -414,12 +414,50 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
     rtf_write_str(w, "\\par\r\n");
 }
 
+/* A running header or footer (docmodel.h): one paragraph, its '|' parts
+   on tab stops -- one part centred, two left and right, three left,
+   centre and right -- and '#' as \chpgn, the page number. */
+static void rtf_emit_margin_text(rtf_writer *w, const wp_document *doc, const char *dest, wp_span text)
+{
+    const wp_section *sec = &doc->sections[0];
+    const u8 *b = wp_strpool_get(&doc->strings, text);
+    i32 col = sec->page_width - sec->margin_left - sec->margin_right;
+    u32 parts = 1, i, start;
+
+    for (i = 0; i < text.length; i++) if (b[i] == '|') parts++;
+    rtf_write_str(w, "{\\");
+    rtf_write_str(w, dest);
+    rtf_write_str(w, "\\pard\\plain");
+    if (parts == 1) {
+        rtf_write_str(w, "\\qc");
+    } else {
+        if (parts >= 3) { rtf_write_str(w, "\\tqc\\tx"); rtf_write_i32(w, col / 2); }
+        rtf_write_str(w, "\\tqr\\tx"); rtf_write_i32(w, col);
+    }
+    rtf_write_str(w, " ");
+    start = 0;
+    for (i = 0; i <= text.length; i++) {
+        if (i == text.length || b[i] == '|' || b[i] == '#') {
+            if (i > start) rtf_write_text(w, b + start, i - start);
+            if (i < text.length) rtf_write_str(w, (b[i] == '|') ? "\\tab " : "\\chpgn ");
+            start = i + 1;
+        }
+    }
+    rtf_write_str(w, "\\par}\r\n");
+}
+
 static void rtf_emit_document(rtf_writer *w, const wp_document *doc, const rtf_color_table *ct,
                                const wp_image_source *src)
 {
     u32 si, pi;
 
     rtf_emit_header(w, doc, ct);
+    if (doc->section_count > 0 && doc->sections[0].header.length > 0) {
+        rtf_emit_margin_text(w, doc, "header", doc->sections[0].header);
+    }
+    if (doc->section_count > 0 && doc->sections[0].footer.length > 0) {
+        rtf_emit_margin_text(w, doc, "footer", doc->sections[0].footer);
+    }
 
     for (si = 0; si < doc->section_count; si++) {
         const wp_section *sec = &doc->sections[si];
