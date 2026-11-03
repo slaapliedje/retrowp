@@ -35,6 +35,7 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "pageview.h"
+#include "rulerbar.h"
 #include "selspan.h"
 #include "tools.h"
 #include "menucheck.h"
@@ -1053,6 +1054,38 @@ static i32 amiga_font_line_height_px(i32 size_twips)
    pens, no dither, legible by construction at any screen depth. */
 #define WP_AMIGA_STATUSLINE_SIZE_TWIPS 160
 
+/* The ruler bar along the top of the editor object (rulerbar.h). A
+   PAL/NTSC hires screen's pixels are about twice as tall as wide, so the
+   icons fold to eight rows there and keep their shape; an object too
+   short to hold the bar and a few lines of text gets none. */
+static wp_bool amiga_rulerbar(Object *obj, wp_rulerbar *rb)
+{
+    i32 tall = (amiga_twips_to_px_y(1440) * 4 < amiga_twips_to_px_x(1440) * 3);
+    i32 obj_h = (i32)(_mbottom(obj) - _mtop(obj) + 1);
+
+    rb->x = _mleft(obj) + 2;
+    rb->y = _mtop(obj) + 2;
+    rb->w = (i32)(_mright(obj) - _mleft(obj) + 1) - 4;
+    rb->icon_rows = tall ? 8 : 16;
+    rb->button_w = 20;
+    rb->button_h = rb->icon_rows + 2;
+    rb->scale_h = amiga_font_line_height_px(WP_AMIGA_STATUSLINE_SIZE_TWIPS) + 4;
+    rb->origin_x = _mleft(obj) + WP_EDITOR_LEFT_MARGIN_PX;
+    rb->twips_to_x = amiga_twips_to_px_x;
+    rb->x_to_twips = amiga_px_to_twips_x;
+    return (wp_bool)(wp_rulerbar_height(rb) * 3 < obj_h);
+}
+
+/* Where the document's first line goes: below the bar, if there is one. */
+static i32 amiga_doc_top(Object *obj)
+{
+    wp_rulerbar rb;
+    i32 top = _mtop(obj) + WP_EDITOR_TOP_MARGIN_PX;
+
+    if (amiga_rulerbar(obj, &rb)) top += wp_rulerbar_height(&rb) + 2;
+    return top;
+}
+
 static void paint_status_line_amiga(amiga_gc *gc, Object *obj, i32 bar_h_px)
 {
     plat_font *font;
@@ -1221,7 +1254,19 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     if (bar_h_px > (i32)(_mbottom(obj) - _mtop(obj) + 1)) bar_h_px = 0;
     doc_bottom = (i32)_mbottom(obj) - bar_h_px;
 
-    y = _mtop(obj) + WP_EDITOR_TOP_MARGIN_PX;
+    {
+        wp_rulerbar rb;
+        plat_font *bar_font;
+        plat_font_metrics bfm;
+
+        if (amiga_rulerbar(obj, &rb) &&
+            plat_font_open((const u8 *)"", 0, WP_AMIGA_STATUSLINE_SIZE_TWIPS, 0, &bar_font) == WP_OK) {
+            plat_font_metrics_get(bar_font, &bfm);
+            wp_rulerbar_paint((plat_gc *)&gc, bar_font, amiga_twips_to_px_y(bfm.ascent), &rb, &g_ctx);
+            plat_font_close(bar_font);
+        }
+    }
+    y = amiga_doc_top(obj);
 
     /* The view follows the caret before anything is painted: a
        keystroke that moved it below the object's bottom scrolls the
@@ -1498,9 +1543,25 @@ static wp_bool amiga_click(Object *obj, struct IntuiMessage *imsg)
 
     if (!g_ctx.doc_loaded || g_help_active || g_content_width_twips <= 0) return WP_FALSE;
     if (x < _mleft(obj) || x > _mright(obj) || y < _mtop(obj) || y > _mbottom(obj)) return WP_FALSE;
+
+    /* The ruler bar: a button runs its action as the menu would, a click
+       on the ruler sets or clears a tab stop there; either way the
+       document is relaid before the redraw the caller does. */
+    {
+        wp_rulerbar rb;
+        if (amiga_rulerbar(obj, &rb) && y < rb.y + wp_rulerbar_height(&rb)) {
+            wp_rulerbar_hit hit;
+            if (!wp_rulerbar_hit_test(&rb, x, y, &hit)) return WP_FALSE;
+            if (hit.kind == (u8)WP_RULERBAR_BUTTON) invoke_action(hit.action);
+            else if (hit.kind == (u8)WP_RULERBAR_RULER) (void)wp_action_toggle_tab(&g_ctx, hit.twips);
+            amiga_relayout_after_edit();
+            return WP_TRUE;
+        }
+    }
+
     if (!wp_viewport_hit_test(&g_ctx.view, &g_amiga_doc, g_content_width_twips,
                               x - (_mleft(obj) + WP_EDITOR_LEFT_MARGIN_PX),
-                              y - (_mtop(obj) + WP_EDITOR_TOP_MARGIN_PX),
+                              y - amiga_doc_top(obj),
                               amiga_px_to_twips_x, amiga_twips_to_px_x, &pos)) return WP_FALSE;
     wp_keymap_click(&g_ctx, pos,
                     (wp_bool)((imsg->Qualifier & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT)) != 0));

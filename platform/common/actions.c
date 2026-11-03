@@ -296,6 +296,117 @@ static wp_status act_format_align(wp_app_ctx *ctx)
     return WP_OK;
 }
 
+/* ---- Paragraph formatting (the ruler bar) -----------------------------
+   One shape for all of them: a change to the paragraph style, applied to
+   every paragraph the selection touches (else the caret's), each moved
+   to the style that differs only in that change (found or added, so a
+   thousand alike paragraphs still share one). Not journaled -- no style
+   change is yet, Alignment... included -- so it marks the document
+   modified itself, and only when something changed. */
+typedef void (*para_change_fn)(wp_para_style *ps, i32 arg);
+
+static wp_status change_paragraphs(wp_app_ctx *ctx, para_change_fn change, i32 arg)
+{
+    wp_selection sel;
+    wp_pos from, to;
+    u32 si;
+    wp_bool changed = WP_FALSE;
+
+    if (!ctx->doc_loaded) return WP_OK;
+    from = to = *wp_keymap_cursor(ctx);
+    if (wp_keymap_selection(ctx, &sel)) {
+        if (wp_pos_compare(sel.anchor, sel.caret) <= 0) { from = sel.anchor; to = sel.caret; }
+        else { from = sel.caret; to = sel.anchor; }
+    }
+
+    for (si = from.section; si <= to.section && si < ctx->doc->section_count; si++) {
+        wp_section *sec = wp_document_section_get(ctx->doc, si);
+        u32 pi = (si == from.section) ? from.paragraph : 0;
+        u32 last = (si == to.section) ? to.paragraph : (sec->para_count > 0 ? sec->para_count - 1 : 0);
+
+        for (; pi <= last && pi < sec->para_count; pi++) {
+            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            const wp_para_style *cur = wp_document_pstyle_get(ctx->doc, para->style);
+            wp_para_style style;
+            wp_pstyle handle;
+
+            if (cur == NULL) continue;
+            style = *cur;
+            change(&style, arg);
+            if (wp_document_pstyle_find_or_add(ctx->doc, &style, &handle) != WP_OK) return WP_NOMEM;
+            if (handle != para->style) {
+                wp_paragraph_pstyle_set(para, handle);
+                changed = WP_TRUE;
+            }
+        }
+    }
+    if (changed) wp_document_mark_modified(ctx->doc);
+    return WP_OK;
+}
+
+static void set_align(wp_para_style *ps, i32 a) { ps->align = (u8)a; }
+static void set_spacing(wp_para_style *ps, i32 ls) { ps->line_spacing = ls; }
+static void shift_indent(wp_para_style *ps, i32 by)
+{
+    ps->indent_left += by;
+    if (ps->indent_left < 0) ps->indent_left = 0;
+    /* A hanging first line may not hang past the margin. */
+    if (ps->indent_left + ps->indent_first < 0) ps->indent_first = -ps->indent_left;
+}
+
+static wp_status act_para_align(wp_app_ctx *ctx, u8 align)
+{
+    ctx->align = align;   /* the Format controls' notion of the current alignment */
+    return change_paragraphs(ctx, set_align, (i32)align);
+}
+static wp_status act_para_left(wp_app_ctx *ctx)    { return act_para_align(ctx, WP_ALIGN_LEFT); }
+static wp_status act_para_center(wp_app_ctx *ctx)  { return act_para_align(ctx, WP_ALIGN_CENTER); }
+static wp_status act_para_right(wp_app_ctx *ctx)   { return act_para_align(ctx, WP_ALIGN_RIGHT); }
+static wp_status act_para_justify(wp_app_ctx *ctx) { return act_para_align(ctx, WP_ALIGN_JUSTIFY); }
+static wp_status act_para_single(wp_app_ctx *ctx)  { return change_paragraphs(ctx, set_spacing, 0); }
+static wp_status act_para_onehalf(wp_app_ctx *ctx) { return change_paragraphs(ctx, set_spacing, 360); }
+static wp_status act_para_double(wp_app_ctx *ctx)  { return change_paragraphs(ctx, set_spacing, 480); }
+static wp_status act_para_indent_less(wp_app_ctx *ctx) { return change_paragraphs(ctx, shift_indent, -WP_DEFAULT_TAB_TWIPS); }
+static wp_status act_para_indent_more(wp_app_ctx *ctx) { return change_paragraphs(ctx, shift_indent, WP_DEFAULT_TAB_TWIPS); }
+
+static void toggle_tab(wp_para_style *ps, i32 x)
+{
+    u8 i, j;
+
+    for (i = 0; i < ps->tab_count; i++) {
+        i32 d = ps->tab_pos[i] - x;
+        if (d < 0) d = -d;
+        if (d < 180) {                      /* within an eighth: remove it */
+            for (j = i; j + 1 < ps->tab_count; j++) {
+                ps->tab_pos[j] = ps->tab_pos[j + 1];
+                ps->tab_kind[j] = ps->tab_kind[j + 1];
+            }
+            ps->tab_count--;
+            return;
+        }
+    }
+    if (ps->tab_count >= WP_MAX_TABS) return;
+    i = ps->tab_count;
+    while (i > 0 && ps->tab_pos[i - 1] > x) {
+        ps->tab_pos[i] = ps->tab_pos[i - 1];
+        ps->tab_kind[i] = ps->tab_kind[i - 1];
+        i--;
+    }
+    ps->tab_pos[i] = x;
+    ps->tab_kind[i] = (u8)WP_TAB_LEFT;
+    ps->tab_count++;
+}
+
+wp_status wp_action_toggle_tab(wp_app_ctx *ctx, i32 x_twips)
+{
+    i32 snapped;
+
+    if (x_twips < 0) x_twips = 0;
+    snapped = ((x_twips + 90) / 180) * 180;   /* nearest eighth of an inch */
+    if (snapped <= 0) return WP_OK;
+    return change_paragraphs(ctx, toggle_tab, snapped);
+}
+
 /* Edit > Copy / Cut / Paste.
  *
  * Copy and Cut act on the selection -- the active scheme's own notion
@@ -745,7 +856,16 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
        to an editing command than to a second way into a menu that is
        already one click away. See wp_action_help_node for the mapping. */
     { WP_ACT_HELP_KEYS,         WP_MENU_HELP,   "Editing Keys",   0,        0,    NULL, NULL },
-    { WP_ACT_HELP_FORMAT,       WP_MENU_HELP,   "Format Keys",    0,        0,    NULL, NULL }
+    { WP_ACT_HELP_FORMAT,       WP_MENU_HELP,   "Format Keys",    0,        0,    NULL, NULL },
+    { WP_ACT_PARA_LEFT,         WP_MENU_NONE,   "Align Left",     0,        0,    act_para_left, NULL },
+    { WP_ACT_PARA_CENTER,       WP_MENU_NONE,   "Center",         0,        0,    act_para_center, NULL },
+    { WP_ACT_PARA_RIGHT,        WP_MENU_NONE,   "Align Right",    0,        0,    act_para_right, NULL },
+    { WP_ACT_PARA_JUSTIFY,      WP_MENU_NONE,   "Justify",        0,        0,    act_para_justify, NULL },
+    { WP_ACT_PARA_SINGLE,       WP_MENU_NONE,   "Single Spacing", 0,        0,    act_para_single, NULL },
+    { WP_ACT_PARA_ONEHALF,      WP_MENU_NONE,   "1.5 Spacing",    0,        0,    act_para_onehalf, NULL },
+    { WP_ACT_PARA_DOUBLE,       WP_MENU_NONE,   "Double Spacing", 0,        0,    act_para_double, NULL },
+    { WP_ACT_PARA_INDENT_LESS,  WP_MENU_NONE,   "Indent Less",    0,        0,    act_para_indent_less, NULL },
+    { WP_ACT_PARA_INDENT_MORE,  WP_MENU_NONE,   "Indent More",    0,        0,    act_para_indent_more, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

@@ -55,6 +55,19 @@ typedef enum {
     WP_ACT_HELP_CONTENTS,
     WP_ACT_HELP_KEYS,
     WP_ACT_HELP_FORMAT,
+    /* Paragraph formatting, the ruler bar's buttons (rulerbar.h). Group
+       NONE: reached by clicking the ruler bar, and by any backend that
+       chooses to bind them; every one has a portable handler. They act
+       on every paragraph the selection touches, else on the caret's. */
+    WP_ACT_PARA_LEFT,
+    WP_ACT_PARA_CENTER,
+    WP_ACT_PARA_RIGHT,
+    WP_ACT_PARA_JUSTIFY,
+    WP_ACT_PARA_SINGLE,
+    WP_ACT_PARA_ONEHALF,
+    WP_ACT_PARA_DOUBLE,
+    WP_ACT_PARA_INDENT_LESS,
+    WP_ACT_PARA_INDENT_MORE,
     WP_ACT_COUNT
 } wp_action_id;
 
@@ -240,6 +253,14 @@ wp_bool wp_action_save_path(struct wp_app_ctx *ctx, wp_bool save_as, wp_pick_pat
 /* File > Save (save_as false) or Save As (true), whole. */
 wp_status wp_action_file_save(struct wp_app_ctx *ctx, wp_bool save_as, wp_pick_path_fn pick,
                               wp_image_source *img_src);
+
+/* Sets or clears a left tab stop at x_twips (from the column's left
+   edge, snapped to the nearest eighth of an inch) on every paragraph the
+   selection touches, else the caret's: a stop already within an eighth
+   of an inch of it is removed, otherwise one is added. What a click on
+   the ruler's scale does. WP_RANGE when the paragraph already has
+   WP_MAX_TABS stops. */
+wp_status wp_action_toggle_tab(struct wp_app_ctx *ctx, i32 x_twips);
 
 /* For a backend that loaded or saved the document by a route of its own. */
 void wp_action_remember_path(struct wp_app_ctx *ctx, const char *native_path);

@@ -22,6 +22,7 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "pageview.h"
+#include "rulerbar.h"
 #include "selspan.h"
 #include "tools.h"
 #include "menucheck.h"
@@ -951,6 +952,34 @@ static i32 statusline_height_px(void)
     return mac_font_line_height_px(WP_MAC_STATUSLINE_SIZE_TWIPS);
 }
 
+/* The ruler bar along the top of the window (rulerbar.h); the Mac's
+   pixels are square, so the icons are their full sixteen rows. A window
+   too short for the bar and a few lines of text gets none. */
+static wp_bool mac_rulerbar(Rect r, wp_rulerbar *rb)
+{
+    rb->x = r.left + 2;
+    rb->y = r.top + 2;
+    rb->w = (i32)(r.right - r.left) - 4;
+    rb->icon_rows = 16;
+    rb->button_w = 20;
+    rb->button_h = 18;
+    rb->scale_h = statusline_height_px() + 4;
+    rb->origin_x = r.left + WP_DOC_LEFT_MARGIN_PX;
+    rb->twips_to_x = mac_twips_to_px;
+    rb->x_to_twips = mac_px_to_twips;
+    return (wp_bool)(wp_rulerbar_height(rb) * 3 < (i32)(r.bottom - r.top));
+}
+
+/* Where the document's first line goes: below the bar, if there is one. */
+static i32 mac_doc_top(Rect r)
+{
+    wp_rulerbar rb;
+    i32 top = r.top + WP_DOC_TOP_MARGIN_PX;
+
+    if (mac_rulerbar(r, &rb)) top += wp_rulerbar_height(&rb) + 2;
+    return top;
+}
+
 /* Paints the reserved bottom strip showing the active keymap scheme's
    current mode (and, in Command-line mode, the pending buffer being
    typed) -- see platform/common/statusline.h. Mirrors platform/atari/
@@ -1117,7 +1146,19 @@ static void draw_document(WindowPtr w)
 
     gc.window = w;
 
-    y = (short)(r.top + WP_DOC_TOP_MARGIN_PX);
+    {
+        wp_rulerbar rb;
+        plat_font *bar_font;
+        plat_font_metrics bfm;
+
+        if (mac_rulerbar(r, &rb) &&
+            plat_font_open((const u8 *)"", 0, WP_MAC_STATUSLINE_SIZE_TWIPS, 0, &bar_font) == WP_OK) {
+            plat_font_metrics_get(bar_font, &bfm);
+            wp_rulerbar_paint((plat_gc *)&gc, bar_font, mac_twips_to_px(bfm.ascent), &rb, &g_ctx);
+            plat_font_close(bar_font);
+        }
+    }
+    y = (short)mac_doc_top(r);
 
     /* The view follows the caret before anything is painted, so a
        keystroke that moved it below the window scrolls the document up
@@ -1388,8 +1429,24 @@ static void mac_click(Point where, wp_bool extend)
     GlobalToLocal(&pt);
     bar_h_px = statusline_height_px();
     if (pt.v >= g_win->portRect.bottom - bar_h_px) return;   /* the status strip */
+
+    /* The ruler bar: a button runs its action as the menu would, a click
+       on the ruler sets or clears a tab stop there. The caller
+       invalidates the window, and the redraw relays out. */
+    {
+        wp_rulerbar rb;
+        if (mac_rulerbar(g_win->portRect, &rb) && pt.v < rb.y + wp_rulerbar_height(&rb)) {
+            wp_rulerbar_hit hit;
+            if (wp_rulerbar_hit_test(&rb, (i32)pt.h, (i32)pt.v, &hit)) {
+                if (hit.kind == (u8)WP_RULERBAR_BUTTON) invoke_action(wp_action_find(hit.action));
+                else if (hit.kind == (u8)WP_RULERBAR_RULER) (void)wp_action_toggle_tab(&g_ctx, hit.twips);
+            }
+            return;
+        }
+    }
+
     if (!wp_viewport_hit_test(&g_ctx.view, &g_mac_doc, g_content_width_twips,
-                              (i32)pt.h - WP_DOC_LEFT_MARGIN_PX, (i32)pt.v - WP_DOC_TOP_MARGIN_PX,
+                              (i32)pt.h - WP_DOC_LEFT_MARGIN_PX, (i32)pt.v - mac_doc_top(g_win->portRect),
                               mac_px_to_twips, mac_twips_to_px, &pos)) return;
     wp_keymap_click(&g_ctx, pos, extend);
 }

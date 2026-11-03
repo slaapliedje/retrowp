@@ -2,6 +2,7 @@
 #include <string.h>
 #include "test.h"
 #include "actions.h"
+#include "rulerbar.h"
 #include "format_txt.h"
 #include "offload.h"
 #include "gateway_harness.h"
@@ -98,7 +99,8 @@ void test_actions_every_action_is_reachable(void)
 
     for (i = 0; i < WP_ACT_COUNT; i++) {
         ASSERT_TRUE(g_wp_actions[i].group != WP_MENU_NONE ||
-                    g_wp_actions[i].shortcut_ascii != 0);
+                    g_wp_actions[i].shortcut_ascii != 0 ||
+                    wp_rulerbar_has_action((wp_action_id)i));
     }
 }
 
@@ -1060,5 +1062,121 @@ void test_actions_document_name_is_the_last_path_component(void)
     ASSERT_TRUE(wp_path_ends_with_ci("NOTES.RTF", ".rtf"));
     ASSERT_TRUE(!wp_path_ends_with_ci("notes.txt", ".RTF"));
     ASSERT_TRUE(!wp_path_ends_with_ci("rtf", ".RTF"));
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* ---- Paragraph formatting and the ruler bar -------------------------- */
+
+static const wp_para_style *caret_pstyle(wp_app_ctx *ctx, u32 pi)
+{
+    wp_paragraph *p = wp_section_paragraph_get(wp_document_section_get(ctx->doc, 0), pi);
+    return wp_document_pstyle_get(ctx->doc, p->style);
+}
+
+void test_actions_paragraph_buttons_change_the_caret_paragraph(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "One\nTwo\n");
+    wp_keymap_cursor(&ctx)->paragraph = 1;
+    wp_keymap_cursor(&ctx)->offset = 0;
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_PARA_JUSTIFY)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(caret_pstyle(&ctx, 1)->align, (u32)WP_ALIGN_JUSTIFY);
+    ASSERT_EQ_U32(caret_pstyle(&ctx, 0)->align, (u32)WP_ALIGN_LEFT);   /* only the caret's */
+    ASSERT_TRUE(wp_document_is_modified(&doc));
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_PARA_DOUBLE)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32((u32)caret_pstyle(&ctx, 1)->line_spacing, 480);
+    ASSERT_TRUE(wp_action_find(WP_ACT_PARA_SINGLE)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32((u32)caret_pstyle(&ctx, 1)->line_spacing, 0);
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_PARA_INDENT_MORE)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(wp_action_find(WP_ACT_PARA_INDENT_MORE)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32((u32)caret_pstyle(&ctx, 1)->indent_left, 1440);
+    ASSERT_TRUE(wp_action_find(WP_ACT_PARA_INDENT_LESS)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(wp_action_find(WP_ACT_PARA_INDENT_LESS)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(wp_action_find(WP_ACT_PARA_INDENT_LESS)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32((u32)caret_pstyle(&ctx, 1)->indent_left, 0);           /* never past the margin */
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_toggle_tab_adds_snaps_and_removes(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    const wp_para_style *ps;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "x\n");
+    ASSERT_TRUE(wp_action_toggle_tab(&ctx, 2950) == WP_OK);        /* snaps to 2880 */
+    ASSERT_TRUE(wp_action_toggle_tab(&ctx, 1000) == WP_OK);        /* snaps to 1080, sorted first */
+    ps = caret_pstyle(&ctx, 0);
+    ASSERT_EQ_U32(ps->tab_count, 2);
+    ASSERT_EQ_U32((u32)ps->tab_pos[0], 1080);
+    ASSERT_EQ_U32((u32)ps->tab_pos[1], 2880);
+    ASSERT_TRUE(wp_action_toggle_tab(&ctx, 2900) == WP_OK);        /* near 2880: removes it */
+    ps = caret_pstyle(&ctx, 0);
+    ASSERT_EQ_U32(ps->tab_count, 1);
+    ASSERT_EQ_U32((u32)ps->tab_pos[0], 1080);
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+static i32 half(i32 v) { return v / 2; }       /* 1 px = 2 twips, for the bar tests */
+static i32 twice(i32 v) { return v * 2; }
+
+void test_rulerbar_hit_test_finds_buttons_gaps_and_the_ruler(void)
+{
+    wp_rulerbar rb;
+    wp_rulerbar_hit hit;
+
+    rb.x = 10; rb.y = 20; rb.w = 600;
+    rb.button_w = 20; rb.button_h = 18; rb.icon_rows = 16; rb.scale_h = 12;
+    rb.origin_x = 16;
+    rb.twips_to_x = half;
+    rb.x_to_twips = twice;
+    ASSERT_EQ_U32((u32)wp_rulerbar_height(&rb), 18 + 2 + 12);
+
+    ASSERT_TRUE(wp_rulerbar_hit_test(&rb, 10, 25, &hit));               /* first button: New */
+    ASSERT_TRUE(hit.kind == WP_RULERBAR_BUTTON && hit.action == WP_ACT_FILE_NEW);
+    ASSERT_TRUE(!wp_rulerbar_hit_test(&rb, 72, 25, &hit));              /* the gap after Save (70..80) */
+    ASSERT_TRUE(wp_rulerbar_hit_test(&rb, 85, 25, &hit));               /* Cut, after the gap */
+    ASSERT_TRUE(hit.kind == WP_RULERBAR_BUTTON && hit.action == WP_ACT_EDIT_CUT);
+    ASSERT_TRUE(!wp_rulerbar_hit_test(&rb, 72, 5, &hit));               /* above the bar */
+    ASSERT_TRUE(wp_rulerbar_hit_test(&rb, 116, 45, &hit));              /* the ruler, 100 px in */
+    ASSERT_TRUE(hit.kind == WP_RULERBAR_RULER);
+    ASSERT_EQ_U32((u32)hit.twips, 200);
+
+    ASSERT_TRUE(wp_rulerbar_has_action(WP_ACT_PARA_JUSTIFY));
+    ASSERT_TRUE(!wp_rulerbar_has_action(WP_ACT_TOOLS_CHAT));
+}
+
+void test_rulerbar_signature_follows_what_the_bar_shows(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_rulerbar rb;
+    u32 a, b;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "x\n");
+    rb.x = 0; rb.y = 0; rb.w = 600; rb.button_w = 20; rb.button_h = 18;
+    rb.icon_rows = 16; rb.scale_h = 12; rb.origin_x = 0;
+    rb.twips_to_x = half; rb.x_to_twips = twice;
+
+    a = wp_rulerbar_signature(&rb, &ctx);
+    ASSERT_EQ_U32(wp_rulerbar_signature(&rb, &ctx), a);                 /* stable */
+    ASSERT_TRUE(wp_action_find(WP_ACT_PARA_CENTER)->handler(&ctx) == WP_OK);
+    b = wp_rulerbar_signature(&rb, &ctx);
+    ASSERT_TRUE(b != a);                                                /* alignment shows */
+    ASSERT_TRUE(wp_action_toggle_tab(&ctx, 1440) == WP_OK);
+    ASSERT_TRUE(wp_rulerbar_signature(&rb, &ctx) != b);                 /* so do tabs */
+    ctx.style_flags = (u16)WP_STYLE_BOLD;
+    ASSERT_TRUE(wp_rulerbar_signature(&rb, &ctx) != b);                 /* and bold */
+
     ctx_teardown(&doc, &journal, &ctx);
 }

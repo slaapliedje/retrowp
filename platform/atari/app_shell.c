@@ -31,6 +31,7 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "pageview.h"
+#include "rulerbar.h"
 #include "selspan.h"
 #include "menucheck.h"
 #include "statusline.h"
@@ -3566,6 +3567,58 @@ static i32 statusline_height_px(void)
     return font_line_height_px(WP_ATARI_STATUSLINE_SIZE_TWIPS);
 }
 
+/* The ruler bar's place at the top of the work area (rulerbar.h). On a
+   screen whose pixels are much taller than wide -- medium resolution,
+   640x200 -- the icons fold to eight rows so they keep their shape. A
+   window too short to hold the bar and a line of text gets none. */
+static wp_bool atari_rulerbar(GRECT work, wp_rulerbar *rb)
+{
+    i32 tall = (atari_twips_to_px_y(1440) * 4 < atari_twips_to_px_x(1440) * 3);
+
+    rb->x = work.g_x;
+    rb->y = work.g_y;
+    rb->w = work.g_w;
+    rb->icon_rows = tall ? 8 : 16;
+    rb->button_w = 20;
+    rb->button_h = rb->icon_rows + 2;
+    rb->scale_h = statusline_height_px() + (tall ? 2 : 4);
+    rb->origin_x = work.g_x;
+    rb->twips_to_x = atari_twips_to_px_x;
+    rb->x_to_twips = atari_px_to_twips_x;
+    return (wp_bool)(wp_rulerbar_height(rb) * 3 < work.g_h);
+}
+
+static i32 atari_rulerbar_h(GRECT work)
+{
+    wp_rulerbar rb;
+    return atari_rulerbar(work, &rb) ? wp_rulerbar_height(&rb) : 0;
+}
+
+/* The bar is repainted only when it could look different (its
+   signature changed) or when the AES damaged it (WM_REDRAW and friends
+   set g_rulerbar_damaged); a keystroke that changes neither costs
+   nothing here. See wp_rulerbar_signature. */
+static u32 g_rulerbar_sig = 0;
+static wp_bool g_rulerbar_damaged = WP_TRUE;
+
+/* Paints the bar; the caller has set the clip. */
+static void paint_rulerbar(short window_handle, VdiHdl vdi, GRECT work)
+{
+    atari_gc gc;
+    plat_font *font;
+    plat_font_metrics fm;
+    wp_rulerbar rb;
+
+    if (!g_ctx.doc_loaded || !atari_rulerbar(work, &rb)) return;
+    if (!g_rulerbar_damaged && wp_rulerbar_signature(&rb, &g_ctx) == g_rulerbar_sig) return;
+    gc.vdi = vdi;
+    gc.window_handle = window_handle;
+    if (plat_font_open((const u8 *)"", 0, WP_ATARI_STATUSLINE_SIZE_TWIPS, 0, &font) != WP_OK) return;
+    plat_font_metrics_get(font, &fm);
+    wp_rulerbar_paint((plat_gc *)&gc, font, atari_twips_to_px_y(fm.ascent), &rb, &g_ctx);
+    plat_font_close(font);
+}
+
 /* Paints the reserved bottom strip showing vi-mode's current mode (and,
    in Command-line mode, the ':'/'/' buffer being typed) -- see
    platform/common/statusline.h. Always repaints in full (the strip is
@@ -3747,7 +3800,7 @@ static void redraw_window(short window_handle, VdiHdl vdi)
 {
     GRECT r, work, doc_area;
     short pxy[4];
-    i32 bar_h_px;
+    i32 bar_h_px, ruler_h_px;
 
     wind_update(BEG_UPDATE);
     graf_mouse(M_OFF, (const MFORM *)0);
@@ -3782,8 +3835,12 @@ static void redraw_window(short window_handle, VdiHdl vdi)
     bar_h_px = statusline_height_px();
     if (bar_h_px > work.g_h) bar_h_px = 0; /* degenerate/tiny window -- skip the bar rather
                                                than hand paint_document a negative height */
+    /* The ruler bar on top, the status line at the bottom, the document
+       between. */
+    ruler_h_px = atari_rulerbar_h(work);
     doc_area = work;
-    doc_area.g_h = (short)(work.g_h - bar_h_px);
+    doc_area.g_y = (short)(work.g_y + ruler_h_px);
+    doc_area.g_h = (short)(work.g_h - bar_h_px - ruler_h_px);
 
     /* The view follows the caret, before any rectangle is painted: a
        keystroke that moved the caret off-screen scrolls the whole view
@@ -3808,10 +3865,19 @@ static void redraw_window(short window_handle, VdiHdl vdi)
            still erasing everything that needs erasing. The clip
            rectangle above still bounds all of it, so a partial AES
            redraw repaints exactly its own rectangle as before. */
+        /* The bar first: it is what a click on it changed, and it sits
+           above the text, so the writer sees the answer before the
+           document finishes repainting under it. */
+        if (r.g_y < doc_area.g_y) paint_rulerbar(window_handle, vdi, work);
         paint_document(window_handle, vdi, doc_area);
         wind_get_grect(window_handle, WF_NEXTXYWH, &r);
     }
     vs_clip(vdi, 0, pxy);
+    {
+        wp_rulerbar rb;
+        if (atari_rulerbar(work, &rb)) g_rulerbar_sig = wp_rulerbar_signature(&rb, &g_ctx);
+        g_rulerbar_damaged = WP_FALSE;
+    }
 
     paint_status_line(window_handle, vdi, work, bar_h_px);
 
@@ -4250,7 +4316,10 @@ wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key, short kstate
        showing help is a harmless no-op rather than resetting the user's
        position back to the index node. */
     if (g_help_active) {
-        if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
+        if (wp_help_view_feed_key(&g_help_view, ev)) {
+            g_help_active = WP_FALSE;
+            g_rulerbar_damaged = WP_TRUE;   /* the manual was drawn over it */
+        }
         redraw_window(window_handle, vdi);
         return WP_FALSE;
     }
@@ -4516,7 +4585,8 @@ static wp_bool menu_action_map_selfcheck(void)
 static void atari_click(short window_handle, VdiHdl vdi, short mx, short my, short kstate)
 {
     GRECT work;
-    i32 bar_h_px;
+    i32 bar_h_px, ruler_h_px;
+    wp_rulerbar rb;
     wp_pos pos;
 
     if (!g_ctx.doc_loaded || g_help_active) return;
@@ -4525,8 +4595,27 @@ static void atari_click(short window_handle, VdiHdl vdi, short mx, short my, sho
     if (mx < work.g_x || mx >= work.g_x + work.g_w) return;
     if (my < work.g_y || my >= work.g_y + work.g_h - bar_h_px) return;
 
+    /* The ruler bar: a button runs its action exactly as the menu would;
+       a click on the ruler sets or clears a tab stop there. */
+    if (atari_rulerbar(work, &rb) && my < work.g_y + wp_rulerbar_height(&rb)) {
+        wp_rulerbar_hit hit;
+        if (wp_rulerbar_hit_test(&rb, mx, my, &hit)) {
+            if (hit.kind == (u8)WP_RULERBAR_BUTTON) {
+                /* Redrawn afterwards, as a menu pick is; a file picker or
+                   alert it opened has closed by now. */
+                invoke_action(window_handle, vdi, hit.action);
+                if (!g_help_active && !g_ctx.quit_requested) redraw_window(window_handle, vdi);
+                return;
+            }
+            if (hit.kind == (u8)WP_RULERBAR_RULER) (void)wp_action_toggle_tab(&g_ctx, hit.twips);
+            redraw_window(window_handle, vdi);
+        }
+        return;
+    }
+    ruler_h_px = atari_rulerbar_h(work);
+
     if (!wp_viewport_hit_test(&g_ctx.view, &g_doc, g_content_width_twips,
-                              (i32)(mx - work.g_x), (i32)(my - work.g_y),
+                              (i32)(mx - work.g_x), (i32)(my - work.g_y - ruler_h_px),
                               atari_px_to_twips_x, atari_twips_to_px_x, &pos)) return;
     wp_keymap_click(&g_ctx, pos, (wp_bool)((kstate & 0x03) != 0));
     redraw_window(window_handle, vdi);
@@ -4607,6 +4696,7 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
         return WP_FALSE;
 
     case WM_REDRAW:
+        g_rulerbar_damaged = WP_TRUE;   /* the AES says something covered it */
         redraw_window(window_handle, vdi);
         return WP_FALSE;
 

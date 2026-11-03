@@ -145,6 +145,28 @@ available choices.
 The Format menu also lists Bold, Italic, Underline, Size, and
 Alignment directly.
 
+The ruler bar across the top of the window does the same with
+the mouse. Its buttons, left to right:
+
+  New, Open, Save
+  Cut, Copy, Paste, Undo
+  Bold, Italic, Underline
+  Align Left, Center, Align Right, Justify
+  Single, 1.5 and Double line spacing
+  Indent Less, Indent More (half an inch at a time)
+
+A button shown inverted is the one in force at the caret. The
+ruler under the buttons measures the page's text column in
+inches: the triangles are the caret paragraph's first-line,
+left and right indents, and an L marks a tab stop. Click the
+ruler to set a tab stop there; click a stop to remove it.
+Paragraph buttons and tab stops act on every paragraph the
+selection touches, or the caret's paragraph.
+
+On DOS the buttons are letters in brackets and the ruler is a
+row of dots: [ and ] are the margins, > the first-line indent,
+| the left indent, and L R C D the tab stops.
+
 {Back to Main|Main}
 @endnode
 

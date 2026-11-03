@@ -15,6 +15,7 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "pageview.h"
+#include "rulerbar.h"
 #include "selspan.h"
 #include "tools.h"
 #include "menucheck.h"
@@ -45,7 +46,9 @@
 #define DOS_SCREEN_COLS   80
 #define DOS_SCREEN_ROWS   25
 #define DOS_TITLE_ROW     0
-#define DOS_DOC_TOP_ROW   1
+#define DOS_BAR_ROW       1   /* the ruler bar's buttons (rulerbar.h) */
+#define DOS_RULER_ROW     2   /* and its ruler */
+#define DOS_DOC_TOP_ROW   3
 #define DOS_STATUS_ROW    (DOS_SCREEN_ROWS - 1)
 #define DOS_DOC_BOTTOM_ROW (DOS_STATUS_ROW - 1)
 
@@ -466,8 +469,31 @@ static u32 dos_format_image_marker(u8 *buf, u32 cap, const wp_document *doc,
    line is one text row, whatever its point size says. */
 static i32 dos_line_rows(i32 height_twips)
 {
-    WP_UNUSED(height_twips);
-    return 1;
+    /* A line box is at least one row; whole extra rows of spacing --
+       double spacing, a 12 pt gap after a paragraph -- become blank
+       rows, as text-mode word processors always showed them. Less than
+       a row of spacing cannot be shown in cells and is dropped. */
+    i32 rows = dos_twips_to_row(height_twips);
+    return (rows < 1) ? 1 : rows;
+}
+
+/* The ruler bar on rows 1 and 2 (rulerbar.h), in cells: three-cell
+   text buttons ("[B]") and a text ruler under them, from the column the
+   document's lines start at. */
+static i32 dos_bar_twips_to_col(i32 twips) { return dos_twips_to_col(twips); }
+static i32 dos_bar_col_to_twips(i32 col)   { return dos_col_to_twips(col); }
+static void dos_rulerbar(wp_rulerbar *rb)
+{
+    rb->x = 0;
+    rb->y = DOS_BAR_ROW;
+    rb->w = DOS_SCREEN_COLS;
+    rb->button_w = 3;
+    rb->button_h = 1;
+    rb->icon_rows = 0;
+    rb->scale_h = 1;
+    rb->origin_x = 0;
+    rb->twips_to_x = dos_bar_twips_to_col;
+    rb->x_to_twips = dos_bar_col_to_twips;
 }
 
 static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
@@ -677,8 +703,9 @@ static void paint_help(plat_gc *gc)
     static const u8 hint[] = "HELP -- j/k select, Enter follow, Backspace back, Esc/q close";
 
     if (plat_font_open((const u8 *)"", 0, 240, 0, &font) == WP_OK) {
-        wp_help_view_paint(gc, font, 0, DOS_DOC_TOP_ROW, DOS_SCREEN_COLS,
-                            DOS_DOC_BOTTOM_ROW - DOS_DOC_TOP_ROW + 1,
+        /* The manual takes the bar's rows too: it has none of its own. */
+        wp_help_view_paint(gc, font, 0, DOS_BAR_ROW, DOS_SCREEN_COLS,
+                            DOS_DOC_BOTTOM_ROW - DOS_BAR_ROW + 1,
                             dos_col_to_twips(DOS_SCREEN_COLS), 1, 0, &g_help_view);
 
         {
@@ -788,6 +815,16 @@ static void redraw_screen(void)
         g_ctx.view.view_h_px = DOS_DOC_BOTTOM_ROW - DOS_DOC_TOP_ROW + 1;
         wp_viewport_follow_cursor(&g_ctx.view, &g_doc, wp_keymap_cursor(&g_ctx));
         paint_document_body(DOS_DOC_TOP_ROW, DOS_DOC_BOTTOM_ROW, gc, &cursor_row, &cursor_col);
+        {
+            wp_rulerbar rb;
+            plat_font *bar_font;
+
+            dos_rulerbar(&rb);
+            if (plat_font_open((const u8 *)"", 0, 240, 0, &bar_font) == WP_OK) {
+                wp_rulerbar_paint(gc, bar_font, 0, &rb, &g_ctx);
+                plat_font_close(bar_font);
+            }
+        }
         paint_status_line(gc);
     }
 
@@ -1180,6 +1217,19 @@ static void dos_click(int col, int row)
     wp_pos pos;
 
     if (!g_ctx.doc_loaded || g_help_active) return;
+
+    /* The ruler bar: a button runs its action as its shortcut would, a
+       click on the ruler sets or clears a tab stop there. */
+    if (row == DOS_BAR_ROW || row == DOS_RULER_ROW) {
+        wp_rulerbar rb;
+        wp_rulerbar_hit hit;
+
+        dos_rulerbar(&rb);
+        if (!wp_rulerbar_hit_test(&rb, (i32)col, (i32)row, &hit)) return;
+        if (hit.kind == (u8)WP_RULERBAR_BUTTON) invoke_action(hit.action);
+        else if (hit.kind == (u8)WP_RULERBAR_RULER) (void)wp_action_toggle_tab(&g_ctx, hit.twips);
+        return;
+    }
     if (row < DOS_DOC_TOP_ROW || row > DOS_DOC_BOTTOM_ROW) return;
     if (!wp_viewport_hit_test(&g_ctx.view, &g_doc, g_content_width_twips,
                               (i32)col, (i32)(row - DOS_DOC_TOP_ROW),
