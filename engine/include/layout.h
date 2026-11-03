@@ -11,20 +11,55 @@
    first-line indent handling, why "minimal recompute" only applies to
    line breaking and not page-filling) is in docs/layout.md. */
 
+/* One laid-out line, with everything a painter needs to place it -- so
+   that every backend draws the same geometry instead of re-deriving it
+   (each used to: none drew indents, and all four measured alignment and
+   justify against the full column even when an indent had narrowed the
+   line). Coordinates are twips: x from the left edge of the text column,
+   y from the top of the line's own box.
+
+     +---------------------------------------- box top (y advances by height_twips)
+     |  text_top_twips   (space_before, first line only)
+     +--- text top ---------------------------
+     |  text_height_twips (the line's own ascent+descent+leading;
+     |                     caret and selection span this)
+     +----------------------------------------
+     |  line spacing's extra, then space_after on the last line
+     +---------------------------------------- box bottom
+
+   x_twips already includes the paragraph's indent (left, plus first-line
+   on line 0) and its alignment within avail_twips; avail_twips is the
+   width the line was broken to, which is also justify's target. */
 typedef struct {
     u32 start_run;    /* line's content starts here (inclusive) */
     u32 start_offset;
     u32 end_run;       /* line's content ends here (exclusive) */
     u32 end_offset;
-    i32 width_twips;   /* measured width of this line's content */
-    i32 height_twips;  /* max (ascent+descent+leading) across the line */
+    i32 width_twips;   /* measured width of this line's content, tabs included */
+    i32 height_twips;  /* the whole box: spacing above and below included */
+    i32 x_twips;            /* where the content starts, from the column's left edge */
+    i32 avail_twips;        /* width available to this line (justify's target) */
+    i32 text_top_twips;     /* box top to text top */
+    i32 text_height_twips;  /* the text's own height */
+    u32 first_tab;          /* index into the layout's tab_widths of this line's first tab */
+    u32 tab_count;          /* tabs on this line */
 } wp_line;
 
 typedef struct {
     wp_line *lines;
     u32      line_count;
     u32      line_capacity;
+    i32     *tab_widths;    /* the advance of every tab in the paragraph, in text order */
+    u32      tab_count;
+    u32      tab_capacity;
 } wp_paragraph_layout;
+
+/* The tab stop a tab starting at x_twips (from the column's left edge)
+   advances to, and its kind (wp_tab_kind): the first explicit stop past
+   x, else the next multiple of WP_DEFAULT_TAB_TWIPS. pstyle may be NULL
+   (default stops only). Shared with the ruler, which draws the same
+   stops the layout uses. */
+i32 wp_tab_next_stop(const wp_para_style *pstyle, i32 x_twips, u8 *kind_out);
 
 /* Recomputes para->layout via greedy word wrap at content_width_twips
    (the section's usable column width; per-line width is further
@@ -97,17 +132,24 @@ void wp_pagination_free(wp_pagination *pagination);
    no alignment/last-line logic of its own -- the function already
    returns 0 whenever it wouldn't apply. */
 
+/* A tab is a fragment of its own (is_tab): never drawn, never measured
+   by the painter -- it advances x by tab_twips, which the layout already
+   worked out from the stops. A painter that measured "\t" as a glyph
+   would draw it at whatever width the font gives a control character. */
 typedef struct {
     u32     run_index;
     u32     byte_start;
     u32     byte_end;
     wp_bool is_space;
+    wp_bool is_tab;
+    i32     tab_twips;   /* meaningful only when is_tab */
 } wp_line_fragment;
 
 typedef struct {
     u32     run_index;
     u32     byte_offset;
     wp_bool finished;
+    u32     tab_index;   /* next tab's index into the layout's tab_widths */
 } wp_line_fragment_iter;
 
 void wp_line_fragment_iter_init(wp_line_fragment_iter *iter, const wp_line *line);
@@ -117,8 +159,10 @@ wp_bool wp_line_next_fragment(wp_document *doc, wp_paragraph *para, const wp_lin
 
 /* 0 unless align is WP_ALIGN_JUSTIFY, the line is not its paragraph's
    last (matching PDF export's own left-align-last-line convention),
-   and it has at least one interior gap; otherwise
-   (target_width_twips - line->width_twips) / gap_count. */
+   it has no tab (stretching gaps would pull tabbed columns out of their
+   stops), and it has at least one interior gap; otherwise
+   (target_width_twips - line->width_twips) / gap_count. Pass
+   line->avail_twips as the target. */
 i32 wp_justify_space_extra_twips(wp_document *doc, wp_paragraph *para, const wp_line *line,
                                   u8 align, wp_bool is_last_line_of_paragraph,
                                   i32 target_width_twips);

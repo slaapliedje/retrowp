@@ -1014,23 +1014,6 @@ static ULONG editor_askminmax(struct IClass *cl, Object *obj, struct MUIP_AskMin
 #define WP_EDITOR_TOP_MARGIN_PX 8
 #define WP_EDITOR_MIN_CONTENT_PX 20
 
-/* Pure arithmetic behind paint's per-line alignment offset, pulled out
-   of the paint loop exactly the way platform/atari/app_shell.c's
-   atari_align_offset_twips is -- same three-way LEFT/CENTER/RIGHT
-   behavior (JUSTIFY isn't implemented -- documented gap, see
-   docs/amiga-platform.md, same as Atari's). Returns a TWIPS offset;
-   callers convert to pixels themselves since the twips<->px ratio is a
-   metrics concern, not an alignment one. */
-static i32 amiga_align_offset_twips(u8 align, i32 content_width_twips, i32 line_width_twips)
-{
-    i32 extra_twips = content_width_twips - line_width_twips;
-
-    if (extra_twips <= 0) return 0;
-    if (align == WP_ALIGN_CENTER) return extra_twips / 2;
-    if (align == WP_ALIGN_RIGHT) return extra_twips;
-    return 0;
-}
-
 /* WP_TRUE if (run, offset) falls within [line->start_run,start_offset)
    .. [line->end_run,end_offset] -- used to find which of a paragraph's
    real wrapped lines the vi-mode cursor is currently sitting on, now
@@ -1065,6 +1048,7 @@ static i32 amiga_font_line_height_px(i32 size_twips)
     plat_font_close(font);
     return h_px;
 }
+
 
 /* The vi-mode status/mode line for the EDITOR window (T159).
 
@@ -1288,6 +1272,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                 wp_line *line = &layout->lines[li];
                 i32 x_px = _mleft(obj) + WP_EDITOR_LEFT_MARGIN_PX;
                 i32 line_origin_px;
+                i32 text_y, text_h_px;
                 i32 extra_twips;
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
@@ -1295,8 +1280,10 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                 /* Scrolled off the top: walked, not drawn, y stays put. */
                 if (flat++ < g_ctx.view.top_line) continue;
 
-                x_px += amiga_twips_to_px_x(
-                    amiga_align_offset_twips(align, content_width_twips, line->width_twips));
+                /* Indent and alignment are the layout's (wp_line.x_twips);
+                   the text sits text_top_twips into the line's box, which
+                   also holds the paragraph's spacing. */
+                x_px += amiga_twips_to_px_x(line->x_twips);
                 line_origin_px = x_px;   /* the fragment walk below advances x_px past it */
 
                 /* M15 T15.6: an image paragraph's single line has no run
@@ -1314,7 +1301,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
 
                     if (img != NULL && img->palette_count > 0) {
                         i32 w_px = amiga_twips_to_px_x(line->width_twips);
-                        i32 h_px = amiga_twips_to_px_y(line->height_twips);
+                        i32 h_px = text_h_px;   /* the picture, not its spacing */
                         wp_bool drew_real = WP_FALSE;
 
                         if (img->blob_path.length > 0 && img->blob_path.length < 256) {
@@ -1334,7 +1321,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                                     u32 read_len;
                                     if (plat_file_read(f, pixels, packed_len, &read_len) == WP_OK &&
                                         read_len == packed_len) {
-                                        if (plat_draw_image((plat_gc *)&gc, x_px, y, w_px, h_px,
+                                        if (plat_draw_image((plat_gc *)&gc, x_px, text_y, w_px, h_px,
                                                              pixels, img->width_px, img->height_px,
                                                              img->palette, img->palette_count) == WP_OK) {
                                             drew_real = WP_TRUE;
@@ -1347,7 +1334,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                         }
 
                         if (!drew_real) {
-                            plat_fill_rect((plat_gc *)&gc, x_px, y, w_px, h_px,
+                            plat_fill_rect((plat_gc *)&gc, x_px, text_y, w_px, h_px,
                                            img->palette[0][0], img->palette[0][1], img->palette[0][2]);
                         }
                     }
@@ -1357,7 +1344,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
 
                 extra_twips = wp_justify_space_extra_twips(
                     &g_amiga_doc, para, line, align, (wp_bool)(li == layout->line_count - 1),
-                    content_width_twips);
+                    line->avail_twips);
 
                 wp_line_fragment_iter_init(&iter, line);
                 while (wp_line_next_fragment(&g_amiga_doc, para, line, &iter, &frag)) {
@@ -1373,6 +1360,11 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                        stale-layout regression into a wild read rather than
                        a visibly wrong glyph. Cheap insurance on the one
                        path that walks engine-supplied indices. */
+                    /* A tab is never drawn: it moves x to its stop. */
+                    if (frag.is_tab) {
+                        x_px += amiga_twips_to_px_x(frag.tab_twips);
+                        continue;
+                    }
                     if (run == NULL) continue;
                     bytes = wp_strpool_get(&g_amiga_doc.strings, run->text);
                     if (bytes == NULL) continue;
@@ -1423,7 +1415,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                     plat_measure_text(font, bytes + frag.byte_start, frag_len, &frag_width_twips);
 
                     if (!frag.is_space) {
-                        plat_draw_text((plat_gc *)&gc, font, x_px, y + ascent_px,
+                        plat_draw_text((plat_gc *)&gc, font, x_px, text_y + ascent_px,
                                         bytes + frag.byte_start, frag_len, text_r, text_g, text_b);
                     }
 
@@ -1463,12 +1455,12 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                                                 (*wp_keymap_cursor(&g_ctx)).run,
                                                 (*wp_keymap_cursor(&g_ctx)).offset,
                                                 extra_twips));
-                    i32 caret_h_px = amiga_twips_to_px_y(line->height_twips);
+                    i32 caret_h_px = text_h_px;
 
                     if (caret_h_px < 1) caret_h_px = 1;
                     SetAPen(gc.rp, (UBYTE)gc.dri->dri_Pens[FILLPEN]);
-                    RectFill(gc.rp, caret_x_px, (LONG)y,
-                             caret_x_px + 1, (LONG)(y + caret_h_px - 1));
+                    RectFill(gc.rp, caret_x_px, (LONG)text_y,
+                             caret_x_px + 1, (LONG)(text_y + caret_h_px - 1));
                 }
 
                 /* The selection, inverted over this line's selected
@@ -1480,11 +1472,11 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                         wp_line_cursor_x_twips(&g_amiga_doc, para, line, sel_from.run, sel_from.offset, extra_twips));
                     i32 hx1 = line_origin_px + amiga_twips_to_px_x(
                         wp_line_cursor_x_twips(&g_amiga_doc, para, line, sel_to.run, sel_to.offset, extra_twips));
-                    i32 h_px = amiga_twips_to_px_y(line->height_twips);
+                    i32 h_px = text_h_px;
 
                     if (hx1 > hx0 && h_px > 0) {
                         SetDrMd(gc.rp, COMPLEMENT);
-                        RectFill(gc.rp, hx0, (LONG)y, hx1 - 1, (LONG)(y + h_px - 1));
+                        RectFill(gc.rp, hx0, (LONG)text_y, hx1 - 1, (LONG)(text_y + h_px - 1));
                         SetDrMd(gc.rp, JAM1);
                     }
                 }

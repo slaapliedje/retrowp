@@ -89,8 +89,8 @@ void test_actions_table_row_order_matches_enum(void)
     }
 }
 
-/* Every action must be reachable by a human: it either sits in a real
-   native menu group, or it has a keyboard shortcut, or both. An entry
+/* Every action must be reachable by a human: it sits in a real native
+   menu group, or has a keyboard shortcut, or is a ruler-bar button. An entry
    with neither is dead weight that no backend can ever invoke. */
 void test_actions_every_action_is_reachable(void)
 {

@@ -299,18 +299,6 @@ wp_bool wp_viewport_line_at_y(const wp_viewport *vp, wp_document *doc, i32 y_px,
     return have;
 }
 
-/* The same LEFT/CENTER/RIGHT arithmetic every painter applies to a
-   line's x origin; JUSTIFY starts at the left like LEFT. */
-static i32 align_offset_twips(u8 align, i32 content_width_twips, i32 line_width_twips)
-{
-    i32 extra = content_width_twips - line_width_twips;
-
-    if (extra <= 0) return 0;
-    if (align == WP_ALIGN_CENTER) return extra / 2;
-    if (align == WP_ALIGN_RIGHT) return extra;
-    return 0;
-}
-
 wp_bool wp_viewport_hit_test(const wp_viewport *vp, wp_document *doc, i32 content_width_twips,
                              i32 x_px, i32 y_px,
                              wp_viewport_x_conv_fn px_to_twips_x, wp_viewport_x_conv_fn twips_to_px_x,
@@ -334,11 +322,14 @@ wp_bool wp_viewport_hit_test(const wp_viewport *vp, wp_document *doc, i32 conten
     pstyle = wp_document_pstyle_get(doc, para->style);
     align = (pstyle != NULL) ? pstyle->align : WP_ALIGN_LEFT;
 
-    origin_px = twips_to_px_x(align_offset_twips(align, content_width_twips, line->width_twips));
+    /* The line's own origin (indent and alignment, from the layout) --
+       the same x every painter starts the line at. */
+    (void)content_width_twips;
+    origin_px = twips_to_px_x(line->x_twips);
     x_twips = (x_px > origin_px) ? px_to_twips_x(x_px - origin_px) : 0;
     extra_twips = wp_justify_space_extra_twips(doc, para, line, align,
                                                (wp_bool)(li == layout->line_count - 1),
-                                               content_width_twips);
+                                               line->avail_twips);
     (void)wp_line_pos_at_x_twips(doc, para, line, x_twips, extra_twips, &run, &offset);
 
     out->section = si;

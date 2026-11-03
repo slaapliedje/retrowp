@@ -8,6 +8,7 @@ void wp_line_fragment_iter_init(wp_line_fragment_iter *iter, const wp_line *line
 {
     iter->run_index = line->start_run;
     iter->byte_offset = line->start_offset;
+    iter->tab_index = line->first_tab;
     iter->finished = (wp_bool)(line->start_run == line->end_run &&
                                 line->start_offset >= line->end_offset);
 }
@@ -54,12 +55,25 @@ wp_bool wp_line_next_fragment(wp_document *doc, wp_paragraph *para, const wp_lin
 
     bytes = wp_strpool_get(&doc->strings, run->text);
     seg_start = iter->byte_offset;
-    seg_is_space = (wp_bool)(bytes[seg_start] == ' ');
-
-    iter->byte_offset = utf8_next(bytes, run_end, iter->byte_offset);
-    while (iter->byte_offset < run_end &&
-           (wp_bool)(bytes[iter->byte_offset] == ' ') == seg_is_space) {
+    out->is_tab = WP_FALSE;
+    out->tab_twips = 0;
+    if (bytes[seg_start] == '\t') {
+        /* One tab, one fragment; its advance is the layout's. */
+        const wp_paragraph_layout *layout = (const wp_paragraph_layout *)para->layout;
+        iter->byte_offset = seg_start + 1;
+        seg_is_space = WP_FALSE;
+        out->is_tab = WP_TRUE;
+        if (layout != NULL && iter->tab_index < layout->tab_count) {
+            out->tab_twips = layout->tab_widths[iter->tab_index];
+        }
+        iter->tab_index++;
+    } else {
+        seg_is_space = (wp_bool)(bytes[seg_start] == ' ');
         iter->byte_offset = utf8_next(bytes, run_end, iter->byte_offset);
+        while (iter->byte_offset < run_end && bytes[iter->byte_offset] != '\t' &&
+               (wp_bool)(bytes[iter->byte_offset] == ' ') == seg_is_space) {
+            iter->byte_offset = utf8_next(bytes, run_end, iter->byte_offset);
+        }
     }
 
     out->run_index = iter->run_index;
@@ -89,6 +103,7 @@ i32 wp_justify_space_extra_twips(wp_document *doc, wp_paragraph *para, const wp_
 
     if (align != WP_ALIGN_JUSTIFY || is_last_line_of_paragraph) return 0;
     if (para->kind == (u8)WP_PARA_IMAGE) return 0;   /* M15: nothing to justify */
+    if (line->tab_count > 0) return 0;               /* keep tabbed columns on their stops */
 
     wp_line_fragment_iter_init(&iter, line);
     while (wp_line_next_fragment(doc, para, line, &iter, &frag)) {
@@ -164,6 +179,13 @@ i32 wp_line_cursor_x_twips(wp_document *doc, wp_paragraph *para, const wp_line *
         if (frag.run_index > cursor_run) break;
         if (frag.run_index == cursor_run && cursor_offset <= frag.byte_start) break;
 
+        if (frag.is_tab) {
+            /* The cursor is past this tab (the check above stopped
+               before it otherwise): its whole advance counts. */
+            x_twips += frag.tab_twips;
+            continue;
+        }
+
         run = wp_paragraph_run_get(para, (u16)frag.run_index);
         if (run == NULL) continue;
         bytes = wp_strpool_get(&doc->strings, run->text);
@@ -237,6 +259,16 @@ wp_bool wp_line_pos_at_x_twips(wp_document *doc, wp_paragraph *para, const wp_li
         *run_out = frag.run_index;
         *offset_out = frag.byte_end;
 
+        if (frag.is_tab) {
+            if (x_twips < x_acc + frag.tab_twips) {
+                /* In the tab's gap: before it or after it, whichever edge is nearer. */
+                *offset_out = ((x_twips - x_acc) * 2 < frag.tab_twips) ? frag.byte_start : frag.byte_end;
+                found = WP_TRUE;
+                break;
+            }
+            x_acc += frag.tab_twips;
+            continue;
+        }
         if (run == NULL) continue;
         bytes = wp_strpool_get(&doc->strings, run->text);
         if (bytes == NULL || frag_len == 0) continue;

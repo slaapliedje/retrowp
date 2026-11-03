@@ -43,16 +43,35 @@ typedef enum {
     WP_ALIGN_LEFT = 0, WP_ALIGN_CENTER = 1, WP_ALIGN_RIGHT = 2, WP_ALIGN_JUSTIFY = 3
 } wp_align;
 
+/* Tab stops (RTF \tqc \tqr \tqdec \txN). A stop's position is measured
+   from the left edge of the text column, as RTF and the ruler measure
+   it -- not from the paragraph's indent. Past the last explicit stop, or
+   with none, a tab advances to the next multiple of WP_DEFAULT_TAB_TWIPS
+   (Word's and Atari Works' half inch). See docs/layout.md. */
+#define WP_MAX_TABS          12
+#define WP_DEFAULT_TAB_TWIPS 720
+typedef enum {
+    WP_TAB_LEFT = 0, WP_TAB_CENTER = 1, WP_TAB_RIGHT = 2, WP_TAB_DECIMAL = 3
+} wp_tab_kind;
+
 typedef struct {
     u8  align;          /* wp_align */
-    u8  _pad[3];
+    u8  tab_count;      /* explicit stops in tab_pos/tab_kind, sorted by position */
+    u8  _pad[2];
     i32 indent_left;
     i32 indent_right;
     i32 indent_first;   /* first-line indent; may be negative */
-    i32 space_before;
-    i32 space_after;
-    i32 line_spacing;   /* 0 = single/auto */
+    i32 space_before;   /* twips above the paragraph's first line */
+    i32 space_after;    /* twips below its last line */
+    /* 0 = single. > 0 = a multiple of single in 240ths (360 is 1.5,
+       480 double: RTF's \slN\slmult1). < 0 = at least -N twips (RTF's
+       \slN\slmult0; RTF's "exactly" is read as "at least" too, since a
+       line clipped to less than its own text is not something this
+       engine draws). The extra goes below the text. */
+    i32 line_spacing;
     wp_str style_name;  /* named style ("Heading 1"), optional */
+    u8  tab_kind[WP_MAX_TABS];  /* wp_tab_kind */
+    i32 tab_pos[WP_MAX_TABS];   /* twips from the column's left edge */
 } wp_para_style;
 
 typedef struct {

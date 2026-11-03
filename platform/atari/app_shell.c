@@ -1290,6 +1290,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                 wp_line *line = &layout->lines[li];
                 i32 x_px = area.g_x;
                 i32 line_origin_px;
+                i32 text_y_px, text_h_px;
                 i32 extra_twips;
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
@@ -1314,9 +1315,15 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                    resolves to 0 here (left start) same as LEFT -- correct,
                    since justify only redistributes slack BETWEEN words,
                    via the per-fragment walk below (T13.2). */
-                x_px += atari_twips_to_px_x(
-                    atari_align_offset_twips(align, g_content_width_twips, line->width_twips));
+                /* Where the line starts -- indent and alignment -- is
+                   the layout's (wp_line.x_twips), so every backend
+                   places it identically; this used to re-derive the
+                   alignment here against the full column, ignoring the
+                   paragraph's indents. */
+                x_px += atari_twips_to_px_x(line->x_twips);
                 line_origin_px = x_px;   /* the fragment walk below advances x_px past it */
+                text_y_px = y_px + atari_twips_to_px_y(line->text_top_twips);
+                text_h_px = atari_twips_to_px_y(line->text_height_twips);
 
                 /* M15 T15.6: an image paragraph's single line has no run
                    bytes to fragment (wp_line_next_fragment already returns
@@ -1335,7 +1342,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 
                     if (img != NULL && img->palette_count > 0) {
                         i32 w_px = atari_twips_to_px_x(line->width_twips);
-                        i32 h_px = atari_twips_to_px_y(line->height_twips);
+                        i32 h_px = text_h_px;   /* the picture, not its spacing */
                         wp_bool drew_real = WP_FALSE;
 
                         if (img->blob_path.length > 0 && img->blob_path.length < 256) {
@@ -1355,7 +1362,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                                     u32 read_len;
                                     if (plat_file_read(imgf, ipixels, packed_len, &read_len) == WP_OK &&
                                         read_len == packed_len) {
-                                        if (plat_draw_image((plat_gc *)&gc, x_px, y_px, w_px, h_px,
+                                        if (plat_draw_image((plat_gc *)&gc, x_px, text_y_px, w_px, h_px,
                                                              ipixels, img->width_px, img->height_px,
                                                              img->palette, img->palette_count) == WP_OK) {
                                             drew_real = WP_TRUE;
@@ -1368,7 +1375,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                         }
 
                         if (!drew_real) {
-                            plat_fill_rect((plat_gc *)&gc, x_px, y_px, w_px, h_px,
+                            plat_fill_rect((plat_gc *)&gc, x_px, text_y_px, w_px, h_px,
                                            img->palette[0][0], img->palette[0][1], img->palette[0][2]);
                         }
                     }
@@ -1378,7 +1385,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 
                 extra_twips = wp_justify_space_extra_twips(
                     &g_doc, para, line, align, (wp_bool)(li == layout->line_count - 1),
-                    g_content_width_twips);
+                    line->avail_twips);
 
                 wp_line_fragment_iter_init(&iter, line);
                 while (wp_line_next_fragment(&g_doc, para, line, &iter, &frag)) {
@@ -1394,6 +1401,12 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                        stale-layout regression into a wild read rather than
                        a visibly wrong glyph. Cheap insurance on the one
                        path that walks engine-supplied indices. */
+                    /* A tab is never drawn: it moves x to where the
+                       layout's tab stop put the next text. */
+                    if (frag.is_tab) {
+                        x_px += atari_twips_to_px_x(frag.tab_twips);
+                        continue;
+                    }
                     if (run == NULL) continue;
                     bytes = wp_strpool_get(&g_doc.strings, run->text);
                     if (bytes == NULL) continue;
@@ -1440,7 +1453,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 
                     if (!frag.is_space) {
                         g_atari_painted_frags++;
-                        plat_draw_text((plat_gc *)&gc, font, x_px, y_px + ascent_px,
+                        plat_draw_text((plat_gc *)&gc, font, x_px, text_y_px + ascent_px,
                                         bytes + frag.byte_start, frag_len, text_r, text_g, text_b);
                     }
 
@@ -1486,10 +1499,10 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                                                 (*wp_keymap_cursor(&g_ctx)).run,
                                                 (*wp_keymap_cursor(&g_ctx)).offset,
                                                 extra_twips));
-                    i32 caret_h_px = atari_twips_to_px_y(line->height_twips);
+                    i32 caret_h_px = text_h_px;
 
                     if (caret_h_px < 1) caret_h_px = 1;
-                    plat_fill_rect((plat_gc *)&gc, caret_x_px, y_px,
+                    plat_fill_rect((plat_gc *)&gc, caret_x_px, text_y_px,
                                     WP_ATARI_CARET_W_PX, caret_h_px, 0, 0, 0);
                 }
 
@@ -1505,7 +1518,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                     i32 hx1 = line_origin_px + atari_twips_to_px_x(
                         wp_line_cursor_x_twips(&g_doc, para, line, sel_to.run, sel_to.offset, extra_twips));
 
-                    atari_invert_rect(vdi, hx0, y_px, hx1 - hx0, atari_twips_to_px_y(line->height_twips));
+                    atari_invert_rect(vdi, hx0, text_y_px, hx1 - hx0, text_h_px);
                 }
 
                 y_px += atari_twips_to_px_y(line->height_twips);

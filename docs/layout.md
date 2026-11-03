@@ -67,10 +67,49 @@ is what starts actually allocating it. `wp_pagination` has its own
 
 ## Line Breaking (T3.1): Greedy Word Wrap
 
-**Break opportunities are ASCII spaces (`0x20`) only.** No tab/CJK/
+**Break opportunities are ASCII spaces (`0x20`) and tabs.** No CJK/
 Unicode line-breaking (UAX #14) -- out of scope for this engine's first
-pass. A "word" is a maximal run of non-space codepoints; a "gap" is a
-maximal run of spaces.
+pass. A "word" is a maximal run of codepoints that are neither space nor
+tab; a "gap" is a maximal run of spaces; a tab is a token of its own.
+
+**Tabs (2026-11-02).** A tab advances to the next stop past where it
+starts, measured from the column's left edge (as RTF and the ruler
+measure it): the paragraph's explicit stops (`wp_para_style.tab_pos`,
+up to `WP_MAX_TABS`), then a default stop every `WP_DEFAULT_TAB_TWIPS`
+(half an inch) -- `wp_tab_next_stop`. A tab is content, like a word: it
+can begin a line, which is how a tabbed first line gets its indent.
+Wrapping happens in two passes. The greedy pass sizes every tab as a
+left tab from where it starts; once a line's tokens are known, a second
+pass gives right (and decimal) tabs the width that ends the following
+segment on the stop, centre tabs the width that centres it, and
+recomputes the line's width. Each tab's final width is kept in the
+layout (`tab_widths`, in text order; `wp_line.first_tab`/`tab_count`),
+so the fragment walk hands it to painters (`wp_line_fragment.is_tab`/
+`tab_twips`) and to the caret and click helpers without remeasuring. A
+justified line with a tab is not stretched: that would pull its columns
+off their stops.
+
+**Line geometry (2026-11-02).** Every line carries its own placement, so
+painters draw what the layout decided instead of re-deriving it (all four
+used to ignore indents when drawing and to align against the full
+column): `x_twips` -- indent (left, plus first-line on line 0) and the
+alignment offset within `avail_twips`, the width the line was broken to
+and justify's target; `height_twips` -- the whole box, which is the
+text's own height (`text_height_twips`) scaled by line spacing (a
+multiple in 240ths, or "at least" N twips), plus `space_before` above
+line 0 (`text_top_twips` says where the text starts in the box) and
+`space_after` below the last line. Pagination and scrolling add box
+heights, so spacing reaches both without further work.
+
+**Wrap width and pages on screen (2026-11-02).** Shells no longer pick
+a width themselves: `platform/common/pageview.c` wraps each section at
+its page's text column (page width less margins,
+`wp_section_column_twips`) -- or at the window when that is narrower,
+Word's draft view -- relays out only what is dirty or was broken at a
+different width (`wp_paragraph_layout.wrap_twips`), then
+`wp_document_mark_pages` stamps each line with its page and whether it
+starts one, which the pixel shells draw as a dashed rule and every shell
+reports in the status line ("Page 2 of 5").
 
 **Words can span run boundaries.** Runs split for reasons unrelated to
 wrapping (e.g. `wp_document_insert_text_raw` always creates a new run

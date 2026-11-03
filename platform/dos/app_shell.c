@@ -393,26 +393,14 @@ static wp_bool line_contains_pos(const wp_line *line, u32 run, u32 offset)
    cursor's own run, then adding the cursor's own in-run offset. Only
    ever called after line_contains_pos has already confirmed cursor_run/
    cursor_offset genuinely falls within this line. */
-static int cursor_col_in_line(wp_paragraph *para, const wp_line *line, int align_offset_col,
-                               u32 cursor_run, u32 cursor_offset)
+static int cursor_col_in_line(wp_paragraph *para, const wp_line *line, int origin_col,
+                               u32 cursor_run, u32 cursor_offset, i32 extra_twips)
 {
-    int col = align_offset_col;
-    u32 r;
-
-    for (r = line->start_run; r <= line->end_run; r++) {
-        u32 seg_start = (r == line->start_run) ? line->start_offset : 0;
-
-        if (r == cursor_run) {
-            col += (int)(cursor_offset - seg_start);
-            return col;
-        }
-        {
-            wp_run *run = wp_paragraph_run_get(para, (u16)r);
-            u32 seg_end = (r == line->end_run) ? line->end_offset : run->text.length;
-            col += (int)(seg_end - seg_start);
-        }
-    }
-    return col;
+    /* The shared measurement every other backend uses, so tabs and a
+       justified line's stretched gaps count here too; it used to count
+       bytes, which only held while every byte was one cell. */
+    return origin_col + (int)dos_twips_to_col(
+        wp_line_cursor_x_twips(&g_doc, para, line, cursor_run, cursor_offset, extra_twips));
 }
 
 /* No sprintf/stdio -- same portable-code discipline platform/common/
@@ -496,6 +484,7 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
     u32 si, pi;
     u32 flat = 0;   /* display-line index, the viewport's unit */
     int row = top_row;
+    int last_text_row = top_row;   /* the text row of the last line painted */
     wp_pos *cursor = wp_keymap_cursor(&g_ctx);
     wp_bool cursor_found = WP_FALSE;
     plat_font *font = NULL;
@@ -524,6 +513,7 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
             for (li = 0; li < layout->line_count && row <= bottom_row; li++) {
                 wp_line *line = &layout->lines[li];
                 int col;
+                int text_row;
                 int sel_c0 = 0, sel_c1 = 0;
                 wp_bool sel_here = WP_FALSE;
                 i32 extra_twips;
@@ -533,10 +523,14 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                 /* Scrolled off the top: walked, not drawn, no row used. */
                 if (flat++ < g_ctx.view.top_line) continue;
 
-                col = dos_twips_to_col(
-                    (align == WP_ALIGN_CENTER || align == WP_ALIGN_RIGHT)
-                        ? (g_content_width_twips - line->width_twips) / (align == WP_ALIGN_CENTER ? 2 : 1)
-                        : 0);
+                /* Indent and alignment are the layout's; the text row
+                   sits below any whole rows of space before it. */
+                col = (int)dos_twips_to_col(line->x_twips);
+                text_row = row + (int)dos_twips_to_row(line->text_top_twips);
+                if (text_row > bottom_row) {        /* spacing pushed it off the screen */
+                    row = bottom_row + 1;           /* and everything after it */
+                    break;
+                }
 
                 if (para->kind == (u8)WP_PARA_IMAGE) {
                     const wp_image_desc *img = wp_document_image_get(&g_doc, para->image);
@@ -548,23 +542,28 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                         plat_font *marker_font;
 
                         if (plat_font_open((const u8 *)"", 0, 240, 0, &marker_font) == WP_OK) {
-                            plat_draw_text(gc, marker_font, col, row, (const u8 *)marker, marker_len,
+                            plat_draw_text(gc, marker_font, col, text_row, (const u8 *)marker, marker_len,
                                            0xAA, 0xAA, 0xAA);
                             plat_font_close(marker_font);
                         }
                     }
-                    row++;
+                    last_text_row = text_row;
+                    row += (int)dos_line_rows(line->height_twips);
                     continue;
                 }
 
+                /* Whole cells only: the gaps are stretched a cell at a
+                   time, and the caret is measured with the same amount. */
                 extra_twips = wp_justify_space_extra_twips(
                     &g_doc, para, line, align, (wp_bool)(li == layout->line_count - 1),
-                    g_content_width_twips);
+                    line->avail_twips);
+                extra_twips = dos_col_to_twips(dos_twips_to_col(extra_twips));
 
                 if (!cursor_found && cursor->section == si && cursor->paragraph == pi &&
                     line_contains_pos(line, cursor->run, cursor->offset)) {
-                    *cursor_row_out = row;
-                    *cursor_col_out = cursor_col_in_line(para, line, col, cursor->run, cursor->offset);
+                    *cursor_row_out = text_row;
+                    *cursor_col_out = cursor_col_in_line(para, line, col, cursor->run, cursor->offset,
+                                                         extra_twips);
                     cursor_found = WP_TRUE;
                 }
 
@@ -572,8 +571,8 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                    the same byte count the cursor column uses; the
                    cells are inverted once the text is on them. */
                 if (have_sel && wp_selspan_for_line(sel, si, pi, line, &sel_from, &sel_to)) {
-                    sel_c0 = cursor_col_in_line(para, line, col, sel_from.run, sel_from.offset);
-                    sel_c1 = cursor_col_in_line(para, line, col, sel_to.run, sel_to.offset);
+                    sel_c0 = cursor_col_in_line(para, line, col, sel_from.run, sel_from.offset, extra_twips);
+                    sel_c1 = cursor_col_in_line(para, line, col, sel_to.run, sel_to.offset, extra_twips);
                     sel_here = (wp_bool)(sel_c1 > sel_c0);
                 }
 
@@ -582,6 +581,12 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                     wp_run *run = wp_paragraph_run_get(para, (u16)frag.run_index);
                     const u8 *bytes;
                     u32 frag_len = frag.byte_end - frag.byte_start;
+
+                    /* A tab is never drawn: it moves to its stop. */
+                    if (frag.is_tab) {
+                        col += (int)dos_twips_to_col(frag.tab_twips);
+                        continue;
+                    }
 
                     /* The layout is rebuilt from the current runs before
                        any paint, so an out-of-range run index should be
@@ -632,7 +637,7 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
 
                     if (frag_len > 0 && font != NULL && !frag.is_space) {
                         g_dos_painted_frags++;
-                        plat_draw_text(gc, font, col, row, bytes + frag.byte_start, frag_len,
+                        plat_draw_text(gc, font, col, text_row, bytes + frag.byte_start, frag_len,
                                         text_r, text_g, text_b);
                     }
 
@@ -640,16 +645,17 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                     if (frag.is_space) col += dos_twips_to_col(extra_twips);
                 }
 
-                if (sel_here) invert_cells(row, sel_c0, sel_c1);
+                if (sel_here) invert_cells(text_row, sel_c0, sel_c1);
 
-                row++;
+                last_text_row = text_row;
+                row += (int)dos_line_rows(line->height_twips);
             }
 
             if (!cursor_found && cursor->section == si && cursor->paragraph == pi) {
                 /* Empty paragraph (one zero-width line) or cursor sits
                    exactly at the paragraph's own end -- park on the
                    last row this paragraph actually used. */
-                *cursor_row_out = (row - 1 >= top_row) ? row - 1 : top_row;
+                *cursor_row_out = (last_text_row >= top_row) ? last_text_row : top_row;
                 *cursor_col_out = 0;
             }
         }

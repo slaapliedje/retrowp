@@ -923,24 +923,6 @@ static wp_bool mac_dispatch_key(wp_key_event ev)
 #define WP_DOC_TOP_MARGIN_PX   8
 #define WP_DOC_MIN_CONTENT_PX  20
 
-/* Pure arithmetic behind a line's per-alignment horizontal offset,
-   pulled out of the paint loop exactly the way platform/atari/
-   app_shell.c's atari_align_offset_twips and platform/amiga/
-   app_shell.c's amiga_align_offset_twips both are -- same three-way
-   LEFT/CENTER/RIGHT behavior (JUSTIFY isn't implemented, a documented
-   gap shared with both other backends). Returns a twips offset;
-   callers convert to pixels themselves since the twips<->px ratio is a
-   metrics concern, not an alignment one. */
-static i32 mac_align_offset_twips(u8 align, i32 content_width_twips, i32 line_width_twips)
-{
-    i32 extra_twips = content_width_twips - line_width_twips;
-
-    if (extra_twips <= 0) return 0;
-    if (align == WP_ALIGN_CENTER) return extra_twips / 2;
-    if (align == WP_ALIGN_RIGHT) return extra_twips;
-    return 0;
-}
-
 /* WP_TRUE if (run, offset) falls within [line->start_run,start_offset)
    .. [line->end_run,end_offset] -- used to find which of a paragraph's
    real wrapped lines the vi-mode cursor is currently sitting on, now
@@ -1181,6 +1163,8 @@ static void draw_document(WindowPtr w)
                 wp_line *line = &layout->lines[li];
                 i32 x_px = r.left + WP_DOC_LEFT_MARGIN_PX;
                 i32 line_origin_px;
+                short text_y;
+                i32 text_h_px;
                 i32 extra_twips;
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
@@ -1188,8 +1172,10 @@ static void draw_document(WindowPtr w)
                 /* Scrolled off the top: walked, not drawn, y stays put. */
                 if (flat++ < g_ctx.view.top_line) continue;
 
-                x_px += mac_twips_to_px(
-                    mac_align_offset_twips(align, content_width_twips, line->width_twips));
+                /* Indent and alignment are the layout's (wp_line.x_twips);
+                   the text sits text_top_twips into the line's box, which
+                   also holds the paragraph's spacing. */
+                x_px += mac_twips_to_px(line->x_twips);
                 line_origin_px = x_px;   /* the fragment walk below advances x_px past it */
 
                 /* M15 T15.6: an image paragraph's single line has no run
@@ -1207,7 +1193,7 @@ static void draw_document(WindowPtr w)
 
                     if (img != NULL && img->palette_count > 0) {
                         i32 w_px = mac_twips_to_px(line->width_twips);
-                        i32 h_px = mac_twips_to_px(line->height_twips);
+                        i32 h_px = text_h_px;   /* the picture, not its spacing */
                         wp_bool drew_real = WP_FALSE;
 
                         if (img->blob_path.length > 0 && img->blob_path.length < 256) {
@@ -1227,7 +1213,7 @@ static void draw_document(WindowPtr w)
                                     u32 read_len;
                                     if (plat_file_read(imgf, ipixels, packed_len, &read_len) == WP_OK &&
                                         read_len == packed_len) {
-                                        if (plat_draw_image((plat_gc *)&gc, x_px, y, w_px, h_px,
+                                        if (plat_draw_image((plat_gc *)&gc, x_px, text_y, w_px, h_px,
                                                              ipixels, img->width_px, img->height_px,
                                                              img->palette, img->palette_count) == WP_OK) {
                                             drew_real = WP_TRUE;
@@ -1240,7 +1226,7 @@ static void draw_document(WindowPtr w)
                         }
 
                         if (!drew_real) {
-                            plat_fill_rect((plat_gc *)&gc, x_px, y, w_px, h_px,
+                            plat_fill_rect((plat_gc *)&gc, x_px, text_y, w_px, h_px,
                                            img->palette[0][0], img->palette[0][1], img->palette[0][2]);
                         }
                     }
@@ -1250,7 +1236,7 @@ static void draw_document(WindowPtr w)
 
                 extra_twips = wp_justify_space_extra_twips(
                     &g_mac_doc, para, line, align, (wp_bool)(li == layout->line_count - 1),
-                    content_width_twips);
+                    line->avail_twips);
 
                 wp_line_fragment_iter_init(&iter, line);
                 while (wp_line_next_fragment(&g_mac_doc, para, line, &iter, &frag)) {
@@ -1266,6 +1252,11 @@ static void draw_document(WindowPtr w)
                        stale-layout regression into a wild read rather than
                        a visibly wrong glyph. Cheap insurance on the one
                        path that walks engine-supplied indices. */
+                    /* A tab is never drawn: it moves x to its stop. */
+                    if (frag.is_tab) {
+                        x_px += mac_twips_to_px(frag.tab_twips);
+                        continue;
+                    }
                     if (run == NULL) continue;
                     bytes = wp_strpool_get(&g_mac_doc.strings, run->text);
                     if (bytes == NULL) continue;
@@ -1312,7 +1303,7 @@ static void draw_document(WindowPtr w)
 
                     if (!frag.is_space) {
                         g_mac_painted_frags++;
-                        plat_draw_text((plat_gc *)&gc, font, x_px, y + ascent_px,
+                        plat_draw_text((plat_gc *)&gc, font, x_px, text_y + ascent_px,
                                         bytes + frag.byte_start, frag_len, text_r, text_g, text_b);
                     }
 
@@ -1349,8 +1340,8 @@ static void draw_document(WindowPtr w)
                        visible in this fix's own before/after screenshots
                        as a bar floating in the gap above the text.
                        Same shape, re-anchored to the line top. */
-                    SetRect(&mark, (short)caret_px, (short)y,
-                                    (short)(caret_px + 3), (short)(y + ascent_px + 2));
+                    SetRect(&mark, (short)caret_px, text_y,
+                                    (short)(caret_px + 3), (short)(text_y + ascent_px + 2));
                     PaintRect(&mark);
                 }
 
@@ -1365,8 +1356,8 @@ static void draw_document(WindowPtr w)
                     Rect hl;
 
                     if (hx1 > hx0) {
-                        SetRect(&hl, (short)hx0, (short)y, (short)hx1,
-                                (short)(y + mac_twips_to_px(line->height_twips)));
+                        SetRect(&hl, (short)hx0, text_y, (short)hx1,
+                                (short)(text_y + text_h_px));
                         InvertRect(&hl);
                     }
                 }

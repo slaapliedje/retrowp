@@ -403,6 +403,14 @@ void test_help_content_retrowp_help_parses_and_all_links_resolve(void);
 
 /* linebreak.c */
 void test_layout_greedy_wrap_hand_computed_fixture(void);
+void test_layout_geometry_indent_and_alignment_place_the_line(void);
+void test_layout_geometry_later_lines_use_the_left_indent_only(void);
+void test_layout_geometry_spacing_shapes_the_line_boxes(void);
+void test_layout_geometry_default_tabs_advance_to_half_inches(void);
+void test_layout_geometry_a_tab_can_start_a_line(void);
+void test_layout_geometry_right_and_centre_stops(void);
+void test_layout_geometry_fragments_caret_and_clicks_agree_on_tabs(void);
+void test_layout_geometry_styles_with_different_tabs_stay_apart(void);
 void test_layout_single_word_wider_than_column_overflows(void);
 void test_layout_empty_paragraph_gets_one_zero_width_line(void);
 void test_layout_word_spanning_run_boundary_is_one_token(void);
@@ -966,6 +974,14 @@ static const test_case g_cases[] = {
     { "help_content_retrowp_help_parses_and_all_links_resolve", test_help_content_retrowp_help_parses_and_all_links_resolve },
 
     { "layout_greedy_wrap_hand_computed_fixture", test_layout_greedy_wrap_hand_computed_fixture },
+    { "layout_geometry_indent_and_alignment_place_the_line", test_layout_geometry_indent_and_alignment_place_the_line },
+    { "layout_geometry_later_lines_use_the_left_indent_only", test_layout_geometry_later_lines_use_the_left_indent_only },
+    { "layout_geometry_spacing_shapes_the_line_boxes", test_layout_geometry_spacing_shapes_the_line_boxes },
+    { "layout_geometry_default_tabs_advance_to_half_inches", test_layout_geometry_default_tabs_advance_to_half_inches },
+    { "layout_geometry_a_tab_can_start_a_line", test_layout_geometry_a_tab_can_start_a_line },
+    { "layout_geometry_right_and_centre_stops", test_layout_geometry_right_and_centre_stops },
+    { "layout_geometry_fragments_caret_and_clicks_agree_on_tabs", test_layout_geometry_fragments_caret_and_clicks_agree_on_tabs },
+    { "layout_geometry_styles_with_different_tabs_stay_apart", test_layout_geometry_styles_with_different_tabs_stay_apart },
     { "layout_single_word_wider_than_column_overflows", test_layout_single_word_wider_than_column_overflows },
     { "layout_empty_paragraph_gets_one_zero_width_line", test_layout_empty_paragraph_gets_one_zero_width_line },
     { "layout_word_spanning_run_boundary_is_one_token", test_layout_word_spanning_run_boundary_is_one_token },
