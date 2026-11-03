@@ -18,12 +18,16 @@
    host/tests/test_convert.c hit this exact ceiling during development --
    offload_submit returned WP_RANGE, not a gateway bug -- before the
    fixture was resized down and this constant was raised instead).
-   32768 is a deliberate, still-bounded choice, not "as large as
-   possible": comfortably covers a real 1MB-tier document's ODT/PDF
-   export, is freed immediately after copying into resp->result (sized
-   to the ACTUAL response length, not this constant), and stays a small
-   fraction of the 1MB Atari ST budget even as a temporary allocation. */
-#define OFFLOAD_MAX_RESPONSE_PAYLOAD  32768u
+   It was 32768; PDF export of a real multi-page document outgrew it
+   (2026-11-02), so it is now as large as one wire frame allows, less a
+   margin: 65000, not WIRE_MAX_PAYLOAD's 65536, because a 16-bit DOS
+   heap cannot hand out a full 64 KB in one block. The scratch buffer is
+   freed as soon as the response is copied into resp->result (sized to
+   the ACTUAL length), so this is a brief 64 KB on a 1 MB machine, not a
+   resident one. The gateway compresses PDF content and fonts so that
+   this holds dozens of pages; a document beyond it is refused cleanly
+   (WP_RANGE), and chunked responses are the next step if that bites. */
+#define OFFLOAD_MAX_RESPONSE_PAYLOAD  65000u
 
 static plat_transport       *g_transport = NULL;
 static wp_bool                g_available = WP_FALSE;

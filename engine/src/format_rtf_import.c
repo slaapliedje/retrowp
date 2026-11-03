@@ -5,6 +5,7 @@
 #include "utf8.h"
 #include "growth_internal.h"
 #include "format_rtf_internal.h"
+#include "codepage.h"
 
 /* Classic RTF 1.x import. Full scope, supported control words, and
    documented simplifications are in docs/formats/rtf.md -- read it
@@ -26,6 +27,11 @@ typedef struct {
     u8  align;          /* wp_align */
     i32 indent_left, indent_right, indent_first;
     i32 space_before, space_after;
+    i32 sl;             /* \slN, 0 = single */
+    u8  slmult;         /* \slmultN: 1 = sl is a multiple (240ths), 0 = twips */
+    u8  uc;             /* \ucN: fallback characters after each \uN */
+    u8  hidden;         /* \v: text not imported */
+    u8  _pad;
     rtf_dest dest;
 } rtf_state;
 
@@ -65,6 +71,18 @@ typedef struct {
     i32      pict_w, pict_h;
     i32      pict_goal_w, pict_goal_h;
     const wp_image_sink *sink;
+
+    u16 codepage;      /* \ansicpgN / \mac / \pc / \pca; \'hh decodes through it */
+    u32 skip;          /* fallback characters still to skip after a \uN */
+
+    /* Tab stops of the paragraph being read. Kept here, not in the group
+       state: \pard resets them and nothing scopes them to a group, and
+       twelve stops in each of 64 nested states would put kilobytes more
+       on a stack this parser no longer lives on, but did. */
+    u8  tab_count;
+    u8  tab_kind_pending;
+    u8  tab_kind[WP_MAX_TABS];
+    i32 tab_pos[WP_MAX_TABS];
 
     wp_status error;   /* sticky first error; once set, parsing short-circuits */
 } rtf_parser;
@@ -169,8 +187,21 @@ static void rtf_apply_pstyle_to_current_paragraph(rtf_parser *p)
     ps.indent_first = st->indent_first;
     ps.space_before = st->space_before;
     ps.space_after = st->space_after;
+    /* RTF's line spacing to the model's (docmodel.h): \slN\slmult1 is
+       a multiple in 240ths, \slN\slmult0 "at least N" twips, and a
+       negative \sl ("exactly") is read as at least. 240ths of exactly
+       one line is single. */
+    if (st->sl != 0) {
+        if (st->slmult && st->sl > 0) ps.line_spacing = (st->sl == 240) ? 0 : st->sl;
+        else ps.line_spacing = -(st->sl < 0 ? -st->sl : st->sl);
+    }
+    ps.tab_count = p->tab_count;
+    memcpy(ps.tab_kind, p->tab_kind, sizeof(ps.tab_kind));
+    memcpy(ps.tab_pos, p->tab_pos, sizeof(ps.tab_pos));
 
-    if (wp_document_pstyle_add(p->doc, &ps, &pstyle) != WP_OK) { p->error = WP_NOMEM; return; }
+    /* Find-or-add, so a document of a thousand alike paragraphs has one
+       style, not a thousand. */
+    if (wp_document_pstyle_find_or_add(p->doc, &ps, &pstyle) != WP_OK) { p->error = WP_NOMEM; return; }
 
     sec = wp_document_section_get(p->doc, p->section_idx);
     para = wp_section_paragraph_get(sec, p->para_idx);
@@ -215,6 +246,8 @@ static void rtf_emit_bytes(rtf_parser *p, const u8 *bytes, u32 n)
     st = &p->stack[p->depth];
 
     if (st->dest == RTF_DEST_SKIP) return;
+
+    if (st->dest == RTF_DEST_NORMAL && st->hidden) return;   /* \v */
 
     if (st->dest == RTF_DEST_COLORTBL) {
         if (n == 1 && bytes[0] == ';') rtf_colortbl_commit(p);
@@ -263,10 +296,20 @@ static void rtf_emit_cp(rtf_parser *p, u32 cp)
     rtf_emit_bytes(p, buf, n);
 }
 
-static void rtf_emit_cp1252_byte(rtf_parser *p, u8 byte_val)
+/* A byte of 8-bit text in the document's code page (\'hh, or a raw
+   high byte in the source). */
+static void rtf_emit_cp_byte(rtf_parser *p, u8 byte_val)
 {
     if (byte_val < 0x80) { rtf_emit_char(p, byte_val); return; }
-    rtf_emit_cp(p, rtf_cp1252_to_unicode(byte_val));
+    rtf_emit_cp(p, wp_codepage_decode(p->codepage, byte_val));
+}
+
+/* One character of document text from the source -- a literal byte or
+   a \'hh -- unless it is a \uN's fallback, which is skipped. */
+static void rtf_source_char(rtf_parser *p, u8 byte_val)
+{
+    if (p->skip > 0) { p->skip--; return; }
+    rtf_emit_cp_byte(p, byte_val);
 }
 
 /* -- group nesting -------------------------------------------------------
@@ -282,6 +325,7 @@ static void rtf_push(rtf_parser *p)
     if (p->depth + 1 >= RTF_MAX_DEPTH) { p->error = WP_RANGE; return; }
     p->stack[p->depth + 1] = p->stack[p->depth];
     p->depth++;
+    p->skip = 0;   /* a \uN's fallback never spans a group boundary */
 }
 
 /* -- \pict -------------------------------------------------------------
@@ -418,6 +462,7 @@ static void rtf_pop(rtf_parser *p)
         rtf_finish_pict(p);
     }
     p->depth--;
+    p->skip = 0;   /* nor does it outlive the group the \uN was in */
 }
 
 /* -- control word / symbol dispatch ------------------------------------ */
@@ -429,13 +474,24 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
     if (p->error != WP_OK) return;
 
     /* Charset declarations are recognized regardless of destination. */
-    if (strcmp(name, "ansi") == 0) return;
+    /* An unknown code page no longer refuses the file: its \'hh bytes
+       decode as 1252 (right for every Western writer), and a modern
+       writer spells everything outside it as \uN anyway. */
+    if (strcmp(name, "ansi") == 0) { p->codepage = 1252; return; }
     if (strcmp(name, "ansicpg") == 0) {
-        if (!has_param || param != 1252) p->error = WP_UNSUPPORTED;
+        if (has_param && param > 0 && param < 65536 && wp_codepage_known((u16)param)) p->codepage = (u16)param;
         return;
     }
-    if (strcmp(name, "mac") == 0 || strcmp(name, "pc") == 0 || strcmp(name, "pca") == 0) {
-        p->error = WP_UNSUPPORTED;
+    if (strcmp(name, "mac") == 0) { p->codepage = 10000; return; }
+    if (strcmp(name, "pc") == 0)  { p->codepage = 437; return; }
+    if (strcmp(name, "pca") == 0) { p->codepage = 850; return; }
+    if (strcmp(name, "bin") == 0) {
+        /* Raw binary follows, N bytes, in any destination: step over it
+           or it would be parsed as RTF. */
+        if (has_param && param > 0) {
+            u32 n = (u32)param;
+            p->pos = (n > p->len - p->pos) ? p->len : p->pos + n;
+        }
         return;
     }
 
@@ -443,10 +499,20 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
 
     /* Destinations: recognized so their content is skipped rather than
        mis-imported as document text (docs/formats/rtf.md). */
+    /* Word's left/right/first-page headers and footers, list-number
+       text (\pntext, \listtext -- the number is generated, not text),
+       \pn and the file and revision tables join them: all of these
+       leaked into the body before. */
     if (strcmp(name, "fonttbl") == 0 || strcmp(name, "info") == 0 ||
         strcmp(name, "stylesheet") == 0 ||
         strcmp(name, "object") == 0 || strcmp(name, "footnote") == 0 ||
-        strcmp(name, "header") == 0 || strcmp(name, "footer") == 0) {
+        strcmp(name, "header") == 0 || strcmp(name, "footer") == 0 ||
+        strcmp(name, "headerl") == 0 || strcmp(name, "headerr") == 0 ||
+        strcmp(name, "headerf") == 0 || strcmp(name, "footerl") == 0 ||
+        strcmp(name, "footerr") == 0 || strcmp(name, "footerf") == 0 ||
+        strcmp(name, "pntext") == 0 || strcmp(name, "listtext") == 0 ||
+        strcmp(name, "pn") == 0 || strcmp(name, "filetbl") == 0 ||
+        strcmp(name, "revtbl") == 0 || strcmp(name, "fldinst") == 0) {
         st->dest = RTF_DEST_SKIP;
         return;
     }
@@ -484,6 +550,9 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         st->align = WP_ALIGN_LEFT;
         st->indent_left = 0; st->indent_right = 0; st->indent_first = 0;
         st->space_before = 0; st->space_after = 0;
+        st->sl = 0; st->slmult = 0;
+        p->tab_count = 0;
+        p->tab_kind_pending = (u8)WP_TAB_LEFT;
         return;
     }
     if (strcmp(name, "par") == 0)  { rtf_end_paragraph(p); return; }
@@ -497,8 +566,95 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
     if (strcmp(name, "fi") == 0) { st->indent_first = has_param ? param : 0; return; }
     if (strcmp(name, "sb") == 0) { st->space_before = has_param ? param : 0; return; }
     if (strcmp(name, "sa") == 0) { st->space_after = has_param ? param : 0; return; }
+    if (strcmp(name, "sl") == 0) { st->sl = has_param ? param : 0; return; }
+    if (strcmp(name, "slmult") == 0) { st->slmult = (u8)(has_param && param != 0); return; }
+    if (strcmp(name, "tqr") == 0) { p->tab_kind_pending = (u8)WP_TAB_RIGHT; return; }
+    if (strcmp(name, "tqc") == 0) { p->tab_kind_pending = (u8)WP_TAB_CENTER; return; }
+    if (strcmp(name, "tqdec") == 0) { p->tab_kind_pending = (u8)WP_TAB_DECIMAL; return; }
+    if (strcmp(name, "tb") == 0) { p->tab_kind_pending = (u8)WP_TAB_LEFT; return; }   /* bar tab: not drawn */
+    if (strcmp(name, "tx") == 0) {
+        /* A stop, kept sorted; past twelve the rest are dropped. */
+        if (has_param && param > 0 && p->tab_count < WP_MAX_TABS) {
+            u8 at = p->tab_count;
+            while (at > 0 && p->tab_pos[at - 1] > param) {
+                p->tab_pos[at] = p->tab_pos[at - 1];
+                p->tab_kind[at] = p->tab_kind[at - 1];
+                at--;
+            }
+            p->tab_pos[at] = param;
+            p->tab_kind[at] = p->tab_kind_pending;
+            p->tab_count++;
+        }
+        p->tab_kind_pending = (u8)WP_TAB_LEFT;
+        return;
+    }
+    /* Page setup, document-wide (\paperw...) or for the section
+       (\pgwsxn...); both set the section being read. */
+    if (has_param && param > 0 &&
+        (strcmp(name, "paperw") == 0 || strcmp(name, "pgwsxn") == 0 ||
+         strcmp(name, "paperh") == 0 || strcmp(name, "pghsxn") == 0)) {
+        wp_section *sec = wp_document_section_get(p->doc, p->section_idx);
+        if (name[1] == 'a' ? name[5] == 'w' : name[2] == 'w') sec->page_width = param;
+        else sec->page_height = param;
+        return;
+    }
+    if (has_param && param >= 0 &&
+        (strncmp(name, "marg", 4) == 0) &&
+        (strcmp(name + 4, "l") == 0 || strcmp(name + 4, "r") == 0 ||
+         strcmp(name + 4, "t") == 0 || strcmp(name + 4, "b") == 0 ||
+         strcmp(name + 4, "lsxn") == 0 || strcmp(name + 4, "rsxn") == 0 ||
+         strcmp(name + 4, "tsxn") == 0 || strcmp(name + 4, "bsxn") == 0)) {
+        wp_section *sec = wp_document_section_get(p->doc, p->section_idx);
+        switch (name[4]) {
+        case 'l': sec->margin_left = param; break;
+        case 'r': sec->margin_right = param; break;
+        case 't': sec->margin_top = param; break;
+        default:  sec->margin_bottom = param; break;
+        }
+        return;
+    }
+    /* Tables arrive as rows of tab-separated cells, which the ruler's tab
+       stops can then line up: no table model yet, but no glued-together
+       cell text either. */
+    if (strcmp(name, "cell") == 0 || strcmp(name, "nestcell") == 0) { rtf_emit_char(p, '\t'); return; }
+    if (strcmp(name, "row") == 0 || strcmp(name, "nestrow") == 0) {
+        if (p->run_buf.length > 0 && p->run_buf.bytes[p->run_buf.length - 1] == '\t') p->run_buf.length--;
+        rtf_end_paragraph(p);
+        return;
+    }
+    /* Page and section breaks end the paragraph; the model has neither
+       yet, so the text after one starts a new paragraph rather than
+       running on. */
+    if (strcmp(name, "page") == 0 || strcmp(name, "sect") == 0) { rtf_end_paragraph(p); return; }
 
     /* Character formatting. */
+    if (strcmp(name, "plain") == 0) {
+        /* Back to the default character format -- Word writes \pard\plain
+           before nearly every paragraph, and without this a bold or a
+           size carried on into text meant to be plain. */
+        rtf_flush_run(p);
+        st->char_flags = 0;
+        st->size_twips = 240;
+        st->color_r = st->color_g = st->color_b = 0;
+        st->hidden = 0;
+        return;
+    }
+    if (strcmp(name, "v") == 0) {
+        rtf_flush_run(p);
+        st->hidden = (u8)(!has_param || param != 0);
+        return;
+    }
+    if (strcmp(name, "uc") == 0) { st->uc = (u8)((has_param && param >= 0 && param < 256) ? param : 1); return; }
+    if (strcmp(name, "u") == 0) {
+        /* A Unicode character (signed 16-bit in the source), then \ucN
+           fallback characters for readers that do not know \u. */
+        if (has_param) {
+            u32 cp = (u32)((param < 0) ? param + 65536 : param);
+            rtf_emit_cp(p, cp);   /* dropped there in a skipped destination */
+            p->skip = st->uc;
+        }
+        return;
+    }
     if (strcmp(name, "b") == 0) {
         rtf_flush_run(p);
         if (!has_param || param) st->char_flags = (u16)(st->char_flags | WP_STYLE_BOLD);
@@ -594,7 +750,7 @@ static void rtf_dispatch_control_symbol(rtf_parser *p, u8 sym)
         lo = p->src[p->pos + 1];
         if (!is_hex(hi) || !is_hex(lo)) { p->error = WP_BADFMT; return; }
         p->pos += 2;
-        rtf_emit_cp1252_byte(p, (u8)(hex_val(hi) * 16 + hex_val(lo)));
+        rtf_source_char(p, (u8)(hex_val(hi) * 16 + hex_val(lo)));
         return;
     }
     default:
@@ -652,7 +808,7 @@ static void rtf_finish(rtf_parser *p)
 wp_status format_rtf_import_images(const u8 *bytes, u32 len, wp_document *doc,
                                     const wp_image_sink *sink)
 {
-    rtf_parser p;
+    rtf_parser *p;
     wp_status st;
     wp_section *sec;
     u32 para_idx;
@@ -662,56 +818,64 @@ wp_status format_rtf_import_images(const u8 *bytes, u32 len, wp_document *doc,
     st = wp_document_init(doc);
     if (st != WP_OK) return st;
 
-    memset(&p, 0, sizeof(p));
-    p.src = bytes;
-    p.len = len;
-    p.pos = 6;
-    p.doc = doc;
-    p.stack[0].char_flags = 0;
-    p.stack[0].size_twips = 240; /* matches wp_document_init's default cstyle size */
-    p.stack[0].color_r = 0; p.stack[0].color_g = 0; p.stack[0].color_b = 0;
-    p.stack[0].align = WP_ALIGN_LEFT;
-    p.stack[0].dest = RTF_DEST_NORMAL;
-    p.depth = 0;
-    p.error = WP_OK;
-    p.sink = sink;
+    /* On the heap: 64 nested group states are kilobytes, and an Amiga
+       program launched from RUN has a 4 KB stack in all. */
+    p = (rtf_parser *)mem_alloc((u32)sizeof(rtf_parser));
+    if (p == NULL) { wp_document_free(doc); return WP_NOMEM; }
+    memset(p, 0, sizeof(*p));
+    p->src = bytes;
+    p->len = len;
+    p->pos = 6;
+    p->doc = doc;
+    p->stack[0].char_flags = 0;
+    p->stack[0].size_twips = 240; /* matches wp_document_init's default cstyle size */
+    p->stack[0].color_r = 0; p->stack[0].color_g = 0; p->stack[0].color_b = 0;
+    p->stack[0].align = WP_ALIGN_LEFT;
+    p->stack[0].dest = RTF_DEST_NORMAL;
+    p->stack[0].uc = 1;
+    p->codepage = 1252;
+    p->depth = 0;
+    p->error = WP_OK;
+    p->sink = sink;
 
-    if (wp_document_section_add(doc, &p.section_idx) != WP_OK) { wp_document_free(doc); return WP_NOMEM; }
-    sec = wp_document_section_get(doc, p.section_idx);
-    if (wp_section_paragraph_add(sec, &para_idx) != WP_OK) { wp_document_free(doc); return WP_NOMEM; }
-    p.para_idx = para_idx;
-    p.para_pending = WP_FALSE;
+    if (wp_document_section_add(doc, &p->section_idx) != WP_OK) { mem_free(p); wp_document_free(doc); return WP_NOMEM; }
+    sec = wp_document_section_get(doc, p->section_idx);
+    if (wp_section_paragraph_add(sec, &para_idx) != WP_OK) { mem_free(p); wp_document_free(doc); return WP_NOMEM; }
+    p->para_idx = para_idx;
+    p->para_pending = WP_FALSE;
 
-    while (p.pos < p.len && p.error == WP_OK) {
-        u8 c = p.src[p.pos];
+    while (p->pos < p->len && p->error == WP_OK) {
+        u8 c = p->src[p->pos];
 
         if (c == '{') {
-            rtf_push(&p);
-            p.pos++;
+            rtf_push(p);
+            p->pos++;
         } else if (c == '}') {
-            rtf_flush_run(&p);
-            if (p.depth == 0) { p.pos++; break; } /* the document's closing brace */
-            rtf_pop(&p);
-            p.pos++;
+            rtf_flush_run(p);
+            if (p->depth == 0) { p->pos++; break; } /* the document's closing brace */
+            rtf_pop(p);
+            p->pos++;
         } else if (c == '\\') {
-            p.pos++;
-            rtf_handle_backslash(&p);
+            p->pos++;
+            rtf_handle_backslash(p);
         } else if (c == '\r' || c == '\n') {
-            p.pos++; /* raw source formatting, not document content */
+            p->pos++; /* raw source formatting, not document content */
         } else {
-            rtf_emit_char(&p, c);
-            p.pos++;
+            rtf_source_char(p, c);
+            p->pos++;
         }
     }
 
-    if (p.error == WP_OK) rtf_finish(&p);
+    if (p->error == WP_OK) rtf_finish(p);
 
-    rtf_buf_free(&p.run_buf);
-    rtf_buf_free(&p.pict_buf);
+    rtf_buf_free(&p->run_buf);
+    rtf_buf_free(&p->pict_buf);
 
-    if (p.error != WP_OK) {
+    st = p->error;
+    mem_free(p);
+    if (st != WP_OK) {
         wp_document_free(doc);
-        return p.error;
+        return st;
     }
     return WP_OK;
 }

@@ -21,14 +21,38 @@ void test_format_rtf_import_rejects_bad_header(void)
     ASSERT_TRUE(format_rtf_import((const u8 *)not_rtf, (u32)strlen(not_rtf), &doc) == WP_BADFMT);
 }
 
-void test_format_rtf_import_rejects_unsupported_charset(void)
+void test_format_rtf_import_decodes_other_code_pages(void)
 {
+    /* Mac, Central European and Cyrillic files used to be refused
+       outright; their \\'hh now decode through the declared code page,
+       and an unknown one falls back to 1252 instead of failing. */
     wp_document doc;
-    static const char *mac_rtf = "{\\rtf1\\mac Hello\\par}";
-    static const char *bad_cpg = "{\\rtf1\\ansicpg1250 Hello\\par}";
+    u32 len;
+    const u8 *b;
+    static const char *mac_rtf = "{\\rtf1\\mac caf\\'8e\\par}";
+    static const char *cp1250 = "{\\rtf1\\ansi\\ansicpg1250 \\'8a\\par}";
+    static const char *cp1251 = "{\\rtf1\\ansi\\ansicpg1251 \\'c0\\par}";
+    static const char *cp874  = "{\\rtf1\\ansi\\ansicpg874 \\'80\\par}";
 
-    ASSERT_TRUE(format_rtf_import((const u8 *)mac_rtf, (u32)strlen(mac_rtf), &doc) == WP_UNSUPPORTED);
-    ASSERT_TRUE(format_rtf_import((const u8 *)bad_cpg, (u32)strlen(bad_cpg), &doc) == WP_UNSUPPORTED);
+    ASSERT_TRUE(format_rtf_import((const u8 *)mac_rtf, (u32)strlen(mac_rtf), &doc) == WP_OK);
+    b = para_text(&doc, 0, 0, 0, &len);
+    ASSERT_TRUE(len == 5 && memcmp(b, "caf\xc3\xa9", 5) == 0);          /* e acute */
+    wp_document_free(&doc);
+
+    ASSERT_TRUE(format_rtf_import((const u8 *)cp1250, (u32)strlen(cp1250), &doc) == WP_OK);
+    b = para_text(&doc, 0, 0, 0, &len);
+    ASSERT_TRUE(len == 2 && memcmp(b, "\xc5\xa0", 2) == 0);             /* S caron */
+    wp_document_free(&doc);
+
+    ASSERT_TRUE(format_rtf_import((const u8 *)cp1251, (u32)strlen(cp1251), &doc) == WP_OK);
+    b = para_text(&doc, 0, 0, 0, &len);
+    ASSERT_TRUE(len == 2 && memcmp(b, "\xd0\x90", 2) == 0);             /* Cyrillic A */
+    wp_document_free(&doc);
+
+    ASSERT_TRUE(format_rtf_import((const u8 *)cp874, (u32)strlen(cp874), &doc) == WP_OK);
+    b = para_text(&doc, 0, 0, 0, &len);
+    ASSERT_TRUE(len == 3 && memcmp(b, "\xe2\x82\xac", 3) == 0);         /* euro, as 1252 */
+    wp_document_free(&doc);
 }
 
 void test_format_rtf_import_simple_paragraph(void)

@@ -49,6 +49,7 @@ import os
 import re
 import sys
 import zipfile
+import zlib
 from xml.sax.saxutils import escape as xml_escape
 import xml.etree.ElementTree as ET
 
@@ -98,7 +99,11 @@ def _q(prefix, local):
 
 
 def _new_para():
-    return {'align': 'left', 'li': 0, 'ri': 0, 'fi': 0, 'sb': 0, 'sa': 0, 'runs': []}
+    # sl/slmult: RTF line spacing; tabs: [(position_twips, kind)] with kind
+    # one of 'left', 'right', 'center', 'decimal' -- the same stops the
+    # engine lays out with (docmodel.h), from the column's left edge.
+    return {'align': 'left', 'li': 0, 'ri': 0, 'fi': 0, 'sb': 0, 'sa': 0,
+            'sl': 0, 'slmult': 0, 'tabs': [], 'runs': []}
 
 
 def _new_run():
@@ -181,16 +186,23 @@ def odt_bytes_to_paragraphs(odt_bytes):
             rd['text'] = text
             para['runs'].append(rd)
 
-        add_run(None, p_el.text)
-        for child in p_el:
-            tag = child.tag
-            if tag == _q('text', 'span'):
-                add_run(child.get(_q('text', 'style-name')), child.text)
-            elif tag == _q('text', 's'):
-                add_run(None, ' ' * int(child.get(_q('text', 'c'), '1')))
-            elif tag == _q('text', 'tab'):
-                add_run(None, '\t')
-            add_run(None, child.tail)
+        def walk(el, rstyle):
+            # A span's own children too: LibreOffice (and this module's
+            # own writer) put <text:tab/> and <text:s/> inside spans, and
+            # reading only a span's leading text dropped everything after
+            # its first tab.
+            add_run(rstyle, el.text)
+            for child in el:
+                tag = child.tag
+                if tag == _q('text', 'span'):
+                    walk(child, child.get(_q('text', 'style-name')))
+                elif tag == _q('text', 's'):
+                    add_run(rstyle, ' ' * int(child.get(_q('text', 'c'), '1')))
+                elif tag == _q('text', 'tab'):
+                    add_run(rstyle, '\t')
+                add_run(rstyle, child.tail)
+
+        walk(p_el, None)
 
         paragraphs.append(para)
 
@@ -221,6 +233,13 @@ _ODT_CONTENT_HEADER = (
     'xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" '
     'office:version="1.2">\n<office:automatic-styles>\n'
 )
+
+
+def _odt_text(text):
+    """Run text as ODF wants it: escaped, and each tab a <text:tab/> --
+    ODF collapses a literal tab character into a space like any other
+    whitespace."""
+    return xml_escape(text).replace('\t', '<text:tab/>')
 
 
 def paragraphs_to_odt_bytes(paragraphs):
@@ -283,9 +302,9 @@ def paragraphs_to_odt_bytes(paragraphs):
                 styles.append('<style:style style:name="%s" style:family="text">'
                                '<style:text-properties %s/></style:style>' % (tstyle_name, ' '.join(tp_attrs)))
                 run_xml.append('<text:span text:style-name="%s">%s</text:span>' %
-                                (tstyle_name, xml_escape(r.get('text', ''))))
+                                (tstyle_name, _odt_text(r.get('text', ''))))
             else:
-                run_xml.append(xml_escape(r.get('text', '')))
+                run_xml.append(_odt_text(r.get('text', '')))
 
         body.append('<text:p text:style-name="%s">%s</text:p>' % (pstyle_name, ''.join(run_xml)))
 
@@ -326,12 +345,16 @@ def _rtf_escape_text(s):
         cp = ord(ch)
         if ch in '{}\\':
             out.append('\\' + ch)
+        elif ch == '\t':
+            out.append('\\tab ')       # a raw tab is ignorable whitespace to RTF readers
         elif cp < 0x80:
             out.append(ch)
         elif 0xA0 <= cp <= 0xFF:
             out.append("\\'%02x" % cp)
         elif cp in _UNICODE_TO_CP1252:
             out.append("\\'%02x" % _UNICODE_TO_CP1252[cp])
+        elif cp <= 0xFFFF:
+            out.append('\\u%d?' % (cp - 65536 if cp >= 0x8000 else cp))   # \\uc1: one fallback
         else:
             out.append('?')
     return ''.join(out)
@@ -411,6 +434,9 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
     cur_para = _new_para()
     cur_run = _new_run()
     dest_stack = ['body']  # top = current (innermost) group's destination
+    uc = 1          # \\ucN: fallback characters after each \\uN
+    skip = 0        # fallback characters still to drop
+    tab_kind = 'left'
 
     for m in _RTF_TOKEN_RE.finditer(rtf_bytes):
         hexval, word, num, brace, text = m.groups()
@@ -438,6 +464,9 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
         if hexval is not None:
             if dest != 'body':
                 continue
+            if skip > 0:
+                skip -= 1
+                continue
             b = int(hexval, 16)
             if b < 0x80 or 0xA0 <= b <= 0xFF:
                 cur_run['text'] += chr(b)
@@ -447,7 +476,10 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
 
         if text is not None:
             if dest == 'body':
-                cur_run['text'] += text.decode('cp1252')
+                t = text.decode('cp1252')
+                if skip > 0:
+                    t, skip = t[skip:], max(0, skip - len(t))
+                cur_run['text'] += t
             continue
 
         if word is None:
@@ -472,9 +504,36 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
         if dest != 'body':
             continue
 
+        if word == 'u' and n is not None:
+            cur_run['text'] += chr(n + 65536 if n < 0 else n)
+            skip = uc
+            continue
+        if word == 'uc':
+            uc = n if n is not None else 1
+            continue
+        skip = 0
         if word == 'pard':
             cur_para['align'] = 'left'
             cur_para['li'] = cur_para['ri'] = cur_para['fi'] = cur_para['sb'] = cur_para['sa'] = 0
+            cur_para['sl'] = cur_para['slmult'] = 0
+            cur_para['tabs'] = []
+            tab_kind = 'left'
+        elif word == 'tab':
+            cur_run['text'] += '\t'
+        elif word == 'sl':
+            cur_para['sl'] = n or 0
+        elif word == 'slmult':
+            cur_para['slmult'] = n or 0
+        elif word in ('tqr', 'tqc', 'tqdec'):
+            tab_kind = {'tqr': 'right', 'tqc': 'center', 'tqdec': 'decimal'}[word]
+        elif word == 'tx':
+            if n:
+                cur_para['tabs'] = sorted(cur_para['tabs'] + [(n, tab_kind)])
+            tab_kind = 'left'
+        elif word == 'plain':
+            if cur_run['text']:
+                cur_para['runs'].append(cur_run)
+            cur_run = _new_run()
         elif word == 'ql':
             cur_para['align'] = 'left'
         elif word == 'qr':
@@ -546,6 +605,25 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
 # upright counterparts (italic is a shear of the same glyphs, not a
 # separate width table) -- verified against the real AFM files. Tier
 # 0's fallback whenever Tier 1 isn't available for a given style slot.
+_RTF_PAGE_RE = re.compile(rb"\\(paperw|paperh|margl|margr|margt|margb)(-?[0-9]+)")
+
+
+def rtf_page_setup(rtf_bytes):
+    """The page an RTF file asks for, in points: (width, height, left,
+    right, top, bottom). The first of each control word wins (the
+    document-wide values come before any section's); a file that says
+    nothing gets US Letter with one-inch margins, RTF's own defaults."""
+    found = {}
+    for m in _RTF_PAGE_RE.finditer(rtf_bytes):
+        found.setdefault(m.group(1).decode('ascii'), int(m.group(2)))
+    tw = lambda k, d: max(0, found.get(k, d)) / 20.0
+    w, h = tw('paperw', 12240), tw('paperh', 15840)
+    if w < 144 or h < 144:          # nonsense: keep a usable page
+        w, h = 612.0, 792.0
+    return (w, h, tw('margl', 1440),
+            tw('margr', 1440), tw('margt', 1440), tw('margb', 1440))
+
+
 _HELV_WIDTHS = {32: 278, 33: 278, 34: 355, 35: 556, 36: 556, 37: 889, 38: 667, 39: 222, 40: 333, 41: 333, 42: 389, 43: 584, 44: 278, 45: 333, 46: 278, 47: 278, 48: 556, 49: 556, 50: 556, 51: 556, 52: 556, 53: 556, 54: 556, 55: 556, 56: 556, 57: 556, 58: 278, 59: 278, 60: 584, 61: 584, 62: 584, 63: 556, 64: 1015, 65: 667, 66: 667, 67: 722, 68: 722, 69: 667, 70: 611, 71: 778, 72: 722, 73: 278, 74: 500, 75: 667, 76: 556, 77: 833, 78: 722, 79: 778, 80: 667, 81: 778, 82: 722, 83: 667, 84: 611, 85: 722, 86: 667, 87: 944, 88: 667, 89: 667, 90: 611, 91: 278, 92: 278, 93: 278, 94: 469, 95: 556, 96: 222, 97: 556, 98: 556, 99: 500, 100: 556, 101: 556, 102: 278, 103: 556, 104: 556, 105: 222, 106: 222, 107: 500, 108: 222, 109: 833, 110: 556, 111: 556, 112: 556, 113: 556, 114: 333, 115: 500, 116: 278, 117: 556, 118: 500, 119: 722, 120: 500, 121: 500, 122: 500, 123: 334, 124: 260, 125: 334, 126: 584}
 _HELV_BOLD_WIDTHS = {32: 278, 33: 333, 34: 474, 35: 556, 36: 556, 37: 889, 38: 722, 39: 278, 40: 333, 41: 333, 42: 389, 43: 584, 44: 278, 45: 333, 46: 278, 47: 278, 48: 556, 49: 556, 50: 556, 51: 556, 52: 556, 53: 556, 54: 556, 55: 556, 56: 556, 57: 556, 58: 333, 59: 333, 60: 584, 61: 584, 62: 584, 63: 611, 64: 975, 65: 722, 66: 722, 67: 722, 68: 722, 69: 667, 70: 611, 71: 778, 72: 722, 73: 278, 74: 556, 75: 722, 76: 611, 77: 833, 78: 722, 79: 778, 80: 667, 81: 778, 82: 722, 83: 667, 84: 611, 85: 722, 86: 667, 87: 944, 88: 667, 89: 667, 90: 611, 91: 333, 92: 278, 93: 333, 94: 584, 95: 556, 96: 278, 97: 556, 98: 611, 99: 556, 100: 611, 101: 556, 102: 333, 103: 611, 104: 611, 105: 278, 106: 278, 107: 556, 108: 278, 109: 889, 110: 611, 111: 611, 112: 611, 113: 611, 114: 389, 115: 556, 116: 333, 117: 611, 118: 556, 119: 778, 120: 556, 121: 556, 122: 500, 123: 389, 124: 280, 125: 389, 126: 584}
 _PDF_FALLBACK_WIDTH = 556  # any char outside Tier 0's ASCII 32-126 AFM table -- an average-width approximation, never hit for a Tier-1 slot (real widths cover the full 32-255 WinAnsi range there)
@@ -772,9 +850,19 @@ def _pdf_build_items(para):
         text = run.get('text', '')
         i, n = 0, len(text)
         while i < n:
+            if text[i] == '\t':
+                # A tab is an item of its own, never merged: each goes to
+                # its own stop. Marked 'tab' (truthy, so code that only
+                # asks "is this a gap?" sees it as one).
+                if cur_fragments:
+                    items.append((cur_is_space, cur_fragments))
+                items.append(('tab', [('\t', run)]))
+                cur_is_space, cur_fragments = None, []
+                i += 1
+                continue
             is_space = (text[i] == ' ')
             j = i
-            while j < n and (text[j] == ' ') == is_space:
+            while j < n and text[j] != '\t' and (text[j] == ' ') == is_space:
                 j += 1
             frag = (text[i:j], run)
             if cur_is_space is None:
@@ -790,9 +878,51 @@ def _pdf_build_items(para):
     return items
 
 
+def _pdf_next_stop(tabs, x_pt):
+    """The stop a tab starting at x_pt (from the column's left edge)
+    reaches, and its kind: the first explicit stop past x, else the next
+    half inch -- the engine's rule (layout.h, wp_tab_next_stop)."""
+    last = 0.0
+    for pos_twips, kind in tabs:
+        pos = pos_twips / 20.0
+        if pos > x_pt + 0.01:
+            return pos, kind
+        last = pos
+    x = max(x_pt, last)
+    return (int(x // 36.0) + 1) * 36.0, 'left'
+
+
+def _pdf_line_tab_widths(line_items, x0_pt, tabs):
+    """Every tab's width on one line, now that the text after it is
+    known: a right (or decimal) tab ends its segment on the stop, a
+    centre tab centres it there, a left tab starts it there."""
+    widths = []
+    x = x0_pt
+    for idx, (kind, frags) in enumerate(line_items):
+        if kind == 'tab':
+            stop, tkind = _pdf_next_stop(tabs, x)
+            seg = 0.0
+            for k2, f2 in line_items[idx + 1:]:
+                if k2 == 'tab':
+                    break
+                seg += _pdf_item_width_pt(f2)
+            if tkind in ('right', 'decimal'):
+                w = stop - x - seg
+            elif tkind == 'center':
+                w = stop - x - seg / 2.0
+            else:
+                w = stop - x
+            w = max(0.0, w)
+            widths.append(w)
+            x += w
+        else:
+            x += _pdf_item_width_pt(frags)
+    return widths
+
+
 def _pdf_item_width_pt(frags):
     return sum(_pdf_text_width_pt(text, _pdf_font_for_run(run)[1], _pdf_effective_size_pt(run))
-               for text, run in frags)
+               for text, run in frags if text != '\t')
 
 
 def _pdf_wrap_paragraph(para, column_width_pt):
@@ -815,7 +945,7 @@ def _pdf_wrap_paragraph(para, column_width_pt):
 
     def flush():
         nonlocal cur, cur_width, first_line
-        if cur and cur[-1][0]:
+        if cur and cur[-1][0] is True:
             cur_width -= _pdf_item_width_pt(cur[-1][1])
             cur = cur[:-1]
         lines.append((cur, first_line))
@@ -827,6 +957,19 @@ def _pdf_wrap_paragraph(para, column_width_pt):
         is_space, frags = items[i]
         w = _pdf_item_width_pt(frags)
         a = avail(first_line)
+        if is_space == 'tab':
+            # Content, like a word (a tab can start a line), sized as a
+            # left tab from where it starts; the render pass corrects
+            # right and centre stops once the line is known.
+            x = li + (fi if first_line else 0.0) + cur_width
+            w = _pdf_next_stop(para.get('tabs', []), x)[0] - x
+            if cur and cur_width + w > a:
+                flush()
+                continue
+            cur.append((is_space, frags))
+            cur_width += w
+            i += 1
+            continue
         if is_space:
             if cur and cur_width + w > a:
                 flush()
@@ -861,10 +1004,17 @@ def _pdf_escape_str(text):
     return ''.join(out)
 
 
-def paragraphs_to_pdf_bytes(paragraphs):
+def paragraphs_to_pdf_bytes(paragraphs, page=None):
+    """page: (width, height, left, right, top, bottom) in points, as
+    rtf_page_setup returns it; None for US Letter with one-inch margins."""
+    page_w, page_h, m_left, m_right, m_top, m_bottom = page or (
+        _PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT, _PDF_MARGIN, _PDF_MARGIN, _PDF_MARGIN, _PDF_MARGIN)
+    column_w = max(72.0, page_w - m_left - m_right)
+    content_top = page_h - m_top
+    content_bottom = m_bottom
     pages = []
     cur_ops = []
-    cur_y = _PDF_CONTENT_TOP
+    cur_y = content_top
     cur_tw = None
     cur_font = cur_size = None
     cur_color = (0, 0, 0)
@@ -874,17 +1024,19 @@ def paragraphs_to_pdf_bytes(paragraphs):
         nonlocal cur_ops, cur_y, cur_tw, cur_font, cur_size, cur_color
         pages.append(cur_ops)
         cur_ops = []
-        cur_y = _PDF_CONTENT_TOP
+        cur_y = content_top
         cur_tw = None
         cur_font = cur_size = None
         cur_color = (0, 0, 0)
 
     def ensure_room(leading):
-        if cur_y - leading < _PDF_CONTENT_BOTTOM:
+        if cur_y - leading < content_bottom:
             new_page()
 
     for pi, para in enumerate(paragraphs):
-        lines, li, ri, fi = _pdf_wrap_paragraph(para, _PDF_COLUMN_WIDTH)
+        lines, li, ri, fi = _pdf_wrap_paragraph(para, column_w)
+        tabs = para.get('tabs', [])
+        sl, slmult = para.get('sl', 0), para.get('slmult', 0)
         sb = para.get('sb', 0) / 20.0
         sa = para.get('sa', 0) / 20.0
         align = para.get('align', 'left')
@@ -900,20 +1052,29 @@ def paragraphs_to_pdf_bytes(paragraphs):
                 for _, run in frags:
                     max_size_pt = max(max_size_pt, run.get('size_twips', 240) / 20.0)
             leading = max_size_pt * 1.2
+            # The engine's line spacing (docmodel.h): a multiple in 240ths,
+            # or "at least" so many twips.
+            if sl > 0 and slmult:
+                leading = leading * sl / 240.0
+            elif sl:
+                leading = max(leading, abs(sl) / 20.0)
             ensure_room(leading)
 
-            line_width = sum(_pdf_item_width_pt(frags) for _, frags in line_items)
             indent = li + (fi if is_first else 0.0)
-            col = _PDF_COLUMN_WIDTH - li - ri - (fi if is_first else 0.0)
+            tab_widths = _pdf_line_tab_widths(line_items, indent, tabs)
+            line_width = (sum(_pdf_item_width_pt(frags) for k, frags in line_items if k != 'tab') +
+                          sum(tab_widths))
+            col = column_w - li - ri - (fi if is_first else 0.0)
+            has_tab = bool(tab_widths)
 
             extra_per_space = 0.0
-            x0 = _PDF_MARGIN + indent
+            x0 = m_left + indent
             if align == 'right':
                 x0 += max(0.0, col - line_width)
             elif align == 'center':
                 x0 += max(0.0, (col - line_width) / 2.0)
-            elif align == 'justify' and not is_last_line_of_para:
-                space_count = sum(1 for is_space, _ in line_items if is_space)
+            elif align == 'justify' and not is_last_line_of_para and not has_tab:
+                space_count = sum(1 for is_space, _ in line_items if is_space is True)
                 if space_count > 0 and col > line_width:
                     extra_per_space = (col - line_width) / space_count
 
@@ -932,7 +1093,17 @@ def paragraphs_to_pdf_bytes(paragraphs):
             # those same widths, it can't drift from where Tj itself draws.
             running_x = x0
             deco = []  # (x_start, x_end, y) segments to stroke AFTER this ET
+            tab_i = 0
             for is_space, frags in line_items:
+                if is_space == 'tab':
+                    # Never drawn: the text after it starts at its stop,
+                    # in a text object of its own.
+                    running_x += tab_widths[tab_i]
+                    tab_i += 1
+                    cur_ops.append('ET')
+                    cur_ops.append('BT')
+                    cur_ops.append('%.2f %.2f Td' % (running_x, cur_y))
+                    continue
                 for text, run in frags:
                     font_name, widths = _pdf_font_for_run(run)
                     size_pt = _pdf_effective_size_pt(run)
@@ -972,10 +1143,10 @@ def paragraphs_to_pdf_bytes(paragraphs):
         cur_y -= sa
 
     pages.append(cur_ops)
-    return _pdf_assemble(pages, used_chars)
+    return _pdf_assemble(pages, used_chars, (page_w, page_h))
 
 
-def _pdf_assemble(pages, used_chars):
+def _pdf_assemble(pages, used_chars, media=(_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT)):
     """Builds the final PDF byte stream: Catalog, Pages tree, one Page +
     one content-stream object per page, and one font object per style
     slot -- Tier 0's standard Type1 font (Helvetica/-Bold/-Oblique/-
@@ -1023,8 +1194,9 @@ def _pdf_assemble(pages, used_chars):
                  '/CapHeight %d /StemV 80 /FontFile2 %d 0 R >>' %
                  (tier1['flags'], tier1['bbox'][0], tier1['bbox'][1], tier1['bbox'][2], tier1['bbox'][3],
                   tier1['italic_angle'], tier1['ascent'], tier1['descent'], tier1['cap_height'], fontfile_num))
-        objects.append((fontfile_num, b'<< /Length %d /Length1 %d >>\nstream\n' %
-                         (len(fontdata), len(fontdata)) + fontdata + b'\nendstream'))
+        packed = zlib.compress(fontdata, 9)
+        objects.append((fontfile_num, b'<< /Length %d /Length1 %d /Filter /FlateDecode >>\nstream\n' %
+                         (len(packed), len(fontdata)) + packed + b'\nendstream'))
         objects.append((descr_num, descr.encode('ascii')))
         objects.append((font_num, ('<< /Type /Font /Subtype /TrueType /BaseFont /LiberationSans '
                                     '/FirstChar 32 /LastChar 255 /Widths [%s] '
@@ -1048,9 +1220,13 @@ def _pdf_assemble(pages, used_chars):
     for page_num, content_num, ops in zip(page_obj_nums, content_obj_nums, pages):
         objects.append((page_num, ('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %g %g] '
                                     '/Resources << /Font << %s >> >> /Contents %d 0 R >>' %
-                                    (_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT, font_res, content_num)).encode('ascii')))
-        stream = ('\n'.join(ops) + '\n').encode('latin-1', errors='replace')
-        objects.append((content_num, b'<< /Length %d >>\nstream\n' % len(stream) + stream + b'endstream'))
+                                    (media[0], media[1], font_res, content_num)).encode('ascii')))
+        # Compressed: page text is the bulk of a PDF and packs four- or
+        # five-fold, which is what lets a real document fit the link's
+        # 64 KB response at all.
+        stream = zlib.compress(('\n'.join(ops) + '\n').encode('latin-1', errors='replace'), 9)
+        objects.append((content_num, b'<< /Length %d /Filter /FlateDecode >>\nstream\n' % len(stream) +
+                         stream + b'\nendstream'))
 
     objects.sort(key=lambda o: o[0])
     out = bytearray(b'%PDF-1.4\n%\xe2\xe3\xcf\xd3\n')
@@ -1100,7 +1276,7 @@ def handle_convert_export(payload):
     try:
         if format_id == FORMAT_ODT:
             return STATUS_OK, paragraphs_to_odt_bytes(paragraphs)
-        return STATUS_OK, paragraphs_to_pdf_bytes(paragraphs)
+        return STATUS_OK, paragraphs_to_pdf_bytes(paragraphs, rtf_page_setup(rtf_bytes))
     except Exception:
         return STATUS_ERR, b''
 

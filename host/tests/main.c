@@ -515,7 +515,14 @@ void test_format_txt_export_reports_size_on_overflow(void);
 
 /* format_rtf_import.c */
 void test_format_rtf_import_rejects_bad_header(void);
-void test_format_rtf_import_rejects_unsupported_charset(void);
+void test_format_rtf_import_decodes_other_code_pages(void);
+void test_rtf_modern_unicode_and_its_fallback(void);
+void test_rtf_modern_plain_resets_and_hidden_text_stays_out(void);
+void test_rtf_modern_word_noise_stays_out_of_the_body(void);
+void test_rtf_modern_table_rows_become_tabbed_paragraphs(void);
+void test_rtf_modern_line_spacing_tabs_and_page_setup(void);
+void test_rtf_modern_alike_paragraphs_share_one_style(void);
+void test_rtf_modern_export_round_trips_the_new_properties(void);
 void test_format_rtf_import_simple_paragraph(void);
 void test_format_rtf_import_no_trailing_empty_paragraph(void);
 void test_format_rtf_import_blank_line_is_empty_paragraph(void);
@@ -584,6 +591,7 @@ void test_offload_submit_fails_after_gateway_killed(void);
 void test_convert_odt_import_via_gateway(void);
 void test_convert_odt_export_roundtrip_via_gateway(void);
 void test_convert_pdf_export_via_gateway(void);
+void test_convert_pdf_export_uses_the_document_page(void);
 void test_convert_unsupported_format_id_reports_unsupported(void);
 void test_convert_malformed_payload_is_error(void);
 
@@ -1075,7 +1083,14 @@ static const test_case g_cases[] = {
     { "format_txt_export_reports_size_on_overflow", test_format_txt_export_reports_size_on_overflow },
 
     { "format_rtf_import_rejects_bad_header", test_format_rtf_import_rejects_bad_header },
-    { "format_rtf_import_rejects_unsupported_charset", test_format_rtf_import_rejects_unsupported_charset },
+    { "format_rtf_import_decodes_other_code_pages", test_format_rtf_import_decodes_other_code_pages },
+    { "rtf_modern_unicode_and_its_fallback", test_rtf_modern_unicode_and_its_fallback },
+    { "rtf_modern_plain_resets_and_hidden_text_stays_out", test_rtf_modern_plain_resets_and_hidden_text_stays_out },
+    { "rtf_modern_word_noise_stays_out_of_the_body", test_rtf_modern_word_noise_stays_out_of_the_body },
+    { "rtf_modern_table_rows_become_tabbed_paragraphs", test_rtf_modern_table_rows_become_tabbed_paragraphs },
+    { "rtf_modern_line_spacing_tabs_and_page_setup", test_rtf_modern_line_spacing_tabs_and_page_setup },
+    { "rtf_modern_alike_paragraphs_share_one_style", test_rtf_modern_alike_paragraphs_share_one_style },
+    { "rtf_modern_export_round_trips_the_new_properties", test_rtf_modern_export_round_trips_the_new_properties },
     { "format_rtf_import_simple_paragraph", test_format_rtf_import_simple_paragraph },
     { "format_rtf_import_no_trailing_empty_paragraph", test_format_rtf_import_no_trailing_empty_paragraph },
     { "format_rtf_import_blank_line_is_empty_paragraph", test_format_rtf_import_blank_line_is_empty_paragraph },
@@ -1138,6 +1153,7 @@ static const test_case g_cases[] = {
     { "convert_odt_import_via_gateway", test_convert_odt_import_via_gateway },
     { "convert_odt_export_roundtrip_via_gateway", test_convert_odt_export_roundtrip_via_gateway },
     { "convert_pdf_export_via_gateway", test_convert_pdf_export_via_gateway },
+    { "convert_pdf_export_uses_the_document_page", test_convert_pdf_export_uses_the_document_page },
     { "convert_unsupported_format_id_reports_unsupported", test_convert_unsupported_format_id_reports_unsupported },
     { "convert_malformed_payload_is_error", test_convert_malformed_payload_is_error },
 

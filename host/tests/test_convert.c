@@ -3,6 +3,7 @@
 #include "test.h"
 #include "offload.h"
 #include "format_rtf.h"
+#include "format_txt.h"
 #include "platform.h"
 #include "gateway_harness.h"
 
@@ -367,6 +368,52 @@ void test_convert_malformed_payload_is_error(void)
     ASSERT_TRUE(resp.status == OFFLOAD_ERR); /* zipfile.BadZipFile, caught -> ERR, not a crash */
     offload_response_free(&resp);
 
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+/* The document's own page reaches the PDF: an A4 section with narrow
+   margins comes out as an A4 MediaBox, and the page text is compressed
+   (what lets a real document fit the link's one-frame response). */
+void test_convert_pdf_export_uses_the_document_page(void)
+{
+    gateway_handle gw;
+    wp_document doc;
+    u8 rtf_buf[2048];
+    u32 rtf_len;
+    u8 req_payload[2048 + 1];
+    offload_request req;
+    offload_response resp;
+    static const char text[] = "Name\tAmount\nAlice\t12.50\n";
+    wp_bool media = WP_FALSE, flate = WP_FALSE;
+    u32 i;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)text, (u32)strlen(text), &doc) == WP_OK);
+    doc.sections[0].page_width = 11906;     /* A4 */
+    doc.sections[0].page_height = 16838;
+    doc.sections[0].margin_left = 1134;
+    ASSERT_TRUE(format_rtf_export(&doc, rtf_buf, sizeof(rtf_buf), &rtf_len) == WP_OK);
+    wp_document_free(&doc);
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    req_payload[0] = FORMAT_PDF;
+    memcpy(req_payload + 1, rtf_buf, rtf_len);
+    req.op = OFFLOAD_CONVERT_EXPORT;
+    req.payload = req_payload;
+    req.payload_len = rtf_len + 1;
+    req.timeout_ms = 10000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+
+    for (i = 0; i + 28 <= resp.result_len; i++) {
+        if (memcmp(resp.result + i, "/MediaBox [0 0 595.3 841.9]", 27) == 0) media = WP_TRUE;
+        if (memcmp(resp.result + i, "/FlateDecode", 12) == 0) flate = WP_TRUE;
+    }
+    ASSERT_TRUE(media);
+    ASSERT_TRUE(flate);
+
+    offload_response_free(&resp);
     offload_shutdown();
     gateway_stop(&gw);
 }

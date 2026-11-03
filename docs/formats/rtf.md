@@ -22,16 +22,49 @@ allocation growth per token.
   skipped wholesale; an unrecognized plain control word's surrounding
   text is still imported.
 
-**Header** -- the file must start `{\rtf1`; `\ansi` or `\ansicpg1252` is
-the only supported character set (anything else, e.g. `\mac`, `\pc`, or a
-different codepage, is `WP_UNSUPPORTED` -- a real, documented gap, not a
-silent mis-decode).
+**Header** -- the file must start `{\rtf1`. `\'hh` bytes decode through
+the declared code page (`engine/include/codepage.h`): `\ansi`/`\ansicpg1252`,
+`\ansicpg1250` (Central European), `\ansicpg1251` (Cyrillic), `\pc` (437),
+`\pca` (850) and `\mac` (Mac Roman). Any other `\ansicpgN` decodes as 1252
+rather than refusing the file -- right for every Western writer, and a
+modern writer spells anything outside its code page as `\uN` anyway.
+(Until 2026-11-02 anything but 1252 was `WP_UNSUPPORTED`.)
+
+**Unicode** -- `\uN` (signed 16-bit, so `\u-3913` is U+F0B7) is the
+character; the `\ucN` fallback characters after it (one by default,
+scoped to the group, `\uc0` for none -- TextEdit's curly quotes) are
+skipped, whether they arrive as literal text or as `\'hh`.
 
 **Destinations recognized and their content NOT imported as document
 text**: `\fonttbl`, `\info` (and everything inside it, including
 `\title`/`\author` -- see "no title/author capture" gap below),
-`\stylesheet`, `\pict`, `\object`, `\footnote`, `\header`, `\footer`, and
-any `\*`-marked group.
+`\stylesheet`, `\pict`, `\object`, `\footnote`, `\header`, `\footer`,
+Word's `\headerl`/`\headerr`/`\headerf` and `\footerl`/`\footerr`/`\footerf`,
+list-number text (`\pntext`, `\listtext`, `\pn` -- the number is generated,
+not document text), `\filetbl`, `\revtbl`, `\fldinst`, and any `\*`-marked
+group. Hidden text (`\v`) is not imported either, and `\binN`'s N raw
+bytes are stepped over in any destination.
+
+**Character format reset** -- `\plain` returns to the default character
+format (not bold, 12 pt, black, visible). Word writes `\pard\plain` before
+nearly every paragraph; without it, a size or bold carried on.
+
+**Paragraph additions (2026-11-02)** -- line spacing `\slN` with
+`\slmultN` (`\slmult1`: a multiple in 240ths; `\slmult0` or a negative
+`\sl`: at least N twips -- `wp_para_style.line_spacing`), and tab stops
+`\txN`, each preceded by its kind if not left (`\tqr`, `\tqc`, `\tqdec`;
+`\tb` bar tabs are read as left), up to `WP_MAX_TABS` (12), sorted.
+`\pard` resets both. Alike paragraphs share one style (find-or-add).
+
+**Page setup** -- `\paperw`/`\paperh` and `\margl`/`\margr`/`\margt`/`\margb`,
+or the section forms `\pgwsxn`/`\pghsxn`/`\marglsxn`..., set the section's
+page.
+
+**Tables, page and section breaks** -- the model has no table, so a row
+comes in as one paragraph of tab-separated cells (`\cell` is a tab,
+`\row` ends the paragraph), which the ruler's tab stops can then line
+up. `\page` and `\sect` end the paragraph; the model has no page break
+yet.
 
 **Destinations recognized and captured**:
 - `\colortbl` -- up to 32 `\redN\greenN\blueN;` entries, referenced later
@@ -80,12 +113,10 @@ enough in real-world RTF to be worth the small fixed lookup).
 - **`\~` (non-breaking space) becomes a regular space**, `\-` (optional
   hyphen) is dropped entirely. Neither concept exists in the document
   model.
-- **Unicode (`\uN`) is not supported.** Classic RTF 1.x's primary text
-  path is `\ansi` + `\'hh`, which this importer handles fully; `\uN`
-  (RTF 1.1+ Unicode escapes with a fallback char) is a real, separate
-  gap -- a fixture RTF using it will import the fallback character(s)
-  literally rather than the intended Unicode codepoint, since the
-  fallback text still arrives as ordinary literal text.
+- **Fonts are not imported.** `\fonttbl` is skipped and `\fN` ignored:
+  the model holds one typeface (docs/layout.md).
+- **Highlighting (`\highlight`, `\cb`) is ignored**: no background colour
+  in the model yet.
 
 ## Export
 

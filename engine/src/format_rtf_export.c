@@ -3,6 +3,7 @@
 #include "format_rtf.h"
 #include "utf8.h"
 #include "format_rtf_internal.h"
+#include "codepage.h"
 #include "platform.h"   /* mem_alloc/mem_free -- CLAUDE.md's allocator rule */
 
 /* Classic RTF 1.x export -- the inverse of format_rtf_import.c. Full
@@ -59,28 +60,11 @@ static void rtf_write_i32(rtf_writer *w, i32 v)
     rtf_write_str(w, &buf[i + 1]);
 }
 
-/* Unicode codepoint -> cp1252 byte. Returns WP_FALSE if cp has no
-   cp1252 representation (caller substitutes '?'). The only consumer of
-   the reverse direction of rtf_cp1252_to_unicode
-   (format_rtf_internal.h), so it lives here rather than in that shared
-   header -- format_rtf_import.c never needs it, and a static function
-   only one of two includers calls trips -Werror=unused-function. */
-static wp_bool rtf_unicode_to_cp1252(u32 cp, u8 *out_byte)
-{
-    u32 i;
-
-    if (cp < 0x80 || (cp >= 0xA0 && cp <= 0xFF)) { *out_byte = (u8)cp; return WP_TRUE; }
-    for (i = 0; i < 32; i++) {
-        if (rtf_cp1252_to_unicode((u8)(0x80 + i)) == cp) { *out_byte = (u8)(0x80 + i); return WP_TRUE; }
-    }
-    return WP_FALSE;
-}
-
 /* Escapes and writes UTF-8 text as RTF text: '{'/'}'/'\\' are escaped,
-   ASCII passes through, everything else round-trips through cp1252 via
-   '\'hh' (falling back to a literal '?' for codepoints cp1252 can't
-   represent -- rare in documents this project can itself produce, since
-   nothing populates styles from arbitrary Unicode input yet). */
+   ASCII passes through, cp1252 characters go as '\'hh', and anything
+   else as \uN followed by a '?' for readers that do not know \u (the
+   header's \uc1 says one fallback character follows). N is RTF's signed
+   16-bit; a character beyond the BMP has no \u spelling and goes as '?'. */
 static void rtf_write_text(rtf_writer *w, const u8 *bytes, u32 len)
 {
     u32 pos = 0;
@@ -91,7 +75,9 @@ static void rtf_write_text(rtf_writer *w, const u8 *bytes, u32 len)
 
         if (n == 0) { pos++; continue; } /* skip an invalid byte rather than emit garbage */
 
-        if (cp == '{' || cp == '}' || cp == '\\') {
+        if (cp == '\t') {
+            rtf_write_str(w, "\\tab ");   /* a raw tab byte is ignorable whitespace to many readers */
+        } else if (cp == '{' || cp == '}' || cp == '\\') {
             u8 esc[2];
             esc[0] = '\\';
             esc[1] = (u8)cp;
@@ -101,12 +87,16 @@ static void rtf_write_text(rtf_writer *w, const u8 *bytes, u32 len)
             rtf_write_bytes(w, &b, 1);
         } else {
             u8 native;
-            if (rtf_unicode_to_cp1252(cp, &native)) {
+            if (wp_codepage_encode(1252, cp, &native)) {
                 char hex[4];
                 hex[0] = '\\'; hex[1] = '\'';
                 hex[2] = "0123456789abcdef"[native >> 4];
                 hex[3] = "0123456789abcdef"[native & 0xF];
                 rtf_write_bytes(w, (const u8 *)hex, 4);
+            } else if (cp <= 0xFFFF) {
+                rtf_write_str(w, "\\u");
+                rtf_write_i32(w, (cp >= 0x8000) ? (i32)cp - 65536 : (i32)cp);
+                rtf_write_str(w, "?");
             } else {
                 rtf_write_bytes(w, (const u8 *)"?", 1);
             }
@@ -178,11 +168,11 @@ static void rtf_build_color_table(const wp_document *doc, rtf_color_table *ct)
     }
 }
 
-static void rtf_emit_header(rtf_writer *w, const rtf_color_table *ct)
+static void rtf_emit_header(rtf_writer *w, const wp_document *doc, const rtf_color_table *ct)
 {
     u32 i;
 
-    rtf_write_str(w, "{\\rtf1\\ansi\\ansicpg1252\\deff0"
+    rtf_write_str(w, "{\\rtf1\\ansi\\ansicpg1252\\deff0\\uc1\\deftab720"
                      "{\\fonttbl{\\f0 Helvetica;}}"); /* honest placeholder -- see docs/formats/rtf.md */
 
     if (ct->count > 1) {
@@ -194,6 +184,19 @@ static void rtf_emit_header(rtf_writer *w, const rtf_color_table *ct)
             rtf_write_str(w, ";");
         }
         rtf_write_str(w, "}");
+    }
+
+    /* Page setup, from the first section: the document's page as the
+       reader should lay it out. */
+    if (doc->section_count > 0) {
+        const wp_section *sec = &doc->sections[0];
+        rtf_write_str(w, "\\paperw"); rtf_write_i32(w, sec->page_width);
+        rtf_write_str(w, "\\paperh"); rtf_write_i32(w, sec->page_height);
+        rtf_write_str(w, "\\margl");  rtf_write_i32(w, sec->margin_left);
+        rtf_write_str(w, "\\margr");  rtf_write_i32(w, sec->margin_right);
+        rtf_write_str(w, "\\margt");  rtf_write_i32(w, sec->margin_top);
+        rtf_write_str(w, "\\margb");  rtf_write_i32(w, sec->margin_bottom);
+        rtf_write_str(w, "\r\n");
     }
 }
 
@@ -380,6 +383,21 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
         if (ps->indent_first != 0)  { rtf_write_str(w, "\\fi"); rtf_write_i32(w, ps->indent_first); }
         if (ps->space_before != 0)  { rtf_write_str(w, "\\sb"); rtf_write_i32(w, ps->space_before); }
         if (ps->space_after != 0)   { rtf_write_str(w, "\\sa"); rtf_write_i32(w, ps->space_after); }
+        /* The model's line spacing back to RTF's (docmodel.h). */
+        if (ps->line_spacing > 0) {
+            rtf_write_str(w, "\\sl"); rtf_write_i32(w, ps->line_spacing); rtf_write_str(w, "\\slmult1");
+        } else if (ps->line_spacing < 0) {
+            rtf_write_str(w, "\\sl"); rtf_write_i32(w, -ps->line_spacing); rtf_write_str(w, "\\slmult0");
+        }
+        {
+            u8 t;
+            for (t = 0; t < ps->tab_count && t < WP_MAX_TABS; t++) {
+                if (ps->tab_kind[t] == (u8)WP_TAB_RIGHT) rtf_write_str(w, "\\tqr");
+                else if (ps->tab_kind[t] == (u8)WP_TAB_CENTER) rtf_write_str(w, "\\tqc");
+                else if (ps->tab_kind[t] == (u8)WP_TAB_DECIMAL) rtf_write_str(w, "\\tqdec");
+                rtf_write_str(w, "\\tx"); rtf_write_i32(w, ps->tab_pos[t]);
+            }
+        }
     }
 
     if (para->kind == (u8)WP_PARA_IMAGE) {
@@ -400,7 +418,7 @@ static void rtf_emit_document(rtf_writer *w, const wp_document *doc, const rtf_c
 {
     u32 si, pi;
 
-    rtf_emit_header(w, ct);
+    rtf_emit_header(w, doc, ct);
 
     for (si = 0; si < doc->section_count; si++) {
         const wp_section *sec = &doc->sections[si];

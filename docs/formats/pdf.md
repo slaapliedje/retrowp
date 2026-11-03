@@ -29,11 +29,19 @@ same thing).
 
 ## Design
 
-- **Page**: US Letter (612&times;792 pt), 1 inch margins all around
-  (468&times;648 pt column). Not configurable -- a fixed, documented
-  choice, the same kind of "one sane default, not a settings dialog"
-  scope this project applies elsewhere (e.g. `ATARI_ASSUMED_DPI` in
-  `docs/atari-platform.md`).
+- **Page**: the document's own, from the RTF header's `\paperw`/`\paperh`
+  and `\margl`/`\margr`/`\margt`/`\margb` (`rtf_page_setup`; the engine's
+  exporter writes them from the first section since 2026-11-02). A file
+  that names no page gets US Letter with one-inch margins, RTF's own
+  default. A4 comes out as a 595.3&times;841.9 pt MediaBox.
+- **Line spacing and tab stops** follow the engine's rules (docs/layout.md):
+  `\sl`/`\slmult` scale or floor the leading; a `\tab` goes to the next
+  `\tx` stop (right, centre and decimal stops placed once the line's
+  text is known), or the next half inch; the text after a tab starts a
+  text object of its own at the stop.
+- **Compressed**: page content streams and embedded font files are
+  `/FlateDecode`, which is what keeps a real document inside one 64 KB
+  link frame.
 - **Fonts, two tiers (T13.3)**: 4 logical style slots (regular/bold/
   italic/bolditalic), selected per run from its bold/italic flags, each
   independently backed by whichever tier is actually available on this
@@ -129,10 +137,12 @@ Automated (`host/tests/test_convert.c::test_convert_pdf_export_via_gateway`,
 part of `make test`): builds a small document, exports to RTF, ships it
 through the real `offload_client.c` API with `format_id=FORMAT_PDF`, and
 checks the result is a genuine PDF (magic bytes, a real `/Type /Page`
-object present). Deliberately small: `engine/src/offload_client.c` caps
-a single response at `OFFLOAD_MAX_RESPONSE_PAYLOAD` (32768 bytes,
-raised from an original 4096 once an earlier, larger fixture actually
-hit it during development -- `offload_submit` returned `WP_RANGE`, not a
+object present); `test_convert_pdf_export_uses_the_document_page` checks
+an A4 document's MediaBox and the compression. `engine/src/offload_client.c`
+caps a single response at `OFFLOAD_MAX_RESPONSE_PAYLOAD` (65000 bytes since
+2026-11-02 -- one wire frame, less what a 16-bit DOS heap can hand out;
+it was 32768, raised from an original 4096 once an earlier, larger
+fixture actually hit it during development -- `offload_submit` returned `WP_RANGE`, not a
 gateway bug) -- a real constraint of the current transport. This is a
 general transport limit, not a PDF-specific one -- any op returning bulk
 data over this link is bounded the same way today. T13.3's font
@@ -195,7 +205,6 @@ properties the automated test's size constraint can't exercise):
   source of truth" rule, a cross-cutting lift on the order of a platform
   milestone. Tracked as its own future milestone item in
   `docs/milestones.md`, not silently dropped or half-implemented here.
-- **Fixed US Letter, 1 inch margins, no page-size/orientation option.**
 - **Extended-charset (non-ASCII) glyph widths are approximated** for any
   style slot still on Tier 0 (no `fonttools`, or that particular
   Liberation face missing on this host) -- see the width-table note
