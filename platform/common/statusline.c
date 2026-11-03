@@ -58,6 +58,14 @@ void wp_statusline_paint(plat_gc *gc, plat_font *font,
         len = append_bytes(buf, len, WP_STATUSLINE_BUF_MAX, view->pending_cmd_utf8, view->pending_cmd_len);
     }
 
+    /* After the mode, a little apart: no measuring needed (this file has
+       no twips<->px conversion of its own), and the mode text never
+       grows long enough to want the space. */
+    if (view->where_len > 0 && view->where_utf8 != NULL) {
+        len = append_bytes(buf, len, WP_STATUSLINE_BUF_MAX, (const u8 *)"   ", 3);
+        len = append_bytes(buf, len, WP_STATUSLINE_BUF_MAX, view->where_utf8, view->where_len);
+    }
+
     if (len > 0) {
         /* plat_draw_text's y is the text BASELINE, not the top of the
            glyph box -- every document paint loop in this project already

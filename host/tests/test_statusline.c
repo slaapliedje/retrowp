@@ -28,7 +28,16 @@ void test_statusline_paint_does_not_crash_with_various_views(void)
     view.pending_count = 0;
     view.pending_cmd_utf8 = NULL;
     view.pending_cmd_len = 0;
+    view.where_utf8 = NULL;
+    view.where_len = 0;
     wp_statusline_paint(gc, font, 0, 180, 640, 20, &view);
+
+    /* mode + where the caret is */
+    view.where_utf8 = (const u8 *)"Page 2 of 5";
+    view.where_len = 11;
+    wp_statusline_paint(gc, font, 0, 180, 640, 20, &view);
+    view.where_utf8 = NULL;
+    view.where_len = 0;
 
     /* mode + pending count (e.g. "3" before "3dd") */
     view.mode_label_utf8 = (const u8 *)"NORMAL";

@@ -124,3 +124,53 @@ void wp_pagination_free(wp_pagination *pagination)
     pagination->page_count = 0;
     pagination->page_capacity = 0;
 }
+
+i32 wp_section_column_twips(const wp_section *sec)
+{
+    i32 w = sec->page_width - sec->margin_left - sec->margin_right;
+    return (w < 1440) ? 1440 : w;
+}
+
+u32 wp_document_mark_pages(wp_document *doc)
+{
+    u32 s_idx;
+    u32 page = 0;
+    wp_bool have_page = WP_FALSE;
+    i32 used = 0;
+
+    for (s_idx = 0; s_idx < doc->section_count; s_idx++) {
+        wp_section *sec = &doc->sections[s_idx];
+        i32 content_height = sec->page_height - sec->margin_top - sec->margin_bottom;
+        u32 p_idx;
+
+        /* A new section starts a new page, as in wp_document_paginate. */
+        if (have_page && s_idx > 0) {
+            page++;
+            used = 0;
+            have_page = WP_FALSE;
+        }
+        for (p_idx = 0; p_idx < sec->para_count; p_idx++) {
+            wp_paragraph_layout *layout = (wp_paragraph_layout *)sec->paras[p_idx].layout;
+            u32 l_idx;
+
+            if (layout == NULL) continue;
+            for (l_idx = 0; l_idx < layout->line_count; l_idx++) {
+                wp_line *line = &layout->lines[l_idx];
+                wp_bool starts = WP_FALSE;
+
+                if (!have_page) {
+                    have_page = WP_TRUE;
+                    starts = WP_TRUE;
+                } else if (used + line->height_twips > content_height && used > 0) {
+                    page++;
+                    used = 0;
+                    starts = WP_TRUE;
+                }
+                line->page = page;
+                line->page_start = starts;
+                used += line->height_twips;
+            }
+        }
+    }
+    return page + 1;
+}

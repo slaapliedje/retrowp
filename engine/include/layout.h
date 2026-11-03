@@ -43,6 +43,8 @@ typedef struct {
     i32 text_height_twips;  /* the text's own height */
     u32 first_tab;          /* index into the layout's tab_widths of this line's first tab */
     u32 tab_count;          /* tabs on this line */
+    u32 page;               /* 0-based page the line falls on (wp_document_mark_pages) */
+    wp_bool page_start;     /* first line of its page */
 } wp_line;
 
 typedef struct {
@@ -52,6 +54,7 @@ typedef struct {
     i32     *tab_widths;    /* the advance of every tab in the paragraph, in text order */
     u32      tab_count;
     u32      tab_capacity;
+    i32      wrap_twips;    /* the column width this layout was broken at */
 } wp_paragraph_layout;
 
 /* The tab stop a tab starting at x_twips (from the column's left edge)
@@ -109,6 +112,18 @@ typedef struct {
 wp_status wp_document_paginate(wp_document *doc, wp_pagination *out);
 
 void wp_pagination_free(wp_pagination *pagination);
+
+/* The same page-filling rule as wp_document_paginate, but nothing
+   allocated: it writes each line's page and page_start in place, for a
+   screen that draws page breaks and a status line that says which page
+   the caret is on. Uses the layouts as they are (lay them out first);
+   a paragraph with no layout contributes no lines. Returns the page
+   count (at least 1). */
+u32 wp_document_mark_pages(wp_document *doc);
+
+/* The text column of a section's page: page width less both margins
+   (never less than an inch, so a nonsense page setup still lays out). */
+i32 wp_section_column_twips(const wp_section *sec);
 
 
 /* ------------------------------------------------------------------ */

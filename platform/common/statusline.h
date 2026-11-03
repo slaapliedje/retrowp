@@ -24,6 +24,8 @@ typedef struct {
     u32       pending_count;     /* the "3" in "3dd"; 0 = none, not shown */
     const u8 *pending_cmd_utf8;  /* partial command buffer, e.g. ":wq", "d" */
     u32       pending_cmd_len;
+    const u8 *where_utf8;        /* where the caret is, e.g. "Page 2 of 5"; NULL = none */
+    u32       where_len;
 } wp_vi_status_view;
 
 /* Fills (x, y, w, h) with a background bar and draws view's fields as

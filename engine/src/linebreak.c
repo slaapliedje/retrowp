@@ -312,6 +312,8 @@ static wp_status emit_line(wp_paragraph_layout *layout, u32 start_run, u32 start
     line->avail_twips = width;
     line->first_tab = layout->tab_count;
     line->tab_count = 0;
+    line->page = 0;
+    line->page_start = WP_FALSE;
     layout->line_count++;
     return WP_OK;
 }
@@ -402,6 +404,7 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
         layout->line_count = 0; /* reuse the allocated arrays; rebuild in place */
         layout->tab_count = 0;
     }
+    layout->wrap_twips = content_width_twips;
 
     if (para->kind == (u8)WP_PARA_IMAGE) {
         /* M15: a fixed-size, non-flowing block -- exactly one line sized

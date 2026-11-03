@@ -3,6 +3,7 @@
 #include "keymap.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "pageview.h"
 
 /* M10: this file's per-arm switches grow by one case each, one
    milestone phase at a time (docs/keymaps.md), the same incremental
@@ -637,6 +638,23 @@ void wp_keymap_clear_selection(wp_app_ctx *ctx)
     }
 }
 
+/* No sprintf: the status line's own small appenders. */
+static u32 append_text(char *w, u32 n, const char *s)
+{
+    while (*s) w[n++] = *s++;
+    return n;
+}
+
+static u32 append_uint(char *w, u32 n, u32 v)
+{
+    char digits[10];
+    u32 d = 0;
+
+    do { digits[d++] = (char)('0' + v % 10); v /= 10; } while (v > 0 && d < sizeof(digits));
+    while (d > 0) w[n++] = digits[--d];
+    return n;
+}
+
 void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,
                                 wp_vi_status_view *out)
 {
@@ -685,6 +703,28 @@ void wp_keymap_get_status_view(const wp_app_ctx *ctx, char *buf, u32 buf_cap,
     out->pending_count = 0;
     out->pending_cmd_utf8 = NULL;
     out->pending_cmd_len = 0;
+    out->where_utf8 = NULL;
+    out->where_len = 0;
+
+    /* Which page the caret is on, after the mode: the same buffer, past
+       the mode text's terminator, so the caller's one buffer holds both. */
+    if (ctx->doc_loaded) {
+        u32 used = out->mode_label_len + 1;
+        u32 pages = 1;
+        u32 page = wp_pageview_cursor_page(ctx->doc, wp_keymap_cursor((struct wp_app_ctx *)ctx)  /* reads only */, &pages);
+
+        if (buf_cap > used + 24) {
+            char *w = buf + used;
+            u32 n = 0;
+            n = append_text(w, n, "Page ");
+            n = append_uint(w, n, page);
+            n = append_text(w, n, " of ");
+            n = append_uint(w, n, pages);
+            w[n] = '\0';
+            out->where_utf8 = (const u8 *)w;
+            out->where_len = n;
+        }
+    }
 }
 
 /* ------------------------------------------------------------------ */

@@ -30,6 +30,7 @@
 #include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "pageview.h"
 #include "selspan.h"
 #include "menucheck.h"
 #include "statusline.h"
@@ -1077,18 +1078,11 @@ static const char g_sample_text[] =
    flag test each. */
 static void relayout_document(i32 content_width_twips)
 {
-    wp_bool width_changed = (wp_bool)(content_width_twips != g_content_width_twips);
-    u32 si, pi;
-
+    /* The page's text column, or the window when that is narrower
+       (pageview.h), relaid only where something changed; then the page
+       breaks are marked. */
     g_content_width_twips = content_width_twips;
-    for (si = 0; si < g_doc.section_count; si++) {
-        wp_section *sec = wp_document_section_get(&g_doc, si);
-        for (pi = 0; pi < sec->para_count; pi++) {
-            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
-            if (!width_changed && para->layout != NULL && !para->layout_dirty) continue;
-            wp_paragraph_relayout(&g_doc, para, content_width_twips);
-        }
-    }
+    (void)wp_pageview_relayout(&g_doc, content_width_twips);
 }
 
 /* Replaces the currently-open document (if any) with new_doc (already
@@ -1306,6 +1300,9 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                    about to be drawn -- a delete is exactly that case. */
                 fill_white_strip(vdi, area.g_x, y_px, area.g_w,
                                   atari_twips_to_px_y(line->height_twips));
+                if (line->page_start && line->page > 0) {
+                    wp_pageview_draw_break((plat_gc *)&gc, area.g_x, y_px, area.g_w);
+                }
 
                 /* Alignment never changes where lines BREAK (both engine
                    relayout and this paint pass use the same
@@ -3583,7 +3580,7 @@ static void paint_status_line(short window_handle, VdiHdl vdi, GRECT full_work, 
     atari_gc gc;
     plat_font *font;
     wp_vi_status_view view;
-    char mode_buf[40];
+    char mode_buf[96];   /* the mode or prompt, then "Page N of M" after its terminator */
     short pxy[4];
 
     if (!g_ctx.doc_loaded || bar_h_px <= 0 || bar_h_px > full_work.g_h) return;
@@ -3687,6 +3684,8 @@ static void paint_help(short window_handle, VdiHdl vdi)
             view.pending_count = 0;
             view.pending_cmd_utf8 = NULL;
             view.pending_cmd_len = 0;
+            view.where_utf8 = NULL;
+            view.where_len = 0;
             wp_statusline_paint((plat_gc *)&gc, hint_font, (i32)pxy[0], (i32)pxy[1],
                                  (i32)work.g_w, hint_bar_h_px, &view);
             plat_font_close(hint_font);

@@ -34,6 +34,7 @@
 #include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "pageview.h"
 #include "selspan.h"
 #include "tools.h"
 #include "menucheck.h"
@@ -249,26 +250,11 @@ static const char g_sample_text[] =
    single redraw. */
 static void relayout_document(i32 content_width_twips)
 {
-    wp_bool width_changed = (wp_bool)(content_width_twips != g_content_width_twips);
-    u32 si, pi;
-
+    /* The page's text column, or the window when that is narrower
+       (pageview.h), relaid only where something changed; then the page
+       breaks are marked. */
     g_content_width_twips = content_width_twips;
-    for (si = 0; si < g_amiga_doc.section_count; si++) {
-        wp_section *sec = wp_document_section_get(&g_amiga_doc, si);
-        for (pi = 0; pi < sec->para_count; pi++) {
-            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
-            /* Only what actually needs it: never-built (layout == NULL),
-               engine-marked dirty (any content edit -- edit.c sets it on
-               every insert/delete), or every paragraph when the column
-               itself changed (a real resize, where nothing is dirty but
-               every line must re-break). wp_paragraph_relayout has no
-               early-out of its own (linebreak.c measures unconditionally),
-               so this check is what makes calling relayout_document
-               before every paint affordable. */
-            if (!width_changed && para->layout != NULL && !para->layout_dirty) continue;
-            wp_paragraph_relayout(&g_amiga_doc, para, content_width_twips);
-        }
-    }
+    (void)wp_pageview_relayout(&g_amiga_doc, content_width_twips);
 }
 
 /* Rebuilds the layout of whatever the engine just marked dirty, to be
@@ -1071,7 +1057,7 @@ static void paint_status_line_amiga(amiga_gc *gc, Object *obj, i32 bar_h_px)
 {
     plat_font *font;
     wp_vi_status_view view;
-    char mode_buf[40];
+    char mode_buf[96];   /* the mode or prompt, then "Page N of M" after its terminator */
 
     if (!g_ctx.doc_loaded || bar_h_px <= 0) return;
 
@@ -1147,6 +1133,8 @@ static void paint_help_amiga(amiga_gc *gc, Object *obj)
             view.pending_count = 0;
             view.pending_cmd_utf8 = NULL;
             view.pending_cmd_len = 0;
+            view.where_utf8 = NULL;
+            view.where_len = 0;
             wp_statusline_paint((plat_gc *)gc, hint_font, x_px, y_px + total_h_px - hint_bar_h_px,
                                  w_px, hint_bar_h_px, &view);
             plat_font_close(hint_font);
@@ -1285,6 +1273,12 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                    also holds the paragraph's spacing. */
                 x_px += amiga_twips_to_px_x(line->x_twips);
                 line_origin_px = x_px;   /* the fragment walk below advances x_px past it */
+                text_y = y + amiga_twips_to_px_y(line->text_top_twips);
+                text_h_px = amiga_twips_to_px_y(line->text_height_twips);
+                if (line->page_start && line->page > 0) {
+                    wp_pageview_draw_break((plat_gc *)&gc, _mleft(obj), y,
+                                           _mright(obj) - _mleft(obj) + 1);
+                }
 
                 /* M15 T15.6: an image paragraph's single line has no run
                    bytes to fragment -- paint its real indexed-bitmap
