@@ -1183,6 +1183,49 @@ static i32 dos_twips_to_cols_conv(i32 twips)
     return (i32)dos_twips_to_col(twips);
 }
 
+/* A press on the ruler: follow the mouse (function 3, the button's
+   state now) while the left button is down, rewriting the ruler row
+   with the marker where it would go, and apply it on release
+   (rulerbar.h). A quick click is already released by the time this
+   looks, and is the click it always was. */
+static void dos_ruler_drag(const wp_rulerbar *rb, int col, int row)
+{
+    wp_rulerbar_drag d;
+    union REGS regs;
+    plat_window *win;
+    plat_gc *gc;
+    plat_font *font;
+    int lc = col, lr = row;
+
+    if (!wp_rulerbar_drag_begin(rb, &g_ctx, (i32)col, (i32)row, &d)) return;
+    if (g_dos_mouse && plat_window_create((const u8 *)"", 0, 0, 0, &win) == WP_OK) {
+        plat_window_get_gc(win, &gc);
+        if (plat_font_open((const u8 *)"", 0, 240, 0, &font) == WP_OK) {
+            for (;;) {
+                int c, r;
+                regs.x.ax = 0x0003;
+                int86(0x33, &regs, &regs);
+                if (!(regs.x.bx & 1)) break;
+                c = regs.x.cx / 8;
+                r = regs.x.dx / 8;
+                if (c != lc || r != lr) {
+                    lc = c;
+                    lr = r;
+                    if (wp_rulerbar_drag_move(rb, &d, (i32)c, (i32)r)) {
+                        dos_mouse_show(WP_FALSE);
+                        wp_rulerbar_paint_scale(gc, font, 0, rb, &g_ctx, &d);
+                        dos_mouse_show(WP_TRUE);
+                    }
+                }
+                dos_idle();
+            }
+            plat_font_close(font);
+        }
+        plat_window_destroy(win);
+    }
+    (void)wp_rulerbar_drag_end(&g_ctx, &d);
+}
+
 static void dos_click(int col, int row)
 {
     wp_pos pos;
@@ -1190,7 +1233,7 @@ static void dos_click(int col, int row)
     if (!g_ctx.doc_loaded || g_help_active) return;
 
     /* The ruler bar: a button runs its action as its shortcut would, a
-       click on the ruler sets or clears a tab stop there. */
+       press on the ruler drags a marker or clicks a tab stop in or out. */
     if (row == DOS_BAR_ROW || row == DOS_RULER_ROW) {
         wp_rulerbar rb;
         wp_rulerbar_hit hit;
@@ -1198,7 +1241,7 @@ static void dos_click(int col, int row)
         dos_rulerbar(&rb);
         if (!wp_rulerbar_hit_test(&rb, (i32)col, (i32)row, &hit)) return;
         if (hit.kind == (u8)WP_RULERBAR_BUTTON) invoke_action(hit.action);
-        else if (hit.kind == (u8)WP_RULERBAR_RULER) (void)wp_action_toggle_tab(&g_ctx, hit.twips);
+        else if (hit.kind == (u8)WP_RULERBAR_RULER) dos_ruler_drag(&rb, col, row);
         return;
     }
     if (row < DOS_DOC_TOP_ROW || row > DOS_DOC_BOTTOM_ROW) return;

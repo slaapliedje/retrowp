@@ -1422,6 +1422,34 @@ static void draw_document(WindowPtr w)
    boundary (wp_viewport_hit_test, measured the way the caret is
    painted, so click and caret agree to the pixel); with Shift held it
    extends the selection there instead. */
+/* A press on the ruler: follow the mouse while the button is down,
+   repainting just the ruler strip with the marker where it would go,
+   and apply it on release (rulerbar.h). The window is in front -- the
+   press was in it -- so its port is drawn into directly. */
+static void mac_ruler_drag(const wp_rulerbar *rb, Point start)
+{
+    wp_rulerbar_drag d;
+    mac_gc gc;
+    plat_font *font = NULL;
+    plat_font_metrics fm;
+    i32 ascent = 0;
+    Point pt, last = start;
+
+    if (!wp_rulerbar_drag_begin(rb, &g_ctx, (i32)start.h, (i32)start.v, &d)) return;
+    gc.window = g_win;
+    if (plat_font_open((const u8 *)"", 0, WP_MAC_STATUSLINE_SIZE_TWIPS, 0, &font) == WP_OK &&
+        plat_font_metrics_get(font, &fm) == WP_OK) ascent = mac_twips_to_px(fm.ascent);
+    while (StillDown()) {
+        GetMouse(&pt);   /* local to g_win, the current port */
+        if (pt.h == last.h && pt.v == last.v) continue;
+        last = pt;
+        if (wp_rulerbar_drag_move(rb, &d, (i32)pt.h, (i32)pt.v) && font != NULL)
+            wp_rulerbar_paint_scale((plat_gc *)&gc, font, ascent, rb, &g_ctx, &d);
+    }
+    if (font != NULL) plat_font_close(font);
+    (void)wp_rulerbar_drag_end(&g_ctx, &d);
+}
+
 static void mac_click(Point where, wp_bool extend)
 {
     Point pt = where;
@@ -1434,8 +1462,8 @@ static void mac_click(Point where, wp_bool extend)
     bar_h_px = statusline_height_px();
     if (pt.v >= g_win->portRect.bottom - bar_h_px) return;   /* the status strip */
 
-    /* The ruler bar: a button runs its action as the menu would, a click
-       on the ruler sets or clears a tab stop there. The caller
+    /* The ruler bar: a button runs its action as the menu would, a press
+       on the ruler drags a marker or clicks a tab stop in or out. The caller
        invalidates the window, and the redraw relays out. */
     {
         wp_rulerbar rb;
@@ -1443,7 +1471,7 @@ static void mac_click(Point where, wp_bool extend)
             wp_rulerbar_hit hit;
             if (wp_rulerbar_hit_test(&rb, (i32)pt.h, (i32)pt.v, &hit)) {
                 if (hit.kind == (u8)WP_RULERBAR_BUTTON) invoke_action(wp_action_find(hit.action));
-                else if (hit.kind == (u8)WP_RULERBAR_RULER) (void)wp_action_toggle_tab(&g_ctx, hit.twips);
+                else if (hit.kind == (u8)WP_RULERBAR_RULER) mac_ruler_drag(&rb, pt);
             }
             return;
         }

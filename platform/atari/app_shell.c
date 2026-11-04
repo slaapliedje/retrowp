@@ -4552,6 +4552,77 @@ static wp_bool menu_action_map_selfcheck(void)
    selection there instead. Clicks on the slider and the window frame
    never arrive here -- the AES turns those into WM_ARROWED, WM_VSLID,
    WM_TOPPED and the like. */
+/* The ruler strip alone, repainted through the window's rectangle list
+   (another window may cover part of it) with a dragged marker where it
+   is now. The caller holds the screen. */
+static void paint_ruler_scale(short window_handle, VdiHdl vdi, GRECT work,
+                              const wp_rulerbar *rb, const wp_rulerbar_drag *d)
+{
+    atari_gc gc;
+    plat_font *font;
+    plat_font_metrics fm;
+    GRECT r, strip;
+    short pxy[4];
+    i32 sy, sh;
+
+    wp_rulerbar_scale_rect(rb, &sy, &sh);
+    if (plat_font_open((const u8 *)"", 0, WP_ATARI_STATUSLINE_SIZE_TWIPS, 0, &font) != WP_OK) return;
+    plat_font_metrics_get(font, &fm);
+    gc.vdi = vdi;
+    gc.window_handle = window_handle;
+
+    wind_get_grect(window_handle, WF_FIRSTXYWH, &r);
+    while (r.g_w > 0 && r.g_h > 0) {
+        strip.g_x = work.g_x;
+        strip.g_y = (short)sy;
+        strip.g_w = work.g_w;
+        strip.g_h = (short)sh;
+        if (rc_intersect(&r, &strip)) {
+            pxy[0] = strip.g_x;
+            pxy[1] = strip.g_y;
+            pxy[2] = (short)(strip.g_x + strip.g_w - 1);
+            pxy[3] = (short)(strip.g_y + strip.g_h - 1);
+            vs_clip(vdi, 1, pxy);
+            wp_rulerbar_paint_scale((plat_gc *)&gc, font, atari_twips_to_px_y(fm.ascent), rb, &g_ctx, d);
+        }
+        wind_get_grect(window_handle, WF_NEXTXYWH, &r);
+    }
+    vs_clip(vdi, 0, pxy);
+    plat_font_close(font);
+}
+
+/* A press on the ruler: follow the mouse while the button is down,
+   showing the marker where it would go, and apply it on release
+   (rulerbar.h). The screen is ours for the drag (BEG_UPDATE: no other
+   window or dropdown draws over the strip), but NOT the mouse: under
+   BEG_MCTRL the AES stops following the button, misses the release, and
+   still thinks it is down -- so the next real press is no change to it,
+   and every other click was lost. Seen under Hatari/EmuTOS. A press
+   already released when this looks is a click. */
+static void atari_ruler_drag(short window_handle, VdiHdl vdi, GRECT work,
+                             const wp_rulerbar *rb, short mx, short my)
+{
+    wp_rulerbar_drag d;
+    short x, y, b, k, lx = mx, ly = my;
+
+    if (!wp_rulerbar_drag_begin(rb, &g_ctx, mx, my, &d)) return;
+    wind_update(BEG_UPDATE);
+    for (;;) {
+        graf_mkstate(&x, &y, &b, &k);
+        if (!(b & 1)) break;
+        if (x == lx && y == ly) continue;
+        lx = x;
+        ly = y;
+        if (wp_rulerbar_drag_move(rb, &d, x, y)) {
+            graf_mouse(M_OFF, (const MFORM *)0);
+            paint_ruler_scale(window_handle, vdi, work, rb, &d);
+            graf_mouse(M_ON, (const MFORM *)0);
+        }
+    }
+    wind_update(END_UPDATE);
+    (void)wp_rulerbar_drag_end(&g_ctx, &d);
+}
+
 static void atari_click(short window_handle, VdiHdl vdi, short mx, short my, short kstate)
 {
     GRECT work;
@@ -4566,7 +4637,7 @@ static void atari_click(short window_handle, VdiHdl vdi, short mx, short my, sho
     if (my < work.g_y || my >= work.g_y + work.g_h - bar_h_px) return;
 
     /* The ruler bar: a button runs its action exactly as the menu would;
-       a click on the ruler sets or clears a tab stop there. */
+       a press on the ruler drags a marker, or clicks a tab stop in or out. */
     if (atari_rulerbar(work, &rb) && my < work.g_y + wp_rulerbar_height(&rb)) {
         wp_rulerbar_hit hit;
         if (wp_rulerbar_hit_test(&rb, mx, my, &hit)) {
@@ -4577,7 +4648,7 @@ static void atari_click(short window_handle, VdiHdl vdi, short mx, short my, sho
                 if (!g_help_active && !g_ctx.quit_requested) redraw_window(window_handle, vdi);
                 return;
             }
-            if (hit.kind == (u8)WP_RULERBAR_RULER) (void)wp_action_toggle_tab(&g_ctx, hit.twips);
+            if (hit.kind == (u8)WP_RULERBAR_RULER) atari_ruler_drag(window_handle, vdi, work, &rb, mx, my);
             redraw_window(window_handle, vdi);
         }
         return;

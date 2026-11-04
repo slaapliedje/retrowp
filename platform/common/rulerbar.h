@@ -81,6 +81,65 @@ wp_bool wp_rulerbar_hit_test(const wp_rulerbar *rb, i32 x, i32 y, wp_rulerbar_hi
    or when the window system says the area was damaged. */
 u32 wp_rulerbar_signature(const wp_rulerbar *rb, struct wp_app_ctx *ctx);
 
+/* Dragging on the ruler. A press picks up the marker under it -- the
+   first-line indent (the upper triangle), the left or right indent (the
+   lower ones), or a tab stop -- or, on bare ruler, a new tab stop. The
+   shell then feeds every mouse position to _move while the button is
+   down, repainting the ruler strip with wp_rulerbar_paint_scale (which
+   draws the marker where it is being dragged to), and calls _end on
+   release:
+     - an indent marker sets that indent, snapped to an eighth of an
+       inch; the first line keeps its place when the left indent moves,
+       as on every ruler since Word 1.0;
+     - a tab stop moves, keeping its kind, or is removed if it was
+       dragged off the ruler, up or down;
+     - a press that never moved is a click: it sets or clears a tab stop
+       there, as a click always has.
+   On DOS's one-row ruler a first-line and left indent in the same cell
+   are picked up together and move together. */
+typedef enum {
+    WP_RB_DRAG_NONE = 0,
+    WP_RB_DRAG_FIRST,       /* first-line indent */
+    WP_RB_DRAG_LEFT,        /* left indent; the first line stays put */
+    WP_RB_DRAG_BOTH,        /* both together (DOS, when they share a cell) */
+    WP_RB_DRAG_RIGHT,       /* right indent */
+    WP_RB_DRAG_TAB,         /* an existing tab stop */
+    WP_RB_DRAG_NEWTAB       /* bare ruler: a new stop, or a click */
+} wp_rulerbar_drag_kind;
+
+typedef struct {
+    u8      kind;           /* wp_rulerbar_drag_kind */
+    wp_bool moved;          /* left the press position */
+    wp_bool off;            /* pulled off the ruler (a tab: removed) */
+    i32     press_twips;    /* where the press was, unsnapped */
+    i32     from_twips;     /* the marker's own position when picked up */
+    i32     twips;          /* where it is now, snapped */
+    i32     wrap;           /* the column width the ruler shows */
+    i32     press_x, press_y;
+} wp_rulerbar_drag;
+
+/* WP_TRUE when (x, y) is on the ruler strip; *d is then set up. */
+wp_bool wp_rulerbar_drag_begin(const wp_rulerbar *rb, struct wp_app_ctx *ctx,
+                               i32 x, i32 y, wp_rulerbar_drag *d);
+
+/* The mouse is at (x, y) with the button still down. WP_TRUE when what
+   the ruler shows changed: repaint the strip. */
+wp_bool wp_rulerbar_drag_move(const wp_rulerbar *rb, wp_rulerbar_drag *d, i32 x, i32 y);
+
+/* The button is up: apply the drag (or the click). */
+wp_status wp_rulerbar_drag_end(struct wp_app_ctx *ctx, wp_rulerbar_drag *d);
+
+/* The ruler strip alone -- the scale under the buttons -- cleared and
+   repainted, with `d`'s marker where it is being dragged to (d may be
+   NULL). A drag repaints this on every move, never the whole bar: on an
+   8 MHz ST the buttons are hundreds of fills. */
+void wp_rulerbar_paint_scale(plat_gc *gc, plat_font *font, i32 ascent,
+                             const wp_rulerbar *rb, struct wp_app_ctx *ctx,
+                             const wp_rulerbar_drag *d);
+
+/* The strip's rectangle, for a shell's clipping: top y and height. */
+void wp_rulerbar_scale_rect(const wp_rulerbar *rb, i32 *y, i32 *h);
+
 /* WP_TRUE if the bar has a button for `id` -- an action reachable this
    way needs no menu or shortcut to be usable. */
 wp_bool wp_rulerbar_has_action(wp_action_id id);

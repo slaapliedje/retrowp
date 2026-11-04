@@ -971,7 +971,9 @@ static ULONG editor_setup(struct IClass *cl, Object *obj, Msg msg)
     data->ehn.ehn_Class = cl;
     data->ehn.ehn_Priority = 0;
     data->ehn.ehn_Flags = MUI_EHF_GUIMODE;
-    data->ehn.ehn_Events = IDCMP_RAWKEY | IDCMP_MOUSEBUTTONS; /* keys, and clicks to place the caret */
+    /* Keys; clicks to place the caret; moves, for a drag on the ruler
+       (ignored while none is on). */
+    data->ehn.ehn_Events = IDCMP_RAWKEY | IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE;
     DoMethod(_win(obj), MUIM_Window_AddEventHandler, &data->ehn);
     return 1;
 }
@@ -1181,6 +1183,33 @@ static void paint_help_amiga(amiga_gc *gc, Object *obj)
     }
 }
 
+/* A drag on the ruler (rulerbar.h), from the press to the release.
+   MUI owns the event loop, so this is state, not a loop: the press
+   starts it (amiga_click), each mouse move updates it and asks for an
+   MADF_DRAWUPDATE redraw that repaints the ruler strip alone, and the
+   release applies it. */
+static wp_rulerbar_drag g_amiga_drag;
+static wp_bool g_amiga_dragging = WP_FALSE;
+static wp_bool g_amiga_drag_paint = WP_FALSE;
+
+static void paint_ruler_scale_amiga(Object *obj)
+{
+    amiga_gc gc;
+    wp_rulerbar rb;
+    plat_font *font;
+    plat_font_metrics fm;
+
+    if (!amiga_rulerbar(obj, &rb)) return;
+    gc.rp = _rp(obj);
+    gc.dri = _dri(obj);
+    GetAttr(MUIA_Window_Screen, g_win, (ULONG *)&gc.screen);
+    if (plat_font_open((const u8 *)"", 0, WP_AMIGA_STATUSLINE_SIZE_TWIPS, 0, &font) != WP_OK) return;
+    plat_font_metrics_get(font, &fm);
+    wp_rulerbar_paint_scale((plat_gc *)&gc, font, amiga_twips_to_px_y(fm.ascent), &rb, &g_ctx,
+                            g_amiga_dragging ? &g_amiga_drag : NULL);
+    plat_font_close(font);
+}
+
 static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
 {
     amiga_gc gc;
@@ -1201,6 +1230,11 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     wp_bool have_sel;
 
     DoSuperMethodA(cl, obj, (Msg)msg);
+    if ((msg->flags & MADF_DRAWUPDATE) && g_amiga_drag_paint) {
+        g_amiga_drag_paint = WP_FALSE;
+        paint_ruler_scale_amiga(obj);
+        return 0;
+    }
     if (!(msg->flags & MADF_DRAWOBJECT)) return 0;
 
     /* MUI_Redraw()-triggered repaints (as opposed to the window's own
@@ -1549,16 +1583,19 @@ static wp_bool amiga_click(Object *obj, struct IntuiMessage *imsg)
     if (!g_ctx.doc_loaded || g_help_active || g_content_width_twips <= 0) return WP_FALSE;
     if (x < _mleft(obj) || x > _mright(obj) || y < _mtop(obj) || y > _mbottom(obj)) return WP_FALSE;
 
-    /* The ruler bar: a button runs its action as the menu would, a click
-       on the ruler sets or clears a tab stop there; either way the
-       document is relaid before the redraw the caller does. */
+    /* The ruler bar: a button runs its action as the menu would, and the
+       document is relaid before the redraw the caller does; a press on
+       the ruler starts a drag, which the release applies. */
     {
         wp_rulerbar rb;
         if (amiga_rulerbar(obj, &rb) && y < rb.y + wp_rulerbar_height(&rb)) {
             wp_rulerbar_hit hit;
             if (!wp_rulerbar_hit_test(&rb, x, y, &hit)) return WP_FALSE;
             if (hit.kind == (u8)WP_RULERBAR_BUTTON) invoke_action(hit.action);
-            else if (hit.kind == (u8)WP_RULERBAR_RULER) (void)wp_action_toggle_tab(&g_ctx, hit.twips);
+            else if (hit.kind == (u8)WP_RULERBAR_RULER) {
+                g_amiga_dragging = wp_rulerbar_drag_begin(&rb, &g_ctx, x, y, &g_amiga_drag);
+                return WP_FALSE;   /* nothing changed yet: the release applies it */
+            }
             amiga_relayout_after_edit();
             return WP_TRUE;
         }
@@ -1580,6 +1617,23 @@ static ULONG editor_handleevent(struct IClass *cl, Object *obj, struct MUIP_Hand
 
     WP_UNUSED(cl);
     if (msg->imsg == NULL) return 0;
+    if (msg->imsg->Class == IDCMP_MOUSEMOVE) {
+        wp_rulerbar rb;
+        if (!g_amiga_dragging || !amiga_rulerbar(obj, &rb)) return 0;
+        if (wp_rulerbar_drag_move(&rb, &g_amiga_drag, (i32)msg->imsg->MouseX, (i32)msg->imsg->MouseY)) {
+            g_amiga_drag_paint = WP_TRUE;
+            MUI_Redraw(obj, MADF_DRAWUPDATE);
+        }
+        return MUI_EventHandlerRC_Eat;
+    }
+    if (msg->imsg->Class == IDCMP_MOUSEBUTTONS && g_amiga_dragging &&
+        (msg->imsg->Code == SELECTUP || msg->imsg->Code == MENUDOWN)) {
+        g_amiga_dragging = WP_FALSE;
+        if (msg->imsg->Code == SELECTUP) (void)wp_rulerbar_drag_end(&g_ctx, &g_amiga_drag);
+        amiga_relayout_after_edit();
+        MUI_Redraw(obj, MADF_DRAWOBJECT);
+        return MUI_EventHandlerRC_Eat;
+    }
     if (msg->imsg->Class == IDCMP_MOUSEBUTTONS) {
         if (msg->imsg->Code == SELECTDOWN && amiga_click(obj, msg->imsg)) {
             MUI_Redraw(obj, MADF_DRAWOBJECT);

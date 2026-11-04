@@ -1401,3 +1401,90 @@ void test_rulerbar_panel_look_follows_the_colour_count(void)
 
     ctx_teardown(&doc, &journal, &ctx);
 }
+
+/* Dragging the ruler's markers. The bar here is 1 px = 2 twips, the
+   strip from y 20 to 31 (upper half the first-line marker's), and the
+   column 9360 twips wide, so the right indent marker starts at x 4680. */
+static void drag_bar(wp_rulerbar *rb)
+{
+    rb->x = 0; rb->y = 0; rb->w = 640; rb->button_w = 20; rb->button_h = 18;
+    rb->icon_rows = 16; rb->scale_h = 12; rb->origin_x = 0;
+    rb->twips_to_x = half; rb->x_to_twips = twice; rb->colors = 2;
+}
+
+static void drag(wp_app_ctx *ctx, const wp_rulerbar *rb, i32 x0, i32 y0, i32 x1, i32 y1)
+{
+    wp_rulerbar_drag d;
+    ASSERT_TRUE(wp_rulerbar_drag_begin(rb, ctx, x0, y0, &d));
+    (void)wp_rulerbar_drag_move(rb, &d, (x0 + x1) / 2, (y0 + y1) / 2);
+    (void)wp_rulerbar_drag_move(rb, &d, x1, y1);
+    ASSERT_TRUE(wp_rulerbar_drag_end(ctx, &d) == WP_OK);
+}
+
+void test_rulerbar_dragging_indents(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_rulerbar rb;
+    wp_rulerbar_drag d;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "x\n");
+    drag_bar(&rb);
+
+    /* The left indent (lower half) to an inch: the first line stays at
+       the margin, so it hangs. Snapped: 724 px is 1448 twips, an inch. */
+    drag(&ctx, &rb, 0, 29, 724, 29);
+    ASSERT_EQ_U32((u32)caret_pstyle(&ctx, 0)->indent_left, 1440);
+    ASSERT_TRUE(caret_pstyle(&ctx, 0)->indent_first == -1440);
+
+    /* The first-line marker (upper half, still at the margin) to 1.5 in. */
+    drag(&ctx, &rb, 0, 21, 1080, 21);
+    ASSERT_TRUE(caret_pstyle(&ctx, 0)->indent_first == 720);
+
+    /* The right indent in by an inch. */
+    drag(&ctx, &rb, 4680, 29, 3960, 29);
+    ASSERT_EQ_U32((u32)caret_pstyle(&ctx, 0)->indent_right, 1440);
+
+    /* Pulled off the ruler, an indent stays on it. */
+    drag(&ctx, &rb, 3960, 29, 3240, 200);
+    ASSERT_EQ_U32((u32)caret_pstyle(&ctx, 0)->indent_right, 2880);
+
+    /* Off the strip is no drag at all. */
+    ASSERT_TRUE(!wp_rulerbar_drag_begin(&rb, &ctx, 100, 5, &d));
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_rulerbar_dragging_tabs(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_rulerbar rb;
+    wp_rulerbar_drag d;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "x\n");
+    drag_bar(&rb);
+
+    /* A click with no movement sets a stop, as a click always did. */
+    ASSERT_TRUE(wp_rulerbar_drag_begin(&rb, &ctx, 720, 29, &d));
+    ASSERT_TRUE(!wp_rulerbar_drag_move(&rb, &d, 721, 29));          /* a wobble */
+    ASSERT_TRUE(wp_rulerbar_drag_end(&ctx, &d) == WP_OK);
+    ASSERT_EQ_U32(caret_pstyle(&ctx, 0)->tab_count, 1);
+    ASSERT_EQ_U32((u32)caret_pstyle(&ctx, 0)->tab_pos[0], 1440);
+
+    /* Dragged along, it moves; its kind goes with it. */
+    drag(&ctx, &rb, 720, 29, 1440, 29);
+    ASSERT_EQ_U32(caret_pstyle(&ctx, 0)->tab_count, 1);
+    ASSERT_EQ_U32((u32)caret_pstyle(&ctx, 0)->tab_pos[0], 2880);
+
+    /* Dragged off the ruler, it goes. */
+    drag(&ctx, &rb, 1440, 29, 1500, 120);
+    ASSERT_EQ_U32(caret_pstyle(&ctx, 0)->tab_count, 0);
+
+    /* A drag on bare ruler sets a stop where it is let go. */
+    drag(&ctx, &rb, 300, 29, 900, 29);
+    ASSERT_EQ_U32(caret_pstyle(&ctx, 0)->tab_count, 1);
+    ASSERT_EQ_U32((u32)caret_pstyle(&ctx, 0)->tab_pos[0], 1800);
+    ctx_teardown(&doc, &journal, &ctx);
+}

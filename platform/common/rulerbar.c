@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <stddef.h>
+#include <string.h>
 #include "rulerbar.h"
 #include "app_ctx.h"
 #include "keymap.h"
@@ -440,6 +441,227 @@ void wp_rulerbar_paint(plat_gc *gc, plat_font *font, i32 ascent,
     paint_buttons(gc, font, ascent, rb, ctx, ps);
     if (text_mode(rb)) paint_ruler_text(gc, font, rb, ps, wrap);
     else paint_ruler_px(gc, font, ascent, rb, ps, wrap);
+}
+
+/* ---- Dragging --------------------------------------------------------- */
+
+static i32 snap_eighth(i32 t) { return (t < 0) ? 0 : ((t + 90) / 180) * 180; }
+
+void wp_rulerbar_scale_rect(const wp_rulerbar *rb, i32 *y, i32 *h)
+{
+    *y = rb->y + rb->button_h + row_gap(rb);
+    *h = text_mode(rb) ? 1 : rb->scale_h;
+}
+
+wp_bool wp_rulerbar_drag_begin(const wp_rulerbar *rb, wp_app_ctx *ctx,
+                               i32 x, i32 y, wp_rulerbar_drag *d)
+{
+    i32 top, h, wrap = 0, best = -1, tol, mid;
+    const wp_para_style *ps = caret_style(ctx, &wrap);
+    u8 i;
+
+    memset(d, 0, sizeof(*d));
+    wp_rulerbar_scale_rect(rb, &top, &h);
+    if (y < top || y >= top + h || x < rb->origin_x) return WP_FALSE;
+    if (wrap <= 0) wrap = 9360;
+
+    d->wrap = wrap;
+    d->press_x = x;
+    d->press_y = y;
+    d->press_twips = rb->x_to_twips(x - rb->origin_x);
+    d->twips = snap_eighth(d->press_twips);
+    d->from_twips = d->twips;
+    d->kind = (u8)WP_RB_DRAG_NEWTAB;
+    if (ps == NULL) return WP_TRUE;
+
+    /* Within a few pixels (the same cell on DOS) of a marker picks it
+       up; the nearest wins. On a pixel ruler the upper half is the
+       first-line marker's, the lower half the others'. */
+    tol = text_mode(rb) ? 0 : 5;
+    mid = top + h / 2;
+    {
+        i32 first = ps->indent_left + ps->indent_first;
+        i32 cand_pos[3 + WP_MAX_TABS];
+        u8  cand_kind[3 + WP_MAX_TABS];
+        u32 n = 0, k;
+
+        if (text_mode(rb) && rb->twips_to_x(first) == rb->twips_to_x(ps->indent_left)) {
+            cand_pos[n] = ps->indent_left; cand_kind[n++] = (u8)WP_RB_DRAG_BOTH;
+        } else if (text_mode(rb) || y < mid) {
+            cand_pos[n] = first; cand_kind[n++] = (u8)WP_RB_DRAG_FIRST;
+        }
+        if (text_mode(rb) || y >= mid) {
+            cand_pos[n] = ps->indent_left; cand_kind[n++] = (u8)WP_RB_DRAG_LEFT;
+            cand_pos[n] = wrap - ps->indent_right; cand_kind[n++] = (u8)WP_RB_DRAG_RIGHT;
+            for (i = 0; i < ps->tab_count && i < WP_MAX_TABS; i++) {
+                cand_pos[n] = ps->tab_pos[i]; cand_kind[n++] = (u8)WP_RB_DRAG_TAB;
+            }
+        }
+        for (k = 0; k < n; k++) {
+            i32 dx = rb->origin_x + rb->twips_to_x(cand_pos[k]) - x;
+            if (dx < 0) dx = -dx;
+            if (dx <= tol && (best < 0 || dx < best)) {
+                best = dx;
+                d->kind = cand_kind[k];
+                d->from_twips = cand_pos[k];
+                d->twips = cand_pos[k];
+            }
+        }
+    }
+    return WP_TRUE;
+}
+
+wp_bool wp_rulerbar_drag_move(const wp_rulerbar *rb, wp_rulerbar_drag *d, i32 x, i32 y)
+{
+    i32 top, h, t, slack;
+    wp_bool off;
+
+    if (d->kind == (u8)WP_RB_DRAG_NONE) return WP_FALSE;
+    wp_rulerbar_scale_rect(rb, &top, &h);
+    /* Off the ruler: well above or below the strip (any other row on
+       DOS). Only a tab is ever pulled off; an indent just stops at the
+       edge of the strip. */
+    slack = text_mode(rb) ? 0 : h;
+    off = (wp_bool)(y < top - slack || y >= top + h + slack);
+    if (d->kind != (u8)WP_RB_DRAG_TAB && d->kind != (u8)WP_RB_DRAG_NEWTAB) off = WP_FALSE;
+
+    t = snap_eighth(rb->x_to_twips(x - rb->origin_x));
+    if (t > d->wrap) t = d->wrap;
+    if (!d->moved) {
+        i32 dx = x - d->press_x;
+        if (dx < 0) dx = -dx;
+        if (dx < (text_mode(rb) ? 1 : 3) && !off) return WP_FALSE;   /* a click's wobble */
+        d->moved = WP_TRUE;
+    }
+    if (t == d->twips && off == d->off) return WP_FALSE;
+    d->twips = t;
+    d->off = off;
+    return WP_TRUE;
+}
+
+/* The caret paragraph's style as the drag would leave it: what the
+   strip shows while dragging, and what _end applies. */
+static void drag_preview(const wp_para_style *ps, const wp_rulerbar_drag *d, wp_para_style *out)
+{
+    i32 first;
+    u8 i, j;
+
+    *out = *ps;
+    if (d == NULL || !d->moved) return;
+    first = ps->indent_left + ps->indent_first;
+    switch ((wp_rulerbar_drag_kind)d->kind) {
+    case WP_RB_DRAG_FIRST:
+        out->indent_first = d->twips - out->indent_left;
+        break;
+    case WP_RB_DRAG_LEFT: {
+        i32 limit = d->wrap - ps->indent_right - 360;     /* half an inch of column, at least */
+        i32 left = (d->twips > limit) ? limit : d->twips;
+        if (left < 0) left = 0;
+        out->indent_left = left;
+        out->indent_first = first - left;
+        break;
+    }
+    case WP_RB_DRAG_BOTH: {
+        i32 limit = d->wrap - ps->indent_right - 360;
+        i32 left = (d->twips > limit) ? limit : d->twips;
+        if (left < 0) left = 0;
+        out->indent_left = left;
+        if (left + out->indent_first < 0) out->indent_first = -left;
+        break;
+    }
+    case WP_RB_DRAG_RIGHT: {
+        i32 lo = ps->indent_left + 360;
+        i32 x = (d->twips < lo) ? lo : d->twips;
+        out->indent_right = (x >= d->wrap) ? 0 : d->wrap - x;
+        break;
+    }
+    case WP_RB_DRAG_TAB:
+    case WP_RB_DRAG_NEWTAB:
+        for (i = 0; i < out->tab_count; i++) {
+            i32 dd = out->tab_pos[i] - d->from_twips;
+            if (dd < 0) dd = -dd;
+            if (d->kind == (u8)WP_RB_DRAG_TAB && dd < 180) {
+                for (j = i; j + 1 < out->tab_count; j++) {
+                    out->tab_pos[j] = out->tab_pos[j + 1];
+                    out->tab_kind[j] = out->tab_kind[j + 1];
+                }
+                out->tab_count--;
+                break;
+            }
+        }
+        if (!d->off && d->twips > 0 && out->tab_count < WP_MAX_TABS) {
+            u8 kind = (u8)WP_TAB_LEFT;
+            for (j = 0; j < ps->tab_count; j++) {
+                i32 dd = ps->tab_pos[j] - d->from_twips;
+                if (dd < 0) dd = -dd;
+                if (d->kind == (u8)WP_RB_DRAG_TAB && dd < 180) { kind = ps->tab_kind[j]; break; }
+            }
+            i = out->tab_count;
+            while (i > 0 && out->tab_pos[i - 1] > d->twips) {
+                out->tab_pos[i] = out->tab_pos[i - 1];
+                out->tab_kind[i] = out->tab_kind[i - 1];
+                i--;
+            }
+            out->tab_pos[i] = d->twips;
+            out->tab_kind[i] = kind;
+            out->tab_count++;
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+wp_status wp_rulerbar_drag_end(wp_app_ctx *ctx, wp_rulerbar_drag *d)
+{
+    i32 wrap = 0;
+    const wp_para_style *ps = caret_style(ctx, &wrap);
+    wp_para_style after;
+    wp_rulerbar_drag_kind kind = (wp_rulerbar_drag_kind)d->kind;
+
+    d->kind = (u8)WP_RB_DRAG_NONE;
+    if (!d->moved) {
+        /* A click: what a click on the ruler always did. */
+        if (kind == WP_RB_DRAG_TAB || kind == WP_RB_DRAG_NEWTAB)
+            return wp_action_toggle_tab(ctx, d->press_twips);
+        return WP_OK;
+    }
+    if (ps == NULL) return WP_OK;
+    d->kind = (u8)kind;
+    drag_preview(ps, d, &after);
+    d->kind = (u8)WP_RB_DRAG_NONE;
+    switch (kind) {
+    case WP_RB_DRAG_TAB:
+        return wp_action_move_tab(ctx, d->from_twips, d->off ? 0 : d->twips);
+    case WP_RB_DRAG_NEWTAB:
+        if (d->off || d->twips <= 0) return WP_OK;
+        return wp_action_toggle_tab(ctx, d->twips);
+    default:
+        return wp_action_set_indents(ctx, after.indent_left,
+                                     after.indent_left + after.indent_first, after.indent_right);
+    }
+}
+
+void wp_rulerbar_paint_scale(plat_gc *gc, plat_font *font, i32 ascent,
+                             const wp_rulerbar *rb, wp_app_ctx *ctx,
+                             const wp_rulerbar_drag *d)
+{
+    i32 wrap = 0, top, h;
+    const wp_para_style *ps = caret_style(ctx, &wrap);
+    wp_para_style shown;
+
+    if (wrap <= 0) wrap = 9360;
+    if (ps != NULL) {
+        drag_preview(ps, d, &shown);
+        ps = &shown;
+    }
+    wp_rulerbar_scale_rect(rb, &top, &h);
+    if (text_mode(rb)) {
+        paint_ruler_text(gc, font, rb, ps, wrap);
+        return;
+    }
+    grey(gc, rb->x, top, rb->w, h, panel(rb) ? RB_FACE : 0xFF);
+    paint_ruler_px(gc, font, ascent, rb, ps, wrap);
 }
 
 static u32 mix(u32 h, u32 v)

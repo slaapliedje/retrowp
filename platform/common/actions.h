@@ -289,6 +289,17 @@ wp_status wp_action_file_save(struct wp_app_ctx *ctx, wp_bool save_as, wp_pick_p
    WP_MAX_TABS stops. */
 wp_status wp_action_toggle_tab(struct wp_app_ctx *ctx, i32 x_twips);
 
+/* The ruler's indent markers, dragged: left indent, the first line's
+   ABSOLUTE start and right indent, in twips from the column's edges
+   (negatives are 0). Every selected paragraph takes all three, else the
+   caret's -- as dragging them over a selection does in every word
+   processor since Word 1.0. */
+wp_status wp_action_set_indents(struct wp_app_ctx *ctx, i32 left, i32 first_abs, i32 right);
+
+/* A tab stop dragged from `from` to `to` (both snapped by the caller),
+   keeping its kind; `to` <= 0 removes it -- dragged off the ruler. */
+wp_status wp_action_move_tab(struct wp_app_ctx *ctx, i32 from, i32 to);
+
 /* For a backend that loaded or saved the document by a route of its own. */
 void wp_action_remember_path(struct wp_app_ctx *ctx, const char *native_path);
 

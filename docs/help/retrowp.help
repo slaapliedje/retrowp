@@ -178,17 +178,25 @@ and right. A # is the page number. For example:
 
   My Report|Page #
 
-A button shown inverted is the one in force at the caret. The
-ruler under the buttons measures the page's text column in
-inches: the triangles are the caret paragraph's first-line,
-left and right indents, and an L marks a tab stop. Click the
-ruler to set a tab stop there; click a stop to remove it.
-Paragraph buttons and tab stops act on every paragraph the
-selection touches, or the caret's paragraph.
+A button shown pressed in (inverted on a black-and-white
+screen) is the one in force at the caret. The ruler under the
+buttons measures the page's text column in inches: the
+triangles are the caret paragraph's first-line, left and right
+indents, and an L marks a tab stop.
+
+Drag a triangle to move that indent; it snaps to an eighth of
+an inch. The top one is the first line alone; the bottom-left
+one is the rest of the paragraph, and the first line stays
+where it was, so dragging it right makes a hanging indent.
+Drag a tab stop to move it, or off the ruler to remove it.
+Click the ruler to set a tab stop there; click a stop to
+remove it. Paragraph buttons, indents and tab stops act on
+every paragraph the selection touches, or the caret's.
 
 On DOS the buttons are letters in brackets and the ruler is a
 row of dots: [ and ] are the margins, > the first-line indent,
-| the left indent, and L R C D the tab stops.
+| the left indent, < the right, and L R C D the tab stops.
+Where > and | share a cell, dragging there moves both.
 
 {Back to Main|Main}
 @endnode

@@ -652,6 +652,68 @@ static void toggle_tab(wp_para_style *ps, i32 x)
     ps->tab_count++;
 }
 
+/* change_paragraphs carries one i32; a drag needs three. Set just
+   before each call and read only by these two callbacks. */
+static i32 g_drag_left, g_drag_first, g_drag_right, g_drag_from, g_drag_to;
+
+static void set_indents(wp_para_style *ps, i32 unused)
+{
+    (void)unused;
+    ps->indent_left = g_drag_left;
+    ps->indent_first = g_drag_first - g_drag_left;
+    ps->indent_right = g_drag_right;
+}
+
+static void move_tab(wp_para_style *ps, i32 unused)
+{
+    u8 i, j, kind = (u8)WP_TAB_LEFT;
+    wp_bool found = WP_FALSE;
+
+    (void)unused;
+    for (i = 0; i < ps->tab_count; i++) {
+        i32 d = ps->tab_pos[i] - g_drag_from;
+        if (d < 0) d = -d;
+        if (d < 180) {
+            kind = ps->tab_kind[i];
+            for (j = i; j + 1 < ps->tab_count; j++) {
+                ps->tab_pos[j] = ps->tab_pos[j + 1];
+                ps->tab_kind[j] = ps->tab_kind[j + 1];
+            }
+            ps->tab_count--;
+            found = WP_TRUE;
+            break;
+        }
+    }
+    if (!found || g_drag_to <= 0 || ps->tab_count >= WP_MAX_TABS) return;
+    for (i = 0; i < ps->tab_count; i++) {
+        if (ps->tab_pos[i] == g_drag_to) return;          /* one there already */
+    }
+    i = ps->tab_count;
+    while (i > 0 && ps->tab_pos[i - 1] > g_drag_to) {
+        ps->tab_pos[i] = ps->tab_pos[i - 1];
+        ps->tab_kind[i] = ps->tab_kind[i - 1];
+        i--;
+    }
+    ps->tab_pos[i] = g_drag_to;
+    ps->tab_kind[i] = kind;
+    ps->tab_count++;
+}
+
+wp_status wp_action_set_indents(wp_app_ctx *ctx, i32 left, i32 first_abs, i32 right)
+{
+    g_drag_left = (left > 0) ? left : 0;
+    g_drag_first = (first_abs > 0) ? first_abs : 0;
+    g_drag_right = (right > 0) ? right : 0;
+    return change_paragraphs(ctx, set_indents, 0);
+}
+
+wp_status wp_action_move_tab(wp_app_ctx *ctx, i32 from, i32 to)
+{
+    g_drag_from = from;
+    g_drag_to = to;
+    return change_paragraphs(ctx, move_tab, 0);
+}
+
 wp_status wp_action_toggle_tab(wp_app_ctx *ctx, i32 x_twips)
 {
     i32 snapped;
