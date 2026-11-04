@@ -53,6 +53,17 @@ typedef struct wp_app_ctx {
                                 unchanged in spirit from pre-M8.5 g_current_size_twips */
     u8  align;
     u16 style_flags;    /* wp_style_flags bitfield */
+    wp_font current_font; /* the input style's face; 0 = the target default */
+
+    /* The input style above is what newly typed text gets only while it
+       is ARMED: a Bold, Size or Font chosen with nothing selected arms it
+       at the caret, typing there keeps it armed, and moving the caret
+       anywhere disarms it -- typed text then takes its neighbour's style,
+       the engine's own rule, and the input style is re-read from the text
+       at the caret (wp_action_after_key). Without that, typing into a
+       paragraph of Times from a Word file came out in the default face. */
+    wp_bool input_armed;
+    wp_pos  input_at;
 
     wp_viewport view;   /* the scrolled view: see viewport.h. The backend sets
                            view.line_px after wp_app_ctx_init and records

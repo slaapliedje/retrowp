@@ -1532,52 +1532,6 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     if (font != NULL) plat_font_close(font);
 }
 
-/* M8.5: actual text insertion/deletion now happens inside vi-mode's own
-   Insert-mode handling (engine/src/vimode.c's feed_insert, driven by
-   wp_dispatch_key below) rather than through app-level do_insert_char/
-   do_backspace functions -- those pre-vimode single-paragraph-editor
-   functions are gone; wp_edit_insert_text/wp_edit_delete_range are still
-   the same primitives, just called from the portable engine layer now.
-
-   What vi-mode's Insert mode does NOT know about is this app's "current
-   input style" toggle state (g_ctx.style_flags/current_size_twips are
-   platform/common concepts vimode.c has no access to, and rightly so --
-   see CLAUDE.md's engine-has-zero-platform-calls rule, which extends to
-   not depending on platform/common either). wp_edit_insert_text's own
-   style-inheritance rule (docs/editing.md) always wins first when vi-
-   mode inserts a character -- there's no way to hand it an override
-   style directly. So this runs AFTER wp_dispatch_key sees a successful
-   Insert-mode keystroke and overwrites the just-created run's style
-   (identified via insert_span_at_pos's own documented contract: pos.run
-   is ALWAYS the newly-inserted run's index, in every case -- empty
-   paragraph, start, run boundary, or a mid-run split) with whatever the
-   current toggle state says it should be. find_or_add means repeated
-   typing with the same toggle state keeps reusing one cstyle handle
-   rather than growing the table per keystroke. */
-static void apply_current_style_to_run_at(wp_pos pos)
-{
-    wp_section *sec;
-    wp_paragraph *para;
-    wp_run *run;
-    const wp_char_style *base;
-    wp_char_style style;
-    wp_cstyle handle;
-
-    sec = wp_document_section_get(&g_doc, pos.section);
-    para = wp_section_paragraph_get(sec, pos.paragraph);
-    run = wp_paragraph_run_get(para, (u16)pos.run);
-    if (run == NULL) return;
-
-    base = wp_document_cstyle_get(&g_doc, g_doc.default_cstyle);
-    style = *base;
-    style.flags = g_ctx.style_flags;
-    style.size_twips = g_ctx.current_size_twips;
-
-    if (wp_document_cstyle_find_or_add(&g_doc, &style, &handle) == WP_OK) {
-        wp_run_cstyle_set(para, (u16)pos.run, handle);
-    }
-}
-
 /* Format menu actions (Font Size +/-, Alignment Left/Center/Right).
    Neither touches document content directly -- each only changes "what
    happens to text typed/laid out from here on" (size) or restyles the
@@ -1619,6 +1573,7 @@ static void change_font_size(int delta_steps)
             if (next < 0) next = 0;
             if (next >= (int)WP_FONT_SIZE_COUNT) next = (int)WP_FONT_SIZE_COUNT - 1;
             g_ctx.current_size_twips = g_font_sizes_twips[next];
+            wp_action_arm_input_style(&g_ctx);
             return;
         }
     }
@@ -1626,6 +1581,7 @@ static void change_font_size(int delta_steps)
        imported RTF's own \fs value) -- snap to the nearest step rather
        than doing nothing. */
     g_ctx.current_size_twips = g_font_sizes_twips[delta_steps > 0 ? WP_FONT_SIZE_COUNT - 1 : 0];
+    wp_action_arm_input_style(&g_ctx);
 }
 
 /* Applies to the paragraph (*wp_keymap_cursor(&g_ctx)) is currently in -- vi-mode
@@ -4343,16 +4299,13 @@ wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key, short kstate
         return WP_FALSE;
     }
 
-    outcome = wp_keymap_feed_key(&g_ctx, ev, (u8)(key & 0xFF));
-
-    /* The active scheme has no notion of this app's "current input
-       style" toggle state (see apply_current_style_to_run_at's own
-       comment) -- restamp the run it just created, but ONLY when this
-       keystroke really was a character insertion (wp_keymap_outcome's
-       own inserted_char contract), never on a bare cursor motion, or
-       moving over already-styled text would silently overwrite it. */
-    if (outcome.inserted_char) {
-        apply_current_style_to_run_at((*wp_keymap_cursor(&g_ctx)));
+    /* The active scheme has no notion of this app's input style
+       (app_ctx.h): wp_action_after_key restamps a character typed where
+       it is armed, and reads it back from the text when the caret moved. */
+    {
+        wp_pos before = *wp_keymap_cursor(&g_ctx);
+        outcome = wp_keymap_feed_key(&g_ctx, ev, (u8)(key & 0xFF));
+        wp_action_after_key(&g_ctx, before, outcome.inserted_char);
     }
 
     switch ((wp_keymap_result_kind)outcome.kind) {
@@ -4445,12 +4398,13 @@ static wp_bool action_exempt_from_menu(wp_action_id id)
     case WP_ACT_FORMAT_SIZE:
     case WP_ACT_FORMAT_ALIGN:
         return WP_TRUE;
-    /* Header... and Footer...: on the ruler bar (rulerbar.c), the way
+    /* Header..., Footer... and Font...: on the ruler bar (rulerbar.c), the way
        this backend reaches paragraph formatting, rather than one more
        edit to the hand-built OBJECT tree. Amiga and Mac fold them into
        their Format menus from the registry. */
     case WP_ACT_PAGE_HEADER:
     case WP_ACT_PAGE_FOOTER:
+    case WP_ACT_FORMAT_FONT:
         return WP_TRUE;
     /* Ctrl+G only, by design -- see actions.c's own comment on why this
        one stays off the hand-built OBJECT tree. */

@@ -17,6 +17,9 @@ void wp_app_ctx_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
     ctx->current_size_twips = 0;
     ctx->align = 0;
     ctx->style_flags = 0;
+    ctx->current_font = 0;
+    ctx->input_armed = WP_FALSE;
+    memset(&ctx->input_at, 0, sizeof(ctx->input_at));
 
     wp_viewport_init(&ctx->view, NULL);
     ctx->doc_path[0] = '\0';

@@ -822,8 +822,10 @@ static wp_status style_one_run(wp_document *doc, wp_undo_journal *journal,
     want = *current;
     want.flags = (u16)((want.flags | delta->flags_set) & (u16)~delta->flags_clear);
     if (delta->size_twips > 0) want.size_twips = delta->size_twips;
+    if (delta->set_font) want.font = delta->font;
 
-    if (want.flags == current->flags && want.size_twips == current->size_twips)
+    if (want.flags == current->flags && want.size_twips == current->size_twips &&
+        want.font == current->font)
         return WP_OK;                       /* already what was asked for */
 
     st = wp_document_cstyle_find_or_add(doc, &want, &handle);

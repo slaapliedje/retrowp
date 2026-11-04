@@ -310,6 +310,9 @@ typedef struct {
     u16 flags_clear;  /* bits to turn OFF -- applied after flags_set, so a
                           bit named in both ends up clear */
     i32 size_twips;   /* > 0 replaces the size; 0 leaves each run's own */
+    u8  set_font;     /* non-zero: every run takes `font` (0 being the
+                          default face, a value, not "leave it") */
+    wp_font font;
 } wp_style_delta;
 
 /* Applies `delta` to every run overlapping [start, end), splitting runs

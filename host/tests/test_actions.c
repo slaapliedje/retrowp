@@ -1276,3 +1276,92 @@ void test_actions_header_prompt_types_edits_and_sets(void)
 
     ctx_teardown(&doc, &journal, &ctx);
 }
+
+/* -- Typefaces and the input style ------------------------------------ */
+
+static void type_key(wp_app_ctx *ctx, wp_key_event ev)
+{
+    wp_pos before = *wp_keymap_cursor(ctx);
+    wp_keymap_outcome o = wp_keymap_feed_key(ctx, ev, 0);
+    wp_action_after_key(ctx, before, o.inserted_char);
+}
+
+static const wp_char_style *run_style(wp_document *doc, u16 ri)
+{
+    wp_paragraph *p = wp_section_paragraph_get(wp_document_section_get(doc, 0), 0);
+    return (ri < p->run_count) ? wp_document_cstyle_get(doc, p->runs[ri].style) : NULL;
+}
+
+void test_actions_font_restyles_the_selection_as_one_step(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_font times;
+
+    ctx_setup(&doc, &journal, &ctx, "Hello World");
+    /* The host's faces are Helvetica, Times and Courier, and its dialog
+       picks the default -- which is the current font, found among them
+       whatever its case. */
+    ASSERT_TRUE(wp_document_font_find_or_add(&doc, (const u8 *)"times", 5, WP_FAMILY_ROMAN, &times) == WP_OK);
+    ctx.current_font = times;
+    select_vi_visual(&ctx, 0, 5);
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_FORMAT_FONT)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(run_style(&doc, 0)->font, times);
+    ASSERT_EQ_U32(run_style(&doc, 1)->font, 0);          /* " World": not selected */
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(run_style(&doc, 0)->font, 0);
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_actions_typed_text_keeps_its_neighbours_style_unless_armed(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_font courier;
+
+    ctx_setup(&doc, &journal, &ctx, "Hello");
+    ASSERT_TRUE(wp_document_font_find_or_add(&doc, (const u8 *)"Courier", 7, WP_FAMILY_MODERN, &courier) == WP_OK);
+
+    /* Not armed: an input style left over from somewhere else does not
+       restamp what is typed -- it takes the text's own style. */
+    ctx.current_font = courier;
+    ctx.style_flags = WP_STYLE_BOLD;
+    type_key(&ctx, key_char('i'));                       /* vi: Insert */
+    type_key(&ctx, key_char('a'));
+    ASSERT_EQ_U32(run_style(&doc, 0)->font, 0);
+    ASSERT_EQ_U32(run_style(&doc, 0)->flags, 0);
+
+    /* Bold with nothing selected arms it at the caret: what is typed
+       there is bold (and in the input face), and stays so while typing
+       goes on from the same place. */
+    ctx.current_font = courier;
+    ctx.style_flags = 0;
+    ASSERT_TRUE(wp_action_find(WP_ACT_FORMAT_BOLD)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(ctx.input_armed);
+    type_key(&ctx, key_char('b'));
+    type_key(&ctx, key_char('c'));
+    {
+        wp_pos at = *wp_keymap_cursor(&ctx);
+        const wp_char_style *cs = run_style(&doc, (u16)at.run);
+        ASSERT_TRUE(cs != NULL && (cs->flags & WP_STYLE_BOLD) != 0);
+        ASSERT_EQ_U32(cs->font, courier);
+    }
+
+    /* Moving the caret disarms it and reads the style at the new place
+       back: the start of the document is plain, default-face text. */
+    type_key(&ctx, key_special(WP_KEY_ESCAPE));
+    type_key(&ctx, key_char('0'));
+    ASSERT_TRUE(!ctx.input_armed);
+    ASSERT_EQ_U32(ctx.style_flags, 0);
+    ASSERT_EQ_U32(ctx.current_font, 0);
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+void test_rulerbar_has_font_and_size(void)
+{
+    ASSERT_TRUE(wp_rulerbar_has_action(WP_ACT_FORMAT_FONT));
+    ASSERT_TRUE(wp_rulerbar_has_action(WP_ACT_FORMAT_SIZE));
+}

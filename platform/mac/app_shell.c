@@ -874,7 +874,11 @@ static wp_bool mac_dispatch_key(wp_key_event ev)
 
     if (!g_ctx.doc_loaded) return WP_FALSE;
 
-    outcome = wp_keymap_feed_key(&g_ctx, ev, g_last_ascii);
+    {
+        wp_pos before = *wp_keymap_cursor(&g_ctx);
+        outcome = wp_keymap_feed_key(&g_ctx, ev, g_last_ascii);
+        wp_action_after_key(&g_ctx, before, outcome.inserted_char);
+    }
 
     switch ((wp_keymap_result_kind)outcome.kind) {
     case WP_KEYMAP_RESULT_QUIT:

@@ -11,7 +11,7 @@ typedef enum {
     WP_ICON_UNDERLINE, WP_ICON_LEFT, WP_ICON_CENTER, WP_ICON_RIGHT,
     WP_ICON_JUSTIFY, WP_ICON_SINGLE, WP_ICON_ONEHALF, WP_ICON_DOUBLE,
     WP_ICON_INDENT_LESS, WP_ICON_INDENT_MORE, WP_ICON_PAGE_BREAK,
-    WP_ICON_HEADER, WP_ICON_FOOTER,
+    WP_ICON_HEADER, WP_ICON_FOOTER, WP_ICON_FONT, WP_ICON_SIZE,
     WP_ICON_COUNT
 } wp_icon_id;
 
@@ -39,6 +39,8 @@ static const u16 g_icon_bits[WP_ICON_COUNT][16] = {
     /* PAGE_BREAK */ { 0x0000, 0x3FF0, 0x2010, 0x2790, 0x2010, 0x2790, 0x3FF0, 0x0000, 0x5554, 0x0000, 0x3FF0, 0x2010, 0x2790, 0x2010, 0x2790, 0x3FF0 },
     /* HEADER */ { 0x3FF0, 0x2FD0, 0x2FD0, 0x2010, 0x2790, 0x2010, 0x2790, 0x2010, 0x2790, 0x2010, 0x2790, 0x2010, 0x2790, 0x2010, 0x3FF0, 0x0000 },
     /* FOOTER */ { 0x3FF0, 0x2010, 0x2790, 0x2010, 0x2790, 0x2010, 0x2790, 0x2010, 0x2790, 0x2010, 0x2790, 0x2010, 0x2FD0, 0x2FD0, 0x3FF0, 0x0000 },
+    /* FONT */ { 0x0000, 0x0000, 0x1800, 0x1800, 0x2400, 0x2400, 0x4200, 0x4238, 0x7E04, 0x813C, 0x8144, 0x8144, 0xE73A, 0x0000, 0x0000, 0x0000 },
+    /* SIZE */ { 0x0000, 0x0000, 0x3000, 0x3000, 0x4800, 0x4800, 0x8400, 0x8410, 0xFC28, 0x8428, 0x847C, 0x8444, 0xCC44, 0x0000, 0x0000, 0x0000 },
 };
 
 /* GENERATED: the 8-row icons for screens with tall pixels -- row pairs
@@ -67,6 +69,8 @@ static const u16 g_icon_bits8[WP_ICON_COUNT][8] = {
     /* PAGE_BREAK */ { 0x3FF0, 0x2790, 0x3FF0, 0x5554, 0x3FF0, 0x2790, 0x3FF0, 0x0000 },
     /* HEADER */ { 0x3FF0, 0x2FD0, 0x2010, 0x2790, 0x2010, 0x2790, 0x3FF0, 0x0000 },
     /* FOOTER */ { 0x3FF0, 0x2790, 0x2010, 0x2790, 0x2010, 0x2FD0, 0x3FF0, 0x0000 },
+    /* FONT */ { 0x1800, 0x2400, 0x4238, 0x7E3C, 0x8144, 0xE73A, 0x0000, 0x0000 },
+    /* SIZE */ { 0x3000, 0x4800, 0x8410, 0xFC28, 0x847C, 0xCC44, 0x0000, 0x0000 },
 };
 
 /* The buttons, left to right; a row with action WP_ACT_COUNT is a gap
@@ -87,6 +91,8 @@ static const rb_button g_buttons[] = {
     { WP_ACT_EDIT_PASTE,        WP_ICON_PASTE,       'V' },
     { WP_ACT_EDIT_UNDO,         WP_ICON_UNDO,        'Z' },
     { WP_ACT_COUNT,             0,                   0   },
+    { WP_ACT_FORMAT_FONT,       WP_ICON_FONT,        'A' },
+    { WP_ACT_FORMAT_SIZE,       WP_ICON_SIZE,        '+' },
     { WP_ACT_FORMAT_BOLD,       WP_ICON_BOLD,        'B' },
     { WP_ACT_FORMAT_ITALIC,     WP_ICON_ITALIC,      'I' },
     { WP_ACT_FORMAT_UNDERLINE,  WP_ICON_UNDERLINE,   'U' },
@@ -400,7 +406,7 @@ u32 wp_rulerbar_signature(const wp_rulerbar *rb, wp_app_ctx *ctx)
 
     h = mix(h, (u32)rb->x); h = mix(h, (u32)rb->y); h = mix(h, (u32)rb->w);
     h = mix(h, (u32)rb->origin_x); h = mix(h, (u32)wrap);
-    h = mix(h, (u32)ctx->style_flags); h = mix(h, (u32)ctx->doc_loaded);
+    h = mix(h, (u32)ctx->style_flags); h = mix(h, (u32)ctx->current_font); h = mix(h, (u32)ctx->doc_loaded);
     if (ps != NULL) {
         h = mix(h, (u32)ps->align); h = mix(h, (u32)ps->line_spacing);
         h = mix(h, (u32)ps->indent_left); h = mix(h, (u32)ps->indent_right);

@@ -89,7 +89,7 @@ static void build_one_run(wp_document *doc, wp_undo_journal *journal,
 static wp_style_delta bold_on(void)
 {
     wp_style_delta d;
-    d.flags_set = WP_STYLE_BOLD; d.flags_clear = 0; d.size_twips = 0;
+    d.flags_set = WP_STYLE_BOLD; d.flags_clear = 0; d.size_twips = 0; d.set_font = 0; d.font = 0;
     return d;
 }
 
@@ -274,7 +274,7 @@ void test_style_range_clear_turns_a_flag_back_off(void)
     wp_style_delta on = bold_on();
     wp_style_delta off;
 
-    off.flags_set = 0; off.flags_clear = WP_STYLE_BOLD; off.size_twips = 0;
+    off.flags_set = 0; off.flags_clear = WP_STYLE_BOLD; off.size_twips = 0; off.set_font = 0; off.font = 0;
 
     build_one_run(&doc, &journal, &para, "Hello World");
     ASSERT_TRUE(wp_edit_style_range(&doc, &journal, pos_at(0, 0, 0, 0),

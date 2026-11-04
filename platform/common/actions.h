@@ -77,6 +77,10 @@ typedef enum {
        left|centre|right, '#' is the page number. */
     WP_ACT_PAGE_HEADER,
     WP_ACT_PAGE_FOOTER,
+    /* Font...: the target's typefaces (plat_font_face_count), eight to
+       a page of the choice dialog; on the selection if there is one,
+       else the input style. */
+    WP_ACT_FORMAT_FONT,
     WP_ACT_COUNT
 } wp_action_id;
 
@@ -179,6 +183,20 @@ wp_bool wp_action_confirm_discard(struct wp_app_ctx *ctx);
    the cursor where wp_keymap_init puts it (document start); a backend
    that wants it elsewhere moves it afterwards. Does not relayout. */
 void wp_action_replace_document(struct wp_app_ctx *ctx, wp_document *fresh);
+
+/* The input style (app_ctx.h): arm it at the caret -- what a Format
+   choice made with nothing selected does, the shells' own Size +/- menu
+   items included. */
+void wp_action_arm_input_style(struct wp_app_ctx *ctx);
+
+/* After the keymap has had a key: `before` is the caret as it was, and
+   inserted_char the outcome's. Text typed where the input style is
+   armed is restamped with it (flags, size and face over the run's own
+   style, so its colour stays); a caret that moved disarms it and reads
+   the input style back from the text before the caret, which is what
+   the ruler bar's B/I/U then show. Every shell calls this after
+   wp_keymap_feed_key. */
+void wp_action_after_key(struct wp_app_ctx *ctx, wp_pos before, wp_bool inserted_char);
 
 /* For every way out other than File > Quit: a scheme's own quit command
    and a window's close box. Asks the same unsaved-changes question and

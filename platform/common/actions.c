@@ -49,6 +49,8 @@ static wp_bool style_selection(wp_app_ctx *ctx, u16 flag)
     if (!wp_keymap_selection(ctx, &sel)) return WP_FALSE;
 
     delta.size_twips = 0;
+    delta.set_font = 0;
+    delta.font = 0;
     if (wp_document_range_has_flags(ctx->doc, sel.anchor, sel.caret, flag)) {
         delta.flags_set = 0;
         delta.flags_clear = flag;
@@ -185,7 +187,9 @@ void wp_action_replace_document(wp_app_ctx *ctx, wp_document *fresh)
     if (def_cs != NULL) {
         ctx->style_flags = def_cs->flags;
         ctx->current_size_twips = def_cs->size_twips;
+        ctx->current_font = def_cs->font;
     }
+    ctx->input_armed = WP_FALSE;
     def_ps = wp_document_pstyle_get(ctx->doc, ctx->doc->default_pstyle);
     if (def_ps != NULL) ctx->align = def_ps->align;
 
@@ -195,10 +199,84 @@ void wp_action_replace_document(wp_app_ctx *ctx, wp_document *fresh)
     wp_document_mark_saved(ctx->doc);
 }
 
+static wp_bool pos_equal(wp_pos a, wp_pos b)
+{
+    return (wp_bool)(a.section == b.section && a.paragraph == b.paragraph &&
+                     a.run == b.run && a.offset == b.offset);
+}
+
+void wp_action_arm_input_style(wp_app_ctx *ctx)
+{
+    ctx->input_armed = WP_TRUE;
+    ctx->input_at = *wp_keymap_cursor(ctx);
+}
+
+/* The style of the text just before `pos` -- what typing there would
+   inherit -- or the document default where there is none. */
+static const wp_char_style *style_before(wp_app_ctx *ctx, wp_pos pos)
+{
+    wp_section *sec = wp_document_section_get(ctx->doc, pos.section);
+    wp_paragraph *para = sec ? wp_section_paragraph_get(sec, pos.paragraph) : NULL;
+    const wp_run *run;
+    u32 ri = pos.run;
+
+    if (para != NULL && para->run_count > 0) {
+        if (pos.offset == 0 && ri > 0) ri--;
+        if (ri >= para->run_count) ri = (u32)para->run_count - 1u;
+        run = wp_paragraph_run_get(para, (u16)ri);
+        if (run != NULL) return wp_document_cstyle_get(ctx->doc, run->style);
+    }
+    return wp_document_cstyle_get(ctx->doc, ctx->doc->default_cstyle);
+}
+
+static void sync_input_style(wp_app_ctx *ctx)
+{
+    const wp_char_style *cs = style_before(ctx, *wp_keymap_cursor(ctx));
+
+    ctx->input_armed = WP_FALSE;
+    if (cs == NULL) return;
+    ctx->style_flags = cs->flags;
+    ctx->current_size_twips = cs->size_twips;
+    ctx->current_font = cs->font;
+}
+
+void wp_action_after_key(wp_app_ctx *ctx, wp_pos before, wp_bool inserted_char)
+{
+    wp_pos after;
+
+    if (ctx->doc == NULL || !ctx->doc_loaded) return;
+    after = *wp_keymap_cursor(ctx);
+
+    if (inserted_char && ctx->input_armed && pos_equal(before, ctx->input_at)) {
+        wp_section *sec = wp_document_section_get(ctx->doc, after.section);
+        wp_paragraph *para = sec ? wp_section_paragraph_get(sec, after.paragraph) : NULL;
+        wp_run *run = para ? wp_paragraph_run_get(para, (u16)after.run) : NULL;
+        const wp_char_style *cur = run ? wp_document_cstyle_get(ctx->doc, run->style) : NULL;
+        wp_char_style want;
+        wp_cstyle handle;
+
+        /* insert_span_at_pos's contract: after.run is the new run. */
+        if (cur != NULL) {
+            want = *cur;
+            want.flags = ctx->style_flags;
+            if (ctx->current_size_twips > 0) want.size_twips = ctx->current_size_twips;
+            want.font = ctx->current_font;
+            if (wp_document_cstyle_find_or_add(ctx->doc, &want, &handle) == WP_OK) {
+                wp_run_cstyle_set(para, (u16)after.run, handle);
+                para->layout_dirty = WP_TRUE;
+            }
+        }
+        ctx->input_at = after;
+        return;
+    }
+    if (!pos_equal(before, after) || (inserted_char && ctx->input_armed)) sync_input_style(ctx);
+}
+
 static wp_status act_format_bold(wp_app_ctx *ctx)
 {
     if (style_selection(ctx, WP_STYLE_BOLD)) return WP_OK;
     ctx->style_flags ^= WP_STYLE_BOLD;
+    wp_action_arm_input_style(ctx);
     return WP_OK;
 }
 
@@ -206,6 +284,7 @@ static wp_status act_format_italic(wp_app_ctx *ctx)
 {
     if (style_selection(ctx, WP_STYLE_ITALIC)) return WP_OK;
     ctx->style_flags ^= WP_STYLE_ITALIC;
+    wp_action_arm_input_style(ctx);
     return WP_OK;
 }
 
@@ -213,6 +292,101 @@ static wp_status act_format_underline(wp_app_ctx *ctx)
 {
     if (style_selection(ctx, WP_STYLE_UNDERLINE)) return WP_OK;
     ctx->style_flags ^= WP_STYLE_UNDERLINE;
+    wp_action_arm_input_style(ctx);
+    return WP_OK;
+}
+
+/* A size or a face over the selection, as one undoable step; WP_FALSE
+   when nothing is selected. */
+static wp_bool restyle_selection(wp_app_ctx *ctx, i32 size_twips, wp_bool set_font, wp_font font)
+{
+    wp_selection sel;
+    wp_style_delta delta;
+
+    if (ctx->doc == NULL || ctx->journal == NULL) return WP_FALSE;
+    if (!wp_keymap_selection(ctx, &sel)) return WP_FALSE;
+    delta.flags_set = 0;
+    delta.flags_clear = 0;
+    delta.size_twips = size_twips;
+    delta.set_font = (u8)(set_font ? 1 : 0);
+    delta.font = font;
+    wp_edit_style_range(ctx->doc, ctx->journal, sel.anchor, sel.caret, &delta);
+    return WP_TRUE;
+}
+
+/* Font...: "Default" and then the target's faces, eight entries and a
+   "More..." to a page -- the choice dialog's nine-option ceiling on the
+   ST and DOS -- going round to the first page after the last. */
+#define FONT_PAGE 8
+#define FONT_NAME_CAP 31
+
+static wp_status act_format_font(wp_app_ctx *ctx)
+{
+    u32 faces = plat_font_face_count();
+    u32 total = faces + 1u, first = 0;
+    static u8 names[FONT_PAGE][FONT_NAME_CAP];
+    const u8 *labels[FONT_PAGE + 1];
+    u32 lens[FONT_PAGE + 1];
+    const wp_font_desc *cur = (ctx->doc != NULL) ? wp_document_font_get(ctx->doc, ctx->current_font) : NULL;
+    wp_font id = 0;
+
+    if (ctx->doc == NULL) return WP_OK;
+    if (faces == 0) {
+        wp_action_tell(ctx, "This machine has one typeface");
+        return WP_OK;
+    }
+
+    for (;;) {
+        u32 n = 0, def = 0, chosen = 0, i;
+        wp_bool more, cancelled = WP_TRUE;
+        wp_status st;
+
+        for (i = first; i < total && n < FONT_PAGE; i++, n++) {
+            if (i == 0) {
+                labels[n] = (const u8 *)"Default";
+                lens[n] = 7;
+                continue;
+            }
+            if (plat_font_face_name(i - 1u, names[n], FONT_NAME_CAP, &lens[n]) != WP_OK) lens[n] = 0;
+            labels[n] = names[n];
+            if (cur != NULL && lens[n] == cur->name.length) {
+                const u8 *cn = wp_strpool_get(&ctx->doc->strings, cur->name);
+                u32 k;
+                for (k = 0; k < lens[n]; k++) {
+                    u8 a = names[n][k], b = cn[k];
+                    if (a >= 'A' && a <= 'Z') a = (u8)(a + 32);
+                    if (b >= 'A' && b <= 'Z') b = (u8)(b + 32);
+                    if (a != b) break;
+                }
+                if (k == lens[n]) def = n;
+            }
+        }
+        more = (wp_bool)(total > FONT_PAGE);
+        if (more) {
+            labels[n] = (const u8 *)"More...";
+            lens[n] = 7;
+        }
+
+        st = plat_dialog_choice(ctx->window, (const u8 *)"Font", 4, labels, lens,
+                                n + (more ? 1u : 0u), def, &cancelled, &chosen);
+        if (st != WP_OK) return st;
+        if (cancelled) return WP_OK;
+        if (more && chosen == n) {
+            first += FONT_PAGE;
+            if (first >= total) first = 0;
+            continue;
+        }
+        if (first + chosen > 0) {
+            st = wp_document_font_find_or_add(ctx->doc, names[chosen], lens[chosen],
+                                              wp_font_family_guess(names[chosen], lens[chosen]), &id);
+            if (st != WP_OK) return st;
+        }
+        break;
+    }
+
+    if (restyle_selection(ctx, 0, WP_TRUE, id)) return WP_OK;
+    ctx->current_font = id;
+    wp_action_arm_input_style(ctx);
     return WP_OK;
 }
 
@@ -239,7 +413,10 @@ static wp_status act_format_size(wp_app_ctx *ctx)
                              label_ptrs, label_lens, count, default_index,
                              &cancelled, &chosen);
     if (st != WP_OK) return st;
-    if (!cancelled) ctx->current_size_twips = sizes[chosen];
+    if (cancelled) return WP_OK;
+    if (restyle_selection(ctx, sizes[chosen], WP_FALSE, 0)) return WP_OK;
+    ctx->current_size_twips = sizes[chosen];
+    wp_action_arm_input_style(ctx);
     return WP_OK;
 }
 
@@ -946,7 +1123,8 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_PARA_INDENT_MORE,  WP_MENU_NONE,   "Indent More",    0,        0,    act_para_indent_more, NULL },
     { WP_ACT_PARA_PAGE_BREAK,   WP_MENU_NONE,   "Page Break",     0,        0,    act_para_page_break, NULL },
     { WP_ACT_PAGE_HEADER,       WP_MENU_FORMAT, "Header...",      0,        0,    act_page_header, NULL },
-    { WP_ACT_PAGE_FOOTER,       WP_MENU_FORMAT, "Footer...",      0,        0,    act_page_footer, NULL }
+    { WP_ACT_PAGE_FOOTER,       WP_MENU_FORMAT, "Footer...",      0,        0,    act_page_footer, NULL },
+    { WP_ACT_FORMAT_FONT,       WP_MENU_FORMAT, "Font...",        0,        0,    act_format_font, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

@@ -343,35 +343,6 @@ static void load_sample_document(i32 content_width_twips)
                             content_width_twips);
 }
 
-/* Restamps the run a just-inserted character landed in with the app's
-   "current input style" (Bold/Italic/Underline/size toggle state) --
-   the active keymap scheme has no notion of this app-level toggle,
-   mirrors platform/atari/app_shell.c's own apply_current_style_to_run_at
-   exactly. */
-static void apply_current_style_to_run_at(wp_pos pos)
-{
-    wp_section *sec;
-    wp_paragraph *para;
-    wp_run *run;
-    const wp_char_style *base;
-    wp_char_style style;
-    wp_cstyle handle;
-
-    sec = wp_document_section_get(&g_doc, pos.section);
-    para = wp_section_paragraph_get(sec, pos.paragraph);
-    run = wp_paragraph_run_get(para, (u16)pos.run);
-    if (run == NULL) return;
-
-    base = wp_document_cstyle_get(&g_doc, g_doc.default_cstyle);
-    style = *base;
-    style.flags = g_ctx.style_flags;
-    style.size_twips = g_ctx.current_size_twips;
-
-    if (wp_document_cstyle_find_or_add(&g_doc, &style, &handle) == WP_OK) {
-        wp_run_cstyle_set(para, (u16)pos.run, handle);
-    }
-}
-
 static wp_bool line_contains_pos(const wp_line *line, u32 run, u32 offset)
 {
     if (run < line->start_run || run > line->end_run) return WP_FALSE;
@@ -1286,10 +1257,10 @@ static wp_bool dos_dispatch_key(void)
         return WP_FALSE;
     }
 
-    outcome = wp_keymap_feed_key(&g_ctx, ev, ascii);
-
-    if (outcome.inserted_char) {
-        apply_current_style_to_run_at((*wp_keymap_cursor(&g_ctx)));
+    {
+        wp_pos before = *wp_keymap_cursor(&g_ctx);
+        outcome = wp_keymap_feed_key(&g_ctx, ev, ascii);
+        wp_action_after_key(&g_ctx, before, outcome.inserted_char);
     }
 
     switch ((wp_keymap_result_kind)outcome.kind) {
