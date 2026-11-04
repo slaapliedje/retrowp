@@ -1113,6 +1113,13 @@ static wp_bool set_document_from_text(const u8 *utf8, u32 len, i32 content_width
     return WP_TRUE;
 }
 
+static const char *g_start_file = NULL;
+
+void app_shell_set_start_file(const char *path)
+{
+    g_start_file = path;
+}
+
 static void load_sample_document(i32 content_width_twips)
 {
     set_document_from_text((const u8 *)g_sample_text, (u32)strlen(g_sample_text),
@@ -5010,6 +5017,14 @@ void app_shell_run(void)
         GRECT work;
         wind_get_grect(window_handle, WF_WORKXYWH, &work);
         load_sample_document(atari_px_to_twips_x((i32)work.g_w));
+    }
+    /* A file from the command line replaces the sample, through the same
+       loader File > Open uses; a file that will not load leaves the
+       sample and says why in the status line. */
+    if (g_start_file != NULL && g_start_file[0] != '\0') {
+        wp_image_sink sink;
+        atari_image_sink_init(&sink);
+        (void)wp_action_load_file(&g_ctx, g_start_file, &sink);
     }
 
     /* Written only after the menu bar is installed, the window is open,

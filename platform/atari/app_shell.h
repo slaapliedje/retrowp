@@ -9,4 +9,9 @@
    appl_exit) before returning. */
 void app_shell_run(void);
 
+/* A file for app_shell_run to open in place of the sample document,
+   kept by pointer (argv's own storage outlives the run); NULL for none.
+   Called before app_shell_run. */
+void app_shell_set_start_file(const char *path);
+
 #endif /* WP_ATARI_APP_SHELL_H */
