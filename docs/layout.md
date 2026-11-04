@@ -174,6 +174,19 @@ The general rule this establishes for `engine/`: **large buffers do not
 go on the stack**, because the engine's stack frames are shared by every
 backend and the tightest target sets the budget for all of them.
 
+**Typefaces**: a character style names a face by `font` (an index into
+`wp_document.fonts`: a name and an RTF-style generic family; 0 is the
+target's default). `wp_cstyle_font_open` is the one way to open it --
+layout, the cursor code and every shell's painter -- and passes the
+name to `plat_font_open` with the family in `style_flags`'
+`PLAT_FAMILY_*` bits, so a target without "Times New Roman" can still
+pick its own serif. What each target does with them is the backend's
+(retroplat): the ST matches the name, then the family, among the faces a
+resident GDOS loaded, else the system font; the Amiga does the same over
+`AvailFonts` (memory and `FONTS:`); the Mac over its installed `FOND`
+families, then `GetFNum` on the name itself; DOS has one face. The
+matching is shared, retroplat's `src/fontpick.c`.
+
 **Font handling**: a small fixed-size (8-entry) linear-scan cache of
 `(wp_cstyle, plat_font*)` keyed by character style, opened lazily and
 all closed at the end of one `wp_paragraph_relayout` call, avoids

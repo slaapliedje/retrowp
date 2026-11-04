@@ -115,7 +115,18 @@ static void rtf_write_text(rtf_writer *w, const u8 *bytes, u32 len)
 typedef struct {
     u8  rgb[RTF_MAX_COLORS][3];
     u32 count;
+    /* Which of the document's fonts some run uses (bit per wp_font id;
+       ids past the bitmap are taken as used): only those reach the
+       \fonttbl, numbered by their own id, so a run's \fN is its id and
+       \f0 is the target default. */
+    u8  font_used[32];
 } rtf_color_table;
+
+static wp_bool rtf_font_used(const rtf_color_table *ct, wp_font id)
+{
+    if (id >= 256u) return WP_TRUE;
+    return (ct->font_used[id >> 3] & (u8)(1u << (id & 7u))) ? WP_TRUE : WP_FALSE;
+}
 
 /* Read-only lookup, used during emission once the table is already
    complete (built by rtf_build_color_table before either emission pass
@@ -154,6 +165,7 @@ static void rtf_build_color_table(const wp_document *doc, rtf_color_table *ct)
 
     ct->rgb[0][0] = 0; ct->rgb[0][1] = 0; ct->rgb[0][2] = 0;
     ct->count = 1;
+    memset(ct->font_used, 0, sizeof(ct->font_used));
 
     for (si = 0; si < doc->section_count; si++) {
         const wp_section *sec = &doc->sections[si];
@@ -163,6 +175,9 @@ static void rtf_build_color_table(const wp_document *doc, rtf_color_table *ct)
             for (ri = 0; ri < para->run_count; ri++) {
                 const wp_char_style *cs = wp_document_cstyle_get(doc, para->runs[ri].style);
                 if (cs != NULL) rtf_color_index(ct, cs->color_r, cs->color_g, cs->color_b);
+                if (cs != NULL && cs->font != 0 && cs->font < 256u) {
+                    ct->font_used[cs->font >> 3] = (u8)(ct->font_used[cs->font >> 3] | (1u << (cs->font & 7u)));
+                }
             }
         }
     }
@@ -172,8 +187,28 @@ static void rtf_emit_header(rtf_writer *w, const wp_document *doc, const rtf_col
 {
     u32 i;
 
+    static const char *const family_word[6] = {
+        "\\fnil", "\\froman", "\\fswiss", "\\fmodern", "\\fscript", "\\fdecor"
+    };
+    wp_font id;
+
+    /* \f0 is the target's default face, which has no name of its own to
+       write: "Helvetica" stands in for it (a reader needs some name),
+       and the \*\generator below is how this program's reader knows to
+       take \f0 back as the default rather than as Helvetica. Every other
+       entry is a face a run names, numbered by its font id. */
     rtf_write_str(w, "{\\rtf1\\ansi\\ansicpg1252\\deff0\\uc1\\deftab720"
-                     "{\\fonttbl{\\f0 Helvetica;}}"); /* honest placeholder -- see docs/formats/rtf.md */
+                     "{\\fonttbl{\\f0\\fswiss Helvetica;}");
+    for (id = 1; id < doc->font_count; id++) {
+        const wp_font_desc *fd = wp_document_font_get(doc, id);
+        if (fd == NULL || !rtf_font_used(ct, id)) continue;
+        rtf_write_str(w, "{\\f"); rtf_write_i32(w, (i32)id);
+        rtf_write_str(w, family_word[fd->family <= 5 ? fd->family : 0]);
+        rtf_write_str(w, " ");
+        rtf_write_text(w, wp_strpool_get(&doc->strings, fd->name), fd->name.length);
+        rtf_write_str(w, ";}");
+    }
+    rtf_write_str(w, "}");
 
     if (ct->count > 1) {
         rtf_write_str(w, "{\\colortbl;");
@@ -185,6 +220,7 @@ static void rtf_emit_header(rtf_writer *w, const wp_document *doc, const rtf_col
         }
         rtf_write_str(w, "}");
     }
+    rtf_write_str(w, "{\\*\\generator RetroWP;}");
 
     /* Page setup, from the first section: the document's page as the
        reader should lay it out. */
@@ -209,6 +245,7 @@ static void rtf_emit_run(rtf_writer *w, const wp_document *doc, const wp_run *ru
     if (cs == NULL) return;
 
     rtf_write_str(w, "{");
+    if (cs->font != 0) { rtf_write_str(w, "\\f"); rtf_write_i32(w, (i32)cs->font); }
     if (cs->flags & WP_STYLE_BOLD)      rtf_write_str(w, "\\b");
     if (cs->flags & WP_STYLE_ITALIC)    rtf_write_str(w, "\\i");
     if (cs->flags & WP_STYLE_UNDERLINE) rtf_write_str(w, "\\ul");

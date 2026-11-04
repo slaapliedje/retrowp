@@ -633,8 +633,7 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                                 font = NULL;
                             }
                             have_font = WP_FALSE;
-                            if (plat_font_open((const u8 *)"", 0, cs->size_twips,
-                                                cs->flags, &font) == WP_OK) {
+                            if (wp_cstyle_font_open(&g_doc, cs, &font) == WP_OK) {
                                 cached_style = run->style;
                                 have_font = WP_TRUE;
                                 /* The run's colour, when it has one; black

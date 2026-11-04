@@ -136,7 +136,7 @@ static plat_font *cursor_slot_font(wp_document *doc, wp_cstyle handle, cursor_fo
 
     style = wp_document_cstyle_get(doc, handle);
     if (style == NULL) return NULL;
-    if (plat_font_open((const u8 *)"", 0, style->size_twips, style->flags, &f) != WP_OK) {
+    if (wp_cstyle_font_open(doc, style, &f) != WP_OK) {
         return NULL;
     }
 

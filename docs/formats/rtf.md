@@ -36,7 +36,7 @@ scoped to the group, `\uc0` for none -- TextEdit's curly quotes) are
 skipped, whether they arrive as literal text or as `\'hh`.
 
 **Destinations recognized and their content NOT imported as document
-text**: `\fonttbl`, `\info` (and everything inside it, including
+text**: `\info` (and everything inside it, including
 `\title`/`\author` -- see "no title/author capture" gap below),
 `\stylesheet`, `\pict`, `\object`, `\footnote`, `\header`, `\footer`,
 Word's `\headerl`/`\headerr`/`\headerf` and `\footerl`/`\footerr`/`\footerf`,
@@ -105,11 +105,6 @@ enough in real-world RTF to be worth the small fixed lookup).
 
 ## Deliberate simplifications (documented, not silent)
 
-- **No font name wiring.** `\fonttbl` is parsed only enough to be
-  correctly skipped; nothing populates `wp_char_style.font_name`. This is
-  the same gap T3.1 already documented (the field is a bare `wp_str`
-  offset with no length, and nothing in the codebase sets it yet) --
-  RTF import doesn't change that, just doesn't pretend to.
 - **No title/author capture**, for the identical reason:
   `wp_document.title`/`.author` are also bare `wp_str` offsets with no
   paired length field anywhere in the locked struct, so there is no safe
@@ -118,7 +113,7 @@ enough in real-world RTF to be worth the small fixed lookup).
   contradict the string pool's own explicit design (`wp_strpool.bytes`
   is documented as "UTF-8, not NUL-terminated internally" -- every other
   piece of text uses an explicit offset+length `wp_span`). `\info` is
-  therefore a skipped destination like `\fonttbl`: its `\title`/`\author`
+  therefore a skipped destination: its `\title`/`\author`
   subgroups are parsed enough to be correctly skipped, not stored.
 - **`\line` (soft line break) is treated as a paragraph break**, same as
   `\par`. The document model has no concept of a break *within* a
@@ -128,8 +123,20 @@ enough in real-world RTF to be worth the small fixed lookup).
 - **`\~` (non-breaking space) becomes a regular space**, `\-` (optional
   hyphen) is dropped entirely. Neither concept exists in the document
   model.
-- **Fonts are not imported.** `\fonttbl` is skipped and `\fN` ignored:
-  the model holds one typeface (docs/layout.md).
+- **Fonts** (since 2026-11-04). `\fonttbl` is read: each entry's number,
+  name, family (`\froman` `\fswiss` `\fmodern` `\fscript` `\fdecor`, with
+  `\ftech` and `\fbidi` as decor) and `\fcharsetN`, grouped or not, with
+  `\*\panose` and `\*\falt` inside an entry skipped. `\fN` selects one,
+  `\deffN` is the body font and the one `\plain` returns to. A face
+  reaches the document's font table (`wp_document.fonts`) only when a
+  run first uses it -- Word lists every font it has ever seen. A font's
+  `\fcharset` decodes its own `\'hh` bytes (77 Mac Roman, 204 cp1251,
+  238 cp1250, 255 cp437; anything else the document's code page), which
+  is how a Central European Word file's text in a CE font comes out right.
+  `\*\generator RetroWP` says the file is this program's, whose `\f0` is
+  the target-default placeholder (Export, below), so it reads back as the
+  default face rather than as Helvetica; anyone else's `\f0` Helvetica
+  is Helvetica.
 - **Highlighting (`\highlight`, `\cb`) is ignored**: no background colour
   in the model yet.
 
@@ -138,9 +145,12 @@ enough in real-world RTF to be worth the small fixed lookup).
 `format_rtf_export` is the inverse: walks the document emitting
 `\pard` per paragraph, one brace-scoped run group per style change
 (`{\b\i\fs24 ...text...}`), `\par` between paragraphs, and a minimal
-one-entry `\fonttbl` (`{\f0 Helvetica;}`, always referenced as `\f0` --
-honest, since nothing sets a real font name anywhere in the codebase to
-export). `\qc`/`\qr`/`\qj`/`\li`/`\ri`/`\fi`/`\sb`/`\sa`/`\cfN` are
+`\fonttbl` of `{\f0\fswiss Helvetica;}` -- a stand-in for the target's default
+face, which has no name of its own, and never written in a run -- then
+one entry per face some run actually names, numbered by its font id
+(`{\f2\fmodern Courier;}`, the run `{\f2\fs24 ...}`), and a
+`{\*\generator RetroWP;}` so this program's reader knows the `\f0` for
+what it is. `\qc`/`\qr`/`\qj`/`\li`/`\ri`/`\fi`/`\sb`/`\sa`/`\cfN` are
 emitted only when they differ from the paragraph/character default, to
 keep output reasonably compact. The `\colortbl` is emitted with exactly
 the colors actually used, plus the implicit auto-color entry 0.

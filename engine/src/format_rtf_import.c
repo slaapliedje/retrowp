@@ -20,8 +20,14 @@ typedef enum {
     RTF_DEST_PICT,       /* \pict -- hex picture data, not document text */
     RTF_DEST_HEADER,     /* \header/\headerr: captured as the section's header */
     RTF_DEST_FOOTER,     /* \footer/\footerr: its footer */
-    RTF_DEST_FLDINST     /* a field's instruction inside one of those: is it PAGE? */
+    RTF_DEST_FLDINST,    /* a field's instruction inside one of those: is it PAGE? */
+    RTF_DEST_FONTTBL,    /* \fonttbl: each entry's name becomes a document font */
+    RTF_DEST_GENERATOR   /* \*\generator: which program wrote the file */
 } rtf_dest;
+
+/* Fonts a \fonttbl can name before the rest are read as the default.
+   Word writes a dozen or two; one per script it ever saw. */
+#define RTF_MAX_FONTS 64
 
 typedef struct {
     u16 char_flags;    /* wp_style_flags bitfield */
@@ -35,6 +41,8 @@ typedef struct {
     u8  uc;             /* \ucN: fallback characters after each \uN */
     u8  hidden;         /* \v: text not imported */
     u8  pagebb;         /* \pagebb: this paragraph starts a page */
+    u8  fidx;           /* \fN: its fmap entry + 1; 0 = the target default */
+    u16 cp;             /* that font's \fcharset as a code page; 0 = the document's */
     rtf_dest dest;
 } rtf_state;
 
@@ -83,6 +91,24 @@ typedef struct {
     rtf_buf margin_buf;   /* the header or footer being read */
     rtf_buf fld_buf;      /* the field instruction being read */
     u8  break_this;    /* ...and this is that paragraph */
+
+    /* \fonttbl: the entry being read, and each entry's number, name (in
+       ft_names), family and code page. A face reaches the document's
+       font table only when a run first uses it (rtf_flush_run): Word
+       lists every font it ever saw, and this program's own \f0 is a
+       placeholder the \*\generator after the table reveals. The default
+       (\deffN) is what \plain returns to. */
+    struct { i32 num; u32 name_off, name_len; u8 family; u16 cp; wp_font id; wp_bool resolved; } fmap[RTF_MAX_FONTS];
+    u32 fmap_count;
+    rtf_buf ft_names;
+    i32 ft_num;
+    u8  ft_family;
+    u16 ft_cp;
+    rtf_buf ft_name;
+    i32 deff;
+    wp_bool ours;      /* \*\generator says RetroWP: its \f0 is the target default */
+    char gen[16];
+    u32  gen_len;
 
     /* Tab stops of the paragraph being read. Kept here, not in the group
        state: \pard resets them and nothing scopes them to a group, and
@@ -175,6 +201,16 @@ static void rtf_flush_run(rtf_parser *p)
     cs.color_r = st->color_r;
     cs.color_g = st->color_g;
     cs.color_b = st->color_b;
+    if (st->fidx > 0) {
+        u32 fi = (u32)st->fidx - 1;
+        if (!p->fmap[fi].resolved) {
+            if (wp_document_font_find_or_add(p->doc, p->ft_names.bytes + p->fmap[fi].name_off,
+                                             p->fmap[fi].name_len, p->fmap[fi].family,
+                                             &p->fmap[fi].id) != WP_OK) { p->error = WP_NOMEM; return; }
+            p->fmap[fi].resolved = WP_TRUE;
+        }
+        cs.font = p->fmap[fi].id;
+    }
 
     if (wp_document_cstyle_add(p->doc, &cs, &cstyle) != WP_OK) { p->error = WP_NOMEM; return; }
 
@@ -250,6 +286,69 @@ static void rtf_colortbl_commit(rtf_parser *p)
     p->pending_r = p->pending_g = p->pending_b = 0;
 }
 
+/* \fcharsetN as one of the code pages codepage.c can decode; 0 for the
+   document's own (ANSI, "default", and anything unknown -- whose \'hh
+   bytes then decode as they did before fonts were read at all). */
+static u16 rtf_charset_cp(i32 charset)
+{
+    u16 cp = 0;
+
+    switch (charset) {
+    case 77:  cp = 10000; break;   /* Mac Roman */
+    case 204: cp = 1251; break;    /* Cyrillic */
+    case 238: cp = 1250; break;    /* Central European */
+    case 255: cp = 437; break;     /* OEM */
+    default:  break;
+    }
+    return (cp != 0 && wp_codepage_known(cp)) ? cp : (u16)0;
+}
+
+/* One \fonttbl entry is complete (its ';', or its group closing). */
+static void rtf_fonttbl_commit(rtf_parser *p)
+{
+    u32 len = p->ft_name.length, i;
+    const u8 *name = p->ft_name.bytes;
+
+    while (len > 0 && name[0] == ' ') { name++; len--; }
+    while (len > 0 && name[len - 1] == ' ') len--;
+    if (len > 0 && p->ft_num >= 0 && p->fmap_count < RTF_MAX_FONTS) {
+        u32 at = p->fmap_count;
+        p->fmap[at].num = p->ft_num;
+        p->fmap[at].name_off = p->ft_names.length;
+        p->fmap[at].name_len = len;
+        p->fmap[at].family = p->ft_family;
+        p->fmap[at].cp = p->ft_cp;
+        p->fmap[at].id = 0;
+        p->fmap[at].resolved = WP_FALSE;
+        for (i = 0; i < len; i++) {
+            if (rtf_buf_append_byte(&p->ft_names, name[i]) != WP_OK) { p->error = WP_NOMEM; return; }
+        }
+        p->fmap_count++;
+    }
+    p->ft_name.length = 0;
+    p->ft_num = -1;
+    p->ft_family = 0;
+    p->ft_cp = 0;
+}
+
+/* RTF font number `num` into st's font and code page; an unknown number
+   is the target default. In a file this program wrote, the default
+   font number IS the target default (rtf_emit_header's placeholder). */
+static void rtf_select_font(rtf_parser *p, rtf_state *st, i32 num)
+{
+    u32 i;
+
+    st->fidx = 0;
+    st->cp = 0;
+    for (i = 0; i < p->fmap_count; i++) {
+        if (p->fmap[i].num == num) {
+            if (!(p->ours && num == p->deff)) st->fidx = (u8)(i + 1);
+            st->cp = p->fmap[i].cp;
+            return;
+        }
+    }
+}
+
 static void rtf_emit_bytes(rtf_parser *p, const u8 *bytes, u32 n)
 {
     rtf_state *st;
@@ -278,6 +377,19 @@ static void rtf_emit_bytes(rtf_parser *p, const u8 *bytes, u32 n)
 
     if (st->dest == RTF_DEST_COLORTBL) {
         if (n == 1 && bytes[0] == ';') rtf_colortbl_commit(p);
+        return;
+    }
+
+    if (st->dest == RTF_DEST_FONTTBL) {
+        for (i = 0; i < n; i++) {
+            if (bytes[i] == ';') { rtf_fonttbl_commit(p); continue; }
+            if (rtf_buf_append_byte(&p->ft_name, bytes[i]) != WP_OK) { p->error = WP_NOMEM; return; }
+        }
+        return;
+    }
+
+    if (st->dest == RTF_DEST_GENERATOR) {
+        for (i = 0; i < n && p->gen_len + 1 < sizeof(p->gen); i++) p->gen[p->gen_len++] = (char)bytes[i];
         return;
     }
 
@@ -327,8 +439,10 @@ static void rtf_emit_cp(rtf_parser *p, u32 cp)
    high byte in the source). */
 static void rtf_emit_cp_byte(rtf_parser *p, u8 byte_val)
 {
+    u16 cp = p->stack[p->depth].cp;
+
     if (byte_val < 0x80) { rtf_emit_char(p, byte_val); return; }
-    rtf_emit_cp(p, wp_codepage_decode(p->codepage, byte_val));
+    rtf_emit_cp(p, wp_codepage_decode(cp != 0 ? cp : p->codepage, byte_val));
 }
 
 /* One character of document text from the source -- a literal byte or
@@ -514,6 +628,20 @@ static void rtf_pop(rtf_parser *p)
         }
         p->margin_buf.length = 0;
     }
+    /* A \fonttbl entry in its own group may omit its ';'. */
+    if (p->stack[p->depth].dest == RTF_DEST_FONTTBL && p->ft_name.length > 0) rtf_fonttbl_commit(p);
+    /* Leaving the table: the default font is in force from here on. */
+    if (p->stack[p->depth].dest == RTF_DEST_FONTTBL && p->depth > 0 &&
+        p->stack[p->depth - 1].dest != RTF_DEST_FONTTBL) {
+        rtf_select_font(p, &p->stack[p->depth - 1], p->deff);
+    }
+    if (p->stack[p->depth].dest == RTF_DEST_GENERATOR && p->depth > 0 &&
+        p->stack[p->depth - 1].dest != RTF_DEST_GENERATOR) {
+        p->ours = (p->gen_len >= 7 && memcmp(p->gen, "RetroWP", 7) == 0) ? WP_TRUE : WP_FALSE;
+        /* The table came first: what it said of the default font is
+           now known to be the placeholder. */
+        if (p->ours) rtf_select_font(p, &p->stack[p->depth - 1], p->deff);
+    }
     p->depth--;
     p->skip = 0;   /* nor does it outlive the group the \uN was in */
 }
@@ -549,13 +677,47 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
     }
 
     if (p->star_pending) {
+        u8 in_margin = (u8)(p->star_pending == 1);
         p->star_pending = 0;
-        if (strcmp(name, "fldinst") == 0) {
+        if (in_margin && strcmp(name, "fldinst") == 0) {
             st->dest = RTF_DEST_FLDINST;
             p->fld_buf.length = 0;
             return;
         }
+        if (strcmp(name, "generator") == 0) {
+            st->dest = RTF_DEST_GENERATOR;
+            p->gen_len = 0;
+            return;
+        }
     }
+    if (strcmp(name, "deff") == 0) { if (has_param) p->deff = param; return; }
+
+    if (st->dest == RTF_DEST_FONTTBL) {
+        if (strcmp(name, "f") == 0) {
+            if (p->ft_name.length > 0) rtf_fonttbl_commit(p);
+            p->ft_num = has_param ? param : -1;
+            p->ft_family = 0;
+            p->ft_cp = 0;
+            return;
+        }
+        if (strcmp(name, "fnil") == 0)    { p->ft_family = (u8)WP_FAMILY_NIL; return; }
+        if (strcmp(name, "froman") == 0)  { p->ft_family = (u8)WP_FAMILY_ROMAN; return; }
+        if (strcmp(name, "fswiss") == 0)  { p->ft_family = (u8)WP_FAMILY_SWISS; return; }
+        if (strcmp(name, "fmodern") == 0) { p->ft_family = (u8)WP_FAMILY_MODERN; return; }
+        if (strcmp(name, "fscript") == 0) { p->ft_family = (u8)WP_FAMILY_SCRIPT; return; }
+        if (strcmp(name, "fdecor") == 0 || strcmp(name, "ftech") == 0 ||
+            strcmp(name, "fbidi") == 0)   { p->ft_family = (u8)WP_FAMILY_DECOR; return; }
+        if (strcmp(name, "fcharset") == 0) { p->ft_cp = rtf_charset_cp(has_param ? param : 0); return; }
+        if (strcmp(name, "u") == 0 && has_param) {
+            u8 enc[4];
+            u32 k, en = utf8_encode((u32)((param < 0) ? param + 65536 : param), enc);
+            for (k = 0; k < en; k++) (void)rtf_buf_append_byte(&p->ft_name, enc[k]);
+            p->skip = st->uc;
+            return;
+        }
+        return;   /* \fprq, \fttruetype, ...: nothing a name needs */
+    }
+    if (st->dest == RTF_DEST_GENERATOR) return;
 
     if (st->dest == RTF_DEST_SKIP) return;
 
@@ -610,7 +772,13 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
        text (\pntext, \listtext -- the number is generated, not text),
        \pn and the file and revision tables join them: all of these
        leaked into the body before. */
-    if (strcmp(name, "fonttbl") == 0 || strcmp(name, "info") == 0 ||
+    if (strcmp(name, "fonttbl") == 0) {
+        st->dest = RTF_DEST_FONTTBL;
+        p->ft_num = -1;
+        p->ft_name.length = 0;
+        return;
+    }
+    if (strcmp(name, "info") == 0 ||
         strcmp(name, "stylesheet") == 0 ||
         strcmp(name, "object") == 0 || strcmp(name, "footnote") == 0 ||
         strcmp(name, "headerl") == 0 ||
@@ -752,6 +920,12 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         st->size_twips = 240;
         st->color_r = st->color_g = st->color_b = 0;
         st->hidden = 0;
+        rtf_select_font(p, st, p->deff);
+        return;
+    }
+    if (strcmp(name, "f") == 0) {
+        rtf_flush_run(p);
+        rtf_select_font(p, st, has_param ? param : p->deff);
         return;
     }
     if (strcmp(name, "v") == 0) {
@@ -860,9 +1034,9 @@ static void rtf_dispatch_control_symbol(rtf_parser *p, u8 sym)
     case '*':
         /* Inside a header or footer, \*\fldinst is read (to tell a page
            number field); everywhere else a starred group is skipped. */
-        if (p->stack[p->depth].dest == RTF_DEST_HEADER || p->stack[p->depth].dest == RTF_DEST_FOOTER) {
-            p->star_pending = 1;
-        }
+        /* \*\generator is read anywhere (1: in a margin, 2: not). */
+        p->star_pending = (u8)((p->stack[p->depth].dest == RTF_DEST_HEADER ||
+                                p->stack[p->depth].dest == RTF_DEST_FOOTER) ? 1 : 2);
         p->stack[p->depth].dest = RTF_DEST_SKIP;
         return;
     case '\'': {
@@ -956,6 +1130,7 @@ wp_status format_rtf_import_images(const u8 *bytes, u32 len, wp_document *doc,
     p->stack[0].dest = RTF_DEST_NORMAL;
     p->stack[0].uc = 1;
     p->codepage = 1252;
+    p->ft_num = -1;
     p->depth = 0;
     p->error = WP_OK;
     p->sink = sink;
@@ -993,6 +1168,8 @@ wp_status format_rtf_import_images(const u8 *bytes, u32 len, wp_document *doc,
     rtf_buf_free(&p->run_buf);
     rtf_buf_free(&p->margin_buf);
     rtf_buf_free(&p->fld_buf);
+    rtf_buf_free(&p->ft_name);
+    rtf_buf_free(&p->ft_names);
     rtf_buf_free(&p->pict_buf);
 
     st = p->error;

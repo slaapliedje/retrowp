@@ -26,15 +26,23 @@ static void font_cache_close_all(font_cache *cache)
     cache->count = 0;
 }
 
+wp_status wp_cstyle_font_open(const wp_document *doc, const wp_char_style *cs, plat_font **out)
+{
+    const wp_font_desc *fd = wp_document_font_get(doc, cs->font);
+    u16 flags = cs->flags;
+
+    if (fd == NULL) return plat_font_open((const u8 *)"", 0, cs->size_twips, flags, out);
+    flags = (u16)(flags | ((u16)(fd->family & 7u) << PLAT_FAMILY_SHIFT));
+    return plat_font_open(wp_strpool_get(&doc->strings, fd->name), fd->name.length,
+                          cs->size_twips, flags, out);
+}
+
 /* Measures bytes[0..len) under cstyle `handle`'s font, returning both
    its width and line height (ascent+descent+leading). Opens/reuses a
    small per-relayout-call font cache; overflow past FONT_CACHE_SIZE
    distinct styles in one paragraph still works, just without caching
-   (a temporary font is opened and closed for that one call). Font
-   names are not yet resolvable from wp_char_style.font_name -- a bare
-   wp_str offset with no length, and nothing in the codebase sets it to
-   non-zero yet -- so this always requests the platform's default font;
-   see docs/layout.md. */
+   (a temporary font is opened and closed for that one call). The face
+   is the style's own (wp_cstyle_font_open); see docs/layout.md. */
 static wp_status measure_and_height(font_cache *cache, wp_document *doc, wp_cstyle handle,
                                      const u8 *bytes, u32 len, i32 *width_out, i32 *height_out)
 {
@@ -55,7 +63,7 @@ static wp_status measure_and_height(font_cache *cache, wp_document *doc, wp_csty
         const wp_char_style *style = wp_document_cstyle_get(doc, handle);
         if (style == NULL) return WP_RANGE;
 
-        st = plat_font_open((const u8 *)"", 0, style->size_twips, style->flags, &f);
+        st = wp_cstyle_font_open(doc, style, &f);
         if (st != WP_OK) return st;
 
         if (cache->count < FONT_CACHE_SIZE) {

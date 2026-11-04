@@ -4,6 +4,7 @@
 
 #include "types.h"
 #include "docmodel.h"
+#include "platform.h"
 
 /* Word wrap and pagination, reached ONLY through platform.h's font
    metrics seam (CLAUDE.md rule 4) -- never a platform font API
@@ -62,6 +63,12 @@ typedef struct {
    x, else the next multiple of WP_DEFAULT_TAB_TWIPS. pstyle may be NULL
    (default stops only). Shared with the ruler, which draws the same
    stops the layout uses. */
+/* Opens the font a character style asks for: its face by name, with
+   the face's family in style_flags' PLAT_FAMILY bits for a target that
+   lacks it (CLAUDE.md rule 4: the one way layout, and any painter that
+   must agree with layout, reaches plat_font_open for document text). */
+wp_status wp_cstyle_font_open(const wp_document *doc, const wp_char_style *cs, plat_font **out);
+
 i32 wp_tab_next_stop(const wp_para_style *pstyle, i32 x_twips, u8 *kind_out);
 
 /* Recomputes para->layout via greedy word wrap at content_width_twips

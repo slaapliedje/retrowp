@@ -523,6 +523,13 @@ void test_format_txt_export_reports_size_on_overflow(void);
 /* format_rtf_import.c */
 void test_format_rtf_import_rejects_bad_header(void);
 void test_format_rtf_import_decodes_other_code_pages(void);
+void test_fonts_table_finds_by_name_ignoring_case(void);
+void test_fonts_family_guess_from_a_bare_name(void);
+void test_fonts_rtf_word_font_table_and_charsets(void);
+void test_fonts_rtf_default_font_and_plain(void);
+void test_fonts_rtf_round_trip_keeps_faces_and_the_default(void);
+void test_fonts_face_pick_by_name_then_family(void);
+void test_fonts_family_bits_match_the_seam(void);
 void test_rtf_modern_unicode_and_its_fallback(void);
 void test_rtf_modern_plain_resets_and_hidden_text_stays_out(void);
 void test_rtf_modern_word_noise_stays_out_of_the_body(void);
@@ -1101,6 +1108,13 @@ static const test_case g_cases[] = {
 
     { "format_rtf_import_rejects_bad_header", test_format_rtf_import_rejects_bad_header },
     { "format_rtf_import_decodes_other_code_pages", test_format_rtf_import_decodes_other_code_pages },
+    { "fonts_table_finds_by_name_ignoring_case", test_fonts_table_finds_by_name_ignoring_case },
+    { "fonts_family_guess_from_a_bare_name", test_fonts_family_guess_from_a_bare_name },
+    { "fonts_rtf_word_font_table_and_charsets", test_fonts_rtf_word_font_table_and_charsets },
+    { "fonts_rtf_default_font_and_plain", test_fonts_rtf_default_font_and_plain },
+    { "fonts_rtf_round_trip_keeps_faces_and_the_default", test_fonts_rtf_round_trip_keeps_faces_and_the_default },
+    { "fonts_face_pick_by_name_then_family", test_fonts_face_pick_by_name_then_family },
+    { "fonts_family_bits_match_the_seam", test_fonts_family_bits_match_the_seam },
     { "rtf_modern_unicode_and_its_fallback", test_rtf_modern_unicode_and_its_fallback },
     { "rtf_modern_plain_resets_and_hidden_text_stays_out", test_rtf_modern_plain_resets_and_hidden_text_stays_out },
     { "rtf_modern_word_noise_stays_out_of_the_body", test_rtf_modern_word_noise_stays_out_of_the_body },

@@ -1431,8 +1431,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                                 font = NULL;
                             }
                             have_font = WP_FALSE;
-                            if (plat_font_open((const u8 *)"", 0, cs->size_twips,
-                                                cs->flags, &font) == WP_OK &&
+                            if (wp_cstyle_font_open(&g_amiga_doc, cs, &font) == WP_OK &&
                                 plat_font_metrics_get(font, &fm) == WP_OK) {
                                 ascent_px = amiga_twips_to_px_y(fm.ascent);
                                 cached_style = run->style;

@@ -29,8 +29,26 @@ typedef enum {
     WP_STYLE_SUB       = 1 << 5
 } wp_style_flags;
 
+typedef u16 wp_font;   /* index into wp_document.fonts; 0 = the target's own default */
+
+/* A typeface's generic family, RTF's \fnil/\froman/\fswiss/\fmodern/
+   \fscript/\fdecor. It is what a target without the named face falls
+   back on -- a serif for Times New Roman, a monospace for Courier --
+   and what a PDF picks its built-in face by. */
+typedef enum {
+    WP_FAMILY_NIL = 0, WP_FAMILY_ROMAN, WP_FAMILY_SWISS, WP_FAMILY_MODERN,
+    WP_FAMILY_SCRIPT, WP_FAMILY_DECOR
+} wp_font_family;
+
 typedef struct {
-    wp_str font_name;  /* pool ref; 0 (empty) = document default */
+    wp_span name;      /* UTF-8, in the document's pool */
+    u8      family;    /* wp_font_family */
+    u8      _pad[3];
+} wp_font_desc;
+
+typedef struct {
+    wp_font font;      /* 0 = the target's default face */
+    u16    _pad0;
     i32    size_twips;
     u16    flags;      /* wp_style_flags bitfield */
     u8     color_r;
@@ -175,6 +193,11 @@ typedef struct {
     u16            image_count;
     u16            image_capacity;
 
+    wp_font_desc  *fonts;    /* the typefaces runs name; append-only, entry
+                                 0 the reserved "target default" sentinel */
+    u16            font_count;
+    u16            font_capacity;
+
     wp_section *sections;
     u32         section_count;
     u32         section_capacity;
@@ -309,6 +332,21 @@ wp_status wp_document_image_add(wp_document *doc, const wp_image_desc *desc,
 
 /* Returns NULL for handle 0 or any handle >= the table's count. */
 const wp_image_desc *wp_document_image_get(const wp_document *doc, wp_image handle);
+
+/* -- Font table --------------------------------------------------------
+   Find-or-add by name (ASCII case ignored, as every target's font
+   lookup does): two runs in "Times" share one entry. An empty name is
+   the default face, id 0, and adds nothing. The family is recorded on
+   the first add and filled in by a later one that knows it. */
+wp_status wp_document_font_find_or_add(wp_document *doc, const u8 *name, u32 len,
+                                        u8 family, wp_font *out);
+
+/* The entry for `id`; NULL for 0 or anything past the table. */
+const wp_font_desc *wp_document_font_get(const wp_document *doc, wp_font id);
+
+/* A guess at a family from a bare name -- for a face picked by name on
+   a target that does not say ("Times" is roman, "Courier" modern). */
+u8 wp_font_family_guess(const u8 *name, u32 len);
 
 /* -- Structural mutation / iteration (T1.2) ---------------------------- */
 /* Each *_add function appends one element to an append-only array and

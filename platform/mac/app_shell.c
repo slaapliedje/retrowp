@@ -1319,8 +1319,7 @@ static void draw_document(WindowPtr w)
                                 font = NULL;
                             }
                             have_font = WP_FALSE;
-                            if (plat_font_open((const u8 *)"", 0, cs->size_twips,
-                                                cs->flags, &font) == WP_OK &&
+                            if (wp_cstyle_font_open(&g_mac_doc, cs, &font) == WP_OK &&
                                 plat_font_metrics_get(font, &fm) == WP_OK) {
                                 ascent_px = mac_twips_to_px(fm.ascent);
                                 cached_style = run->style;
