@@ -57,8 +57,8 @@ ODF.
 **The RTF reader here is deliberately narrow.** `rtf_bytes_to_paragraphs()`
 only needs to understand the ONE shape `format_rtf_export()` actually
 produces (documented in `rtf.md`'s "Export" section: `\pard` per
-paragraph, `{`-delimited sibling run groups, a fixed `\fonttbl`/
-`\colortbl` header) -- not arbitrary third-party RTF. The wire contract
+paragraph, `{`-delimited sibling run groups, a `\fonttbl` whose `\f0` is
+the default-face placeholder, a `\colortbl`, a `\*\generator`) -- not arbitrary third-party RTF. The wire contract
 guarantees CONVERT_EXPORT's RTF payload always comes from this project's
 own `format_rtf_export()`, so this is a correctness boundary, not a
 missing feature: a hand-crafted or third-party RTF file with different
@@ -168,3 +168,15 @@ Two layers, deliberately different in what they can prove:
   (`ci_atari_convert_serial.sh`) that goes beyond what this document's
   own verification section above covers (a real whole-file transfer over
   real RS-232, not just TCP loopback or manual LibreOffice cross-checks).
+
+## Typefaces
+
+Since 2026-11-04 a run's face crosses in both directions. Export
+declares each face once in `<office:font-face-decls>` (with
+`style:font-family-generic` from its RTF family) and names it from the
+run's text style with `style:font-name`; import reads `style:font-name`
+through those declarations, or LibreOffice's other spelling, an inline
+`fo:font-family` with `style:font-family-generic`. Checked against real
+LibreOffice both ways: it opens the export with Courier and Times New
+Roman in place, and an ODT it writes reads back with both faces, their
+families and the bold.

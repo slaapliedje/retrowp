@@ -73,11 +73,18 @@ same thing).
     (`poppler`'s) text-extraction fallback heuristic broke down partway
     through a subsetted font's renumbered glyph IDs even though visual
     rendering was already correct.
-  - There is no document-level font-*family* selection anywhere in this
-    pipeline (RTF's `\fonttbl` is a skipped destination on import, same
-    as the C engine's own importer; RTF export always declares a single
-    Helvetica font) -- so Tier 1 embeds one real family for the same 4
-    logical slots Tier 0 already has, not a font-family feature.
+  - **Three families** (since 2026-11-04), each with those four style
+    slots: Sans, Serif and Mono -- Helvetica, Times and Courier in Tier 0,
+    Liberation Sans, Serif and Mono (their metric twins) in Tier 1. A run's
+    family comes from its RTF font entry (`\froman` is Serif, `\fmodern`
+    Mono) or, for `\fnil`, from its face's name (`font_family_guess`,
+    the engine's `wp_font_family_guess` word for word); everything else,
+    the default face included, is Sans. That is as many faces as a PDF
+    has built in: a document's Garamond sets in Times, its Arial in
+    Helvetica. The Sans slots are declared on every PDF as before; a
+    Serif or Mono slot only when some text uses it. Times's widths come
+    from the same bundled AFMs, all four (its italics are their own
+    designs, unlike Helvetica's obliques); Courier's are 600 throughout.
 - **Glyph widths are REAL data for both tiers**, not approximated:
   Tier 0 uses Adobe AFM data extracted from `matplotlib`'s bundled
   `pdfcorefonts/Helvetica*.afm` (the actual Adobe Core 14 metrics)

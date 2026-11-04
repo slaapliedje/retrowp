@@ -446,3 +446,43 @@ void test_convert_pdf_export_honours_page_breaks(void)
     offload_shutdown();
     gateway_stop(&gw);
 }
+
+/* A run's face picks the PDF's: a serif (\froman, or a name like
+   "Times New Roman") sets in Times, a monospace in Courier -- the
+   built-in Type 1 faces, or Liberation Serif and Mono embedded where
+   the gateway host has them; either tier is the right answer. */
+void test_convert_pdf_export_picks_faces_by_family(void)
+{
+    gateway_handle gw;
+    static const char rtf[] =
+        "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fswiss Helvetica;}{\\f1\\froman Times New Roman;}"
+        "{\\f2\\fnil Courier New;}}{\\*\\generator RetroWP;}"
+        "\\pard{\\fs24 plain }{\\f1\\fs24 serif }{\\f2\\fs24 mono}\\par}";
+    u8 req_payload[512];
+    offload_request req;
+    offload_response resp;
+    wp_bool serif = WP_FALSE, mono = WP_FALSE;
+    u32 i;
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    req_payload[0] = FORMAT_PDF;
+    memcpy(req_payload + 1, rtf, sizeof(rtf) - 1);
+    req.op = OFFLOAD_CONVERT_EXPORT;
+    req.payload = req_payload;
+    req.payload_len = (u32)sizeof(rtf);
+    req.timeout_ms = 10000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+    for (i = 0; i + 26 <= resp.result_len; i++) {
+        if (memcmp(resp.result + i, "/BaseFont /Times-Roman", 22) == 0 ||
+            memcmp(resp.result + i, "/BaseFont /LiberationSerif", 26) == 0) serif = WP_TRUE;
+        if (memcmp(resp.result + i, "/BaseFont /Courier", 18) == 0 ||
+            memcmp(resp.result + i, "/BaseFont /LiberationMono", 25) == 0) mono = WP_TRUE;
+    }
+    ASSERT_TRUE(serif);
+    ASSERT_TRUE(mono);
+    offload_response_free(&resp);
+    offload_shutdown();
+    gateway_stop(&gw);
+}

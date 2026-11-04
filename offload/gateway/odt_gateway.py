@@ -91,6 +91,7 @@ _ODF_NS = {
     'text': 'urn:oasis:names:tc:opendocument:xmlns:text:1.0',
     'style': 'urn:oasis:names:tc:opendocument:xmlns:style:1.0',
     'fo': 'urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0',
+    'svg': 'urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0',
 }
 
 
@@ -107,8 +108,33 @@ def _new_para():
 
 
 def _new_run():
+    # font: the face's name, None for the reader's default; family: RTF's
+    # generic family word without the 'f' ('roman', 'swiss', 'modern',
+    # 'script', 'decor'), None for unknown -- what a PDF picks its
+    # built-in face by and an ODT declares as the generic family.
     return {'b': False, 'i': False, 'ul': False, 'strike': False, 'super': False, 'sub': False,
-            'size_twips': 240, 'color': None, 'text': ''}
+            'size_twips': 240, 'color': None, 'font': None, 'family': None, 'text': ''}
+
+
+_FAMILY_WORDS = (
+    ('modern', ('courier', 'mono', 'consol', 'typewriter', 'fixed', 'terminal', 'menlo', 'monaco')),
+    ('swiss', ('sans',)),
+    ('roman', ('times', 'roman', 'serif', 'georgia', 'garamond', 'palatino', 'book', 'century',
+               'cambria', 'dutch', 'new york', 'baskerville', 'bodoni')),
+    ('script', ('script', 'brush', 'chancery', 'comic')),
+)
+
+
+def font_family_guess(name):
+    """A family for a bare face name -- the engine's wp_font_family_guess,
+    word for word, so both sides of the link agree."""
+    if not name:
+        return None
+    low = name.lower()
+    for family, words in _FAMILY_WORDS:
+        if any(w in low for w in words):
+            return family
+    return 'swiss'
 
 
 # ---------------------------------------------------------------------
@@ -122,6 +148,16 @@ def odt_bytes_to_paragraphs(odt_bytes):
 
     para_styles = {}
     text_styles = {}
+    # <style:font-face style:name="X" svg:font-family="'X'"
+    # style:font-family-generic="roman"/>: what a style:font-name names.
+    faces = {}
+    for decls in (root.find('.//' + _q('office', 'font-face-decls')),):
+        if decls is None:
+            continue
+        for ff in decls.findall(_q('style', 'font-face')):
+            fam = (ff.get(_q('svg', 'font-family')) or ff.get(_q('style', 'name')) or '').strip("'\"")
+            generic = ff.get(_q('style', 'font-family-generic'))
+            faces[ff.get(_q('style', 'name'))] = (fam, generic if generic in ('roman', 'swiss', 'modern', 'script', 'decorative') else None)
     autostyles = root.find('.//' + _q('office', 'automatic-styles'))
     if autostyles is not None:
         for st in autostyles.findall(_q('style', 'style')):
@@ -168,6 +204,19 @@ def odt_bytes_to_paragraphs(odt_bytes):
                     color = tp.get(_q('fo', 'color'))
                     if color and color.startswith('#') and len(color) == 7:
                         d['color'] = (int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16))
+                    # A declared face by name, or (LibreOffice's other
+                    # spelling) the family itself, inline.
+                    fname = tp.get(_q('style', 'font-name'))
+                    inline = tp.get(_q('fo', 'font-family'))
+                    if fname:
+                        fam, generic = faces.get(fname, (fname, None))
+                    elif inline:
+                        fam, generic = inline.strip("'\""), tp.get(_q('style', 'font-family-generic'))
+                    if fname or inline:
+                        d['font'] = fam or fname
+                        d['family'] = ({'decorative': 'decor'}.get(generic, generic)
+                                       if generic in ('roman', 'swiss', 'modern', 'script', 'decorative')
+                                       else None) or font_family_guess(d['font'])
                 text_styles[name] = d
 
     paragraphs = []
@@ -232,7 +281,7 @@ _ODT_CONTENT_HEADER = (
     'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
     'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" '
     'xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" '
-    'office:version="1.2">\n<office:automatic-styles>\n'
+    'office:version="1.2">\n'
 )
 
 
@@ -256,6 +305,7 @@ def paragraphs_to_odt_bytes(paragraphs):
     simpler to generate and still fully valid ODF."""
     styles = []
     body = []
+    faces = {}     # face name -> family, for <office:font-face-decls>
 
     for pi, p in enumerate(paragraphs):
         pstyle_name = 'P%d' % (pi + 1)
@@ -299,6 +349,10 @@ def paragraphs_to_odt_bytes(paragraphs):
             tp_attrs.append('fo:font-size="%.1fpt"' % (r.get('size_twips', 240) / 20.0))
             if r.get('color'):
                 tp_attrs.append('fo:color="#%02x%02x%02x"' % r['color'])
+            if r.get('font'):
+                if r['font'] not in faces:
+                    faces[r['font']] = r.get('family') or font_family_guess(r['font'])
+                tp_attrs.append('style:font-name="%s"' % xml_escape(r['font'], {'"': '&quot;'}))
 
             if tp_attrs:
                 tstyle_name = 'P%dT%d' % (pi + 1, ri + 1)
@@ -311,7 +365,14 @@ def paragraphs_to_odt_bytes(paragraphs):
 
         body.append('<text:p text:style-name="%s">%s</text:p>' % (pstyle_name, ''.join(run_xml)))
 
-    content = (_ODT_CONTENT_HEADER + '\n'.join(styles) +
+    decls = ''.join('<style:font-face style:name="%s" svg:font-family="%s"%s/>' %
+                    (xml_escape(n, {'"': '&quot;'}), xml_escape("'%s'" % n, {'"': '&quot;'}),
+                     ' style:font-family-generic="%s"' % ('decorative' if f == 'decor' else f)
+                     if f in ('roman', 'swiss', 'modern', 'script', 'decor') else '')
+                    for n, f in faces.items())
+    content = (_ODT_CONTENT_HEADER +
+               ('<office:font-face-decls>%s</office:font-face-decls>\n' % decls if decls else '') +
+               '<office:automatic-styles>\n' + '\n'.join(styles) +
                '</office:automatic-styles><office:body><office:text>' +
                ''.join(body) + '</office:text></office:body></office:document-content>')
 
@@ -373,16 +434,29 @@ def paragraphs_to_rtf_bytes(paragraphs):
             colors.append(rgb)
         return colors.index(rgb) + 1
 
+    fonts = []    # face names, \\f1 onward; \\f0 is the reader's default
+
     for p in paragraphs:
         for r in p['runs']:
             color_index(r.get('color'))
+            if r.get('font') and r['font'] not in [f for f, _ in fonts]:
+                fonts.append((r['font'], r.get('family') or font_family_guess(r['font'])))
 
-    parts = ['{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0 Helvetica;}}']
+    # The engine's own shape (format_rtf_export.c): \\f0 a "Helvetica"
+    # placeholder for the default face, which the \\*\\generator below
+    # tells its reader not to take as Helvetica.
+    parts = ['{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0\\fswiss Helvetica;}']
+    for i, (name, family) in enumerate(fonts):
+        parts.append('{\\f%d\\f%s %s;}' % (i + 1, family if family in ('roman', 'swiss', 'modern', 'script', 'decor') else 'nil',
+                                         _rtf_escape_text(name)))
+    parts.append('}')
     if colors:
         parts.append('{\\colortbl;')
         for (r, g, b) in colors:
             parts.append('\\red%d\\green%d\\blue%d;' % (r, g, b))
         parts.append('}')
+    parts.append('{\\*\\generator RetroWP;}')
+    font_num = {name: i + 1 for i, (name, _) in enumerate(fonts)}
 
     for p in paragraphs:
         parts.append('\\pard')
@@ -408,6 +482,8 @@ def paragraphs_to_rtf_bytes(paragraphs):
 
         for r in (p['runs'] or [_new_run()]):
             parts.append('{')
+            if r.get('font') in font_num:
+                parts.append('\\f%d' % font_num[r['font']])
             if r.get('b'):
                 parts.append('\\b')
             if r.get('i'):
@@ -443,6 +519,24 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
     uc = 1          # \\ucN: fallback characters after each \\uN
     skip = 0        # fallback characters still to drop
     tab_kind = 'left'
+    fonts = {}      # RTF font number -> (name, family)
+    ft_num, ft_family, ft_name = None, None, ''
+    deff = 0
+    ours = False    # \\*\\generator RetroWP: its \\f0 is the default face
+    generator = ''
+
+    def font_commit():
+        nonlocal ft_num, ft_family, ft_name
+        name = ft_name.strip()
+        if ft_num is not None and name:
+            fonts[ft_num] = (name, ft_family or font_family_guess(name))
+        ft_num, ft_family, ft_name = None, None, ''
+
+    def font_select(run, num):
+        if num is None or (ours and num == deff) or num not in fonts:
+            run['font'], run['family'] = None, None
+        else:
+            run['font'], run['family'] = fonts[num]
 
     for m in _RTF_TOKEN_RE.finditer(rtf_bytes):
         hexval, word, num, brace, text, sym = m.groups()
@@ -452,7 +546,7 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
             # the star and keep the text; the escaped braces and
             # backslash are text.
             if sym == b'*':
-                dest_stack[-1] = 'skip'
+                dest_stack[-1] = 'star'   # skipped -- unless the next word is \\generator
             elif sym in (b'{', b'}', b'\\') and dest_stack[-1] == 'body':
                 cur_run['text'] += sym.decode('ascii')
             elif sym == b'~' and dest_stack[-1] == 'body':
@@ -462,6 +556,10 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
         brace = brace.decode('ascii') if brace is not None else None
         dest = dest_stack[-1]
 
+        if brace == '}' and dest == 'fonttbl' and ft_name.strip():
+            font_commit()      # an entry in its own group may omit its ';'
+        if brace == '}' and dest == 'generator':
+            ours = generator.strip().rstrip(';').startswith('RetroWP')
         if brace == '{' or brace == '}':
             # format_rtf_export's character runs are SIBLING brace groups
             # at paragraph level, {run1}{run2}..., never nested inside
@@ -493,6 +591,16 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
             continue
 
         if text is not None:
+            if dest == 'fonttbl':
+                for ch in text.decode('cp1252'):
+                    if ch == ';':
+                        font_commit()
+                    else:
+                        ft_name += ch
+                continue
+            if dest == 'generator':
+                generator += text.decode('cp1252')
+                continue
             if dest == 'body':
                 t = text.decode('cp1252')
                 if skip > 0:
@@ -504,8 +612,22 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
             continue
         n = int(num) if num else None
 
+        if dest == 'star':
+            dest_stack[-1] = 'generator' if word == 'generator' else 'skip'
+            continue
+        if word == 'deff':
+            deff = n or 0
+            continue
         if word == 'fonttbl':
             dest_stack[-1] = 'fonttbl'
+            continue
+        if dest == 'fonttbl':
+            if word == 'f':
+                if ft_name.strip():
+                    font_commit()
+                ft_num, ft_family, ft_name = n, None, ''
+            elif word in ('fnil', 'froman', 'fswiss', 'fmodern', 'fscript', 'fdecor', 'ftech', 'fbidi'):
+                ft_family = {'fnil': None, 'ftech': 'decor', 'fbidi': 'decor'}.get(word, word[1:])
             continue
         # Headers, footers and the other non-body destinations are not
         # body text (rtf_margin_texts reads the header and footer).
@@ -607,6 +729,8 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
             cur_run['sub'] = True
         elif word == 'fs':
             cur_run['size_twips'] = n * 10
+        elif word == 'f':
+            font_select(cur_run, n)
         elif word == 'cf':
             if n is not None and 0 <= n < len(colors):
                 cur_run['color'] = tuple(colors[n]) if n else None
@@ -752,16 +876,21 @@ def rtf_page_setup(rtf_bytes):
 
 _HELV_WIDTHS = {32: 278, 33: 278, 34: 355, 35: 556, 36: 556, 37: 889, 38: 667, 39: 222, 40: 333, 41: 333, 42: 389, 43: 584, 44: 278, 45: 333, 46: 278, 47: 278, 48: 556, 49: 556, 50: 556, 51: 556, 52: 556, 53: 556, 54: 556, 55: 556, 56: 556, 57: 556, 58: 278, 59: 278, 60: 584, 61: 584, 62: 584, 63: 556, 64: 1015, 65: 667, 66: 667, 67: 722, 68: 722, 69: 667, 70: 611, 71: 778, 72: 722, 73: 278, 74: 500, 75: 667, 76: 556, 77: 833, 78: 722, 79: 778, 80: 667, 81: 778, 82: 722, 83: 667, 84: 611, 85: 722, 86: 667, 87: 944, 88: 667, 89: 667, 90: 611, 91: 278, 92: 278, 93: 278, 94: 469, 95: 556, 96: 222, 97: 556, 98: 556, 99: 500, 100: 556, 101: 556, 102: 278, 103: 556, 104: 556, 105: 222, 106: 222, 107: 500, 108: 222, 109: 833, 110: 556, 111: 556, 112: 556, 113: 556, 114: 333, 115: 500, 116: 278, 117: 556, 118: 500, 119: 722, 120: 500, 121: 500, 122: 500, 123: 334, 124: 260, 125: 334, 126: 584}
 _HELV_BOLD_WIDTHS = {32: 278, 33: 333, 34: 474, 35: 556, 36: 556, 37: 889, 38: 722, 39: 278, 40: 333, 41: 333, 42: 389, 43: 584, 44: 278, 45: 333, 46: 278, 47: 278, 48: 556, 49: 556, 50: 556, 51: 556, 52: 556, 53: 556, 54: 556, 55: 556, 56: 556, 57: 556, 58: 333, 59: 333, 60: 584, 61: 584, 62: 584, 63: 611, 64: 975, 65: 722, 66: 722, 67: 722, 68: 722, 69: 667, 70: 611, 71: 778, 72: 722, 73: 278, 74: 556, 75: 722, 76: 611, 77: 833, 78: 722, 79: 778, 80: 667, 81: 778, 82: 722, 83: 667, 84: 611, 85: 722, 86: 667, 87: 944, 88: 667, 89: 667, 90: 611, 91: 333, 92: 278, 93: 333, 94: 584, 95: 556, 96: 278, 97: 556, 98: 611, 99: 556, 100: 611, 101: 556, 102: 333, 103: 611, 104: 611, 105: 278, 106: 278, 107: 556, 108: 278, 109: 889, 110: 611, 111: 611, 112: 611, 113: 611, 114: 389, 115: 556, 116: 333, 117: 611, 118: 556, 119: 778, 120: 556, 121: 556, 122: 500, 123: 389, 124: 280, 125: 389, 126: 584}
+# The Times family's, from the same bundled AFMs (Times-Roman, -Bold,
+# -Italic, -BoldItalic): unlike Helvetica's, Times's italics are their
+# own designs with their own widths. Courier is 600 for every glyph in
+# every style -- it is a monospace -- so it needs no table.
+_TIMES_WIDTHS = {32: 250, 33: 333, 34: 408, 35: 500, 36: 500, 37: 833, 38: 778, 39: 333, 40: 333, 41: 333, 42: 500, 43: 564, 44: 250, 45: 333, 46: 250, 47: 278, 48: 500, 49: 500, 50: 500, 51: 500, 52: 500, 53: 500, 54: 500, 55: 500, 56: 500, 57: 500, 58: 278, 59: 278, 60: 564, 61: 564, 62: 564, 63: 444, 64: 921, 65: 722, 66: 667, 67: 667, 68: 722, 69: 611, 70: 556, 71: 722, 72: 722, 73: 333, 74: 389, 75: 722, 76: 611, 77: 889, 78: 722, 79: 722, 80: 556, 81: 722, 82: 667, 83: 556, 84: 611, 85: 722, 86: 722, 87: 944, 88: 722, 89: 722, 90: 611, 91: 333, 92: 278, 93: 333, 94: 469, 95: 500, 96: 333, 97: 444, 98: 500, 99: 444, 100: 500, 101: 444, 102: 333, 103: 500, 104: 500, 105: 278, 106: 278, 107: 500, 108: 278, 109: 778, 110: 500, 111: 500, 112: 500, 113: 500, 114: 333, 115: 389, 116: 278, 117: 500, 118: 500, 119: 722, 120: 500, 121: 500, 122: 444, 123: 480, 124: 200, 125: 480, 126: 541}
+_TIMES_BOLD_WIDTHS = {32: 250, 33: 333, 34: 555, 35: 500, 36: 500, 37: 1000, 38: 833, 39: 333, 40: 333, 41: 333, 42: 500, 43: 570, 44: 250, 45: 333, 46: 250, 47: 278, 48: 500, 49: 500, 50: 500, 51: 500, 52: 500, 53: 500, 54: 500, 55: 500, 56: 500, 57: 500, 58: 333, 59: 333, 60: 570, 61: 570, 62: 570, 63: 500, 64: 930, 65: 722, 66: 667, 67: 722, 68: 722, 69: 667, 70: 611, 71: 778, 72: 778, 73: 389, 74: 500, 75: 778, 76: 667, 77: 944, 78: 722, 79: 778, 80: 611, 81: 778, 82: 722, 83: 556, 84: 667, 85: 722, 86: 722, 87: 1000, 88: 722, 89: 722, 90: 667, 91: 333, 92: 278, 93: 333, 94: 581, 95: 500, 96: 333, 97: 500, 98: 556, 99: 444, 100: 556, 101: 444, 102: 333, 103: 500, 104: 556, 105: 278, 106: 333, 107: 556, 108: 278, 109: 833, 110: 556, 111: 500, 112: 556, 113: 556, 114: 444, 115: 389, 116: 333, 117: 556, 118: 500, 119: 722, 120: 500, 121: 500, 122: 444, 123: 394, 124: 220, 125: 394, 126: 520}
+_TIMES_ITALIC_WIDTHS = {32: 250, 33: 333, 34: 420, 35: 500, 36: 500, 37: 833, 38: 778, 39: 333, 40: 333, 41: 333, 42: 500, 43: 675, 44: 250, 45: 333, 46: 250, 47: 278, 48: 500, 49: 500, 50: 500, 51: 500, 52: 500, 53: 500, 54: 500, 55: 500, 56: 500, 57: 500, 58: 333, 59: 333, 60: 675, 61: 675, 62: 675, 63: 500, 64: 920, 65: 611, 66: 611, 67: 667, 68: 722, 69: 611, 70: 611, 71: 722, 72: 722, 73: 333, 74: 444, 75: 667, 76: 556, 77: 833, 78: 667, 79: 722, 80: 611, 81: 722, 82: 611, 83: 500, 84: 556, 85: 722, 86: 611, 87: 833, 88: 611, 89: 556, 90: 556, 91: 389, 92: 278, 93: 389, 94: 422, 95: 500, 96: 333, 97: 500, 98: 500, 99: 444, 100: 500, 101: 444, 102: 278, 103: 500, 104: 500, 105: 278, 106: 278, 107: 444, 108: 278, 109: 722, 110: 500, 111: 500, 112: 500, 113: 500, 114: 389, 115: 389, 116: 278, 117: 500, 118: 444, 119: 667, 120: 444, 121: 444, 122: 389, 123: 400, 124: 275, 125: 400, 126: 541}
+_TIMES_BOLDITALIC_WIDTHS = {32: 250, 33: 389, 34: 555, 35: 500, 36: 500, 37: 833, 38: 778, 39: 333, 40: 333, 41: 333, 42: 500, 43: 570, 44: 250, 45: 333, 46: 250, 47: 278, 48: 500, 49: 500, 50: 500, 51: 500, 52: 500, 53: 500, 54: 500, 55: 500, 56: 500, 57: 500, 58: 333, 59: 333, 60: 570, 61: 570, 62: 570, 63: 500, 64: 832, 65: 667, 66: 667, 67: 667, 68: 722, 69: 667, 70: 667, 71: 722, 72: 778, 73: 389, 74: 500, 75: 667, 76: 611, 77: 889, 78: 722, 79: 722, 80: 611, 81: 722, 82: 667, 83: 556, 84: 611, 85: 722, 86: 667, 87: 889, 88: 667, 89: 611, 90: 611, 91: 333, 92: 278, 93: 333, 94: 570, 95: 500, 96: 333, 97: 500, 98: 500, 99: 444, 100: 500, 101: 444, 102: 333, 103: 500, 104: 556, 105: 278, 106: 278, 107: 500, 108: 278, 109: 778, 110: 556, 111: 500, 112: 500, 113: 500, 114: 389, 115: 389, 116: 278, 117: 556, 118: 444, 119: 667, 120: 500, 121: 444, 122: 389, 123: 348, 124: 220, 125: 348, 126: 570}
+_COURIER_WIDTHS = {c: 600 for c in range(32, 127)}
 _PDF_FALLBACK_WIDTH = 556  # any char outside Tier 0's ASCII 32-126 AFM table -- an average-width approximation, never hit for a Tier-1 slot (real widths cover the full 32-255 WinAnsi range there)
 
 _PDF_PAGE_WIDTH = 612.0   # US Letter, points
 _PDF_PAGE_HEIGHT = 792.0
 _PDF_MARGIN = 72.0        # 1 inch
 
-_PDF_FONT_REGULAR = '/F1'
-_PDF_FONT_BOLD = '/F2'
-_PDF_FONT_OBLIQUE = '/F3'
-_PDF_FONT_BOLDOBLIQUE = '/F4'
 
 # ---------------------------------------------------------------------
 # Tier 1: real embedded TrueType, gated on fonttools + Liberation Sans
@@ -787,28 +916,35 @@ except ImportError:
 # Real install paths across the distros this project's real hosts (dev
 # machine, Raspberry Pi gateway) realistically run: Arch, Debian/
 # Ubuntu/Raspbian, Fedora. Checked in order; first hit wins.
-_LIBERATION_CANDIDATES = {
-    'Regular': ['/usr/share/fonts/liberation/LiberationSans-Regular.ttf',
-                '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-                '/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf'],
-    'Bold': ['/usr/share/fonts/liberation/LiberationSans-Bold.ttf',
-             '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
-             '/usr/share/fonts/liberation-sans/LiberationSans-Bold.ttf'],
-    'Italic': ['/usr/share/fonts/liberation/LiberationSans-Italic.ttf',
-               '/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf',
-               '/usr/share/fonts/liberation-sans/LiberationSans-Italic.ttf'],
-    'BoldItalic': ['/usr/share/fonts/liberation/LiberationSans-BoldItalic.ttf',
-                   '/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf',
-                   '/usr/share/fonts/liberation-sans/LiberationSans-BoldItalic.ttf'],
-}
+# Three families, each of the four style slots: Sans (Helvetica, the
+# default, and every face a run names that is not one of the other
+# two), Serif (Times) and Mono (Courier) -- which is as many as a PDF
+# has built in, and the RTF \\froman/\\fswiss/\\fmodern a document's font
+# table says, or its face's name suggests (font_family_guess). Liberation
+# Sans, Serif and Mono are metric twins of the three.
+_PDF_FAMILIES = ('Sans', 'Serif', 'Mono')
+_PDF_STYLE_NAMES = ('Regular', 'Bold', 'Italic', 'BoldItalic')
 
-# Style slot indices shared by _pdf_run_slot, _pdf_tier1_slot_info, and
-# _pdf_assemble -- 0=regular, 1=bold, 2=italic, 3=bolditalic.
-_PDF_SLOT_STYLE_NAME = {0: 'Regular', 1: 'Bold', 2: 'Italic', 3: 'BoldItalic'}
-_PDF_SLOT_TIER0_OBJ = {0: (10, 'Helvetica'), 1: (11, 'Helvetica-Bold'),
-                        2: (12, 'Helvetica-Oblique'), 3: (13, 'Helvetica-BoldOblique')}
-_PDF_SLOT_TIER0_WIDTHS = {0: _HELV_WIDTHS, 1: _HELV_BOLD_WIDTHS, 2: _HELV_WIDTHS, 3: _HELV_BOLD_WIDTHS}
-_PDF_SLOT_RESOURCE = {0: _PDF_FONT_REGULAR, 1: _PDF_FONT_BOLD, 2: _PDF_FONT_OBLIQUE, 3: _PDF_FONT_BOLDOBLIQUE}
+
+def _liberation_candidates(family, style):
+    stem = 'Liberation%s-%s.ttf' % (family, style)
+    return ['/usr/share/fonts/liberation/' + stem,
+            '/usr/share/fonts/truetype/liberation/' + stem,
+            '/usr/share/fonts/liberation-%s/%s' % (family.lower(), stem),
+            '/usr/share/fonts/TTF/' + stem]
+
+
+# Style slots shared by _pdf_run_slot, _pdf_tier1_slot_info, and
+# _pdf_assemble: family * 4 + (0=regular, 1=bold, 2=italic, 3=bolditalic).
+_PDF_SLOT_COUNT = 12
+_PDF_SLOT_TIER0_NAME = {0: 'Helvetica', 1: 'Helvetica-Bold', 2: 'Helvetica-Oblique', 3: 'Helvetica-BoldOblique',
+                        4: 'Times-Roman', 5: 'Times-Bold', 6: 'Times-Italic', 7: 'Times-BoldItalic',
+                        8: 'Courier', 9: 'Courier-Bold', 10: 'Courier-Oblique', 11: 'Courier-BoldOblique'}
+_PDF_SLOT_TIER0_WIDTHS = {0: _HELV_WIDTHS, 1: _HELV_BOLD_WIDTHS, 2: _HELV_WIDTHS, 3: _HELV_BOLD_WIDTHS,
+                          4: _TIMES_WIDTHS, 5: _TIMES_BOLD_WIDTHS, 6: _TIMES_ITALIC_WIDTHS,
+                          7: _TIMES_BOLDITALIC_WIDTHS,
+                          8: _COURIER_WIDTHS, 9: _COURIER_WIDTHS, 10: _COURIER_WIDTHS, 11: _COURIER_WIDTHS}
+_PDF_SLOT_RESOURCE = {slot: '/F%d' % (slot + 1) for slot in range(_PDF_SLOT_COUNT)}
 
 # Identity ToUnicode CMap for codes 0x20-0xFF: correct (not an
 # approximation) precisely because this module's own character codes
@@ -830,8 +966,8 @@ _PDF_TOUNICODE_CMAP = (
 ).encode('ascii')
 
 
-def _liberation_font_path(style_name):
-    for path in _LIBERATION_CANDIDATES[style_name]:
+def _liberation_font_path(slot):
+    for path in _liberation_candidates(_PDF_FAMILIES[slot // 4], _PDF_STYLE_NAMES[slot % 4]):
         if os.path.isfile(path):
             return path
     return None
@@ -852,7 +988,7 @@ def _pdf_tier1_slot_info(slot):
         return _pdf_tier1_slot_info._cache[slot]
 
     info = None
-    path = _liberation_font_path(_PDF_SLOT_STYLE_NAME[slot])
+    path = _liberation_font_path(slot)
     if path is not None:
         try:
             font = _TTFont(path)
@@ -873,7 +1009,11 @@ def _pdf_tier1_slot_info(slot):
                 'bbox': [round(v * 1000 / upm) for v in
                          (font['head'].xMin, font['head'].yMin, font['head'].xMax, font['head'].yMax)],
                 'italic_angle': font['post'].italicAngle,
-                'flags': 96 if slot in (2, 3) else 32,  # bit 6 (nonsymbolic) always; bit 7 (italic) for slots 2/3
+                # bit 6 (nonsymbolic) always; bit 7 (italic) for the italic
+                # slots; bit 1 (fixed pitch) for Mono, bit 2 (serif) for Serif
+                'flags': (96 if slot % 4 in (2, 3) else 32) | (1 if slot // 4 == 2 else 0) |
+                         (2 if slot // 4 == 1 else 0),
+                'font_name': 'Liberation%s' % _PDF_FAMILIES[slot // 4],
             }
         except Exception:
             info = None
@@ -911,16 +1051,14 @@ _PDF_SUPERSUB_SCALE = 0.65  # typographic convention: super/subscript glyphs ren
 
 
 def _pdf_run_slot(run):
-    """0=regular, 1=bold, 2=italic, 3=bolditalic -- the same 4 logical
-    style slots both font tiers key off of."""
+    """family * 4 + (0=regular, 1=bold, 2=italic, 3=bolditalic) -- the
+    logical slots both font tiers key off of. The family is the run's
+    own (RTF's \\froman is Serif, \\fmodern Mono) or its face's guessed
+    one; everything else, the default face included, is Sans."""
     b, i = run.get('b'), run.get('i')
-    if b and i:
-        return 3
-    if b:
-        return 1
-    if i:
-        return 2
-    return 0
+    style = 3 if (b and i) else 1 if b else 2 if i else 0
+    family = run.get('family') or (font_family_guess(run['font']) if run.get('font') else None)
+    return {'roman': 4, 'modern': 8}.get(family, 0) + style
 
 
 def _pdf_font_for_run(run):
@@ -1173,7 +1311,7 @@ def paragraphs_to_pdf_bytes(paragraphs, page=None, header='', footer=''):
     cur_tw = None
     cur_font = cur_size = None
     cur_color = (0, 0, 0)
-    used_chars = {0: set(), 1: set(), 2: set(), 3: set()}  # per style slot, for Tier-1 subsetting
+    used_chars = {slot: set() for slot in range(_PDF_SLOT_COUNT)}  # per style slot, for Tier-1 subsetting
 
     def new_page():
         nonlocal cur_ops, cur_y, cur_tw, cur_font, cur_size, cur_color
@@ -1322,8 +1460,12 @@ def _pdf_assemble(pages, used_chars, media=(_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT)):
     font_res_parts = []
     tounicode_num = None
 
-    for slot in (0, 1, 2, 3):
+    for slot in range(_PDF_SLOT_COUNT):
         resource_name = _PDF_SLOT_RESOURCE[slot][1:]  # strip the leading '/'
+        # The Sans slots are always declared (objects 10-13, as they
+        # always were); a Serif or Mono slot only when some text uses it.
+        if slot >= 4 and not used_chars.get(slot):
+            continue
         # Embedding an unused slot would be pure waste (a real font
         # subset costs real KB even for zero glyphs actually drawn) --
         # a slot with nothing in used_chars falls back to Tier 0's
@@ -1331,7 +1473,11 @@ def _pdf_assemble(pages, used_chars, media=(_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT)):
         tier1 = _pdf_tier1_slot_info(slot) if used_chars.get(slot) else None
 
         if tier1 is None:
-            num, base_name = _PDF_SLOT_TIER0_OBJ[slot]
+            base_name = _PDF_SLOT_TIER0_NAME[slot]
+            if slot < 4:
+                num = 10 + slot
+            else:
+                num, next_obj = next_obj, next_obj + 1
             objects.append((num, ('<< /Type /Font /Subtype /Type1 /BaseFont /%s '
                                    '/Encoding /WinAnsiEncoding >>' % base_name).encode('ascii')))
             font_res_parts.append('/%s %d 0 R' % (resource_name, num))
@@ -1349,20 +1495,20 @@ def _pdf_assemble(pages, used_chars, media=(_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT)):
 
         fontdata = _pdf_subset_embed(slot, used_chars.get(slot, set()))
         widths_arr = ' '.join(str(tier1['widths'].get(cp, 0)) for cp in range(32, 256))
-        descr = ('<< /Type /FontDescriptor /FontName /LiberationSans /Flags %d '
+        descr = ('<< /Type /FontDescriptor /FontName /%s /Flags %d '
                  '/FontBBox [%d %d %d %d] /ItalicAngle %g /Ascent %d /Descent %d '
                  '/CapHeight %d /StemV 80 /FontFile2 %d 0 R >>' %
-                 (tier1['flags'], tier1['bbox'][0], tier1['bbox'][1], tier1['bbox'][2], tier1['bbox'][3],
+                 (tier1['font_name'], tier1['flags'], tier1['bbox'][0], tier1['bbox'][1], tier1['bbox'][2], tier1['bbox'][3],
                   tier1['italic_angle'], tier1['ascent'], tier1['descent'], tier1['cap_height'], fontfile_num))
         packed = zlib.compress(fontdata, 9)
         objects.append((fontfile_num, b'<< /Length %d /Length1 %d /Filter /FlateDecode >>\nstream\n' %
                          (len(packed), len(fontdata)) + packed + b'\nendstream'))
         objects.append((descr_num, descr.encode('ascii')))
-        objects.append((font_num, ('<< /Type /Font /Subtype /TrueType /BaseFont /LiberationSans '
+        objects.append((font_num, ('<< /Type /Font /Subtype /TrueType /BaseFont /%s '
                                     '/FirstChar 32 /LastChar 255 /Widths [%s] '
                                     '/FontDescriptor %d 0 R /Encoding /WinAnsiEncoding '
                                     '/ToUnicode %d 0 R >>' %
-                                    (widths_arr, descr_num, tounicode_num)).encode('ascii')))
+                                    (tier1['font_name'], widths_arr, descr_num, tounicode_num)).encode('ascii')))
         font_res_parts.append('/%s %d 0 R' % (resource_name, font_num))
 
     font_res = ' '.join(font_res_parts)
