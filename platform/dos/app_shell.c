@@ -461,6 +461,7 @@ static void dos_rulerbar(wp_rulerbar *rb)
     rb->button_w = 3;
     rb->button_h = 1;
     rb->icon_rows = 0;
+    rb->colors = 0;
     rb->scale_h = 1;
     rb->origin_x = 0;
     rb->twips_to_x = dos_bar_twips_to_col;

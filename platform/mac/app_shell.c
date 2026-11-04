@@ -965,6 +965,7 @@ static wp_bool mac_rulerbar(Rect r, wp_rulerbar *rb)
     rb->y = r.top + 2;
     rb->w = (i32)(r.right - r.left) - 4;
     rb->icon_rows = 16;
+    rb->colors = 2;   /* a plain GrafPort: black and white (draw_mac.c) */
     rb->button_w = 20;
     rb->button_h = 18;
     rb->scale_h = statusline_height_px() + 4;

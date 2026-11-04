@@ -6,6 +6,7 @@
 #include "format_txt.h"
 #include "offload.h"
 #include "gateway_harness.h"
+#include "draw_host.h"
 
 static void build_doc_with_text(wp_document *doc, const char *text)
 {
@@ -1139,6 +1140,7 @@ void test_rulerbar_hit_test_finds_buttons_gaps_and_the_ruler(void)
     rb.origin_x = 16;
     rb.twips_to_x = half;
     rb.x_to_twips = twice;
+    rb.colors = 2;
     ASSERT_EQ_U32((u32)wp_rulerbar_height(&rb), 18 + 2 + 12);
 
     ASSERT_TRUE(wp_rulerbar_hit_test(&rb, 10, 25, &hit));               /* first button: New */
@@ -1166,7 +1168,7 @@ void test_rulerbar_signature_follows_what_the_bar_shows(void)
     ctx_setup_imported(&doc, &journal, &ctx, "x\n");
     rb.x = 0; rb.y = 0; rb.w = 600; rb.button_w = 20; rb.button_h = 18;
     rb.icon_rows = 16; rb.scale_h = 12; rb.origin_x = 0;
-    rb.twips_to_x = half; rb.x_to_twips = twice;
+    rb.twips_to_x = half; rb.x_to_twips = twice; rb.colors = 2;
 
     a = wp_rulerbar_signature(&rb, &ctx);
     ASSERT_EQ_U32(wp_rulerbar_signature(&rb, &ctx), a);                 /* stable */
@@ -1364,4 +1366,38 @@ void test_rulerbar_has_font_and_size(void)
 {
     ASSERT_TRUE(wp_rulerbar_has_action(WP_ACT_FORMAT_FONT));
     ASSERT_TRUE(wp_rulerbar_has_action(WP_ACT_FORMAT_SIZE));
+}
+
+/* From 16 colours the bar is a grey panel of raised buttons, with a
+   pressed one sunk; below, the flat black-on-white it always was -- no
+   grey face at all, since four colours have none to give. */
+void test_rulerbar_panel_look_follows_the_colour_count(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_rulerbar rb;
+    u32 sig2;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "x\n");
+    rb.x = 0; rb.y = 0; rb.w = 640; rb.button_w = 22; rb.button_h = 20;
+    rb.icon_rows = 16; rb.scale_h = 12; rb.origin_x = 0;
+    rb.twips_to_x = half; rb.x_to_twips = twice;
+
+    rb.colors = 4;
+    draw_host_reset_fills();
+    wp_rulerbar_paint(NULL, NULL, 0, &rb, &ctx);
+    ASSERT_EQ_U32(draw_host_grey_fills(0xC0), 0);
+    ASSERT_EQ_U32(draw_host_grey_fills(0xE0), 0);
+    sig2 = wp_rulerbar_signature(&rb, &ctx);
+
+    rb.colors = 256;
+    draw_host_reset_fills();
+    wp_rulerbar_paint(NULL, NULL, 0, &rb, &ctx);
+    ASSERT_EQ_U32(draw_host_grey_fills(0xC0), 1);       /* the panel, once */
+    ASSERT_TRUE(draw_host_grey_fills(0x80) > 20);       /* every button's shadow */
+    ASSERT_EQ_U32(draw_host_grey_fills(0xE0), 2);       /* the two pressed: Align Left, Single */
+    ASSERT_TRUE(wp_rulerbar_signature(&rb, &ctx) != sig2);   /* a repaint when it changes */
+
+    ctx_teardown(&doc, &journal, &ctx);
 }

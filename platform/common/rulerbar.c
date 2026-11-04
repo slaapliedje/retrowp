@@ -123,6 +123,42 @@ static i32 gap_w(const wp_rulerbar *rb) { return text_mode(rb) ? 1 : rb->button_
 /* The gap between the button row and the ruler. */
 static i32 row_gap(const wp_rulerbar *rb) { return text_mode(rb) ? 0 : 2; }
 
+/* The panel look (rulerbar.h): enough colours for real greys. */
+static wp_bool panel(const wp_rulerbar *rb) { return (wp_bool)(!text_mode(rb) && rb->colors >= 16); }
+
+#define RB_FACE   0xC0   /* panel and button face */
+#define RB_LIGHT  0xFF   /* the lit edge */
+#define RB_SHADE  0x80   /* the shadowed edge */
+#define RB_DARK   0x40   /* the outer shadow */
+#define RB_DOWN   0xE0   /* a pressed button's face */
+
+static void grey(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 v)
+{
+    (void)plat_fill_rect(gc, x, y, w, h, v, v, v);
+}
+
+/* A raised button, or a sunken one when pressed: light top and left,
+   shadow bottom and right, swapped when it is in. */
+static void bevel(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, wp_bool in)
+{
+    if (in) {
+        grey(gc, x + 1, y + 1, w - 2, h - 2, RB_DOWN);
+        grey(gc, x, y, w, 1, RB_DARK);
+        grey(gc, x, y, 1, h, RB_DARK);
+        grey(gc, x + 1, y + 1, w - 2, 1, RB_SHADE);
+        grey(gc, x + 1, y + 1, 1, h - 2, RB_SHADE);
+        grey(gc, x, y + h - 1, w, 1, RB_LIGHT);
+        grey(gc, x + w - 1, y, 1, h, RB_LIGHT);
+    } else {
+        grey(gc, x, y, w, 1, RB_LIGHT);
+        grey(gc, x, y, 1, h, RB_LIGHT);
+        grey(gc, x + 1, y + h - 2, w - 2, 1, RB_SHADE);
+        grey(gc, x + w - 2, y + 1, 1, h - 2, RB_SHADE);
+        grey(gc, x, y + h - 1, w, 1, RB_DARK);
+        grey(gc, x + w - 1, y, 1, h, RB_DARK);
+    }
+}
+
 i32 wp_rulerbar_height(const wp_rulerbar *rb)
 {
     return rb->button_h + row_gap(rb) + rb->scale_h;
@@ -227,6 +263,14 @@ static void paint_buttons(plat_gc *gc, plat_font *font, i32 ascent,
             i32 ix = x + (rb->button_w - 16) / 2;
             i32 iy = rb->y + (rb->button_h - rb->icon_rows) / 2;
 
+            if (panel(rb)) {
+                /* Raised, or pressed in with its icon nudged a pixel
+                   down and right, the way a pushed button moves. */
+                bevel(gc, x, rb->y, rb->button_w - 1, rb->button_h, on);
+                draw_icon(gc, ix + (on ? 1 : 0), iy + (on ? 1 : 0), b->icon, rb->icon_rows, 0);
+                x += rb->button_w;
+                continue;
+            }
             /* An "on" button is drawn inverted; every button gets a frame. */
             if (on) {
                 (void)plat_fill_rect(gc, x, rb->y, rb->button_w - 1, rb->button_h, 0, 0, 0);
@@ -270,6 +314,13 @@ static void paint_ruler_px(plat_gc *gc, plat_font *font, i32 ascent,
     i32 eighth_px = rb->twips_to_x(180);
     i32 t;
     u8 i;
+
+    /* On the panel, the text column is white against the grey margins,
+       sunk a pixel below the panel. */
+    if (panel(rb)) {
+        grey(gc, x0, top, x1 - x0 + 1, h, 0xFF);
+        grey(gc, x0, top, x1 - x0 + 1, 1, RB_SHADE);
+    }
 
     /* The text column's extent: a baseline, and a bar at each margin. */
     (void)plat_fill_rect(gc, x0, base, x1 - x0 + 1, 1, 0, 0, 0);
@@ -378,7 +429,12 @@ void wp_rulerbar_paint(plat_gc *gc, plat_font *font, i32 ascent,
     const wp_para_style *ps = caret_style(ctx, &wrap);
 
     if (wrap <= 0) wrap = 9360;
-    if (!text_mode(rb)) {
+    if (panel(rb)) {
+        /* The panel, with a dark line under it to part it from the page. */
+        i32 hh = wp_rulerbar_height(rb);
+        grey(gc, rb->x, rb->y, rb->w, hh - 1, RB_FACE);
+        grey(gc, rb->x, rb->y + hh - 1, rb->w, 1, RB_SHADE);
+    } else if (!text_mode(rb)) {
         (void)plat_fill_rect(gc, rb->x, rb->y, rb->w, wp_rulerbar_height(rb), 0xFF, 0xFF, 0xFF);
     }
     paint_buttons(gc, font, ascent, rb, ctx, ps);
@@ -405,7 +461,7 @@ u32 wp_rulerbar_signature(const wp_rulerbar *rb, wp_app_ctx *ctx)
     u8 i;
 
     h = mix(h, (u32)rb->x); h = mix(h, (u32)rb->y); h = mix(h, (u32)rb->w);
-    h = mix(h, (u32)rb->origin_x); h = mix(h, (u32)wrap);
+    h = mix(h, (u32)rb->origin_x); h = mix(h, (u32)wrap); h = mix(h, (u32)rb->colors);
     h = mix(h, (u32)ctx->style_flags); h = mix(h, (u32)ctx->current_font); h = mix(h, (u32)ctx->doc_loaded);
     if (ps != NULL) {
         h = mix(h, (u32)ps->align); h = mix(h, (u32)ps->line_spacing);

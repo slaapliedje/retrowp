@@ -1071,8 +1071,10 @@ static wp_bool amiga_rulerbar(Object *obj, wp_rulerbar *rb)
     rb->y = _mtop(obj) + 2;
     rb->w = (i32)(_mright(obj) - _mleft(obj) + 1) - 4;
     rb->icon_rows = tall ? 8 : 16;
-    rb->button_w = 20;
-    rb->button_h = rb->icon_rows + 2;
+    /* A 16-colour screen or deeper gets the panel look (rulerbar.h). */
+    rb->colors = (i32)amiga_screen_color_count();
+    rb->button_w = (rb->colors >= 16) ? 22 : 20;
+    rb->button_h = rb->icon_rows + ((rb->colors >= 16) ? 4 : 2);
     rb->scale_h = amiga_font_line_height_px(WP_AMIGA_STATUSLINE_SIZE_TWIPS) + 4;
     rb->origin_x = _mleft(obj) + WP_EDITOR_LEFT_MARGIN_PX;
     rb->twips_to_x = amiga_twips_to_px_x;

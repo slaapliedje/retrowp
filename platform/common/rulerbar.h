@@ -41,6 +41,12 @@ typedef struct {
     i32 origin_x;           /* screen x of the text column's left edge */
     wp_rulerbar_conv_fn twips_to_x;   /* the shell's own x-axis conversions */
     wp_rulerbar_conv_fn x_to_twips;
+    i32 colors;             /* the screen's colours: from 16 up the bar is a
+                               grey panel of raised buttons (a pressed one
+                               sunken) with the text column white on the
+                               ruler; below, black line art on white, which
+                               is all two or four colours can show (ST
+                               Medium's four are white, red, green, black) */
 } wp_rulerbar;
 
 /* The bar's whole height: the button row, a gap, and the ruler. */

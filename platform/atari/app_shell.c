@@ -3541,8 +3541,11 @@ static wp_bool atari_rulerbar(GRECT work, wp_rulerbar *rb)
     rb->y = work.g_y;
     rb->w = work.g_w;
     rb->icon_rows = tall ? 8 : 16;
-    rb->button_w = 20;
-    rb->button_h = rb->icon_rows + 2;
+    /* 16 colours or more draw the bar as a panel of raised buttons,
+       which want a little more room round the icon than a flat frame. */
+    rb->colors = atari_screen_max_colors();
+    rb->button_w = (rb->colors >= 16) ? 22 : 20;
+    rb->button_h = rb->icon_rows + ((rb->colors >= 16) ? 4 : 2);
     rb->scale_h = statusline_height_px() + (tall ? 2 : 4);
     rb->origin_x = work.g_x;
     rb->twips_to_x = atari_twips_to_px_x;
