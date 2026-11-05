@@ -1299,7 +1299,10 @@ def _pdf_subset_embed(slot, used_chars):
     unexpectedly empty used_chars -- still embeds a usable font) and
     returns the raw TrueType bytes to embed as /FontFile2."""
     info = _pdf_tier1_slot_info(slot)
-    font = _TTFont(info['path'])
+    # recalcTimestamp off: saving the subset otherwise stamps the font's
+    # head table with the time, and the same document made a different PDF
+    # from one second to the next.
+    font = _TTFont(info['path'], recalcTimestamp=False)
     options = _fonttools_subset.Options()
     options.set(layout_features=[])
     options.drop_tables += ['GSUB', 'GPOS', 'GDEF']
