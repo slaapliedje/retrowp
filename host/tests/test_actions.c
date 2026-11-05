@@ -7,6 +7,7 @@
 #include "offload.h"
 #include "gateway_harness.h"
 #include "draw_host.h"
+#include "window_host.h"
 
 static void build_doc_with_text(wp_document *doc, const char *text)
 {
@@ -1397,7 +1398,7 @@ void test_rulerbar_panel_look_follows_the_colour_count(void)
     ASSERT_EQ_U32(draw_host_grey_fills(0xC0), 1);       /* the panel, once */
     ASSERT_TRUE(draw_host_grey_fills(0x80) > 20);       /* every button's shadow */
     ASSERT_EQ_U32(draw_host_grey_fills(0xE0), 2);       /* the two pressed: Align Left, Single */
-    ASSERT_EQ_U32(draw_host_mono_calls(), 24);          /* one blit per icon, not a fill per run */
+    ASSERT_EQ_U32(draw_host_mono_calls(), 25);          /* one blit per icon, not a fill per run */
     ASSERT_TRUE(wp_rulerbar_signature(&rb, &ctx) != sig2);   /* a repaint when it changes */
 
     ctx_teardown(&doc, &journal, &ctx);
@@ -1532,3 +1533,64 @@ void test_actions_header_follows_the_caret_section(void)
     ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, doc.sections[2].header), "Mine", 4);
     ctx_teardown(&doc, &journal, &ctx);
 }
+
+/* Page Setup: a paper size for the caret's section, or its margins
+   through the status-line prompt, in inches or centimetres. */
+static void type_text(wp_app_ctx *ctx, const char *t)
+{
+    while (*t) (void)wp_keymap_feed_key(ctx, key_char((u8)*t++), 0);
+}
+
+void test_actions_page_setup_paper_and_margins(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_section *sec;
+    u32 i;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Body\n");
+    sec = &doc.sections[0];
+
+    window_host_next_choice(3);                         /* A4, landscape */
+    ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32((u32)sec->page_width, 16838);
+    ASSERT_EQ_U32((u32)sec->page_height, 11906);
+    ASSERT_TRUE(wp_document_is_modified(&doc));
+
+    window_host_next_choice(6);                         /* Margins... */
+    ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(ctx.prompt.active);
+    ASSERT_EQ_U32(ctx.prompt.len, 7);                   /* "1 1 1 1" */
+    ASSERT_MEM_EQ(ctx.prompt.text, "1 1 1 1", 7);
+    for (i = 0; i < 7; i++) (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_BACKSPACE), 0);
+    type_text(&ctx, "0.75");
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
+    ASSERT_EQ_U32((u32)sec->margin_left, 1080);         /* one length: all four */
+    ASSERT_EQ_U32((u32)sec->margin_bottom, 1080);
+
+    window_host_next_choice(6);
+    ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
+    for (i = 0; i < 20; i++) (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_BACKSPACE), 0);
+    type_text(&ctx, "2.5cm 1in 1 1.25");
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
+    ASSERT_EQ_U32((u32)sec->margin_left, 1417);         /* 2.5 x 567 */
+    ASSERT_EQ_U32((u32)sec->margin_right, 1440);
+    ASSERT_EQ_U32((u32)sec->margin_top, 1440);
+    ASSERT_EQ_U32((u32)sec->margin_bottom, 1800);
+
+    /* Nonsense, and margins that leave no page, change nothing. */
+    window_host_next_choice(6);
+    ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
+    for (i = 0; i < 30; i++) (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_BACKSPACE), 0);
+    type_text(&ctx, "1 2 x");
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
+    window_host_next_choice(6);
+    ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
+    for (i = 0; i < 30; i++) (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_BACKSPACE), 0);
+    type_text(&ctx, "6 6 1 1");
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
+    ASSERT_EQ_U32((u32)sec->margin_left, 1417);
+    ctx_teardown(&doc, &journal, &ctx);
+}
+

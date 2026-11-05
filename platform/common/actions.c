@@ -635,6 +635,154 @@ static wp_status open_margin_prompt(wp_app_ctx *ctx, wp_bool header)
     return WP_OK;
 }
 
+/* ---- Page Setup ---------------------------------------------------- */
+
+static wp_section *caret_section(wp_app_ctx *ctx)
+{
+    u32 si = wp_keymap_cursor(ctx)->section;
+    return (ctx->doc_loaded && si < ctx->doc->section_count) ? wp_document_section_get(ctx->doc, si) : NULL;
+}
+
+/* A page change: every paragraph of the section wraps afresh. */
+static void section_changed(wp_app_ctx *ctx, wp_section *sec)
+{
+    u32 pi;
+    for (pi = 0; pi < sec->para_count; pi++) sec->paras[pi].layout_dirty = WP_TRUE;
+    wp_document_mark_modified(ctx->doc);
+}
+
+/* twips as inches, to two places with the zeros dropped: "1", "0.75". */
+static u32 fmt_inches(i32 twips, char *out)
+{
+    i32 h = (twips * 100 + 720) / 1440;    /* hundredths, rounded */
+    char d[12];
+    u32 n = 0, k = 0;
+    i32 whole = h / 100, frac = h % 100;
+
+    do { d[k++] = (char)('0' + whole % 10); whole /= 10; } while (whole > 0);
+    while (k > 0) out[n++] = d[--k];
+    if (frac != 0) {
+        out[n++] = '.';
+        out[n++] = (char)('0' + frac / 10);
+        if (frac % 10 != 0) out[n++] = (char)('0' + frac % 10);
+    }
+    return n;
+}
+
+/* One length off the front of text: a number, optionally with a decimal
+   part, optionally "cm", "mm" or "in" (inches by default). Twips, or -1
+   for none. */
+static i32 parse_length(const u8 **pp, const u8 *end)
+{
+    const u8 *p = *pp;
+    i32 whole = 0, frac = 0, scale = 1;
+    wp_bool any = WP_FALSE;
+
+    while (p < end && (*p == ' ' || *p == ',')) p++;
+    while (p < end && *p >= '0' && *p <= '9') { whole = whole * 10 + (*p++ - '0'); any = WP_TRUE; }
+    if (p < end && (*p == '.')) {
+        p++;
+        while (p < end && *p >= '0' && *p <= '9') {
+            if (scale < 1000) { frac = frac * 10 + (*p - '0'); scale *= 10; }
+            p++;
+            any = WP_TRUE;
+        }
+    }
+    if (!any || whole > 100) { *pp = p; return -1; }
+    while (p < end && *p == ' ') p++;
+    *pp = p;
+    if (end - p >= 2 && (p[0] | 32) == 'c' && (p[1] | 32) == 'm') {      /* 567 twips a cm */
+        *pp = p + 2;
+        return (whole * 567) + (frac * 567) / scale;
+    }
+    if (end - p >= 2 && (p[0] | 32) == 'm' && (p[1] | 32) == 'm') {
+        *pp = p + 2;
+        return (whole * 567 + (frac * 567) / scale) / 10;
+    }
+    if (end - p >= 2 && (p[0] | 32) == 'i' && (p[1] | 32) == 'n') *pp = p + 2;
+    else if (p < end && *p == '"') *pp = p + 1;
+    return whole * 1440 + (frac * 1440) / scale;
+}
+
+static void margins_done(wp_app_ctx *ctx, const u8 *text, u32 len)
+{
+    wp_section *sec = caret_section(ctx);
+    const u8 *p = text, *end = text + len;
+    i32 m[4];
+    u32 n = 0;
+
+    if (sec == NULL) return;
+    while (n < 4) {
+        i32 v = parse_length(&p, end);
+        if (v < 0) break;
+        m[n++] = v;
+    }
+    while (p < end && *p == ' ') p++;
+    if ((n != 1 && n != 4) || p != end) {
+        wp_action_tell(ctx, "Margins: one length for all four, or left right top bottom");
+        return;
+    }
+    if (n == 1) m[1] = m[2] = m[3] = m[0];
+    /* At least an inch of page between them, both ways. */
+    if (m[0] + m[1] > sec->page_width - 1440 || m[2] + m[3] > sec->page_height - 1440) {
+        wp_action_tell(ctx, "Those margins leave no room on the page");
+        return;
+    }
+    sec->margin_left = m[0];
+    sec->margin_right = m[1];
+    sec->margin_top = m[2];
+    sec->margin_bottom = m[3];
+    section_changed(ctx, sec);
+}
+
+static wp_status act_page_setup(wp_app_ctx *ctx)
+{
+    static const char *const labels[] = {
+        "Letter", "Letter, landscape", "A4", "A4, landscape",
+        "Legal", "A5", "Margins..."
+    };
+    static const i32 sizes[][2] = {
+        { 12240, 15840 }, { 15840, 12240 }, { 11906, 16838 }, { 16838, 11906 },
+        { 12240, 20160 }, { 8391, 11906 }
+    };
+    const u32 count = (u32)(sizeof(labels) / sizeof(labels[0]));
+    const u8 *label_ptrs[7];
+    u32 label_lens[7], i, chosen = 0, def = 0;
+    wp_bool cancelled;
+    wp_section *sec = caret_section(ctx);
+    wp_status st;
+
+    if (sec == NULL) return WP_OK;
+    for (i = 0; i < count; i++) {
+        label_ptrs[i] = (const u8 *)labels[i];
+        label_lens[i] = (u32)strlen(labels[i]);
+        if (i < count - 1 && sizes[i][0] == sec->page_width && sizes[i][1] == sec->page_height) def = i;
+    }
+    st = plat_dialog_choice(ctx->window, (const u8 *)"Page Setup", 10, label_ptrs, label_lens,
+                            count, def, &cancelled, &chosen);
+    if (st != WP_OK || cancelled) return st;
+
+    if (chosen == count - 1) {
+        static char cur[48];
+        u32 n = 0;
+        n += fmt_inches(sec->margin_left, cur + n);   cur[n++] = ' ';
+        n += fmt_inches(sec->margin_right, cur + n);  cur[n++] = ' ';
+        n += fmt_inches(sec->margin_top, cur + n);    cur[n++] = ' ';
+        n += fmt_inches(sec->margin_bottom, cur + n);
+        wp_prompt_begin(ctx, "Margins, inches (left right top bottom):", (const u8 *)cur, n, margins_done);
+        return WP_OK;
+    }
+    if (sizes[chosen][0] - sec->margin_left - sec->margin_right < 1440 ||
+        sizes[chosen][1] - sec->margin_top - sec->margin_bottom < 1440) {
+        wp_action_tell(ctx, "The margins are too wide for that paper");
+        return WP_OK;
+    }
+    sec->page_width = sizes[chosen][0];
+    sec->page_height = sizes[chosen][1];
+    section_changed(ctx, sec);
+    return WP_OK;
+}
+
 static wp_status act_page_header(wp_app_ctx *ctx) { return open_margin_prompt(ctx, WP_TRUE); }
 static wp_status act_page_footer(wp_app_ctx *ctx) { return open_margin_prompt(ctx, WP_FALSE); }
 
@@ -1200,7 +1348,8 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_PARA_PAGE_BREAK,   WP_MENU_NONE,   "Page Break",     0,        0,    act_para_page_break, NULL },
     { WP_ACT_PAGE_HEADER,       WP_MENU_FORMAT, "Header...",      0,        0,    act_page_header, NULL },
     { WP_ACT_PAGE_FOOTER,       WP_MENU_FORMAT, "Footer...",      0,        0,    act_page_footer, NULL },
-    { WP_ACT_FORMAT_FONT,       WP_MENU_FORMAT, "Font...",        0,        0,    act_format_font, NULL }
+    { WP_ACT_FORMAT_FONT,       WP_MENU_FORMAT, "Font...",        0,        0,    act_format_font, NULL },
+    { WP_ACT_PAGE_SETUP,        WP_MENU_FILE,   "Page Setup...",  0,        0,    act_page_setup, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

@@ -12,7 +12,7 @@ typedef enum {
     WP_ICON_UNDERLINE, WP_ICON_LEFT, WP_ICON_CENTER, WP_ICON_RIGHT,
     WP_ICON_JUSTIFY, WP_ICON_SINGLE, WP_ICON_ONEHALF, WP_ICON_DOUBLE,
     WP_ICON_INDENT_LESS, WP_ICON_INDENT_MORE, WP_ICON_PAGE_BREAK,
-    WP_ICON_HEADER, WP_ICON_FOOTER, WP_ICON_FONT, WP_ICON_SIZE,
+    WP_ICON_HEADER, WP_ICON_FOOTER, WP_ICON_FONT, WP_ICON_SIZE, WP_ICON_PAGESETUP,
     WP_ICON_COUNT
 } wp_icon_id;
 
@@ -42,6 +42,7 @@ static const u16 g_icon_bits[WP_ICON_COUNT][16] = {
     /* FOOTER */ { 0x3FF0, 0x2010, 0x2790, 0x2010, 0x2790, 0x2010, 0x2790, 0x2010, 0x2790, 0x2010, 0x2790, 0x2010, 0x2FD0, 0x2FD0, 0x3FF0, 0x0000 },
     /* FONT */ { 0x0000, 0x0000, 0x1800, 0x1800, 0x2400, 0x2400, 0x4200, 0x4238, 0x7E04, 0x813C, 0x8144, 0x8144, 0xE73A, 0x0000, 0x0000, 0x0000 },
     /* SIZE */ { 0x0000, 0x0000, 0x3000, 0x3000, 0x4800, 0x4800, 0x8400, 0x8410, 0xFC28, 0x8428, 0x847C, 0x8444, 0xCC44, 0x0000, 0x0000, 0x0000 },
+    /* PAGESETUP */ { 0x7FF0, 0x4018, 0x4014, 0x555E, 0x4002, 0x5012, 0x4002, 0x5012, 0x4002, 0x5012, 0x4002, 0x5552, 0x4002, 0x4002, 0x7FFE, 0x0000 },
 };
 
 /* GENERATED: the 8-row icons for screens with tall pixels -- row pairs
@@ -72,6 +73,7 @@ static const u16 g_icon_bits8[WP_ICON_COUNT][8] = {
     /* FOOTER */ { 0x3FF0, 0x2790, 0x2010, 0x2790, 0x2010, 0x2FD0, 0x3FF0, 0x0000 },
     /* FONT */ { 0x1800, 0x2400, 0x4238, 0x7E3C, 0x8144, 0xE73A, 0x0000, 0x0000 },
     /* SIZE */ { 0x3000, 0x4800, 0x8410, 0xFC28, 0x847C, 0xCC44, 0x0000, 0x0000 },
+    /* PAGESETUP */ { 0x7FF0, 0x555C, 0x5012, 0x5012, 0x5552, 0x4002, 0x7FFE, 0x0000 },
 };
 
 /* The buttons, left to right; a row with action WP_ACT_COUNT is a gap
@@ -112,14 +114,29 @@ static const rb_button g_buttons[] = {
     { WP_ACT_COUNT,             0,                   0   },
     { WP_ACT_PARA_PAGE_BREAK,   WP_ICON_PAGE_BREAK,  'P' },
     { WP_ACT_PAGE_HEADER,       WP_ICON_HEADER,      'T' },
-    { WP_ACT_PAGE_FOOTER,       WP_ICON_FOOTER,      'F' }
+    { WP_ACT_PAGE_FOOTER,       WP_ICON_FOOTER,      'F' },
+    { WP_ACT_PAGE_SETUP,        WP_ICON_PAGESETUP,   'G' }
 };
 #define RB_BUTTON_COUNT ((u32)(sizeof(g_buttons) / sizeof(g_buttons[0])))
 
 static wp_bool text_mode(const wp_rulerbar *rb) { return (wp_bool)(rb->icon_rows == 0); }
 
+/* The space between button groups: half a button, or a cell on DOS --
+   none on DOS when the buttons would not otherwise all fit across its
+   eighty columns, since a button cut off there is one DOS cannot reach
+   at all (it has no menu bar). */
+static i32 gap_w(const wp_rulerbar *rb)
+{
+    u32 i, buttons = 0, gaps = 0;
+
+    if (!text_mode(rb)) return rb->button_w / 2;
+    for (i = 0; i < RB_BUTTON_COUNT; i++) {
+        if (g_buttons[i].action == WP_ACT_COUNT) gaps++; else buttons++;
+    }
+    return ((i32)(buttons * (u32)rb->button_w + gaps) <= rb->w) ? 1 : 0;
+}
+
 /* A gap is half a button wide (a single cell in text mode). */
-static i32 gap_w(const wp_rulerbar *rb) { return text_mode(rb) ? 1 : rb->button_w / 2; }
 
 /* The gap between the button row and the ruler. */
 static i32 row_gap(const wp_rulerbar *rb) { return text_mode(rb) ? 0 : 2; }

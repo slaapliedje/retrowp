@@ -160,6 +160,9 @@ the mouse. Its buttons, left to right:
   Header, Footer (a line printed at the top or bottom of every
               page; the Format menu has them too on the Amiga
               and Mac)
+  Page Setup (the paper -- Letter, A4, Legal or A5, upright or
+              on its side -- or the margins; the File menu has
+              it too on the Amiga and Mac)
 
 Font lists the typefaces this machine has: the GDOS fonts on
 the ST, the fonts in FONTS: on the Amiga, the installed fonts on
@@ -170,6 +173,11 @@ caret. Typing anywhere else takes the style of the text around
 it. A font this machine does not have is shown in one like it
 -- a serif for Times, a typewriter face for Courier -- and kept
 in the file under its own name.
+
+Page Setup's Margins asks in the status line, in inches: one
+length for all four margins, or four for left, right, top and
+bottom ("1 1 0.75 0.75"). A number may say cm or mm instead.
+Paper and margins belong to the section the caret is in.
 
 Header and Footer ask in the status line. Type the line and
 press Enter (Esc leaves it as it was). A | splits it into parts:

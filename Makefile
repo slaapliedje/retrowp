@@ -892,14 +892,15 @@ GEM4XE_INCLUDES = -I engine/include -I $(RETROPLAT)/include \
                   -I services/spell -I services/grammar \
                   -I $(GEM4XE_SDK)/include -I $(GENERATED)
 
-# Four code banks: the far code measures ~169 KB (it was ~155 KB before
-# Markdown and the shared ODT/PDF route, 2026-10-28) and a bank holds
-# just under 64 KB, so three banks left 5 KB unplaced.  app-layout-n is
+# Five code banks: the far code measures ~262 KB (~169 KB at four banks'
+# introduction, 2026-10-28; fonts, the ruler bar's drags, sections and
+# Page Setup since), and a bank holds just under 64 KB, so four left 480
+# fragments unplaced on 2026-11-05.  app-layout-n is
 # gemapp.scm's own mechanism for that, and gem4xe's loader has been
 # exercised on a spilled link (its test-m6).  STACK is raised from the
 # kit's 256: the shell's own frames are small, but the engine's call
 # chains are not the kit's example programs'.
-GEM4XE_CBANKS ?= 4
+GEM4XE_CBANKS ?= 5
 GEM4XE_FBANKS ?= 1
 # Raised from the kit's 2048/256: WP_AES_NEAR puts the menu tree and its
 # strings in bank $00 (they are handed to the AES, which reads only that

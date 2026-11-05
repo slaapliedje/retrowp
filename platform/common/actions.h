@@ -81,6 +81,11 @@ typedef enum {
        a page of the choice dialog; on the selection if there is one,
        else the input style. */
     WP_ACT_FORMAT_FONT,
+    /* Page Setup...: the caret's section's paper (a choice of sizes, each
+       upright or on its side) or its margins (a status-line prompt, in
+       inches -- "1" for all four, or left right top bottom; "2.5cm"
+       works too). */
+    WP_ACT_PAGE_SETUP,
     WP_ACT_COUNT
 } wp_action_id;
 
