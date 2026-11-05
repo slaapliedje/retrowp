@@ -177,6 +177,8 @@ def odt_bytes_to_paragraphs(odt_bytes):
                     d['sb'] = twips_from_odf_len(pp.get(_q('fo', 'margin-top')))
                     d['sa'] = twips_from_odf_len(pp.get(_q('fo', 'margin-bottom')))
                     d['pagebb'] = (pp.get(_q('fo', 'break-before')) == 'page')
+                if st.get(_q('style', 'master-page-name')):
+                    d['master'] = st.get(_q('style', 'master-page-name'))
                 para_styles[name] = d
             elif family == 'text':
                 tp = st.find(_q('style', 'text-properties'))
@@ -305,18 +307,34 @@ def _odt_margin_xml(text):
         part(t) for t in _margin_parts(text))
 
 
-def _odt_styles_xml(page, header, footer):
-    """styles.xml: the page (size and margins, in points) as the one
-    master page every paragraph is on, with the header and footer in it.
-    Their paragraph style has a centre tab stop mid-column and a right one
-    at its edge, so the three parts land where the PDF puts them."""
-    w, h, ml, mr, mt, mb = page
+def _odt_master_name(si):
+    """Section si's master page: the first is Standard, the default every
+    ODF reader starts on; the rest are RetroWP's own."""
+    return 'Standard' if si == 0 else 'RWPSection%d' % (si + 1)
+
+
+def _odt_styles_xml(sections):
+    """styles.xml: a page layout and a master page for each section
+    (page, header, footer) -- size and margins in points, the header and
+    footer in it. Their paragraph style has a centre tab stop mid-column
+    and a right one at its edge (the first section's column), so the
+    three parts land where the PDF puts them."""
+    w, h, ml, mr, mt, mb = sections[0][0]
     col = max(72.0, w - ml - mr)
-    master = ''
-    if header:
-        master += '<style:header>%s</style:header>' % _odt_margin_xml(header)
-    if footer:
-        master += '<style:footer>%s</style:footer>' % _odt_margin_xml(footer)
+    layouts, masters = [], []
+    for si, (page, header, footer) in enumerate(sections):
+        w, h, ml, mr, mt, mb = page
+        layouts.append('<style:page-layout style:name="RWPPage%d">'
+                       '<style:page-layout-properties fo:page-width="%.2fpt" fo:page-height="%.2fpt" '
+                       'fo:margin-left="%.2fpt" fo:margin-right="%.2fpt" fo:margin-top="%.2fpt" '
+                       'fo:margin-bottom="%.2fpt"/></style:page-layout>' % (si + 1, w, h, ml, mr, mt, mb))
+        inner = ''
+        if header:
+            inner += '<style:header>%s</style:header>' % _odt_margin_xml(header)
+        if footer:
+            inner += '<style:footer>%s</style:footer>' % _odt_margin_xml(footer)
+        masters.append('<style:master-page style:name="%s" style:page-layout-name="RWPPage%d">%s'
+                       '</style:master-page>' % (_odt_master_name(si), si + 1, inner))
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<office:document-styles ' + _ODF_NS_DECLS + 'office:version="1.2">'
             '<office:styles>'
@@ -327,13 +345,9 @@ def _odt_styles_xml(page, header, footer):
             '</style:tab-stops></style:paragraph-properties>'
             '<style:text-properties fo:font-size="10pt"/></style:style>'
             '</office:styles>'
-            '<office:automatic-styles><style:page-layout style:name="RWPPage">'
-            '<style:page-layout-properties fo:page-width="%.2fpt" fo:page-height="%.2fpt" '
-            'fo:margin-left="%.2fpt" fo:margin-right="%.2fpt" fo:margin-top="%.2fpt" '
-            'fo:margin-bottom="%.2fpt"/></style:page-layout></office:automatic-styles>'
-            '<office:master-styles><style:master-page style:name="Standard" '
-            'style:page-layout-name="RWPPage">%s</style:master-page></office:master-styles>'
-            '</office:document-styles>' % (col / 2.0, col, w, h, ml, mr, mt, mb, master))
+            '<office:automatic-styles>%s</office:automatic-styles>'
+            '<office:master-styles>%s</office:master-styles>'
+            '</office:document-styles>' % (col / 2.0, col, ''.join(layouts), ''.join(masters)))
 
 
 def _pt_from_odf_len(s, default):
@@ -341,36 +355,33 @@ def _pt_from_odf_len(s, default):
     return t / 20.0 if t else default
 
 
-def odt_page_and_margins(odt_bytes):
-    """From styles.xml: the page as (width, height, left, right, top,
-    bottom) in points, or None, and the default master page's header and
-    footer, each a list of parts (left/centre/right, an empty middle part
-    dropped and a lone centre kept alone, the way the engine writes them),
-    each part a list of ('text', s) and ('page',) -- or None."""
+def odt_masters(odt_bytes):
+    """From styles.xml: the default master page's name, and every master
+    page as name -> (page, header, footer): the page as (width, height,
+    left, right, top, bottom) in points or None, the header and footer as
+    lists of parts (left/centre/right, an empty middle part dropped and a
+    lone centre kept alone, the way the engine writes them), each part a
+    list of ('text', s) and ('page',) -- or None."""
     with zipfile.ZipFile(io.BytesIO(odt_bytes)) as zf:
         if 'styles.xml' not in zf.namelist():
-            return None, None, None
+            return None, {}
         root = ET.fromstring(zf.read('styles.xml'))
     masters = root.findall('.//' + _q('style', 'master-page'))
     if not masters:
-        return None, None, None
-    master = next((m for m in masters if m.get(_q('style', 'name')) == 'Standard'), masters[0])
-
-    page = None
-    layout_name = master.get(_q('style', 'page-layout-name'))
+        return None, {}
+    layouts = {}
     for pl in root.findall('.//' + _q('style', 'page-layout')):
-        if pl.get(_q('style', 'name')) != layout_name:
-            continue
         pp = pl.find(_q('style', 'page-layout-properties'))
         if pp is not None:
-            page = (_pt_from_odf_len(pp.get(_q('fo', 'page-width')), 612.0),
-                    _pt_from_odf_len(pp.get(_q('fo', 'page-height')), 792.0),
-                    _pt_from_odf_len(pp.get(_q('fo', 'margin-left')), 72.0),
-                    _pt_from_odf_len(pp.get(_q('fo', 'margin-right')), 72.0),
-                    _pt_from_odf_len(pp.get(_q('fo', 'margin-top')), 72.0),
-                    _pt_from_odf_len(pp.get(_q('fo', 'margin-bottom')), 72.0))
+            layouts[pl.get(_q('style', 'name'))] = (
+                _pt_from_odf_len(pp.get(_q('fo', 'page-width')), 612.0),
+                _pt_from_odf_len(pp.get(_q('fo', 'page-height')), 792.0),
+                _pt_from_odf_len(pp.get(_q('fo', 'margin-left')), 72.0),
+                _pt_from_odf_len(pp.get(_q('fo', 'margin-right')), 72.0),
+                _pt_from_odf_len(pp.get(_q('fo', 'margin-top')), 72.0),
+                _pt_from_odf_len(pp.get(_q('fo', 'margin-bottom')), 72.0))
 
-    def margin(tag):
+    def margin(master, tag):
         el = master.find(_q('style', tag))
         p_el = el.find(_q('text', 'p')) if el is not None else None
         if p_el is None:
@@ -400,7 +411,40 @@ def odt_page_and_margins(odt_bytes):
             parts = [parts[1]]
         return parts if any(parts) else None
 
-    return page, margin('header'), margin('footer')
+    info = {}
+    for m in masters:
+        info[m.get(_q('style', 'name'))] = (layouts.get(m.get(_q('style', 'page-layout-name'))),
+                                            margin(m, 'header'), margin(m, 'footer'))
+    default = 'Standard' if 'Standard' in info else masters[0].get(_q('style', 'name'))
+    return default, info
+
+
+def odt_page_and_margins(odt_bytes):
+    """The default master page's (page, header, footer) -- odt_masters'
+    shape -- or (None, None, None)."""
+    default, info = odt_masters(odt_bytes)
+    return info.get(default, (None, None, None))
+
+
+def odt_sections(odt_bytes, paragraphs):
+    """Numbers the paragraphs' sections and returns each section's (page,
+    header, footer): a paragraph that names a master page other than the
+    one in force starts a section on it (the same one again is only a page
+    break, as it reads in LibreOffice)."""
+    default, info = odt_masters(odt_bytes)
+    current = default
+    sections = [info.get(default, (None, None, None))]
+    for k, p in enumerate(paragraphs):
+        m = p.pop('master', None)
+        if m is not None and m in info and m != current and k > 0:
+            sections.append(info[m])
+            current = m
+        elif m is not None and k == 0 and m in info:
+            sections[0] = info[m]
+            current = m
+        p['section'] = len(sections) - 1
+    return sections
+
 
 _ODT_CONTENT_HEADER = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -421,7 +465,7 @@ def _odt_text(text):
     return xml_escape(text).replace('\t', '<text:tab/>')
 
 
-def paragraphs_to_odt_bytes(paragraphs, page=None, header='', footer=''):
+def paragraphs_to_odt_bytes(paragraphs, page=None, header='', footer='', sections=None):
     """Minimal but real, spec-valid ODT: mimetype + META-INF/manifest.xml
     + content.xml only -- no styles.xml/meta.xml/settings.xml/Thumbnails,
     all optional per ODF 1.2. Verified openable by real LibreOffice
@@ -435,6 +479,11 @@ def paragraphs_to_odt_bytes(paragraphs, page=None, header='', footer=''):
     styles = []
     body = []
     faces = {}     # face name -> family, for <office:font-face-decls>
+    default_page = (612.0, 792.0, 72.0, 72.0, 72.0, 72.0)
+    if not sections:
+        sections = [(page, header, footer)]
+    sections = [(pg or default_page, hd or '', ft or '') for pg, hd, ft in sections]
+    last_sec = -1   # the first paragraph of each section names its master page
 
     for pi, p in enumerate(paragraphs):
         pstyle_name = 'P%d' % (pi + 1)
@@ -452,11 +501,16 @@ def paragraphs_to_odt_bytes(paragraphs, page=None, header='', footer=''):
             pp_attrs.append('fo:margin-top="%s"' % odf_len_from_twips(p['sb']))
         if p.get('sa'):
             pp_attrs.append('fo:margin-bottom="%s"' % odf_len_from_twips(p['sa']))
-        if p.get('pagebb'):
+        psec = min(max(0, p.get('section', 0)), len(sections) - 1)
+        master = ''
+        if psec != last_sec:
+            master = ' style:master-page-name="%s"' % _odt_master_name(psec)
+            last_sec = psec
+        elif p.get('pagebb'):
             pp_attrs.append('fo:break-before="page"')
         styles.append(
-            '<style:style style:name="%s" style:family="paragraph" style:parent-style-name="Standard">'
-            '<style:paragraph-properties %s/></style:style>' % (pstyle_name, ' '.join(pp_attrs)))
+            '<style:style style:name="%s" style:family="paragraph" style:parent-style-name="Standard"%s>'
+            '<style:paragraph-properties %s/></style:style>' % (pstyle_name, master, ' '.join(pp_attrs)))
 
         run_xml = []
         runs = p['runs'] or [_new_run()]
@@ -513,8 +567,7 @@ def paragraphs_to_odt_bytes(paragraphs, page=None, header='', footer=''):
         # response for a real document.
         zf.writestr('META-INF/manifest.xml', _ODT_MANIFEST, compress_type=zipfile.ZIP_DEFLATED)
         zf.writestr('content.xml', content.encode('utf-8'), compress_type=zipfile.ZIP_DEFLATED)
-        zf.writestr('styles.xml', _odt_styles_xml(page or (612.0, 792.0, 72.0, 72.0, 72.0, 72.0),
-                                                  header, footer).encode('utf-8'),
+        zf.writestr('styles.xml', _odt_styles_xml(sections).encode('utf-8'),
                     compress_type=zipfile.ZIP_DEFLATED)
     return buf.getvalue()
 
@@ -571,7 +624,12 @@ def _rtf_margin_group(dest, parts):
     return '{\\%s\\pard\\plain %s}' % (dest, ''.join(out))
 
 
-def paragraphs_to_rtf_bytes(paragraphs, page=None, header=None, footer=None):
+def paragraphs_to_rtf_bytes(paragraphs, page=None, header=None, footer=None, sections=None):
+    """sections, when given (odt_sections), is each section's (page,
+    header, footer) -- the first's in place of page/header/footer -- and
+    every paragraph's 'section' says where a \\sect goes."""
+    if sections:
+        page, header, footer = sections[0]
     colors = []
 
     def color_index(rgb):
@@ -613,7 +671,25 @@ def paragraphs_to_rtf_bytes(paragraphs, page=None, header=None, footer=None):
     parts.append('\r\n')
     font_num = {name: i + 1 for i, (name, _) in enumerate(fonts)}
 
+    cur_sec = 0
     for p in paragraphs:
+        psec = p.get('section', 0) if sections else 0
+        if 0 < psec < len(sections) and psec != cur_sec:
+            # The engine's own shape: \\sect\\sectd, the section's page,
+            # and its header and footer -- an empty one only where the
+            # section before had one, which is how it says it has none.
+            spage, shead, sfoot = sections[psec]
+            _, phead, pfoot = sections[cur_sec]
+            parts.append('\\sect\\sectd')
+            if spage is not None:
+                parts.append('\\pgwsxn%d\\pghsxn%d\\marglsxn%d\\margrsxn%d\\margtsxn%d\\margbsxn%d' %
+                             tuple(int(round(v * 20)) for v in spage))
+            if shead or phead:
+                parts.append(_rtf_margin_group('header', shead or []))
+            if sfoot or pfoot:
+                parts.append(_rtf_margin_group('footer', sfoot or []))
+            parts.append('\r\n')
+            cur_sec = psec
         parts.append('\\pard')
         align = p.get('align', 'left')
         if align == 'right':
@@ -674,6 +750,7 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
     uc = 1          # \\ucN: fallback characters after each \\uN
     skip = 0        # fallback characters still to drop
     tab_kind = 'left'
+    section = 0     # \\sect so far: every paragraph says which section it is in
     fonts = {}      # RTF font number -> (name, family)
     ft_num, ft_family, ft_name = None, None, ''
     deff = 0
@@ -825,15 +902,20 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
             cur_para['pagebb'] = (n != 0)
         elif word in ('page', 'sect'):
             # Straight after a \\par there is nothing to end; otherwise
-            # this ends the paragraph. Either way the next one starts a page.
+            # this ends the paragraph. After \\page the next one starts a
+            # page; after \\sect it starts the next section, whose own page
+            # it is (rtf_sections).
             if cur_run['text'] or cur_para['runs']:
                 if cur_run['text']:
                     cur_para['runs'].append(cur_run)
-                paragraphs.append(cur_para)
+                paragraphs.append(dict(cur_para, section=section))
                 cur_para = _new_para()
                 cur_run = _new_run()
-            cur_para['pagebb'] = True
-            break_next = True
+            if word == 'page':
+                cur_para['pagebb'] = True
+                break_next = True
+            else:
+                section += 1
         elif word == 'tab':
             cur_run['text'] += '\t'
         elif word == 'sl':
@@ -892,7 +974,7 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
         elif word == 'par':
             if cur_run['text']:
                 cur_para['runs'].append(cur_run)
-            paragraphs.append(cur_para)
+            paragraphs.append(dict(cur_para, section=section))
             cur_para = _new_para()
             cur_run = _new_run()
             break_next = False
@@ -999,18 +1081,50 @@ def _rtf_margin_text(group):
     return ''.join(out).strip()
 
 
-def rtf_margin_texts(rtf_bytes):
-    """(header, footer) the way the engine keeps them, '' for none: the
-    first \\header (or \\headerr) and \\footer (or \\footerr) group."""
+def rtf_margin_texts(rtf_bytes, missing=''):
+    """(header, footer) the way the engine keeps them, `missing` for one
+    with no group at all: the first \\header (or \\headerr) and \\footer
+    (or \\footerr) group."""
     found = {}
     for m in re.finditer(rb"\{\\(header|headerr|footer|footerr)(?![a-z])", rtf_bytes):
         kind = 'header' if m.group(1).startswith(b'header') else 'footer'
         if kind not in found:
             found[kind] = _rtf_margin_text(_rtf_group_at(rtf_bytes, m.start())[len(m.group(0)):-1])
-    return found.get('header', ''), found.get('footer', '')
+    return found.get('header', missing), found.get('footer', missing)
 
 
 _RTF_PAGE_RE = re.compile(rb"\\(paperw|paperh|margl|margr|margt|margb)(-?[0-9]+)")
+_RTF_SECT_RE = re.compile(rb"\\sect(?![a-z])")
+_RTF_SECT_PAGE_RE = re.compile(rb"\\(pgwsxn|pghsxn|marglsxn|margrsxn|margtsxn|margbsxn)(-?[0-9]+)")
+
+
+def rtf_sections(rtf_bytes):
+    """Every section's (page, header, footer): the RTF split at each
+    top-level \\sect, each part read for its own page setup (\\pgwsxn...,
+    the first part's \\paperw... being the document's) and header and
+    footer -- each carried on from the section before unless the part
+    sets its own, \\sectd putting the page back to the document's, as the
+    engine's reader does. The paragraphs' 'section' indexes this list."""
+    chunks = _RTF_SECT_RE.split(rtf_bytes)
+    doc_page = rtf_page_setup(chunks[0])
+    out = []
+    page, header, footer = doc_page, '', ''
+    for k, chunk in enumerate(chunks):
+        if k == 0:
+            page = doc_page
+        else:
+            base = doc_page if re.search(rb"\\sectd(?![a-z])", chunk) else page
+            found = {}
+            for m in _RTF_SECT_PAGE_RE.finditer(chunk):
+                found.setdefault(m.group(1).decode('ascii'), int(m.group(2)) / 20.0)
+            page = (found.get('pgwsxn', base[0]), found.get('pghsxn', base[1]),
+                    found.get('marglsxn', base[2]), found.get('margrsxn', base[3]),
+                    found.get('margtsxn', base[4]), found.get('margbsxn', base[5]))
+        h, f = rtf_margin_texts(chunk, missing=None)
+        header = header if h is None else h
+        footer = footer if f is None else f
+        out.append((page, header, footer))
+    return out
 
 
 def rtf_page_setup(rtf_bytes):
@@ -1453,17 +1567,26 @@ def _pdf_margin_ops(text, page_no, y, m_left, column_w, used_chars):
     return ops
 
 
-def paragraphs_to_pdf_bytes(paragraphs, page=None, header='', footer=''):
+def paragraphs_to_pdf_bytes(paragraphs, page=None, header='', footer='', sections=None):
     """page: (width, height, left, right, top, bottom) in points, as
     rtf_page_setup returns it; None for US Letter with one-inch margins.
     header/footer: the running lines (rtf_margin_texts), drawn halfway
-    into the top and bottom margins of every page."""
-    page_w, page_h, m_left, m_right, m_top, m_bottom = page or (
-        _PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT, _PDF_MARGIN, _PDF_MARGIN, _PDF_MARGIN, _PDF_MARGIN)
-    column_w = max(72.0, page_w - m_left - m_right)
-    content_top = page_h - m_top
-    content_bottom = m_bottom
+    into the top and bottom margins of every page. sections, when given
+    (rtf_sections), is a (page, header, footer) per section in their
+    place: a paragraph's 'section' picks one, and each section starts a
+    page of its own, of its own size."""
+    if not sections:
+        sections = [(page, header, footer)]
+    default_page = (_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT, _PDF_MARGIN, _PDF_MARGIN, _PDF_MARGIN, _PDF_MARGIN)
+
+    def geometry(si):
+        pw, ph, ml, mr, mt, mb = sections[si][0] or default_page
+        return pw, ph, ml, mr, mt, mb, max(72.0, pw - ml - mr), ph - mt, mb
+
+    cur_sec = 0
+    page_w, page_h, m_left, m_right, m_top, m_bottom, column_w, content_top, content_bottom = geometry(0)
     pages = []
+    page_secs = []      # each page's section, for its size, header and footer
     cur_ops = []
     cur_y = content_top
     cur_tw = None
@@ -1474,6 +1597,7 @@ def paragraphs_to_pdf_bytes(paragraphs, page=None, header='', footer=''):
     def new_page():
         nonlocal cur_ops, cur_y, cur_tw, cur_font, cur_size, cur_color
         pages.append(cur_ops)
+        page_secs.append(cur_sec)
         cur_ops = []
         cur_y = content_top
         cur_tw = None
@@ -1485,6 +1609,15 @@ def paragraphs_to_pdf_bytes(paragraphs, page=None, header='', footer=''):
             new_page()
 
     for pi, para in enumerate(paragraphs):
+        psec = min(max(0, para.get('section', 0)), len(sections) - 1)
+        if psec != cur_sec:
+            # A new section: its own page, at its own size and margins.
+            if cur_ops or pages:
+                new_page()
+            cur_sec = psec
+            (page_w, page_h, m_left, m_right, m_top, m_bottom,
+             column_w, content_top, content_bottom) = geometry(cur_sec)
+            cur_y = content_top
         lines, li, ri, fi = _pdf_wrap_paragraph(para, column_w)
         tabs = para.get('tabs', [])
         sl, slmult = para.get('sl', 0), para.get('slmult', 0)
@@ -1596,13 +1729,19 @@ def paragraphs_to_pdf_bytes(paragraphs, page=None, header='', footer=''):
         cur_y -= sa
 
     pages.append(cur_ops)
+    page_secs.append(cur_sec)
+    media = []
     for k, ops in enumerate(pages):
-        ops += _pdf_margin_ops(header, k + 1, page_h - m_top / 2.0, m_left, column_w, used_chars)
-        ops += _pdf_margin_ops(footer, k + 1, m_bottom / 2.0, m_left, column_w, used_chars)
-    return _pdf_assemble(pages, used_chars, (page_w, page_h))
+        pw, ph, ml, _, mt, mb, cw, _, _ = geometry(page_secs[k])
+        _, sec_header, sec_footer = sections[page_secs[k]]
+        ops += _pdf_margin_ops(sec_header, k + 1, ph - mt / 2.0, ml, cw, used_chars)
+        ops += _pdf_margin_ops(sec_footer, k + 1, mb / 2.0, ml, cw, used_chars)
+        media.append((pw, ph))
+    return _pdf_assemble(pages, used_chars, media)
 
 
 def _pdf_assemble(pages, used_chars, media=(_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT)):
+    # media: one (width, height) for every page, or a list of one each.
     """Builds the final PDF byte stream: Catalog, Pages tree, one Page +
     one content-stream object per page, and one font object per style
     slot -- Tier 0's standard Type1 font (Helvetica/-Bold/-Oblique/-
@@ -1681,10 +1820,12 @@ def _pdf_assemble(pages, used_chars, media=(_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT)):
     kids = ' '.join('%d 0 R' % n for n in page_obj_nums)
     objects.append((1, b'<< /Type /Catalog /Pages 2 0 R >>'))
     objects.append((2, ('<< /Type /Pages /Kids [%s] /Count %d >>' % (kids, len(pages))).encode('ascii')))
-    for page_num, content_num, ops in zip(page_obj_nums, content_obj_nums, pages):
+    if media and not isinstance(media[0], (tuple, list)):
+        media = [media] * len(pages)
+    for page_num, content_num, ops, (mw, mh) in zip(page_obj_nums, content_obj_nums, pages, media):
         objects.append((page_num, ('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %g %g] '
                                     '/Resources << /Font << %s >> >> /Contents %d 0 R >>' %
-                                    (media[0], media[1], font_res, content_num)).encode('ascii')))
+                                    (mw, mh, font_res, content_num)).encode('ascii')))
         # Compressed: page text is the bulk of a PDF and packs four- or
         # five-fold, which is what lets a real document fit the link's
         # 64 KB response at all.
@@ -1722,8 +1863,9 @@ def handle_convert_import(payload):
     if format_id != FORMAT_ODT:
         return STATUS_UNSUPPORTED, b''
     try:
-        page, header, footer = odt_page_and_margins(body)
-        return STATUS_OK, paragraphs_to_rtf_bytes(odt_bytes_to_paragraphs(body), page, header, footer)
+        paragraphs = odt_bytes_to_paragraphs(body)
+        sections = odt_sections(body, paragraphs)
+        return STATUS_OK, paragraphs_to_rtf_bytes(paragraphs, sections=sections)
     except Exception:
         return STATUS_ERR, b''
 
@@ -1739,10 +1881,11 @@ def handle_convert_export(payload):
     except Exception:
         return STATUS_ERR, b''
     try:
-        header, footer = rtf_margin_texts(rtf_bytes)
+        sections = rtf_sections(rtf_bytes)
+        page, header, footer = sections[0]
         if format_id == FORMAT_ODT:
-            return STATUS_OK, paragraphs_to_odt_bytes(paragraphs, rtf_page_setup(rtf_bytes), header, footer)
-        return STATUS_OK, paragraphs_to_pdf_bytes(paragraphs, rtf_page_setup(rtf_bytes), header, footer)
+            return STATUS_OK, paragraphs_to_odt_bytes(paragraphs, page, header, footer, sections)
+        return STATUS_OK, paragraphs_to_pdf_bytes(paragraphs, page, header, footer, sections)
     except Exception:
         return STATUS_ERR, b''
 

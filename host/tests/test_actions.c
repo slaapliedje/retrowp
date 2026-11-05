@@ -1489,3 +1489,46 @@ void test_rulerbar_dragging_tabs(void)
     ASSERT_EQ_U32((u32)caret_pstyle(&ctx, 0)->tab_pos[0], 1800);
     ctx_teardown(&doc, &journal, &ctx);
 }
+
+/* With sections, Header edits the caret's section and the ones after it
+   that shared its text -- not the sections before, and not a later one
+   with a header of its own. */
+void test_actions_header_follows_the_caret_section(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    u32 si, pi, k;
+    wp_span shared, own;
+    wp_span span;
+    u16 ri;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "first\n");
+    for (k = 0; k < 2; k++) {                       /* sections 1 and 2, a paragraph each */
+        ASSERT_TRUE(wp_document_section_add(&doc, &si) == WP_OK);
+        ASSERT_TRUE(wp_section_paragraph_add(wp_document_section_get(&doc, si), &pi) == WP_OK);
+        ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"x", 1, &span) == WP_OK);
+        ASSERT_TRUE(wp_paragraph_run_add(wp_section_paragraph_get(wp_document_section_get(&doc, si), pi),
+                                         span, doc.default_cstyle, &ri) == WP_OK);
+    }
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"Old", 3, &shared) == WP_OK);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"Mine", 4, &own) == WP_OK);
+    doc.sections[0].header = shared;
+    doc.sections[1].header = shared;
+    doc.sections[2].header = own;
+
+    ctx.km.vi.cursor.section = 1;
+    ctx.km.vi.cursor.paragraph = 0;
+    ctx.km.vi.cursor.run = 0;
+    ctx.km.vi.cursor.offset = 0;
+    ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_HEADER)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(ctx.prompt.len, 3);                    /* starts from section 1's */
+    (void)wp_keymap_feed_key(&ctx, key_char('!'), 0);
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
+
+    ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, doc.sections[0].header), "Old", 3);
+    ASSERT_EQ_U32(doc.sections[1].header.length, 4);
+    ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, doc.sections[1].header), "Old!", 4);
+    ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, doc.sections[2].header), "Mine", 4);
+    ctx_teardown(&doc, &journal, &ctx);
+}

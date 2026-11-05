@@ -592,3 +592,70 @@ void test_convert_a_reply_in_parts_arrives_whole(void)
     mem_free(whole);
     mem_free(parts);
 }
+
+/* Sections reach the PDF and the ODT: each starts its own page, at its
+   own size, under its own header -- and the ODT carries them back. */
+static const char g_sections_rtf[] =
+    "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fswiss Helvetica;}}{\\*\\generator RetroWP;}"
+    "\\paperw12240\\paperh15840\\margl1440\\margr1440\\margt1440\\margb1440"
+    "{\\header\\pard\\plain Upright}\\pard{\\fs24 Portrait page.}\\par"
+    "\\sect\\sectd\\pgwsxn15840\\pghsxn12240\\marglsxn1440\\margrsxn1440\\margtsxn1440\\margbsxn1440"
+    "{\\header\\pard\\plain Sideways\\tab \\chpgn }\\pard{\\fs24 Landscape page.}\\par}";
+
+static void gateway_convert(u8 op, u8 format, const u8 *body, u32 len, u8 **out, u32 *out_len)
+{
+    gateway_handle gw;
+    static u8 payload[FIXTURE_CAP + 1];
+    offload_request req;
+    offload_response resp;
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    payload[0] = format;
+    memcpy(payload + 1, body, len);
+    req.op = (offload_op)op;
+    req.payload = payload;
+    req.payload_len = len + 1;
+    req.timeout_ms = 10000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+    *out = resp.result;
+    *out_len = resp.result_len;
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+static wp_bool has_bytes(const u8 *hay, u32 n, const char *needle)
+{
+    u32 k = (u32)strlen(needle), i;
+    for (i = 0; i + k <= n; i++) if (memcmp(hay + i, needle, k) == 0) return WP_TRUE;
+    return WP_FALSE;
+}
+
+void test_convert_sections_reach_the_pdf_and_odt(void)
+{
+    u8 *pdf, *odt, *rtf;
+    u32 pdf_len, odt_len, rtf_len;
+    wp_document doc;
+
+    gateway_convert(OFFLOAD_CONVERT_EXPORT, FORMAT_PDF, (const u8 *)g_sections_rtf,
+                    (u32)sizeof(g_sections_rtf) - 1, &pdf, &pdf_len);
+    ASSERT_TRUE(has_bytes(pdf, pdf_len, "/MediaBox [0 0 612 792]"));    /* section one, upright */
+    ASSERT_TRUE(has_bytes(pdf, pdf_len, "/MediaBox [0 0 792 612]"));    /* section two, on its side */
+    mem_free(pdf);
+
+    gateway_convert(OFFLOAD_CONVERT_EXPORT, FORMAT_ODT, (const u8 *)g_sections_rtf,
+                    (u32)sizeof(g_sections_rtf) - 1, &odt, &odt_len);
+    ASSERT_TRUE(odt_len <= FIXTURE_CAP);
+    gateway_convert(OFFLOAD_CONVERT_IMPORT, FORMAT_ODT, odt, odt_len, &rtf, &rtf_len);
+    mem_free(odt);
+    ASSERT_TRUE(format_rtf_import(rtf, rtf_len, &doc) == WP_OK);
+    mem_free(rtf);
+    ASSERT_EQ_U32(doc.section_count, 2);
+    ASSERT_EQ_U32((u32)doc.sections[0].page_width, 12240);
+    ASSERT_EQ_U32((u32)doc.sections[1].page_width, 15840);
+    ASSERT_EQ_U32(doc.sections[1].header.length, 10);
+    ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, doc.sections[1].header), "Sideways|#", 10);
+    ASSERT_EQ_U32(doc.sections[0].header.length, 7);
+    wp_document_free(&doc);
+}

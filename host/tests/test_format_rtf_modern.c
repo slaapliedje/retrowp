@@ -275,3 +275,68 @@ void test_rtf_modern_headers_and_footers_both_ways(void)
     wp_document_free(&back);
     wp_document_free(&doc);
 }
+
+static wp_bool span_is(wp_document *doc, wp_span sp, const char *text)
+{
+    u32 n = (u32)strlen(text);
+    return (wp_bool)(sp.length == n && (n == 0 || memcmp(wp_strpool_get(&doc->strings, sp), text, n) == 0));
+}
+
+/* \sect starts a section: its own page and header and footer, each
+   carried on from the one before until it sets its own; \sectd puts
+   the page back to the document's; an empty header group clears the
+   inherited one; two \sect in a row are one, and a \sect at the end
+   leaves no empty section behind. */
+void test_rtf_modern_sections_in(void)
+{
+    wp_document doc;
+    wp_section *s0, *s1, *s2;
+    char t[64];
+
+    ASSERT_TRUE(import("{\\rtf1\\ansi\\paperw11906\\paperh16838\\margl1134"
+                       "{\\header \\pard\\plain Report\\tab \\chpgn}{\\footer \\pard\\plain Draft}"
+                       "\\pard one\\par\\sect\\sect"
+                       "\\sectd\\pgwsxn16838\\pghsxn11906{\\header \\pard\\plain Wide}"
+                       "\\pard two\\par\\sect"
+                       "\\sectd{\\footer }\\pard three\\par\\sect}", &doc) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 3);
+    s0 = wp_document_section_get(&doc, 0);
+    s1 = wp_document_section_get(&doc, 1);
+    s2 = wp_document_section_get(&doc, 2);
+    ASSERT_EQ_U32((u32)s0->page_width, 11906);
+    ASSERT_EQ_U32((u32)s1->page_width, 16838);            /* its own, landscape */
+    ASSERT_EQ_U32((u32)s1->margin_left, 1134);            /* \sectd: the document's */
+    ASSERT_EQ_U32((u32)s2->page_width, 11906);            /* \sectd again: back to the document's */
+    ASSERT_TRUE(span_is(&doc, s0->header, "Report|#"));
+    ASSERT_TRUE(span_is(&doc, s1->header, "Wide"));       /* replaced */
+    ASSERT_TRUE(span_is(&doc, s1->footer, "Draft"));      /* carried on */
+    ASSERT_TRUE(span_is(&doc, s2->header, "Wide"));
+    ASSERT_TRUE(span_is(&doc, s2->footer, ""));           /* an empty one clears it */
+    ASSERT_EQ_U32(s1->para_count, 1);
+    para_all(&doc, 0, t, sizeof(t)); ASSERT_EQ_STR(t, "one");
+    wp_document_free(&doc);
+}
+
+void test_rtf_modern_sections_round_trip(void)
+{
+    wp_document doc, back;
+    static u8 out[4096];
+    u32 len = 0;
+
+    ASSERT_TRUE(import("{\\rtf1\\ansi\\paperw12240\\paperh15840{\\header \\pard\\plain A}"
+                       "\\pard one\\par\\sect\\sectd\\pgwsxn15840\\pghsxn12240\\marglsxn720"
+                       "{\\header \\pard\\plain B\\tab \\chpgn}\\pard two\\par\\sect\\sectd{\\header }\\pard three\\par}",
+                       &doc) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 3);
+    ASSERT_TRUE(format_rtf_export(&doc, out, sizeof(out) - 1, &len) == WP_OK);
+    ASSERT_TRUE(format_rtf_import(out, len, &back) == WP_OK);
+    ASSERT_EQ_U32(back.section_count, 3);
+    ASSERT_EQ_U32((u32)back.sections[1].page_width, 15840);
+    ASSERT_EQ_U32((u32)back.sections[1].margin_left, 720);
+    ASSERT_TRUE(span_is(&back, back.sections[0].header, "A"));
+    ASSERT_TRUE(span_is(&back, back.sections[1].header, "B|#"));
+    ASSERT_TRUE(span_is(&back, back.sections[2].header, ""));
+    ASSERT_EQ_U32(back.sections[2].para_count, 1);
+    wp_document_free(&back);
+    wp_document_free(&doc);
+}

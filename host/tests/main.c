@@ -539,6 +539,10 @@ void test_rulerbar_dragging_indents(void);
 void test_rulerbar_dragging_tabs(void);
 void test_convert_odt_carries_headers_footers_and_the_page(void);
 void test_convert_a_reply_in_parts_arrives_whole(void);
+void test_rtf_modern_sections_in(void);
+void test_rtf_modern_sections_round_trip(void);
+void test_convert_sections_reach_the_pdf_and_odt(void);
+void test_actions_header_follows_the_caret_section(void);
 void test_rtf_modern_unicode_and_its_fallback(void);
 void test_rtf_modern_plain_resets_and_hidden_text_stays_out(void);
 void test_rtf_modern_word_noise_stays_out_of_the_body(void);
@@ -1133,6 +1137,10 @@ static const test_case g_cases[] = {
     { "rulerbar_dragging_tabs", test_rulerbar_dragging_tabs },
     { "convert_odt_carries_headers_footers_and_the_page", test_convert_odt_carries_headers_footers_and_the_page },
     { "convert_a_reply_in_parts_arrives_whole", test_convert_a_reply_in_parts_arrives_whole },
+    { "rtf_modern_sections_in", test_rtf_modern_sections_in },
+    { "rtf_modern_sections_round_trip", test_rtf_modern_sections_round_trip },
+    { "convert_sections_reach_the_pdf_and_odt", test_convert_sections_reach_the_pdf_and_odt },
+    { "actions_header_follows_the_caret_section", test_actions_header_follows_the_caret_section },
     { "rtf_modern_unicode_and_its_fallback", test_rtf_modern_unicode_and_its_fallback },
     { "rtf_modern_plain_resets_and_hidden_text_stays_out", test_rtf_modern_plain_resets_and_hidden_text_stays_out },
     { "rtf_modern_word_noise_stays_out_of_the_body", test_rtf_modern_word_noise_stays_out_of_the_body },

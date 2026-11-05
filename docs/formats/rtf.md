@@ -56,16 +56,16 @@ nearly every paragraph; without it, a size or bold carried on.
 `\tb` bar tabs are read as left), up to `WP_MAX_TABS` (12), sorted.
 `\pard` resets both. Alike paragraphs share one style (find-or-add).
 
-**Page setup** -- `\paperw`/`\paperh` and `\margl`/`\margr`/`\margt`/`\margb`,
-or the section forms `\pgwsxn`/`\pghsxn`/`\marglsxn`..., set the section's
-page.
+**Page setup** -- `\paperw`/`\paperh` and `\margl`/`\margr`/`\margt`/`\margb`
+are the document's page and the section being read's; the section forms
+`\pgwsxn`/`\pghsxn`/`\marglsxn`... are that section's alone.
 
 **Tables** -- the model has no table, so a row comes in as one
 paragraph of tab-separated cells (`\cell` is a tab, `\row` ends the
 paragraph), which the ruler's tab stops can then line up.
 
 **Headers and footers** -- the first `\header` (or `\headerr`) and
-`\footer` (or `\footerr`) group become the section's running lines
+`\footer` (or `\footerr`) group in a section become its running lines
 (`wp_section.header`/`footer`): a tab is a part break `|`, `\chpgn` or a
 `PAGE` field (`{\field{\*\fldinst PAGE}{\fldrslt 1}}`) the page number
 `#`, a paragraph end a space. A literal `|` or `#` in a header reads as
@@ -78,8 +78,23 @@ right tab stop and `\chpgn` for `#`.
 (until `\pard`); `\page` and `\sect` end the paragraph (unless one just
 ended -- Word's `\par\page` adds no empty paragraph) and the next
 paragraph gets it, surviving the `\pard` Word puts after them. Export
-writes `\pagebb`. Sections are not separate yet: a section break is a
-page break.
+writes `\pagebb`; `\page` writes nothing more than that.
+
+**Sections** (since 2026-11-04) -- `\sect` ends the paragraph and starts
+a section (`wp_document.sections`), which starts a page of its own (the
+model's only kind, RTF's default `\sbkpage`). The new section is opened
+by the first thing that belongs to it -- a paragraph, its page setup,
+its header or footer, `\sectd` -- so two `\sect` in a row are one and a
+file that ends on `\sect` has no empty section. It inherits the page and
+header and footer of the section before (Word's "same as previous")
+until it sets its own; `\sectd` puts its page back to the document's;
+an empty `{\header }` says it has none. Export writes, for each section
+after the first, `\sect\sectd` and its `\pgwsxn`... and its header and
+footer -- an empty one where the section before had one. Layout already
+lays each section out at its own column width and starts it on a new
+page; the gateway gives each its own PDF page size and header, and its
+own ODT master page (docs/formats/odt.md). Header... and Footer... edit
+the caret's section and those after it that shared its text.
 
 **Destinations recognized and captured**:
 - `\colortbl` -- up to 32 `\redN\greenN\blueN;` entries, referenced later

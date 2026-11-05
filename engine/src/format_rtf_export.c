@@ -454,9 +454,9 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
 /* A running header or footer (docmodel.h): one paragraph, its '|' parts
    on tab stops -- one part centred, two left and right, three left,
    centre and right -- and '#' as \chpgn, the page number. */
-static void rtf_emit_margin_text(rtf_writer *w, const wp_document *doc, const char *dest, wp_span text)
+static void rtf_emit_margin_text(rtf_writer *w, const wp_document *doc, const wp_section *sec,
+                                 const char *dest, wp_span text)
 {
-    const wp_section *sec = &doc->sections[0];
     const u8 *b = wp_strpool_get(&doc->strings, text);
     i32 col = sec->page_width - sec->margin_left - sec->margin_right;
     u32 parts = 1, i, start;
@@ -489,15 +489,32 @@ static void rtf_emit_document(rtf_writer *w, const wp_document *doc, const rtf_c
     u32 si, pi;
 
     rtf_emit_header(w, doc, ct);
-    if (doc->section_count > 0 && doc->sections[0].header.length > 0) {
-        rtf_emit_margin_text(w, doc, "header", doc->sections[0].header);
-    }
-    if (doc->section_count > 0 && doc->sections[0].footer.length > 0) {
-        rtf_emit_margin_text(w, doc, "footer", doc->sections[0].footer);
-    }
 
     for (si = 0; si < doc->section_count; si++) {
         const wp_section *sec = &doc->sections[si];
+        const wp_section *prev = (si > 0) ? &doc->sections[si - 1] : NULL;
+
+        /* Each section after the first: \sect, then \sectd and its own
+           page (the first's is the document's, in the header). */
+        if (prev != NULL) {
+            rtf_write_str(w, "\\sect\\sectd");
+            rtf_write_str(w, "\\pgwsxn"); rtf_write_i32(w, sec->page_width);
+            rtf_write_str(w, "\\pghsxn"); rtf_write_i32(w, sec->page_height);
+            rtf_write_str(w, "\\marglsxn"); rtf_write_i32(w, sec->margin_left);
+            rtf_write_str(w, "\\margrsxn"); rtf_write_i32(w, sec->margin_right);
+            rtf_write_str(w, "\\margtsxn"); rtf_write_i32(w, sec->margin_top);
+            rtf_write_str(w, "\\margbsxn"); rtf_write_i32(w, sec->margin_bottom);
+            rtf_write_str(w, "\r\n");
+        }
+        /* Its header and footer -- an empty one only where the section
+           before had one, which is how a section says it has none (a
+           reader carries the last one on otherwise). */
+        if (sec->header.length > 0 || (prev != NULL && prev->header.length > 0)) {
+            rtf_emit_margin_text(w, doc, sec, "header", sec->header);
+        }
+        if (sec->footer.length > 0 || (prev != NULL && prev->footer.length > 0)) {
+            rtf_emit_margin_text(w, doc, sec, "footer", sec->footer);
+        }
         for (pi = 0; pi < sec->para_count; pi++) {
             rtf_emit_paragraph(w, doc, &sec->paras[pi], ct, src);
         }

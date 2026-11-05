@@ -85,7 +85,18 @@ typedef struct {
 
     u16 codepage;      /* \ansicpgN / \mac / \pc / \pca; \'hh decodes through it */
     u32 skip;          /* fallback characters still to skip after a \uN */
-    u8  break_next;    /* a \page or \sect was seen: the next paragraph starts a page */
+    u8  break_next;    /* a \page was seen: the next paragraph starts a page */
+
+    /* Sections. A \sect leaves the next section PENDING: it is opened
+       (rtf_open_section) by the first thing that belongs to it -- a
+       paragraph, its page setup, its header or footer, \sectd -- so a
+       file that ends on \sect has no empty last section. A new section
+       inherits the previous one's page and header and footer, as Word's
+       "same as previous" does, until it says otherwise; \sectd puts the
+       page back to the document's (\paperw...). */
+    u8  sect_pending;
+    u8  sec_has_header, sec_has_footer;   /* this section's own, read already */
+    i32 doc_page[6];   /* \paperw \paperh \margl \margr \margt \margb */
     u8  star_pending;  /* \* just seen: the next control word may be one we read anyway */
     u8  fld_is_page;   /* the last field instruction was PAGE */
     rtf_buf margin_buf;   /* the header or footer being read */
@@ -160,12 +171,37 @@ static void rtf_buf_free(rtf_buf *buf)
 
 /* -- paragraph/run construction ---------------------------------------- */
 
+static void rtf_open_section(rtf_parser *p)
+{
+    wp_section prev, *sec;
+    u32 idx;
+
+    if (p->error != WP_OK || !p->sect_pending) return;
+    p->sect_pending = 0;
+    prev = *wp_document_section_get(p->doc, p->section_idx);
+    if (wp_document_section_add(p->doc, &idx) != WP_OK) { p->error = WP_NOMEM; return; }
+    sec = wp_document_section_get(p->doc, idx);
+    sec->page_width = prev.page_width;
+    sec->page_height = prev.page_height;
+    sec->margin_left = prev.margin_left;
+    sec->margin_right = prev.margin_right;
+    sec->margin_top = prev.margin_top;
+    sec->margin_bottom = prev.margin_bottom;
+    sec->header = prev.header;
+    sec->footer = prev.footer;
+    p->section_idx = idx;
+    p->sec_has_header = p->sec_has_footer = 0;
+    p->para_pending = WP_TRUE;
+}
+
 static void rtf_ensure_paragraph(rtf_parser *p)
 {
     wp_section *sec;
     u32 new_idx;
 
     if (p->error != WP_OK || !p->para_pending) return;
+    rtf_open_section(p);
+    if (p->error != WP_OK) return;
 
     sec = wp_document_section_get(p->doc, p->section_idx);
     if (wp_section_paragraph_add(sec, &new_idx) != WP_OK) { p->error = WP_NOMEM; return; }
@@ -613,18 +649,26 @@ static void rtf_pop(rtf_parser *p)
                  p->fld_buf.bytes[k + 4] == '\\')) { p->fld_is_page = 1; break; }
         }
     }
-    /* Leaving the header or footer group: it becomes the section's,
-       unless one was already captured (the first of several wins). */
+    /* Leaving the header or footer group: it becomes the section's --
+       the first of several in one section wins, and it replaces the one
+       inherited from the section before, an empty one included (that is
+       how a section says it has none). */
     if ((p->stack[p->depth].dest == RTF_DEST_HEADER || p->stack[p->depth].dest == RTF_DEST_FOOTER) &&
         p->depth > 0 && p->stack[p->depth - 1].dest != p->stack[p->depth].dest) {
         wp_section *sec = wp_document_section_get(p->doc, p->section_idx);
-        wp_span *slot = (p->stack[p->depth].dest == RTF_DEST_HEADER) ? &sec->header : &sec->footer;
+        wp_bool is_header = (wp_bool)(p->stack[p->depth].dest == RTF_DEST_HEADER);
+        wp_span *slot = is_header ? &sec->header : &sec->footer;
+        u8 *have = is_header ? &p->sec_has_header : &p->sec_has_footer;
         u32 len = p->margin_buf.length;
 
         while (len > 0 && p->margin_buf.bytes[len - 1] == ' ') len--;
-        if (slot->length == 0 && len > 0 &&
-            wp_strpool_append(&p->doc->strings, p->margin_buf.bytes, len, slot) != WP_OK) {
-            p->error = WP_NOMEM;
+        if (!*have) {
+            *have = 1;
+            slot->offset = 0;
+            slot->length = 0;
+            if (len > 0 && wp_strpool_append(&p->doc->strings, p->margin_buf.bytes, len, slot) != WP_OK) {
+                p->error = WP_NOMEM;
+            }
         }
         p->margin_buf.length = 0;
     }
@@ -760,6 +804,7 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
     if (strcmp(name, "header") == 0 || strcmp(name, "headerr") == 0 ||
         strcmp(name, "footer") == 0 || strcmp(name, "footerr") == 0) {
         rtf_flush_run(p);
+        rtf_open_section(p);
         st->dest = (name[0] == 'h') ? RTF_DEST_HEADER : RTF_DEST_FOOTER;
         st->hidden = 0;
         p->margin_buf.length = 0;
@@ -864,13 +909,30 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         p->tab_kind_pending = (u8)WP_TAB_LEFT;
         return;
     }
-    /* Page setup, document-wide (\paperw...) or for the section
-       (\pgwsxn...); both set the section being read. */
+    /* \sectd: this section's properties back to the document's. */
+    if (strcmp(name, "sectd") == 0) {
+        wp_section *sec;
+        rtf_open_section(p);
+        sec = wp_document_section_get(p->doc, p->section_idx);
+        sec->page_width = p->doc_page[0];
+        sec->page_height = p->doc_page[1];
+        sec->margin_left = p->doc_page[2];
+        sec->margin_right = p->doc_page[3];
+        sec->margin_top = p->doc_page[4];
+        sec->margin_bottom = p->doc_page[5];
+        return;
+    }
+    /* Page setup, document-wide (\paperw...: the document's, and the
+       section being read) or for the section alone (\pgwsxn...). */
     if (has_param && param > 0 &&
         (strcmp(name, "paperw") == 0 || strcmp(name, "pgwsxn") == 0 ||
          strcmp(name, "paperh") == 0 || strcmp(name, "pghsxn") == 0)) {
-        wp_section *sec = wp_document_section_get(p->doc, p->section_idx);
-        if (name[1] == 'a' ? name[5] == 'w' : name[2] == 'w') sec->page_width = param;
+        wp_section *sec;
+        wp_bool w = (wp_bool)(name[1] == 'a' ? name[5] == 'w' : name[2] == 'w');
+        if (name[1] == 'a') p->doc_page[w ? 0 : 1] = param;
+        else rtf_open_section(p);
+        sec = wp_document_section_get(p->doc, p->section_idx);
+        if (w) sec->page_width = param;
         else sec->page_height = param;
         return;
     }
@@ -880,7 +942,13 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
          strcmp(name + 4, "t") == 0 || strcmp(name + 4, "b") == 0 ||
          strcmp(name + 4, "lsxn") == 0 || strcmp(name + 4, "rsxn") == 0 ||
          strcmp(name + 4, "tsxn") == 0 || strcmp(name + 4, "bsxn") == 0)) {
-        wp_section *sec = wp_document_section_get(p->doc, p->section_idx);
+        wp_section *sec;
+        if (name[5] == '\0') {          /* \margl...: the document's too */
+            p->doc_page[name[4] == 'l' ? 2 : name[4] == 'r' ? 3 : name[4] == 't' ? 4 : 5] = param;
+        } else {
+            rtf_open_section(p);
+        }
+        sec = wp_document_section_get(p->doc, p->section_idx);
         switch (name[4]) {
         case 'l': sec->margin_left = param; break;
         case 'r': sec->margin_right = param; break;
@@ -898,15 +966,20 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         rtf_end_paragraph(p);
         return;
     }
-    /* A page or section break ends the paragraph, and the next one
-       starts a page (page_break_before; a section break's default,
-       \sbkpage, is a new page too). */
+    /* A page or section break ends the paragraph. After \page the next
+       one starts a page (page_break_before); after \sect it starts the
+       next section, which starts a page of its own (\sbkpage, the
+       default and the only kind this model has). */
     if (strcmp(name, "page") == 0 || strcmp(name, "sect") == 0) {
         /* Straight after a \par (Word's usual "\par\page") there is no
            paragraph to end -- ending one would add an empty paragraph at
            every break. */
         if (!p->para_pending || p->run_buf.length > 0) rtf_end_paragraph(p);
-        p->break_next = 1;
+        if (name[0] == 'p') {
+            p->break_next = 1;
+        } else {
+            p->sect_pending = 1;      /* two in a row are one: no section without a paragraph */
+        }
         return;
     }
 
@@ -1131,6 +1204,8 @@ wp_status format_rtf_import_images(const u8 *bytes, u32 len, wp_document *doc,
     p->stack[0].uc = 1;
     p->codepage = 1252;
     p->ft_num = -1;
+    p->doc_page[0] = 12240; p->doc_page[1] = 15840;   /* RTF's defaults: Letter, an inch */
+    p->doc_page[2] = p->doc_page[3] = p->doc_page[4] = p->doc_page[5] = 1440;
     p->depth = 0;
     p->error = WP_OK;
     p->sink = sink;

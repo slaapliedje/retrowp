@@ -1070,3 +1070,38 @@ the compiler's own support code (`pseudoRegisters.o`, `integer.o`, `memory.o`,
 
 RetroWP has no top-level `LICENSE` file. It needs one, and which it should be is
 not a decision this document can make.
+
+## OPEN (2026-11-04): a startup hang that follows the code's placement
+
+With the sections work (format_rtf_import.c + format_rtf_export.c,
+commit "Sections: ...") RetroWP loads (APP_OK, app_near $4B00) and never
+reaches wp_menu_tree_init: `make gem4xe-check` fails with BAR spec
+$00000000, and the screen is the bare green desk. Waiting 3,000 frames
+instead of 600 changes nothing -- it is not slow, it is stuck.
+
+What the machine is doing, sampled with the bridge's `REGS` every 50
+frames from load on: the same instruction every time --
+K=$03 PC=$1A4C, interrupts disabled (P=$04), native mode, D=$4B00,
+S=$60CF. The bytes there (`8B E2 30 A9 00 48 AB AD 0E D2 ...` -- PHB,
+SEP #$30, LDA #0, PHA, PLB, LDA $D20E) are gem4xe's own POKEY IRQ entry,
+not RetroWP code: an IRQ that is raised again the moment it returns.
+
+What it is NOT, each tried:
+- size: the passing tree padded with 1,200 bytes of referenced constant
+  data (far image 256,336 bytes, more than the failing 256,235) passes;
+- either file: the import change alone passes (far 255,933, 11,313 bank
+  fixups), the export change alone passes (255,390, 11,299); both
+  together fail (256,235, 11,351);
+- the B17 miscompile: `make gem4xe-mscan` is clean, its control speaking;
+- neither changed function runs before the menu is built.
+
+So it follows WHERE every function after format_rtf_import.o lands in
+RetroWP's four code banks -- a wild far write or a call through a
+truncated pointer somewhere in start-up, gem4xe's loader, or Calypsi's
+output, that only misbehaves at some addresses. In the failing map
+`plat_transport_open` (a 20-byte stub) ends exactly at $02FFFF where
+gem4xe's `dos` ended in the passing one, and an actions.o static ends at
+$03FFFF; neither is known to matter. Tracing it needs Altirra's debugger
+(break on the IRQ entry, look at the stack and the last JSL), which the
+a8test bridge does not expose. Reproduce: check out the commit, `make
+gem4xe-check`.

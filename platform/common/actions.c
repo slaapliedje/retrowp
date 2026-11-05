@@ -584,21 +584,35 @@ static wp_status act_para_page_break(wp_app_ctx *ctx)
     return WP_OK;
 }
 
-/* Header and footer: the prompt's answer goes to every section (the
-   model allows one per section; nothing yet makes them differ). */
+static wp_bool same_text(const wp_document *doc, wp_span a, wp_span b)
+{
+    if (a.length != b.length) return WP_FALSE;
+    if (a.length == 0) return WP_TRUE;
+    return (wp_bool)(memcmp(wp_strpool_get(&doc->strings, a), wp_strpool_get(&doc->strings, b), a.length) == 0);
+}
+
+/* Header and footer: the prompt's answer goes to the caret's section and
+   on through the sections after it that still carry the same text --
+   Word's "same as previous" -- stopping at the first with its own. A
+   document of one section has the one. */
 static void set_margin_text(wp_app_ctx *ctx, const u8 *text, u32 len, wp_bool header)
 {
-    wp_span span;
-    u32 si;
+    wp_span span, old;
+    u32 si = wp_keymap_cursor(ctx)->section;
+    wp_section *sec;
 
+    if (si >= ctx->doc->section_count) return;
     span.offset = 0;
     span.length = 0;
     if (len > 0 && wp_strpool_append(&ctx->doc->strings, text, len, &span) != WP_OK) {
         wp_action_tell(ctx, "Not enough memory for that");
         return;
     }
-    for (si = 0; si < ctx->doc->section_count; si++) {
-        wp_section *sec = wp_document_section_get(ctx->doc, si);
+    sec = wp_document_section_get(ctx->doc, si);
+    old = header ? sec->header : sec->footer;
+    for (; si < ctx->doc->section_count; si++) {
+        sec = wp_document_section_get(ctx->doc, si);
+        if (!same_text(ctx->doc, header ? sec->header : sec->footer, old)) break;
         if (header) sec->header = span; else sec->footer = span;
     }
     wp_document_mark_modified(ctx->doc);
@@ -612,8 +626,8 @@ static wp_status open_margin_prompt(wp_app_ctx *ctx, wp_bool header)
     const wp_section *sec;
     wp_span cur;
 
-    if (!ctx->doc_loaded || ctx->doc->section_count == 0) return WP_OK;
-    sec = &ctx->doc->sections[0];
+    if (!ctx->doc_loaded || wp_keymap_cursor(ctx)->section >= ctx->doc->section_count) return WP_OK;
+    sec = &ctx->doc->sections[wp_keymap_cursor(ctx)->section];
     cur = header ? sec->header : sec->footer;
     wp_prompt_begin(ctx, header ? "Header (left|centre|right, # = page):" : "Footer (left|centre|right, # = page):",
                     (cur.length > 0) ? wp_strpool_get(&ctx->doc->strings, cur) : NULL, cur.length,

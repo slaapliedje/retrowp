@@ -200,3 +200,12 @@ back to the same header, footer and page.
 The ODT's parts other than `mimetype` are deflated now (ODF requires
 only that one stored): a document's ODT is several times smaller, which
 is room under the link's one-frame response.
+
+**Sections**: each section is a page layout and a master page of its
+own (`Standard` for the first, `RWPSection2`... after), and the first
+paragraph of each names its master page (`style:master-page-name`).
+Import starts a section at a paragraph that names a master page other
+than the one in force -- the same one again is a page break, as
+LibreOffice reads it. Checked against LibreOffice: a portrait page under
+one header, then a landscape page under another, and its own resave
+reads back as the same two sections.
