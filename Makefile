@@ -936,7 +936,10 @@ $(GEM4XE_BUILD)/linebreak.o: GEM4XE_CFLAGS = $(GEM4XE_O1_CFLAGS)
 # start-up hang of b345046, which followed CODE PLACEMENT only because
 # placement decided what the stray copy read. Traced with gem4xe's
 # instruction history; help_doc at -O1 passes in two different layouts
-# where the allocator at -O1 alone does not.
+# where the allocator at -O1 alone does not. gem4xe's tools/ccbug holds it
+# as a B24 candidate (stack slots: one slot live as two values), with no
+# scan for the form yet -- so this -O1 is the only defence; keep it until
+# ccbug can see the bug.
 $(GEM4XE_BUILD)/help_doc.o: GEM4XE_CFLAGS = $(GEM4XE_O1_CFLAGS)
 
 # timer_atari.c is NOT here: its clock() links on gem4xe now, but it
