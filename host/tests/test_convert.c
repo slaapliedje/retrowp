@@ -659,3 +659,53 @@ void test_convert_sections_reach_the_pdf_and_odt(void)
     ASSERT_EQ_U32(doc.sections[0].header.length, 7);
     wp_document_free(&doc);
 }
+
+/* A request bigger than one frame goes in parts to a gateway that takes
+   them: a document whose RTF is well past 64 KB goes out as ODT and
+   comes back with every paragraph. */
+void test_convert_a_large_document_goes_in_parts(void)
+{
+    gateway_handle gw;
+    static u8 payload[200000];
+    static u8 odt[FIXTURE_CAP];
+    u32 len, odt_len, i;
+    offload_request req;
+    offload_response resp;
+    wp_document doc;
+    const char *head = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fswiss Helvetica;}}{\\*\\generator RetroWP;}";
+    const char *para = "\\pard{\\fs24 A paragraph of a long document, long enough to fill some lines of a page.}\\par\r\n";
+
+    payload[0] = FORMAT_ODT;
+    len = 1;
+    memcpy(payload + len, head, strlen(head)); len += (u32)strlen(head);
+    for (i = 0; i < 1500; i++) { memcpy(payload + len, para, strlen(para)); len += (u32)strlen(para); }
+    payload[len++] = '}';
+    ASSERT_TRUE(len > 100000);                      /* well past one frame */
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    ASSERT_TRUE(offload_takes_large_requests());
+    req.op = OFFLOAD_CONVERT_EXPORT;
+    req.payload = payload;
+    req.payload_len = len;
+    req.timeout_ms = 20000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+    ASSERT_TRUE(resp.result_len <= FIXTURE_CAP);
+    odt_len = resp.result_len;
+    memcpy(odt, resp.result, odt_len);
+    offload_response_free(&resp);
+
+    payload[0] = FORMAT_ODT;
+    memcpy(payload + 1, odt, odt_len);
+    req.op = OFFLOAD_CONVERT_IMPORT;
+    req.payload_len = odt_len + 1;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+    ASSERT_TRUE(format_rtf_import(resp.result, resp.result_len, &doc) == WP_OK);
+    offload_response_free(&resp);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 1500);
+    wp_document_free(&doc);
+    offload_shutdown();
+    gateway_stop(&gw);
+}

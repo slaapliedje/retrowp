@@ -89,6 +89,11 @@ wp_status offload_query(offload_capabilities *out);
    every submit to fail fast. On WP_OK, resp->result is heap-allocated
    and owned by the caller until passed to offload_response_free. */
 wp_status offload_submit(const offload_request *req, offload_response *resp);
+
+/* WP_TRUE when the gateway takes a request bigger than one frame (its
+   CAPS protocol_version says it reassembles parts) -- what a caller
+   checks before building a payload past ~64 KB. */
+wp_bool offload_takes_large_requests(void);
 void      offload_response_free(offload_response *resp);
 
 /* The response's bytes, as they arrive -- one call per frame. A non-OK

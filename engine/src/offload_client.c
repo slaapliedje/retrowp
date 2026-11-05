@@ -29,6 +29,11 @@
    same scratch and handed on before the next. */
 #define OFFLOAD_MAX_RESPONSE_PAYLOAD  65000u
 
+/* The biggest request sent as one frame: the gateway's one-frame
+   reader takes a whole WIRE_MAX_PAYLOAD, but this side keeps the same
+   margin its DOS heap needs for the frame buffer. Past it, parts. */
+#define OFFLOAD_MAX_REQUEST_SINGLE    65000u
+
 static plat_transport       *g_transport = NULL;
 static wp_bool                g_available = WP_FALSE;
 static offload_capabilities   g_caps;
@@ -103,28 +108,48 @@ wp_status offload_query(offload_capabilities *out)
     return WP_OK;
 }
 
-/* Sends the request frame. */
-static wp_status send_request(const offload_request *req, u16 seq)
+/* One frame of the request: `type`, `len` bytes of payload. */
+static wp_status send_frame(const offload_request *req, u8 type, u16 seq, const u8 *data, u32 len)
 {
-    wire_header req_hdr;
-    u8 *req_buf;
-    u32 req_buf_size, n;
+    wire_header hdr;
+    u8 *buf;
+    u32 size, n;
     wp_status st;
 
-    req_hdr.type = WIRE_MSG_REQUEST;
-    req_hdr.op = (u8)req->op;
-    req_hdr.status = 0;
-    req_hdr.seq = seq;
-    req_hdr.length = req->payload_len;
-
-    req_buf_size = WIRE_HEADER_SIZE + req->payload_len + WIRE_CRC_SIZE;
-    req_buf = (u8 *)mem_alloc(req_buf_size);
-    if (req_buf == NULL) return WP_NOMEM;
-    n = wire_encode_frame(&req_hdr, req->payload, req_buf, req_buf_size);
-    if (n == 0) { mem_free(req_buf); return WP_ERR; }
-    st = plat_transport_write(g_transport, req_buf, n, req->timeout_ms);
-    mem_free(req_buf);
+    hdr.type = type;
+    hdr.op = (u8)req->op;
+    hdr.status = 0;
+    hdr.seq = seq;
+    hdr.length = len;
+    size = WIRE_HEADER_SIZE + len + WIRE_CRC_SIZE;
+    buf = (u8 *)mem_alloc(size);
+    if (buf == NULL) return WP_NOMEM;
+    n = wire_encode_frame(&hdr, data, buf, size);
+    if (n == 0) { mem_free(buf); return WP_ERR; }
+    st = plat_transport_write(g_transport, buf, n, req->timeout_ms);
+    mem_free(buf);
     return st;
+}
+
+/* The request: one frame, or -- past what one holds, to a gateway that
+   reassembles them -- REQUEST_PART frames and a REQUEST with the rest.
+   Each part is framed on its own, so no more than one part's buffer is
+   ever held. WP_RANGE for a request too big for a gateway that cannot. */
+static wp_status send_request(const offload_request *req, u16 seq)
+{
+    const u8 *p = req->payload;
+    u32 left = req->payload_len;
+
+    if (left > OFFLOAD_MAX_REQUEST_SINGLE) {
+        if (g_caps.protocol_version < WIRE_CAPS_REQUEST_PARTS) return WP_RANGE;
+        while (left > WIRE_REQUEST_PART_MAX) {
+            wp_status st = send_frame(req, (u8)WIRE_MSG_REQUEST_PART, seq, p, WIRE_REQUEST_PART_MAX);
+            if (st != WP_OK) return st;
+            p += WIRE_REQUEST_PART_MAX;
+            left -= WIRE_REQUEST_PART_MAX;
+        }
+    }
+    return send_frame(req, (u8)WIRE_MSG_REQUEST, seq, p, left);
 }
 
 wp_status offload_submit_stream(const offload_request *req, offload_chunk_fn chunk, void *user,
@@ -211,6 +236,11 @@ wp_status offload_submit(const offload_request *req, offload_response *resp)
     resp->result = g.bytes;
     resp->result_len = g.len;
     return WP_OK;
+}
+
+wp_bool offload_takes_large_requests(void)
+{
+    return (wp_bool)(g_available && g_caps.protocol_version >= WIRE_CAPS_REQUEST_PARTS);
 }
 
 void offload_response_free(offload_response *resp)

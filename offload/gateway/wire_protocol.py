@@ -37,7 +37,12 @@ WIRE_VERSION = 1
 WIRE_HEADER_SIZE = 12
 WIRE_CRC_SIZE = 2
 
-MSG_HELLO, MSG_CAPS, MSG_REQUEST, MSG_RESPONSE, MSG_ERROR, MSG_RESPONSE_PART = range(6)
+MSG_HELLO, MSG_CAPS, MSG_REQUEST, MSG_RESPONSE, MSG_ERROR, MSG_RESPONSE_PART, MSG_REQUEST_PART = range(7)
+
+# CAPS protocol_version 2: this gateway reassembles MSG_REQUEST_PART
+# frames (wire.h, WIRE_CAPS_REQUEST_PARTS); the frames themselves are
+# still WIRE_VERSION 1.
+CAPS_PROTOCOL_VERSION = 2
 
 # A response bigger than one frame goes as MSG_RESPONSE_PART frames of
 # this much, then a MSG_RESPONSE with the rest and the status (wire.h).
@@ -75,7 +80,7 @@ def encode_frame(msg_type, op, status, seq, payload):
 
 def encode_caps(ops_supported, name):
     name_bytes = name.encode('utf-8')[:32].ljust(32, b'\x00')
-    return struct.pack('>HII', WIRE_VERSION, ops_supported, 65536) + name_bytes
+    return struct.pack('>HII', CAPS_PROTOCOL_VERSION, ops_supported, 65536) + name_bytes
 
 
 class GatewayError(Exception):
@@ -214,11 +219,18 @@ def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, hand
     caps_payload = encode_caps(ops_supported, gateway_name)
     os.write(write_fd, encode_frame(MSG_CAPS, 0, 0, 0, caps_payload))
 
+    parts = []          # a request's MSG_REQUEST_PART payloads, so far
     while True:
         try:
             hdr, payload = read_frame(read_fd, 120.0)
         except GatewayError:
             break
+        if hdr['type'] == MSG_REQUEST_PART:
+            parts.append(payload)
+            continue
+        if parts:
+            payload = b''.join(parts) + payload
+            parts = []
         status, resp_payload = handle_request(hdr['op'], payload)
         if len(resp_payload) > RESPONSE_SINGLE_MAX:
             while len(resp_payload) > RESPONSE_PART_MAX:

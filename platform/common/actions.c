@@ -1464,7 +1464,16 @@ const char *wp_action_document_name(const wp_app_ctx *ctx)
    gateway speaks it; docs/formats/offload-protocol.md), without pictures:
    the gateway's converter does not carry them, and the payload cap is
    better spent on text. */
-#define WP_ACTION_CONVERT_MAX_FILE   60000uL   /* under WIRE_MAX_PAYLOAD with room for the id byte and framing */
+#define WP_ACTION_CONVERT_ONE_FRAME  60000uL   /* under WIRE_MAX_PAYLOAD with room for the id byte and framing */
+#define WP_ACTION_CONVERT_LARGE      512000uL  /* in parts: a bound on what a 1 MB machine is asked to hold */
+
+/* How big a file the gateway can be sent: one frame's worth, or, to a
+   gateway that reassembles request parts (offload_takes_large_requests),
+   far more -- the payload is built in memory either way. */
+static u32 convert_max_file(void)
+{
+    return offload_takes_large_requests() ? (u32)WP_ACTION_CONVERT_LARGE : (u32)WP_ACTION_CONVERT_ONE_FRAME;
+}
 #define WP_ACTION_CONVERT_TIMEOUT_MS 120000uL  /* about two minutes; see above */
 
 /* The link, brought up the backend's way if it gave us one, else as it
@@ -1528,7 +1537,7 @@ static wp_status convert_export(wp_app_ctx *ctx, const char *native_path, u8 for
     wp_status st;
 
     format_rtf_export(ctx->doc, NULL, 0, &rtf_len);
-    if (rtf_len + 1 > WP_ACTION_CONVERT_MAX_FILE) {
+    if (rtf_len + 1 > convert_max_file()) {
         wp_action_tell(ctx, "The document is too large to send to the gateway");
         return WP_RANGE;
     }
@@ -1595,7 +1604,7 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
         wp_action_tell(ctx, "Couldn't read that file");
         return WP_ERR;
     }
-    if (via_gateway && size + 1 > WP_ACTION_CONVERT_MAX_FILE) {
+    if (via_gateway && size + 1 > convert_max_file()) {
         plat_file_close(f);
         wp_action_tell(ctx, "That file is too large to send to the gateway");
         return WP_RANGE;

@@ -54,10 +54,18 @@ typedef enum {
        ordinary RESPONSE (the rest, possibly nothing, and the status).
        Only for a response over a single frame's worth, so a client that
        predates parts never sees one on anything it could have read. */
-    WIRE_MSG_RESPONSE_PART = 5
+    WIRE_MSG_RESPONSE_PART = 5,
+    /* The same the other way: a request too big for one frame goes as
+       REQUEST_PART frames, then an ordinary REQUEST with the rest -- but
+       only to a gateway whose CAPS protocol_version is at least
+       WIRE_CAPS_REQUEST_PARTS, since an older one would take the last
+       part for the whole request. */
+    WIRE_MSG_REQUEST_PART = 6
 } wire_msg_type;
 
 #define WIRE_RESPONSE_PART_MAX 32768uL
+#define WIRE_REQUEST_PART_MAX  32768uL
+#define WIRE_CAPS_REQUEST_PARTS 2u
 
 typedef struct {
     u8  type;    /* wire_msg_type */

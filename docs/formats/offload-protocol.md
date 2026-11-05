@@ -51,7 +51,7 @@ offset  size  field
 1       1     magic1     0x50 ('P')
 2       1     version    1
 3       1     type       wire_msg_type: HELLO=0, CAPS=1, REQUEST=2, RESPONSE=3, ERROR=4,
-                          RESPONSE_PART=5
+                          RESPONSE_PART=5, REQUEST_PART=6
 4       1     op         offload_op (meaningful for REQUEST/RESPONSE, else 0)
 5       1     status     offload_status (meaningful for RESPONSE/ERROR, else 0)
 6       2     seq        matches a RESPONSE to the REQUEST that triggered it
@@ -86,7 +86,17 @@ parts never sees one on anything it could have read whole. The client
 reads one frame at a time into the same buffer: `offload_submit_stream`
 hands each part on as it arrives (an exported PDF or ODT is written to
 its file that way, never held whole), and `offload_submit` gathers them
-into one block. The request side is still one frame.
+into one block.
+
+**A request bigger than one frame** goes the same way, as `REQUEST_PART`
+frames (type 6) of at most 32768 bytes then an ordinary `REQUEST` with
+the rest -- but only to a gateway whose CAPS `protocol_version` is 2 or
+more (`WIRE_CAPS_REQUEST_PARTS`): one that predates parts would take the
+last part for the whole request. The Python gateways (`wire_protocol.py`'s
+shared `serve`) say 2 and reassemble; the C ones say 1, and the client
+refuses an oversized request to them with `WP_RANGE` before sending
+anything. `offload_takes_large_requests()` tells a caller which it has:
+the ODT/PDF file flow allows 512000 bytes with one, 60000 without.
 
 ## Handshake: HELLO / CAPS
 
