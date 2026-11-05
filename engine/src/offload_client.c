@@ -24,9 +24,9 @@
    heap cannot hand out a full 64 KB in one block. The scratch buffer is
    freed as soon as the response is copied into resp->result (sized to
    the ACTUAL length), so this is a brief 64 KB on a 1 MB machine, not a
-   resident one. The gateway compresses PDF content and fonts so that
-   this holds dozens of pages; a document beyond it is refused cleanly
-   (WP_RANGE), and chunked responses are the next step if that bites. */
+   resident one. It bounds ONE FRAME, not a response: a bigger response
+   comes as WIRE_MSG_RESPONSE_PART frames (wire.h), each read into this
+   same scratch and handed on before the next. */
 #define OFFLOAD_MAX_RESPONSE_PAYLOAD  65000u
 
 static plat_transport       *g_transport = NULL;
@@ -103,12 +103,35 @@ wp_status offload_query(offload_capabilities *out)
     return WP_OK;
 }
 
-wp_status offload_submit(const offload_request *req, offload_response *resp)
+/* Sends the request frame. */
+static wp_status send_request(const offload_request *req, u16 seq)
 {
-    wp_status st;
-    wire_header req_hdr, resp_hdr;
+    wire_header req_hdr;
     u8 *req_buf;
     u32 req_buf_size, n;
+    wp_status st;
+
+    req_hdr.type = WIRE_MSG_REQUEST;
+    req_hdr.op = (u8)req->op;
+    req_hdr.status = 0;
+    req_hdr.seq = seq;
+    req_hdr.length = req->payload_len;
+
+    req_buf_size = WIRE_HEADER_SIZE + req->payload_len + WIRE_CRC_SIZE;
+    req_buf = (u8 *)mem_alloc(req_buf_size);
+    if (req_buf == NULL) return WP_NOMEM;
+    n = wire_encode_frame(&req_hdr, req->payload, req_buf, req_buf_size);
+    if (n == 0) { mem_free(req_buf); return WP_ERR; }
+    st = plat_transport_write(g_transport, req_buf, n, req->timeout_ms);
+    mem_free(req_buf);
+    return st;
+}
+
+wp_status offload_submit_stream(const offload_request *req, offload_chunk_fn chunk, void *user,
+                                offload_response *resp)
+{
+    wp_status st;
+    wire_header resp_hdr;
     u8 *scratch;
     u32 scratch_len;
 
@@ -118,46 +141,75 @@ wp_status offload_submit(const offload_request *req, offload_response *resp)
 
     if (!g_available) return WP_ERR;
 
-    req_hdr.type = WIRE_MSG_REQUEST;
-    req_hdr.op = (u8)req->op;
-    req_hdr.status = 0;
-    req_hdr.seq = g_next_seq++;
-    req_hdr.length = req->payload_len;
-
-    req_buf_size = WIRE_HEADER_SIZE + req->payload_len + WIRE_CRC_SIZE;
-    req_buf = (u8 *)mem_alloc(req_buf_size);
-    if (req_buf == NULL) return WP_NOMEM;
-
-    n = wire_encode_frame(&req_hdr, req->payload, req_buf, req_buf_size);
-    if (n == 0) { mem_free(req_buf); return WP_ERR; }
-
-    st = plat_transport_write(g_transport, req_buf, n, req->timeout_ms);
-    mem_free(req_buf);
+    st = send_request(req, g_next_seq++);
     if (st != WP_OK) return st;
 
     scratch = (u8 *)mem_alloc(OFFLOAD_MAX_RESPONSE_PAYLOAD);
     if (scratch == NULL) return WP_NOMEM;
 
-    st = wire_read_frame(transport_read_adapter, g_transport, req->timeout_ms,
-                          &resp_hdr, scratch, OFFLOAD_MAX_RESPONSE_PAYLOAD, &scratch_len);
-    if (st != WP_OK) { mem_free(scratch); return st; }
-
-    if (resp_hdr.type != WIRE_MSG_RESPONSE && resp_hdr.type != WIRE_MSG_ERROR) {
-        mem_free(scratch);
-        return WP_ERR;
-    }
-
-    resp->status = (offload_status)resp_hdr.status;
-    resp->result_len = scratch_len;
-    if (scratch_len > 0) {
-        resp->result = (u8 *)mem_alloc(scratch_len);
-        if (resp->result == NULL) { mem_free(scratch); return WP_NOMEM; }
-        memcpy(resp->result, scratch, scratch_len);
-    } else {
-        resp->result = NULL;
+    /* Parts until the final RESPONSE (or an ERROR); each frame's bytes
+       go on before the next is read, so only one frame is ever held. */
+    for (;;) {
+        st = wire_read_frame(transport_read_adapter, g_transport, req->timeout_ms,
+                              &resp_hdr, scratch, OFFLOAD_MAX_RESPONSE_PAYLOAD, &scratch_len);
+        if (st != WP_OK) break;
+        if (resp_hdr.type != WIRE_MSG_RESPONSE && resp_hdr.type != WIRE_MSG_ERROR &&
+            resp_hdr.type != WIRE_MSG_RESPONSE_PART) { st = WP_ERR; break; }
+        if (scratch_len > 0 && chunk != NULL) {
+            st = chunk(user, scratch, scratch_len);
+            if (st != WP_OK) break;
+        }
+        resp->result_len += scratch_len;
+        if (resp_hdr.type != WIRE_MSG_RESPONSE_PART) {
+            resp->status = (offload_status)resp_hdr.status;
+            break;
+        }
     }
     mem_free(scratch);
+    return st;
+}
 
+/* offload_submit's sink: the parts gathered into one block, grown as
+   they come. */
+typedef struct {
+    u8 *bytes;
+    u32 len, cap;
+} gather_buf;
+
+static wp_status gather(void *user, const u8 *data, u32 len)
+{
+    gather_buf *g = (gather_buf *)user;
+
+    if (g->len + len > g->cap) {
+        u32 cap = (g->cap == 0) ? len : g->cap;
+        u8 *grown;
+        while (cap < g->len + len) cap *= 2;
+        grown = (u8 *)mem_realloc(g->bytes, g->cap, cap);
+        if (grown == NULL) return WP_NOMEM;
+        g->bytes = grown;
+        g->cap = cap;
+    }
+    memcpy(g->bytes + g->len, data, len);
+    g->len += len;
+    return WP_OK;
+}
+
+wp_status offload_submit(const offload_request *req, offload_response *resp)
+{
+    gather_buf g;
+    wp_status st;
+
+    g.bytes = NULL;
+    g.len = g.cap = 0;
+    st = offload_submit_stream(req, gather, &g, resp);
+    if (st != WP_OK) {
+        mem_free(g.bytes);
+        resp->result = NULL;
+        resp->result_len = 0;
+        return st;
+    }
+    resp->result = g.bytes;
+    resp->result_len = g.len;
     return WP_OK;
 }
 

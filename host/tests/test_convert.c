@@ -1,4 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#define _POSIX_C_SOURCE 200112L   /* setenv, for the gateway's test-only part size */
+#include <stdlib.h>
 #include <string.h>
 #include "test.h"
 #include "offload.h"
@@ -541,4 +543,52 @@ void test_convert_odt_carries_headers_footers_and_the_page(void)
     wp_document_free(&doc);
     offload_shutdown();
     gateway_stop(&gw);
+}
+
+/* A reply bigger than one frame comes in parts (WIRE_MSG_RESPONSE_PART)
+   and reaches the caller whole: the gateway is made to split anything
+   over 2000 bytes into 1000-byte parts, and the PDF that comes back that
+   way must be the PDF that comes back in one frame, byte for byte. */
+static void export_pdf(const char *rtf, u32 rtf_len, u8 **out, u32 *out_len)
+{
+    gateway_handle gw;
+    static u8 payload[4096];
+    offload_request req;
+    offload_response resp;
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    payload[0] = FORMAT_PDF;
+    memcpy(payload + 1, rtf, rtf_len);
+    req.op = OFFLOAD_CONVERT_EXPORT;
+    req.payload = payload;
+    req.payload_len = rtf_len + 1;
+    req.timeout_ms = 10000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+    *out = resp.result;          /* kept: the caller frees it */
+    *out_len = resp.result_len;
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+void test_convert_a_reply_in_parts_arrives_whole(void)
+{
+    static const char rtf[] =
+        "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fswiss Helvetica;}}{\\*\\generator RetroWP;}"
+        "\\pard{\\fs24 One paragraph, and another, enough to make a PDF of a few kilobytes.}\\par"
+        "\\pard\\pagebb{\\fs24 A second page.}\\par}";
+    u8 *whole, *parts;
+    u32 whole_len, parts_len;
+
+    export_pdf(rtf, (u32)sizeof(rtf) - 1, &whole, &whole_len);
+    setenv("RETROWP_GATEWAY_PART_TEST", "1", 1);
+    export_pdf(rtf, (u32)sizeof(rtf) - 1, &parts, &parts_len);
+    unsetenv("RETROWP_GATEWAY_PART_TEST");
+
+    ASSERT_TRUE(whole_len > 2000);                 /* big enough to have been split */
+    ASSERT_EQ_U32(parts_len, whole_len);
+    ASSERT_TRUE(memcmp(parts, whole, whole_len) == 0);
+    mem_free(whole);
+    mem_free(parts);
 }

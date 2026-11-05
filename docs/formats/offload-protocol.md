@@ -50,7 +50,8 @@ offset  size  field
 0       1     magic0     0x57 ('W')
 1       1     magic1     0x50 ('P')
 2       1     version    1
-3       1     type       wire_msg_type: HELLO=0, CAPS=1, REQUEST=2, RESPONSE=3, ERROR=4
+3       1     type       wire_msg_type: HELLO=0, CAPS=1, REQUEST=2, RESPONSE=3, ERROR=4,
+                          RESPONSE_PART=5
 4       1     op         offload_op (meaningful for REQUEST/RESPONSE, else 0)
 5       1     status     offload_status (meaningful for RESPONSE/ERROR, else 0)
 6       2     seq        matches a RESPONSE to the REQUEST that triggered it
@@ -74,6 +75,18 @@ garbage stream (total bytes skipped scanning for magic; total frames
 rejected after a full header was read); exceeding either returns
 `WP_ERR`, meaning "reconnect," not "keep retrying this stream." See the
 comment above `wire_read_frame` in `wire.h` for the full contract.
+
+**A response bigger than one frame** (since 2026-11-04) goes as
+`RESPONSE_PART` frames of at most 32768 bytes (`WIRE_RESPONSE_PART_MAX`),
+with the request's op and seq, then an ordinary `RESPONSE` carrying the
+rest -- possibly nothing -- and the status. The receiver concatenates
+the payloads in order. A gateway splits only a response over 65000
+bytes, what a client's one-frame buffer holds, so a client that predates
+parts never sees one on anything it could have read whole. The client
+reads one frame at a time into the same buffer: `offload_submit_stream`
+hands each part on as it arrives (an exported PDF or ODT is written to
+its file that way, never held whole), and `offload_submit` gathers them
+into one block. The request side is still one frame.
 
 ## Handshake: HELLO / CAPS
 

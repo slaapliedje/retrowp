@@ -48,8 +48,16 @@ typedef enum {
     WIRE_MSG_CAPS     = 1,
     WIRE_MSG_REQUEST  = 2,
     WIRE_MSG_RESPONSE = 3,
-    WIRE_MSG_ERROR    = 4
+    WIRE_MSG_ERROR    = 4,
+    /* One frame of a response too big for one: the gateway sends parts
+       of at most WIRE_RESPONSE_PART_MAX bytes, same op and seq, then an
+       ordinary RESPONSE (the rest, possibly nothing, and the status).
+       Only for a response over a single frame's worth, so a client that
+       predates parts never sees one on anything it could have read. */
+    WIRE_MSG_RESPONSE_PART = 5
 } wire_msg_type;
+
+#define WIRE_RESPONSE_PART_MAX 32768uL
 
 typedef struct {
     u8  type;    /* wire_msg_type */

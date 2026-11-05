@@ -91,4 +91,17 @@ wp_status offload_query(offload_capabilities *out);
 wp_status offload_submit(const offload_request *req, offload_response *resp);
 void      offload_response_free(offload_response *resp);
 
+/* The response's bytes, as they arrive -- one call per frame. A non-OK
+   return stops the transfer: offload_submit_stream then returns it. */
+typedef wp_status (*offload_chunk_fn)(void *user, const u8 *data, u32 len);
+
+/* offload_submit for a response that may be bigger than a frame: each
+   part goes to `chunk` as it arrives, so a long PDF is written to its
+   file as it comes rather than held whole. resp->status is the
+   gateway's; resp->result stays NULL and resp->result_len is the total
+   delivered. Returns WP_OK once the final frame is in. offload_submit
+   itself gathers the parts into one block. */
+wp_status offload_submit_stream(const offload_request *req, offload_chunk_fn chunk, void *user,
+                                offload_response *resp);
+
 #endif /* WP_OFFLOAD_H */

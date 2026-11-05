@@ -1190,7 +1190,10 @@ def _pdf_subset_embed(slot, used_chars):
     options.set(layout_features=[])
     options.drop_tables += ['GSUB', 'GPOS', 'GDEF']
     subsetter = _fonttools_subset.Subsetter(options=options)
-    text = ''.join(used_chars) + ''.join(chr(c) for c in range(32, 127))
+    # Sorted: a set's order changes from one process to the next (string
+    # hashing is seeded per process), and with it the subset's bytes -- the
+    # same document must make the same PDF.
+    text = ''.join(sorted(used_chars)) + ''.join(chr(c) for c in range(32, 127))
     subsetter.populate(text=text)
     subsetter.subset(font)
     buf = io.BytesIO()

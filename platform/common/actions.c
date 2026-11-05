@@ -1277,8 +1277,9 @@ const char *wp_action_document_name(const wp_app_ctx *ctx)
    bounds. Real RS-232 at 9600 baud moves about 960 bytes a second (8N1
    is 10 bits a byte), so a few KB of document genuinely takes tens of
    seconds each way: the timeout is sized for that line, not for a fast
-   local one. The response side is bounded regardless by offload_client.c's
-   OFFLOAD_MAX_RESPONSE_PAYLOAD. RTF is the interchange both ways (the
+   local one. The response side has no bound of its own: a reply bigger
+   than one frame comes in parts (offload_submit_stream), and an export
+   writes each to its file as it arrives. RTF is the interchange both ways (the
    gateway speaks it; docs/formats/offload-protocol.md), without pictures:
    the gateway's converter does not carry them, and the payload cap is
    better spent on text. */
@@ -1325,8 +1326,15 @@ static wp_status convert_import(wp_app_ctx *ctx, u8 *payload, u32 payload_len,
     return st;
 }
 
+/* convert_export's sink: each part of the gateway's reply straight to
+   the file, so a long PDF is never held whole. */
+static wp_status write_part(void *user, const u8 *data, u32 len)
+{
+    return plat_file_write((plat_file *)user, data, len);
+}
+
 /* The document as RTF behind a format id, to the gateway; what comes
-   back is the file, written as is. ODT reads back in, so it is a save
+   back is the file, written as it arrives. ODT reads back in, so it is a save
    and the name sticks; PDF does not, so it is an export, the document
    stays modified and keeps its own name. */
 static wp_status convert_export(wp_app_ctx *ctx, const char *native_path, u8 format_id)
@@ -1335,6 +1343,7 @@ static wp_status convert_export(wp_app_ctx *ctx, const char *native_path, u8 for
     u8 *payload;
     offload_request req;
     offload_response resp;
+    plat_file *out;
     wp_status st;
 
     format_rtf_export(ctx->doc, NULL, 0, &rtf_len);
@@ -1359,22 +1368,27 @@ static wp_status convert_export(wp_app_ctx *ctx, const char *native_path, u8 for
     req.payload_len = rtf_len + 1;
     req.timeout_ms = (u32)WP_ACTION_CONVERT_TIMEOUT_MS;
 
-    st = offload_submit(&req, &resp);
+    if (plat_file_open(native_path, PLAT_FILE_WRITE, &out) != WP_OK) {
+        mem_free(payload);
+        wp_action_tell(ctx, "Couldn't save that file");
+        return WP_ERR;
+    }
+    st = offload_submit_stream(&req, write_part, out, &resp);
     mem_free(payload);
-    if (st != WP_OK) {
-        wp_action_tell(ctx, "Saving that file failed or timed out");
+    plat_file_close(out);
+    /* A transfer that did not finish, or a gateway that said no, leaves
+       no half-written file behind under the name the writer chose. */
+    if (st != WP_OK || resp.status != OFFLOAD_OK) {
+        (void)plat_file_delete(native_path);
+        wp_action_tell(ctx, (st != WP_OK) ? "Saving that file failed or timed out"
+                                          : "The gateway couldn't produce that file format");
         return WP_ERR;
     }
-    if (resp.status != OFFLOAD_OK) {
-        offload_response_free(&resp);
-        wp_action_tell(ctx, "The gateway couldn't produce that file format");
-        return WP_ERR;
+    if (format_id == (u8)OFFLOAD_FORMAT_ODT) {
+        wp_document_mark_saved(ctx->doc);
+        wp_action_remember_path(ctx, native_path);
     }
-    st = wp_action_write_file(ctx, native_path, resp.result, resp.result_len,
-                              (wp_bool)(format_id == (u8)OFFLOAD_FORMAT_ODT));
-    offload_response_free(&resp);
-    if (st == WP_OK && format_id == (u8)OFFLOAD_FORMAT_ODT) wp_action_remember_path(ctx, native_path);
-    return st;
+    return WP_OK;
 }
 
 wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image_sink *sink)

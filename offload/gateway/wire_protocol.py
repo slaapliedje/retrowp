@@ -37,7 +37,17 @@ WIRE_VERSION = 1
 WIRE_HEADER_SIZE = 12
 WIRE_CRC_SIZE = 2
 
-MSG_HELLO, MSG_CAPS, MSG_REQUEST, MSG_RESPONSE, MSG_ERROR = range(5)
+MSG_HELLO, MSG_CAPS, MSG_REQUEST, MSG_RESPONSE, MSG_ERROR, MSG_RESPONSE_PART = range(6)
+
+# A response bigger than one frame goes as MSG_RESPONSE_PART frames of
+# this much, then a MSG_RESPONSE with the rest and the status (wire.h).
+# Only past RESPONSE_SINGLE_MAX -- what a client's one-frame buffer
+# holds -- so a client that predates parts never sees one.
+RESPONSE_PART_MAX = 32768
+RESPONSE_SINGLE_MAX = 65000
+# Smaller, for tests only, so a reply of a few KB comes in parts.
+if os.environ.get('RETROWP_GATEWAY_PART_TEST'):
+    RESPONSE_SINGLE_MAX, RESPONSE_PART_MAX = 2000, 1000
 
 (OP_SPELL_CHECK, OP_GRAMMAR_CHECK, OP_THESAURUS,
  OP_CONVERT_IMPORT, OP_CONVERT_EXPORT, OP_CHAT, OP_IMAGE,
@@ -210,6 +220,11 @@ def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, hand
         except GatewayError:
             break
         status, resp_payload = handle_request(hdr['op'], payload)
+        if len(resp_payload) > RESPONSE_SINGLE_MAX:
+            while len(resp_payload) > RESPONSE_PART_MAX:
+                os.write(write_fd, encode_frame(MSG_RESPONSE_PART, hdr['op'], status, hdr['seq'],
+                                                resp_payload[:RESPONSE_PART_MAX]))
+                resp_payload = resp_payload[RESPONSE_PART_MAX:]
         os.write(write_fd, encode_frame(MSG_RESPONSE, hdr['op'], status, hdr['seq'], resp_payload))
 
     return 0
