@@ -12,7 +12,7 @@ typedef enum {
     WP_ICON_UNDERLINE, WP_ICON_LEFT, WP_ICON_CENTER, WP_ICON_RIGHT,
     WP_ICON_JUSTIFY, WP_ICON_SINGLE, WP_ICON_ONEHALF, WP_ICON_DOUBLE,
     WP_ICON_INDENT_LESS, WP_ICON_INDENT_MORE, WP_ICON_PAGE_BREAK,
-    WP_ICON_HEADER, WP_ICON_FOOTER, WP_ICON_FONT, WP_ICON_SIZE, WP_ICON_PAGESETUP,
+    WP_ICON_HEADER, WP_ICON_FOOTER, WP_ICON_FONT, WP_ICON_SIZE, WP_ICON_PAGESETUP, WP_ICON_SECTION,
     WP_ICON_COUNT
 } wp_icon_id;
 
@@ -43,6 +43,7 @@ static const u16 g_icon_bits[WP_ICON_COUNT][16] = {
     /* FONT */ { 0x0000, 0x0000, 0x1800, 0x1800, 0x2400, 0x2400, 0x4200, 0x4238, 0x7E04, 0x813C, 0x8144, 0x8144, 0xE73A, 0x0000, 0x0000, 0x0000 },
     /* SIZE */ { 0x0000, 0x0000, 0x3000, 0x3000, 0x4800, 0x4800, 0x8400, 0x8410, 0xFC28, 0x8428, 0x847C, 0x8444, 0xCC44, 0x0000, 0x0000, 0x0000 },
     /* PAGESETUP */ { 0x7FF0, 0x4018, 0x4014, 0x555E, 0x4002, 0x5012, 0x4002, 0x5012, 0x4002, 0x5012, 0x4002, 0x5552, 0x4002, 0x4002, 0x7FFE, 0x0000 },
+    /* SECTION */ { 0x3FF0, 0x2010, 0x2FD0, 0x2010, 0x3FF0, 0x0000, 0xFFFF, 0x0000, 0xFFFF, 0x0000, 0x3FF0, 0x2010, 0x2FD0, 0x2010, 0x3FF0, 0x0000 },
 };
 
 /* GENERATED: the 8-row icons for screens with tall pixels -- row pairs
@@ -74,6 +75,7 @@ static const u16 g_icon_bits8[WP_ICON_COUNT][8] = {
     /* FONT */ { 0x1800, 0x2400, 0x4238, 0x7E3C, 0x8144, 0xE73A, 0x0000, 0x0000 },
     /* SIZE */ { 0x3000, 0x4800, 0x8410, 0xFC28, 0x847C, 0xCC44, 0x0000, 0x0000 },
     /* PAGESETUP */ { 0x7FF0, 0x555C, 0x5012, 0x5012, 0x5552, 0x4002, 0x7FFE, 0x0000 },
+    /* SECTION */ { 0x3FF0, 0x2FD0, 0x3FF0, 0xFFFF, 0xFFFF, 0x3FF0, 0x2FD0, 0x3FF0 },
 };
 
 /* The buttons, left to right; a row with action WP_ACT_COUNT is a gap
@@ -113,6 +115,7 @@ static const rb_button g_buttons[] = {
     { WP_ACT_PARA_INDENT_MORE,  WP_ICON_INDENT_MORE, '>' },
     { WP_ACT_COUNT,             0,                   0   },
     { WP_ACT_PARA_PAGE_BREAK,   WP_ICON_PAGE_BREAK,  'P' },
+    { WP_ACT_SECTION_BREAK,     WP_ICON_SECTION,     '=' },
     { WP_ACT_PAGE_HEADER,       WP_ICON_HEADER,      'T' },
     { WP_ACT_PAGE_FOOTER,       WP_ICON_FOOTER,      'F' },
     { WP_ACT_PAGE_SETUP,        WP_ICON_PAGESETUP,   'G' }

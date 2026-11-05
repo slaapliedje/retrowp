@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#include <string.h>
 #include <stddef.h>
 #include "editing.h"
 #include "edit_internal.h"
@@ -10,11 +11,26 @@ void wp_undo_journal_init(wp_undo_journal *journal)
     journal->redo_top = NULL;
 }
 
+/* Every op starts zeroed, so a kind that does not use a field -- extra
+   above all -- never carries garbage into free_stack. */
+static wp_op *op_new(void)
+{
+    wp_op *op = (wp_op *)mem_alloc((u32)sizeof(wp_op));
+    if (op != NULL) memset(op, 0, sizeof(*op));
+    return op;
+}
+
+static void op_free(wp_op *op)
+{
+    mem_free(op->extra);
+    mem_free(op);
+}
+
 static void free_stack(wp_op *top)
 {
     while (top) {
         wp_op *next = top->next;
-        mem_free(top);
+        op_free(top);
         top = next;
     }
 }
@@ -72,7 +88,7 @@ wp_status wp_edit_insert_text(wp_document *doc, wp_undo_journal *journal, wp_pos
     st = insert_span_at_pos(doc, pos, new_span, &local_out);
     if (st != WP_OK) return st;
 
-    op = (wp_op *)mem_alloc((u32)sizeof(wp_op));
+    op = op_new();
     if (op == NULL) return WP_NOMEM;
 
     op->kind = (u8)WP_OP_INSERT_TEXT;
@@ -134,7 +150,7 @@ wp_status wp_edit_delete_range(wp_document *doc, wp_undo_journal *journal,
                                        start_offset, end_offset);
     if (st != WP_OK) return st;
 
-    op = (wp_op *)mem_alloc((u32)sizeof(wp_op));
+    op = op_new();
     if (op == NULL) return WP_NOMEM;
 
     op->kind = (u8)WP_OP_DELETE_TEXT;
@@ -155,7 +171,7 @@ wp_status wp_edit_delete_range(wp_document *doc, wp_undo_journal *journal,
 
 static wp_op *push_marker_op(wp_undo_journal *journal, wp_op_kind kind)
 {
-    wp_op *op = (wp_op *)mem_alloc((u32)sizeof(wp_op));
+    wp_op *op = op_new();
     if (op == NULL) return NULL;
 
     op->kind = (u8)kind;
@@ -199,7 +215,7 @@ wp_status wp_edit_split_paragraph(wp_document *doc, wp_undo_journal *journal,
     st = wp_document_split_paragraph_raw(doc, pos, &local_out);
     if (st != WP_OK) return st;
 
-    op = (wp_op *)mem_alloc((u32)sizeof(wp_op));
+    op = op_new();
     if (op == NULL) return WP_NOMEM;
 
     op->kind = (u8)WP_OP_SPLIT_PARA;
@@ -217,6 +233,115 @@ wp_status wp_edit_split_paragraph(wp_document *doc, wp_undo_journal *journal,
 
     if (out_pos) *out_pos = local_out;
     return WP_OK;
+}
+
+wp_status wp_edit_split_section(wp_document *doc, wp_undo_journal *journal,
+                                wp_pos pos, wp_pos *out_pos)
+{
+    wp_status st;
+    wp_op *op;
+    u32 at;
+    wp_bool grouped = WP_FALSE;
+
+    if (pos.section >= doc->section_count) return WP_RANGE;
+    if (pos.run == 0 && pos.offset == 0) {
+        if (pos.paragraph == 0) return WP_RANGE;   /* nothing would be left before it */
+        at = pos.paragraph;
+    } else {
+        /* Mid-paragraph: Enter first, then the break -- one undo step. */
+        wp_undo_group_begin(journal);
+        grouped = WP_TRUE;
+        st = wp_edit_split_paragraph(doc, journal, pos, NULL);
+        if (st != WP_OK) { wp_undo_group_end(journal); return st; }
+        at = pos.paragraph + 1;
+    }
+
+    op = op_new();
+    if (op == NULL) {
+        if (grouped) wp_undo_group_end(journal);
+        return WP_NOMEM;
+    }
+    st = wp_document_split_section_raw(doc, pos.section, at);
+    if (st != WP_OK) {
+        op_free(op);
+        if (grouped) wp_undo_group_end(journal);
+        return st;
+    }
+    op->kind = (u8)WP_OP_SPLIT_SECTION;
+    op->at.section = pos.section;
+    op->at.paragraph = at;
+    op->at.run = 0;
+    op->at.offset = 0;
+    op->text.offset = 0;
+    op->text.length = 0;
+    op->style_before = 0;
+    op->style_after = 0;
+    commit_edit(doc, journal);
+    op->next = journal->undo_top;
+    journal->undo_top = op;
+    if (grouped) wp_undo_group_end(journal);
+
+    if (out_pos) {
+        out_pos->section = pos.section + 1;
+        out_pos->paragraph = 0;
+        out_pos->run = 0;
+        out_pos->offset = 0;
+    }
+    return WP_OK;
+}
+
+wp_status wp_edit_merge_section(wp_document *doc, wp_undo_journal *journal,
+                                u32 section, wp_pos *out_pos)
+{
+    wp_section *saved;
+    wp_op *op;
+    u32 before;
+    wp_status st;
+
+    if (section + 1 >= doc->section_count) return WP_RANGE;
+    before = doc->sections[section].para_count;
+    op = op_new();
+    saved = (wp_section *)mem_alloc((u32)sizeof(wp_section));
+    if (op == NULL || saved == NULL) {
+        mem_free(op);
+        mem_free(saved);
+        return WP_NOMEM;
+    }
+    *saved = doc->sections[section + 1];   /* its page and header and footer */
+    saved->paras = NULL;
+    saved->para_count = saved->para_capacity = 0;
+
+    st = wp_document_merge_section_raw(doc, section);
+    if (st != WP_OK) {
+        mem_free(saved);
+        mem_free(op);
+        return st;
+    }
+    op->kind = (u8)WP_OP_MERGE_SECTION;
+    op->at.section = section;
+    op->at.paragraph = before;
+    op->extra = saved;
+    commit_edit(doc, journal);
+    op->next = journal->undo_top;
+    journal->undo_top = op;
+
+    if (out_pos) {
+        out_pos->section = section;
+        out_pos->paragraph = before;
+        out_pos->run = 0;
+        out_pos->offset = 0;
+    }
+    return WP_OK;
+}
+
+wp_bool wp_edit_backspace_section(wp_document *doc, wp_undo_journal *journal, wp_pos *cursor)
+{
+    wp_pos out;
+
+    if (cursor->section == 0 || cursor->paragraph != 0 || cursor->run != 0 || cursor->offset != 0)
+        return WP_FALSE;
+    if (wp_edit_merge_section(doc, journal, cursor->section - 1, &out) == WP_OK) *cursor = out;
+    return WP_TRUE;
 }
 
 wp_status wp_edit_merge_paragraph(wp_document *doc, wp_undo_journal *journal,
@@ -258,7 +383,7 @@ wp_status wp_edit_merge_paragraph(wp_document *doc, wp_undo_journal *journal,
     st = wp_document_merge_paragraph_raw(doc, section, paragraph, &local_out);
     if (st != WP_OK) return st;
 
-    op = (wp_op *)mem_alloc((u32)sizeof(wp_op));
+    op = op_new();
     if (op == NULL) return WP_NOMEM;
 
     op->kind = (u8)WP_OP_MERGE_PARA;
@@ -312,7 +437,7 @@ wp_status wp_edit_insert_image(wp_document *doc, wp_undo_journal *journal,
     image_para->style = doc->default_pstyle;
     image_para->layout_dirty = WP_TRUE;
 
-    op = (wp_op *)mem_alloc((u32)sizeof(wp_op));
+    op = op_new();
     if (op == NULL) return WP_NOMEM;
 
     op->kind = (u8)WP_OP_INSERT_IMAGE;
@@ -408,7 +533,30 @@ wp_status wp_edit_delete_selection(wp_document *doc, wp_undo_journal *journal,
     }
 
     if (start.section >= doc->section_count) return WP_RANGE;
-    if (start.section != end.section) return WP_RANGE;
+    if (end.section >= doc->section_count) return WP_RANGE;
+    if (start.section != end.section) {
+        /* Across section breaks: the breaks go with the text, as in
+           every word processor -- the sections the selection spans are
+           merged first (journaled), end following its paragraphs into
+           the section they join, and the rest is an ordinary delete.
+           One undo step for all of it. */
+        u32 s;
+        wp_selection inner;
+
+        wp_undo_group_begin(journal);
+        for (s = end.section; s > start.section; s--) {
+            u32 before = doc->sections[s - 1].para_count;
+            st = wp_edit_merge_section(doc, journal, s - 1, NULL);
+            if (st != WP_OK) { wp_undo_group_end(journal); return st; }
+            end.section = s - 1;
+            end.paragraph += before;
+        }
+        inner.anchor = start;
+        inner.caret = end;
+        st = wp_edit_delete_selection(doc, journal, inner, out_pos);
+        wp_undo_group_end(journal);
+        return st;
+    }
     sec = &doc->sections[start.section];
     if (start.paragraph >= sec->para_count || end.paragraph >= sec->para_count) return WP_RANGE;
 
@@ -572,8 +720,33 @@ wp_status wp_edit_paste_text(wp_document *doc, wp_undo_journal *journal, wp_pos 
 
 static void apply_single_undo_op(wp_document *doc, wp_op *op)
 {
-    wp_section *sec = wp_document_section_get(doc, op->at.section);
-    wp_paragraph *para = wp_section_paragraph_get(sec, op->at.paragraph);
+    wp_section *sec;
+    wp_paragraph *para;
+
+    if (op->kind == (u8)WP_OP_SPLIT_SECTION) {
+        (void)wp_document_merge_section_raw(doc, op->at.section);
+        return;
+    }
+    if (op->kind == (u8)WP_OP_MERGE_SECTION) {
+        /* Split where the join was, and give the section back its own
+           page setup and header and footer. */
+        if (wp_document_split_section_raw(doc, op->at.section, op->at.paragraph) == WP_OK &&
+            op->extra != NULL) {
+            wp_section *back = &doc->sections[op->at.section + 1];
+            const wp_section *was = (const wp_section *)op->extra;
+            back->page_width = was->page_width;
+            back->page_height = was->page_height;
+            back->margin_left = was->margin_left;
+            back->margin_right = was->margin_right;
+            back->margin_top = was->margin_top;
+            back->margin_bottom = was->margin_bottom;
+            back->header = was->header;
+            back->footer = was->footer;
+        }
+        return;
+    }
+    sec = wp_document_section_get(doc, op->at.section);
+    para = wp_section_paragraph_get(sec, op->at.paragraph);
 
     if (op->kind == (u8)WP_OP_INSERT_TEXT) {
         u16 idx = find_run_by_span(para, op->text);
@@ -648,9 +821,18 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
 
 static wp_status apply_single_redo_op(wp_document *doc, wp_op *op)
 {
-    wp_section *sec = wp_document_section_get(doc, op->at.section);
-    wp_paragraph *para = wp_section_paragraph_get(sec, op->at.paragraph);
+    wp_section *sec;
+    wp_paragraph *para;
     wp_status st = WP_OK;
+
+    if (op->kind == (u8)WP_OP_SPLIT_SECTION) {
+        return wp_document_split_section_raw(doc, op->at.section, op->at.paragraph);
+    }
+    if (op->kind == (u8)WP_OP_MERGE_SECTION) {
+        return wp_document_merge_section_raw(doc, op->at.section);
+    }
+    sec = wp_document_section_get(doc, op->at.section);
+    para = wp_section_paragraph_get(sec, op->at.paragraph);
 
     if (op->kind == (u8)WP_OP_INSERT_TEXT) {
         wp_pos out_pos;
@@ -832,7 +1014,7 @@ static wp_status style_one_run(wp_document *doc, wp_undo_journal *journal,
     if (st != WP_OK) return st;
     if (handle == before) return WP_OK;
 
-    op = (wp_op *)mem_alloc((u32)sizeof(wp_op));
+    op = op_new();
     if (op == NULL) return WP_NOMEM;
 
     op->kind = (u8)WP_OP_SET_CSTYLE;

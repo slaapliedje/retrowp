@@ -23,6 +23,63 @@ static wp_status section_table_grow(wp_document *doc, u32 needed_count)
     return WP_OK;
 }
 
+wp_status wp_document_split_section_raw(wp_document *doc, u32 section, u32 paragraph)
+{
+    wp_section *sec, *ns;
+    wp_paragraph *moved;
+    u32 n, i;
+    wp_status st;
+
+    if (section >= doc->section_count) return WP_RANGE;
+    sec = &doc->sections[section];
+    if (paragraph < 1 || paragraph >= sec->para_count) return WP_RANGE;
+    n = sec->para_count - paragraph;
+
+    moved = (wp_paragraph *)mem_alloc(n * (u32)sizeof(wp_paragraph));
+    if (moved == NULL) return WP_NOMEM;
+    st = section_table_grow(doc, doc->section_count + 1);
+    if (st != WP_OK) { mem_free(moved); return st; }
+
+    sec = &doc->sections[section];          /* the table may have moved */
+    for (i = doc->section_count; i > section + 1; i--) doc->sections[i] = doc->sections[i - 1];
+    doc->section_count++;
+
+    ns = &doc->sections[section + 1];
+    *ns = *sec;                              /* page setup, header, footer */
+    memcpy(moved, sec->paras + paragraph, n * (u32)sizeof(wp_paragraph));
+    ns->paras = moved;
+    ns->para_count = n;
+    ns->para_capacity = n;
+    sec->para_count = paragraph;
+    for (i = 0; i < n; i++) ns->paras[i].layout_dirty = WP_TRUE;
+    return WP_OK;
+}
+
+wp_status wp_document_merge_section_raw(wp_document *doc, u32 section)
+{
+    wp_section *sec, *next;
+    u32 need, i;
+
+    if (section + 1 >= doc->section_count) return WP_RANGE;
+    sec = &doc->sections[section];
+    next = &doc->sections[section + 1];
+    need = sec->para_count + next->para_count;
+    if (need > sec->para_capacity) {
+        void *grown = mem_realloc(sec->paras, sec->para_capacity * (u32)sizeof(wp_paragraph),
+                                  need * (u32)sizeof(wp_paragraph));
+        if (grown == NULL) return WP_NOMEM;
+        sec->paras = (wp_paragraph *)grown;
+        sec->para_capacity = need;
+    }
+    memcpy(sec->paras + sec->para_count, next->paras, next->para_count * (u32)sizeof(wp_paragraph));
+    for (i = sec->para_count; i < need; i++) sec->paras[i].layout_dirty = WP_TRUE;
+    sec->para_count = need;
+    mem_free(next->paras);
+    for (i = section + 1; i + 1 < doc->section_count; i++) doc->sections[i] = doc->sections[i + 1];
+    doc->section_count--;
+    return WP_OK;
+}
+
 wp_status wp_document_section_add(wp_document *doc, u32 *out_index)
 {
     wp_status st;

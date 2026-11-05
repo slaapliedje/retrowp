@@ -256,6 +256,20 @@ typedef enum {
        self-contained inverse (remove the image paragraph, re-merge),
        the same shape WP_OP_SPLIT_PARA's own undo already has. */
     WP_OP_INSERT_IMAGE,
+    /* A section break: section at.section was split before paragraph
+       at.paragraph, the paragraphs from there on moving into a new
+       section at.section + 1 (wp_edit_split_section). Undo merges that
+       section back (its own page setup with it -- page setup is not
+       journaled); redo splits again at the same place. Every later op
+       names positions in the split document, and undo runs them first,
+       so their indices stay true. */
+    WP_OP_SPLIT_SECTION,
+    /* The inverse, journaled: section at.section + 1 was merged into
+       at.section, whose own paragraphs numbered at.paragraph before it
+       (wp_edit_merge_section). Undo splits there again, redo merges. The
+       absorbed section's page setup and header and footer are kept in
+       op->extra (a wp_section, no paragraphs) so undo puts them back. */
+    WP_OP_MERGE_SECTION,
     /* M8.5: markers, not edits -- bracket a run of ops on the undo stack
        so wp_edit_undo/redo treats them as one user-facing step. Carry no
        payload (at/text/style_before/style_after all unused). See
@@ -269,6 +283,8 @@ typedef struct wp_op {
     wp_span  text;
     u16      style_before;
     u16      style_after;
+    void    *extra;         /* an op's own saved state, freed with it; NULL
+                               for every kind but WP_OP_MERGE_SECTION */
     struct wp_op *next;     /* journal linkage */
 } wp_op;
 

@@ -4423,6 +4423,7 @@ static wp_bool action_exempt_from_menu(wp_action_id id)
     case WP_ACT_PAGE_FOOTER:
     case WP_ACT_FORMAT_FONT:
     case WP_ACT_PAGE_SETUP:
+    case WP_ACT_SECTION_BREAK:
         return WP_TRUE;
     /* Ctrl+G only, by design -- see actions.c's own comment on why this
        one stays off the hand-built OBJECT tree. */

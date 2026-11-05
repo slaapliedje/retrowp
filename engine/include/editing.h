@@ -241,6 +241,37 @@ wp_status wp_edit_insert_text(wp_document *doc, wp_undo_journal *journal,
 wp_status wp_edit_delete_range(wp_document *doc, wp_undo_journal *journal,
                                 u32 section, u32 paragraph, u16 run_index,
                                 u32 start_offset, u32 end_offset);
+/* Section breaks, raw: split_section moves paragraphs [paragraph,
+   para_count) of `section` into a new section inserted after it, which
+   takes the old one's page setup and header and footer; paragraph must
+   leave both sides at least one (1 <= paragraph < para_count), else
+   WP_RANGE. merge_section is the inverse: section + 1's paragraphs are
+   appended to `section` and section + 1 is removed (its page setup goes
+   with it). Neither is journaled. */
+wp_status wp_document_split_section_raw(wp_document *doc, u32 section, u32 paragraph);
+wp_status wp_document_merge_section_raw(wp_document *doc, u32 section);
+
+/* Insert Section Break at pos, journaled as one undo step: a pos inside
+   a paragraph splits the paragraph first (as Enter does) and the new
+   section starts with the second half; a pos at a paragraph's start
+   starts the section with that paragraph. WP_RANGE at the very start of
+   a section, which would leave an empty one behind. *out_pos, if
+   non-NULL, is the start of the new section. */
+wp_status wp_edit_split_section(wp_document *doc, wp_undo_journal *journal,
+                                wp_pos pos, wp_pos *out_pos);
+
+/* Section break removed, journaled: section + 1's paragraphs join
+   `section`, the break and the absorbed section's page setup going (undo
+   brings both back). *out_pos is where the absorbed section began. */
+wp_status wp_edit_merge_section(wp_document *doc, wp_undo_journal *journal,
+                                u32 section, wp_pos *out_pos);
+
+/* Backspace at the very start of a section, for every keymap scheme:
+   removes the section break before it (wp_edit_merge_section) and moves
+   *cursor to where that section began. WP_FALSE, nothing done, anywhere
+   else -- the scheme's own backspace applies. */
+wp_bool wp_edit_backspace_section(wp_document *doc, wp_undo_journal *journal, wp_pos *cursor);
+
 wp_status wp_edit_split_paragraph(wp_document *doc, wp_undo_journal *journal,
                                    wp_pos pos, wp_pos *out_pos);
 wp_status wp_edit_merge_paragraph(wp_document *doc, wp_undo_journal *journal,

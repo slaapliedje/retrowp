@@ -86,6 +86,11 @@ typedef enum {
        inches -- "1" for all four, or left right top bottom; "2.5cm"
        works too). */
     WP_ACT_PAGE_SETUP,
+    /* Insert Section Break: a new section from the caret on (the
+       paragraph split there first if the caret is inside one), taking
+       this one's paper, margins, header and footer to start with. One
+       undo step; Backspace at a section's start removes the break. */
+    WP_ACT_SECTION_BREAK,
     WP_ACT_COUNT
 } wp_action_id;
 

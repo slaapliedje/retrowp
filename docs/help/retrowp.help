@@ -157,6 +157,10 @@ the mouse. Its buttons, left to right:
   Page Break (the text after the caret starts a new page; at
               the start of a paragraph it turns that paragraph's
               break on or off)
+  Section Break (the text after the caret starts a new section:
+              a new page with its own paper, margins, header and
+              footer, which start as this section's. Backspace
+              at the start of a section removes the break)
   Header, Footer (a line printed at the top or bottom of every
               page; the Format menu has them too on the Amiga
               and Mac)

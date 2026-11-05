@@ -1398,7 +1398,7 @@ void test_rulerbar_panel_look_follows_the_colour_count(void)
     ASSERT_EQ_U32(draw_host_grey_fills(0xC0), 1);       /* the panel, once */
     ASSERT_TRUE(draw_host_grey_fills(0x80) > 20);       /* every button's shadow */
     ASSERT_EQ_U32(draw_host_grey_fills(0xE0), 2);       /* the two pressed: Align Left, Single */
-    ASSERT_EQ_U32(draw_host_mono_calls(), 25);          /* one blit per icon, not a fill per run */
+    ASSERT_EQ_U32(draw_host_mono_calls(), 26);          /* one blit per icon, not a fill per run */
     ASSERT_TRUE(wp_rulerbar_signature(&rb, &ctx) != sig2);   /* a repaint when it changes */
 
     ctx_teardown(&doc, &journal, &ctx);
@@ -1594,3 +1594,78 @@ void test_actions_page_setup_paper_and_margins(void)
     ctx_teardown(&doc, &journal, &ctx);
 }
 
+/* Insert Section Break: one undo step, mid-paragraph or at a paragraph's
+   start, refused at a section's top; Backspace at the new section's
+   start removes the break, and undo brings it and its page back. */
+void test_actions_section_break_and_backspace(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char t[64];
+
+    ctx_setup_imported(&doc, &journal, &ctx, "first\nsecond half\n");
+    ctx.km.vi.cursor.paragraph = 1;
+    ctx.km.vi.cursor.run = 0;
+    ctx.km.vi.cursor.offset = 6;                          /* "second| half" */
+    ASSERT_TRUE(wp_action_find(WP_ACT_SECTION_BREAK)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 2);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 2);
+    ASSERT_EQ_U32(doc.sections[1].para_count, 1);
+    ASSERT_EQ_U32(ctx.km.vi.cursor.section, 1);
+    doc_text(&doc, t, sizeof(t));
+    ASSERT_EQ_STR(t, "first\nsecond\n half\n");
+
+    /* At the top of a section: refused, nothing changed. */
+    ASSERT_TRUE(wp_action_find(WP_ACT_SECTION_BREAK)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 2);
+
+    /* The new section's page is its own; Backspace removes the break. */
+    doc.sections[1].page_width = 16838;
+    ASSERT_TRUE(wp_edit_backspace_section(&doc, &journal, &ctx.km.vi.cursor));
+    ASSERT_EQ_U32(doc.section_count, 1);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 3);
+    ASSERT_EQ_U32(ctx.km.vi.cursor.paragraph, 2);
+
+    /* Undo: the break back, with its landscape page; again: the split
+       paragraph whole and one section. */
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 2);
+    ASSERT_EQ_U32((u32)doc.sections[1].page_width, 16838);
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 1);
+    doc_text(&doc, t, sizeof(t));
+    ASSERT_EQ_STR(t, "first\nsecond half\n");
+    ASSERT_TRUE(wp_edit_redo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 2);
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* A selection across a section break deletes the break with the text,
+   as one undo step. */
+void test_actions_delete_across_a_section_break(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_selection sel;
+    wp_pos out;
+    char t[64];
+
+    ctx_setup_imported(&doc, &journal, &ctx, "first\nsecond half\n");
+    ctx.km.vi.cursor.paragraph = 1;
+    ctx.km.vi.cursor.offset = 6;
+    ASSERT_TRUE(wp_action_find(WP_ACT_SECTION_BREAK)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 2);
+    sel.anchor.section = 0; sel.anchor.paragraph = 0; sel.anchor.run = 0; sel.anchor.offset = 2;
+    sel.caret.section = 1;  sel.caret.paragraph = 0;  sel.caret.run = 0;  sel.caret.offset = 2;
+    ASSERT_TRUE(wp_edit_delete_selection(&doc, &journal, sel, &out) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 1);
+    doc_text(&doc, t, sizeof(t));
+    ASSERT_EQ_STR(t, "fialf\n");
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 2);
+    doc_text(&doc, t, sizeof(t));
+    ASSERT_EQ_STR(t, "first\nsecond\n half\n");
+    ctx_teardown(&doc, &journal, &ctx);
+}

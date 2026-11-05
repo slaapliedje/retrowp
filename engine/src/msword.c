@@ -69,6 +69,8 @@ static wp_bool delete_selection_if_any(wp_msword_state *vs)
    special case, reproduced rather than re-derived. */
 static void delete_char_backward(wp_msword_state *vs)
 {
+    /* At a section's very start: the section break goes first. */
+    if (wp_edit_backspace_section(vs->doc, vs->journal, &vs->cursor)) return;
     if (vs->cursor.run == 0 && vs->cursor.offset == 0 && vs->cursor.paragraph > 0) {
         wp_pos out;
         wp_edit_merge_paragraph(vs->doc, vs->journal, vs->cursor.section, vs->cursor.paragraph - 1, &out);

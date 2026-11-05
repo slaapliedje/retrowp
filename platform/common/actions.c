@@ -635,6 +635,23 @@ static wp_status open_margin_prompt(wp_app_ctx *ctx, wp_bool header)
     return WP_OK;
 }
 
+static wp_status act_section_break(wp_app_ctx *ctx)
+{
+    wp_pos *cur, after;
+    wp_status st;
+
+    if (!ctx->doc_loaded) return WP_OK;
+    cur = wp_keymap_cursor(ctx);
+    st = wp_edit_split_section(ctx->doc, ctx->journal, *cur, &after);
+    if (st == WP_RANGE) {
+        wp_action_tell(ctx, "A section can't start at the top of another");
+        return WP_OK;
+    }
+    if (st != WP_OK) return st;
+    *cur = after;
+    return WP_OK;
+}
+
 /* ---- Page Setup ---------------------------------------------------- */
 
 static wp_section *caret_section(wp_app_ctx *ctx)
@@ -1349,7 +1366,8 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_PAGE_HEADER,       WP_MENU_FORMAT, "Header...",      0,        0,    act_page_header, NULL },
     { WP_ACT_PAGE_FOOTER,       WP_MENU_FORMAT, "Footer...",      0,        0,    act_page_footer, NULL },
     { WP_ACT_FORMAT_FONT,       WP_MENU_FORMAT, "Font...",        0,        0,    act_format_font, NULL },
-    { WP_ACT_PAGE_SETUP,        WP_MENU_FILE,   "Page Setup...",  0,        0,    act_page_setup, NULL }
+    { WP_ACT_PAGE_SETUP,        WP_MENU_FILE,   "Page Setup...",  0,        0,    act_page_setup, NULL },
+    { WP_ACT_SECTION_BREAK,     WP_MENU_FORMAT, "Section Break",  0,        0,    act_section_break, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)
