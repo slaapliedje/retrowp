@@ -924,6 +924,20 @@ GEM4XE_BIN   = bin/gem4xe
 
 # The -O1 exception above; here, where GEM4XE_BUILD has a value.
 $(GEM4XE_BUILD)/linebreak.o: GEM4XE_CFLAGS = $(GEM4XE_O1_CFLAGS)
+# help_doc.c too, since 2026-11-05. At -O2 Calypsi inlines
+# parse_node_directive into wp_help_doc_parse and gives the name's end
+# and the node-address temporary (node_count * 4) one stack slot, 41,s --
+# then still adds that slot into the source pointer of the name's
+# wp_strpool_append. A copy from the wrong place followed, landing over
+# the node table at the start of the first heap arena: line_capacity read
+# back as code bytes, mem_realloc was asked for 2 GB, gem4xe's Malloc
+# answered a negative size with a bank-$00 block (its bug, fixed in
+# gem4xe 49aa443), and the arena's sentinel overwrote PORTB -- the
+# start-up hang of b345046, which followed CODE PLACEMENT only because
+# placement decided what the stray copy read. Traced with gem4xe's
+# instruction history; help_doc at -O1 passes in two different layouts
+# where the allocator at -O1 alone does not.
+$(GEM4XE_BUILD)/help_doc.o: GEM4XE_CFLAGS = $(GEM4XE_O1_CFLAGS)
 
 # timer_atari.c is NOT here: its clock() links on gem4xe now, but it
 # busy-waits, and a spin that never calls the AES starves the accessories
@@ -1116,7 +1130,7 @@ gem4xe-mscan: $(GENERATED)/help_retrowp.h
 	@for f in $(GEM4XE_C_SRC); do \
 	    b=`basename $$f .c`; \
 	    case $$b in \
-	      linebreak) fl="$(GEM4XE_O1_CFLAGS)";; \
+	      linebreak|help_doc) fl="$(GEM4XE_O1_CFLAGS)";; \
 	      *)         fl="$(GEM4XE_CFLAGS)";; \
 	    esac; \
 	    $(G4X_CC) $$fl $(GEM4XE_INCLUDES) --assembly-source $(GEM4XE_ASMDIR)/$$b.s $$f \

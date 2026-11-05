@@ -1071,7 +1071,31 @@ the compiler's own support code (`pseudoRegisters.o`, `integer.o`, `memory.o`,
 RetroWP has no top-level `LICENSE` file. It needs one, and which it should be is
 not a decision this document can make.
 
-## OPEN (2026-11-04): a startup hang that follows the code's placement
+## RESOLVED (2026-11-05): the start-up hang that followed code placement
+
+Cause, traced with gem4xe's instruction history (gem4xe's half) and the
+-O2 listing of help_doc.c (ours): Calypsi at -O2 inlines
+`parse_node_directive` into `wp_help_doc_parse` and gives the name's end
+and the node-address temporary (node_count * 4) one stack slot, 41,s --
+then still adds that slot into the source pointer of the name's
+`wp_strpool_append`. The copy from the wrong place ends up over the node
+table at the start of the first heap arena ($0E:0010 was found holding
+bytes of `format_txt_export`'s code), so a node's `line_capacity` read as
+garbage; `line_table_grow` asked `mem_realloc` for over 2 GB; gem4xe's
+`Malloc` took the negative size for Malloc(-1) and answered a block in
+bank $00 (gem4xe's bug, fixed in its 49aa443); the arena's sentinel
+header landed on the PIA, PORTB went to 0, and the banked window under
+the stack and direct page changed -- a BRK, and gem4xe's fault handler
+spinning, which is the "IRQ entry" PC sampled below. It followed code
+placement only because placement decided what the stray copy read.
+
+Fixed on RetroWP's side by building help_doc.c at -O1 (the Makefile,
+beside linebreak.c's), which passes in two different layouts where the
+allocator alone at -O1 does not; and retroplat's arena_new now refuses
+a size past 16 MB and any answer below $01:0000, so a garbage size is a
+plain WP_NOMEM rather than a heap in bank $00.
+
+### The original report, as written while it was open
 
 With the sections work (format_rtf_import.c + format_rtf_export.c,
 commit "Sections: ...") RetroWP loads (APP_OK, app_near $4B00) and never
