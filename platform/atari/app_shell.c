@@ -1254,6 +1254,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 
     gc.vdi = vdi;
     gc.window_handle = window_handle;
+    gc.clip_on = 0;   /* set where a blit must keep to a redraw rectangle */
     have_sel = wp_keymap_selection(&g_ctx, &sel);
 
     for (si = 0; si < g_doc.section_count; si++) {
@@ -3567,7 +3568,7 @@ static u32 g_rulerbar_sig = 0;
 static wp_bool g_rulerbar_damaged = WP_TRUE;
 
 /* Paints the bar; the caller has set the clip. */
-static void paint_rulerbar(short window_handle, VdiHdl vdi, GRECT work)
+static void paint_rulerbar(short window_handle, VdiHdl vdi, GRECT work, const short *clip)
 {
     atari_gc gc;
     plat_font *font;
@@ -3578,6 +3579,10 @@ static void paint_rulerbar(short window_handle, VdiHdl vdi, GRECT work)
     if (!g_rulerbar_damaged && wp_rulerbar_signature(&rb, &g_ctx) == g_rulerbar_sig) return;
     gc.vdi = vdi;
     gc.window_handle = window_handle;
+    /* The icons are blits, which ignore vs_clip: they keep to the
+       redraw rectangle the caller clipped to. */
+    gc.clip_on = 1;
+    gc.clip[0] = clip[0]; gc.clip[1] = clip[1]; gc.clip[2] = clip[2]; gc.clip[3] = clip[3];
     if (plat_font_open((const u8 *)"", 0, WP_ATARI_STATUSLINE_SIZE_TWIPS, 0, &font) != WP_OK) return;
     plat_font_metrics_get(font, &fm);
     wp_rulerbar_paint((plat_gc *)&gc, font, atari_twips_to_px_y(fm.ascent), &rb, &g_ctx);
@@ -3605,6 +3610,7 @@ static void paint_status_line(short window_handle, VdiHdl vdi, GRECT full_work, 
 
     gc.vdi = vdi;
     gc.window_handle = window_handle;
+    gc.clip_on = 0;   /* set where a blit must keep to a redraw rectangle */
 
     pxy[0] = full_work.g_x;
     pxy[1] = (short)(full_work.g_y + full_work.g_h - bar_h_px);
@@ -3653,6 +3659,7 @@ static void paint_help(short window_handle, VdiHdl vdi)
     wind_get_grect(window_handle, WF_WORKXYWH, &work);
     gc.vdi = vdi;
     gc.window_handle = window_handle;
+    gc.clip_on = 0;   /* set where a blit must keep to a redraw rectangle */
 
     pxy[0] = work.g_x;
     pxy[1] = work.g_y;
@@ -3833,7 +3840,7 @@ static void redraw_window(short window_handle, VdiHdl vdi)
         /* The bar first: it is what a click on it changed, and it sits
            above the text, so the writer sees the answer before the
            document finishes repainting under it. */
-        if (r.g_y < doc_area.g_y) paint_rulerbar(window_handle, vdi, work);
+        if (r.g_y < doc_area.g_y) paint_rulerbar(window_handle, vdi, work, pxy);
         paint_document(window_handle, vdi, doc_area);
         wind_get_grect(window_handle, WF_NEXTXYWH, &r);
     }
@@ -4570,6 +4577,7 @@ static void paint_ruler_scale(short window_handle, VdiHdl vdi, GRECT work,
     plat_font_metrics_get(font, &fm);
     gc.vdi = vdi;
     gc.window_handle = window_handle;
+    gc.clip_on = 0;   /* set where a blit must keep to a redraw rectangle */
 
     wind_get_grect(window_handle, WF_FIRSTXYWH, &r);
     while (r.g_w > 0 && r.g_h > 0) {

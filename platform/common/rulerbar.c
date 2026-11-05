@@ -214,28 +214,13 @@ static wp_bool button_active(wp_app_ctx *ctx, const wp_para_style *ps, wp_action
     }
 }
 
-/* One icon, run by run: a row's set pixels go out as as few rectangles
-   as it has runs (two or three for most rows), not one per pixel. At 8
-   rows the 8-row set is used. */
+/* One icon, in one call: the platform blits it where it can (an 8 MHz
+   ST's toolbar is otherwise hundreds of fills), run by run where it
+   cannot. At 8 rows the 8-row set is used. */
 static void draw_icon(plat_gc *gc, i32 x, i32 y, u8 icon, i32 rows, u8 c)
 {
-    i32 r;
-    i32 n = (rows >= 16) ? 16 : 8;
-
-    for (r = 0; r < n; r++) {
-        u16 bits = (n == 16) ? g_icon_bits[icon][r] : g_icon_bits8[icon][r];
-        i32 col = 0;
-
-        while (col < 16) {
-            i32 start;
-
-            while (col < 16 && !(bits & (0x8000u >> col))) col++;
-            if (col >= 16) break;
-            start = col;
-            while (col < 16 && (bits & (0x8000u >> col))) col++;
-            (void)plat_fill_rect(gc, x + start, y + r, col - start, 1, c, c, c);
-        }
-    }
+    if (rows >= 16) (void)plat_draw_mono(gc, x, y, 16, 16, g_icon_bits[icon], 1, c, c, c);
+    else            (void)plat_draw_mono(gc, x, y, 16, 8, g_icon_bits8[icon], 1, c, c, c);
 }
 
 static void paint_buttons(plat_gc *gc, plat_font *font, i32 ascent,

@@ -1397,6 +1397,7 @@ void test_rulerbar_panel_look_follows_the_colour_count(void)
     ASSERT_EQ_U32(draw_host_grey_fills(0xC0), 1);       /* the panel, once */
     ASSERT_TRUE(draw_host_grey_fills(0x80) > 20);       /* every button's shadow */
     ASSERT_EQ_U32(draw_host_grey_fills(0xE0), 2);       /* the two pressed: Align Left, Single */
+    ASSERT_EQ_U32(draw_host_mono_calls(), 24);          /* one blit per icon, not a fill per run */
     ASSERT_TRUE(wp_rulerbar_signature(&rb, &ctx) != sig2);   /* a repaint when it changes */
 
     ctx_teardown(&doc, &journal, &ctx);
