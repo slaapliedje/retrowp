@@ -180,3 +180,23 @@ through those declarations, or LibreOffice's other spelling, an inline
 LibreOffice both ways: it opens the export with Courier and Times New
 Roman in place, and an ODT it writes reads back with both faces, their
 families and the bold.
+
+## Headers, footers and the page
+
+Since 2026-11-04 an ODT carries a `styles.xml`: the page layout (size
+and margins, from the RTF's `\paperw`... -- an A4 document is A4 in
+LibreOffice) and the one master page, `Standard`, with the header and
+footer in it. Each is one paragraph in a `RWPMargin` style with a centre
+tab stop mid-column and a right one at its edge; the engine's parts
+(`|`: one centred, two left and right, three left, centre and right --
+the PDF's own rule) are apart by `<text:tab/>`, and `#` is a live
+`<text:page-number>` field. Import reads the same back from any ODT's
+default master page -- an empty middle part dropped, a lone centred one
+kept alone -- and hands the engine `\header`/`\footer` groups (`\tab`,
+`\chpgn`) and the page setup. Checked against real LibreOffice: it
+prints "My Report ... Page 1/2" on each page, and its own resave reads
+back to the same header, footer and page.
+
+The ODT's parts other than `mimetype` are deflated now (ODF requires
+only that one stored): a document's ODT is several times smaller, which
+is room under the link's one-frame response.

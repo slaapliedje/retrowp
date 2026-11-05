@@ -270,8 +270,137 @@ _ODT_MANIFEST = (
     '<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">\n'
     ' <manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="application/vnd.oasis.opendocument.text"/>\n'
     ' <manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>\n'
+    ' <manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/>\n'
     '</manifest:manifest>\n'
 )
+
+_ODF_NS_DECLS = (
+    'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+    'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" '
+    'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+    'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" '
+    'xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" '
+)
+
+
+def _margin_parts(text):
+    """A header or footer as the engine keeps it ('|' parts, '#' the page
+    number) as its left, centre and right parts -- one part is centred,
+    two go left and right, three are all three: the PDF's own rule."""
+    parts = text.split('|')
+    if len(parts) == 1:
+        return ['', parts[0], '']
+    if len(parts) == 2:
+        return [parts[0], '', parts[1]]
+    return [parts[0], parts[1], '|'.join(parts[2:])]
+
+
+def _odt_margin_xml(text):
+    """One header or footer paragraph: left<tab>centre<tab>right, '#' a
+    live page-number field."""
+    def part(t):
+        return '<text:page-number text:select-page="current">1</text:page-number>'.join(
+            xml_escape(seg) for seg in t.split('#'))
+    return '<text:p text:style-name="RWPMargin">%s</text:p>' % '<text:tab/>'.join(
+        part(t) for t in _margin_parts(text))
+
+
+def _odt_styles_xml(page, header, footer):
+    """styles.xml: the page (size and margins, in points) as the one
+    master page every paragraph is on, with the header and footer in it.
+    Their paragraph style has a centre tab stop mid-column and a right one
+    at its edge, so the three parts land where the PDF puts them."""
+    w, h, ml, mr, mt, mb = page
+    col = max(72.0, w - ml - mr)
+    master = ''
+    if header:
+        master += '<style:header>%s</style:header>' % _odt_margin_xml(header)
+    if footer:
+        master += '<style:footer>%s</style:footer>' % _odt_margin_xml(footer)
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<office:document-styles ' + _ODF_NS_DECLS + 'office:version="1.2">'
+            '<office:styles>'
+            '<style:style style:name="RWPMargin" style:family="paragraph">'
+            '<style:paragraph-properties><style:tab-stops>'
+            '<style:tab-stop style:position="%.2fpt" style:type="center"/>'
+            '<style:tab-stop style:position="%.2fpt" style:type="right"/>'
+            '</style:tab-stops></style:paragraph-properties>'
+            '<style:text-properties fo:font-size="10pt"/></style:style>'
+            '</office:styles>'
+            '<office:automatic-styles><style:page-layout style:name="RWPPage">'
+            '<style:page-layout-properties fo:page-width="%.2fpt" fo:page-height="%.2fpt" '
+            'fo:margin-left="%.2fpt" fo:margin-right="%.2fpt" fo:margin-top="%.2fpt" '
+            'fo:margin-bottom="%.2fpt"/></style:page-layout></office:automatic-styles>'
+            '<office:master-styles><style:master-page style:name="Standard" '
+            'style:page-layout-name="RWPPage">%s</style:master-page></office:master-styles>'
+            '</office:document-styles>' % (col / 2.0, col, w, h, ml, mr, mt, mb, master))
+
+
+def _pt_from_odf_len(s, default):
+    t = twips_from_odf_len(s)
+    return t / 20.0 if t else default
+
+
+def odt_page_and_margins(odt_bytes):
+    """From styles.xml: the page as (width, height, left, right, top,
+    bottom) in points, or None, and the default master page's header and
+    footer, each a list of parts (left/centre/right, an empty middle part
+    dropped and a lone centre kept alone, the way the engine writes them),
+    each part a list of ('text', s) and ('page',) -- or None."""
+    with zipfile.ZipFile(io.BytesIO(odt_bytes)) as zf:
+        if 'styles.xml' not in zf.namelist():
+            return None, None, None
+        root = ET.fromstring(zf.read('styles.xml'))
+    masters = root.findall('.//' + _q('style', 'master-page'))
+    if not masters:
+        return None, None, None
+    master = next((m for m in masters if m.get(_q('style', 'name')) == 'Standard'), masters[0])
+
+    page = None
+    layout_name = master.get(_q('style', 'page-layout-name'))
+    for pl in root.findall('.//' + _q('style', 'page-layout')):
+        if pl.get(_q('style', 'name')) != layout_name:
+            continue
+        pp = pl.find(_q('style', 'page-layout-properties'))
+        if pp is not None:
+            page = (_pt_from_odf_len(pp.get(_q('fo', 'page-width')), 612.0),
+                    _pt_from_odf_len(pp.get(_q('fo', 'page-height')), 792.0),
+                    _pt_from_odf_len(pp.get(_q('fo', 'margin-left')), 72.0),
+                    _pt_from_odf_len(pp.get(_q('fo', 'margin-right')), 72.0),
+                    _pt_from_odf_len(pp.get(_q('fo', 'margin-top')), 72.0),
+                    _pt_from_odf_len(pp.get(_q('fo', 'margin-bottom')), 72.0))
+
+    def margin(tag):
+        el = master.find(_q('style', tag))
+        p_el = el.find(_q('text', 'p')) if el is not None else None
+        if p_el is None:
+            return None
+        parts = [[]]
+
+        def add(t):
+            if t:
+                parts[-1].append(('text', t))
+
+        def walk(e):
+            add(e.text)
+            for c in e:
+                if c.tag == _q('text', 'tab'):
+                    parts.append([])
+                elif c.tag == _q('text', 'page-number'):
+                    parts[-1].append(('page',))
+                elif c.tag == _q('text', 's'):
+                    add(' ' * int(c.get(_q('text', 'c'), '1')))
+                else:
+                    walk(c)
+                add(c.tail)
+        walk(p_el)
+        if len(parts) == 3 and not parts[1]:
+            parts = [parts[0], parts[2]]
+        elif len(parts) == 3 and not parts[0] and not parts[2]:
+            parts = [parts[1]]
+        return parts if any(parts) else None
+
+    return page, margin('header'), margin('footer')
 
 _ODT_CONTENT_HEADER = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -292,7 +421,7 @@ def _odt_text(text):
     return xml_escape(text).replace('\t', '<text:tab/>')
 
 
-def paragraphs_to_odt_bytes(paragraphs):
+def paragraphs_to_odt_bytes(paragraphs, page=None, header='', footer=''):
     """Minimal but real, spec-valid ODT: mimetype + META-INF/manifest.xml
     + content.xml only -- no styles.xml/meta.xml/settings.xml/Thumbnails,
     all optional per ODF 1.2. Verified openable by real LibreOffice
@@ -379,8 +508,14 @@ def paragraphs_to_odt_bytes(paragraphs):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w') as zf:
         zf.writestr('mimetype', _ODT_MIMETYPE, compress_type=zipfile.ZIP_STORED)
-        zf.writestr('META-INF/manifest.xml', _ODT_MANIFEST)
-        zf.writestr('content.xml', content.encode('utf-8'))
+        # Deflated: only the mimetype must be stored as is (ODF 1.2), and
+        # the rest packs several-fold -- room under the link's one-frame
+        # response for a real document.
+        zf.writestr('META-INF/manifest.xml', _ODT_MANIFEST, compress_type=zipfile.ZIP_DEFLATED)
+        zf.writestr('content.xml', content.encode('utf-8'), compress_type=zipfile.ZIP_DEFLATED)
+        zf.writestr('styles.xml', _odt_styles_xml(page or (612.0, 792.0, 72.0, 72.0, 72.0, 72.0),
+                                                  header, footer).encode('utf-8'),
+                    compress_type=zipfile.ZIP_DEFLATED)
     return buf.getvalue()
 
 
@@ -424,7 +559,19 @@ def _rtf_escape_text(s):
     return ''.join(out)
 
 
-def paragraphs_to_rtf_bytes(paragraphs):
+def _rtf_margin_group(dest, parts):
+    """{\\header ...} in the engine's shape: parts apart by \\tab (its
+    '|'), the page number \\chpgn (its '#')."""
+    out = []
+    for i, part in enumerate(parts):
+        if i:
+            out.append('\\tab ')
+        for tok in part:
+            out.append('\\chpgn ' if tok[0] == 'page' else _rtf_escape_text(tok[1]))
+    return '{\\%s\\pard\\plain %s}' % (dest, ''.join(out))
+
+
+def paragraphs_to_rtf_bytes(paragraphs, page=None, header=None, footer=None):
     colors = []
 
     def color_index(rgb):
@@ -456,6 +603,14 @@ def paragraphs_to_rtf_bytes(paragraphs):
             parts.append('\\red%d\\green%d\\blue%d;' % (r, g, b))
         parts.append('}')
     parts.append('{\\*\\generator RetroWP;}')
+    if page is not None:
+        parts.append('\\paperw%d\\paperh%d\\margl%d\\margr%d\\margt%d\\margb%d' %
+                     tuple(int(round(v * 20)) for v in page))
+    if header:
+        parts.append(_rtf_margin_group('header', header))
+    if footer:
+        parts.append(_rtf_margin_group('footer', footer))
+    parts.append('\r\n')
     font_num = {name: i + 1 for i, (name, _) in enumerate(fonts)}
 
     for p in paragraphs:
@@ -1564,7 +1719,8 @@ def handle_convert_import(payload):
     if format_id != FORMAT_ODT:
         return STATUS_UNSUPPORTED, b''
     try:
-        return STATUS_OK, paragraphs_to_rtf_bytes(odt_bytes_to_paragraphs(body))
+        page, header, footer = odt_page_and_margins(body)
+        return STATUS_OK, paragraphs_to_rtf_bytes(odt_bytes_to_paragraphs(body), page, header, footer)
     except Exception:
         return STATUS_ERR, b''
 
@@ -1580,9 +1736,9 @@ def handle_convert_export(payload):
     except Exception:
         return STATUS_ERR, b''
     try:
-        if format_id == FORMAT_ODT:
-            return STATUS_OK, paragraphs_to_odt_bytes(paragraphs)
         header, footer = rtf_margin_texts(rtf_bytes)
+        if format_id == FORMAT_ODT:
+            return STATUS_OK, paragraphs_to_odt_bytes(paragraphs, rtf_page_setup(rtf_bytes), header, footer)
         return STATUS_OK, paragraphs_to_pdf_bytes(paragraphs, rtf_page_setup(rtf_bytes), header, footer)
     except Exception:
         return STATUS_ERR, b''

@@ -37,7 +37,7 @@ void test_convert_odt_import_via_gateway(void)
     offload_response resp;
     u8 odt_bytes[FIXTURE_CAP];
     u32 odt_len;
-    u8 req_payload[FIXTURE_CAP + 1];
+    static u8 req_payload[FIXTURE_CAP + 1];
     wp_document doc;
     wp_section *sec;
     wp_paragraph *para;
@@ -136,7 +136,7 @@ void test_convert_odt_export_roundtrip_via_gateway(void)
     u32 sec_idx, para_idx;
     u8 rtf_buf[2048];
     u32 rtf_len;
-    u8 req_payload[2048 + 1];
+    static u8 req_payload[FIXTURE_CAP + 1];
     offload_request req;
     offload_response resp;
     u8 odt_bytes[FIXTURE_CAP];
@@ -191,7 +191,7 @@ void test_convert_odt_export_roundtrip_via_gateway(void)
     offload_response_free(&resp);
 
     req_payload[0] = FORMAT_ODT;
-    memcpy(req_payload + 1, odt_bytes, odt_len > sizeof(req_payload) - 1 ? sizeof(req_payload) - 1 : odt_len);
+    memcpy(req_payload + 1, odt_bytes, odt_len);   /* odt_len <= FIXTURE_CAP, checked above */
     req.op = OFFLOAD_CONVERT_IMPORT;
     req.payload = req_payload;
     req.payload_len = odt_len + 1;
@@ -483,6 +483,62 @@ void test_convert_pdf_export_picks_faces_by_family(void)
     ASSERT_TRUE(serif);
     ASSERT_TRUE(mono);
     offload_response_free(&resp);
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+/* The header, the footer and the page cross to ODT and back: styles.xml
+   carries the page layout and a master page whose header and footer
+   hold the parts apart by tabs and '#' as a page-number field, and the
+   way back hands the engine its own \header, \footer and \paperw... */
+void test_convert_odt_carries_headers_footers_and_the_page(void)
+{
+    gateway_handle gw;
+    wp_document doc;
+    static const char rtf[] =
+        "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fswiss Helvetica;}}{\\*\\generator RetroWP;}"
+        "\\paperw11906\\paperh16838\\margl1134\\margr1134\\margt1440\\margb1440"
+        "{\\header\\pard\\plain My Report\\tab Page \\chpgn }{\\footer\\pard\\plain \\chpgn }"
+        "\\pard{\\fs24 Body}\\par}";
+    static u8 req_payload[FIXTURE_CAP + 1];
+    static u8 odt_bytes[FIXTURE_CAP];
+    u32 odt_len;
+    offload_request req;
+    offload_response resp;
+    wp_section *sec;
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    req_payload[0] = FORMAT_ODT;
+    memcpy(req_payload + 1, rtf, sizeof(rtf) - 1);
+    req.op = OFFLOAD_CONVERT_EXPORT;
+    req.payload = req_payload;
+    req.payload_len = (u32)sizeof(rtf);
+    req.timeout_ms = 10000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+    ASSERT_TRUE(resp.result_len <= FIXTURE_CAP);
+    odt_len = resp.result_len;
+    memcpy(odt_bytes, resp.result, odt_len);
+    offload_response_free(&resp);
+
+    req_payload[0] = FORMAT_ODT;
+    memcpy(req_payload + 1, odt_bytes, odt_len);
+    req.op = OFFLOAD_CONVERT_IMPORT;
+    req.payload_len = odt_len + 1;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+    ASSERT_TRUE(format_rtf_import(resp.result, resp.result_len, &doc) == WP_OK);
+    offload_response_free(&resp);
+
+    sec = wp_document_section_get(&doc, 0);
+    ASSERT_EQ_U32(sec->header.length, 16);
+    ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, sec->header), "My Report|Page #", 16);
+    ASSERT_EQ_U32(sec->footer.length, 1);
+    ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, sec->footer), "#", 1);
+    ASSERT_EQ_U32((u32)sec->page_width, 11906);
+    ASSERT_EQ_U32((u32)sec->margin_left, 1134);
+    wp_document_free(&doc);
     offload_shutdown();
     gateway_stop(&gw);
 }
