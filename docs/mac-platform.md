@@ -1,8 +1,12 @@
 # Mac Classic Platform Backend (M12)
 
 `platform/mac` is RetroWP's third real `platform.h` backend, targeting
-classic Mac OS (68k Toolbox + QuickDraw, System 7.5.3 minimum per the
-fixture's own install). This document covers the toolchain, the
+classic Mac OS (68k Toolbox + QuickDraw). The CI fixture runs System
+7.5.3, but that is the fixture's install, not a floor: the app is built
+for a plain 68000 (Retro68's default) and uses only System 6-era calls
+(SFGetFile, WaitNextEvent, a plain NewWindow), and it runs on a MiSTer
+Mac Plus core under System 6 (2026-11-06; see "Real hardware: MiSTer Mac
+Plus" below). This document covers the toolchain, the
 BasiliskII test-fixture recipe, and the honest gotchas hit standing both
 up -- written incrementally per phase, starting here with Phase 0
 (toolchain + CI-fixture bring-up). **Phase 0 is closed**: a reliable,
@@ -1020,3 +1024,33 @@ reliable here in a way it is not on the other two emulators.
 
 With the click added: `2 -> 11` events, 250 painted fragments, 2/2 ROMs
 green.
+
+## Real hardware: MiSTer Mac Plus (2026-11-06)
+
+RetroWP runs on the MiSTer's MacPlus core (release 20260603: a 68000 Mac
+Plus, 4 MB) from its System 6 startup disk -- the first run anywhere but
+BasiliskII, and on an older System than the fixture's. What it took, for
+the next time:
+
+- **The app goes on the startup disk.** That core release mounts floppies
+  read-only, and System 6's Finder will not take a locked disk with no
+  `Desktop` file (Retro68's `.dsk` has none, and a hand-made one is
+  judged damaged). A second SCSI image through an MGL took the boot slot
+  on that release and left a black screen -- and the MiSTer remembers a
+  slot's image in `config/MACPLUS.sN`, so the black screen survived
+  reloads until that file was moved aside. What works: the app's resource
+  fork added to the root of `games/MacPlus/boot.vhd`'s HFS partition with
+  `host/tools/mac_hfs`'s catalog insertion (root parent CNID 2, Finder
+  flags 0), with the core at the menu and the original kept as
+  `boot.vhd.bak`.
+- **Take the app from a full build.** `cmake --build build/mac --target
+  RETROWP` leaves `RETROWP.bin`/`.dsk` stale (the Rez trap above); build
+  everything, or let `ci_mac.sh` do it.
+- **It found a real bug.** retroplat's `plat_dialog_choice` was a popup
+  menu that dropped its title and closed at once when called with the
+  mouse button up -- so every message (a save failure, File > Print's
+  answer) had always vanished on the Mac. It is a modal dialog now
+  (retroplat 308447f).
+- The Mac Plus keyboard has no Control key: shortcuts there are the
+  menus' Command keys (Command-P prints).
+
