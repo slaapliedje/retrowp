@@ -7,7 +7,9 @@ A third offload/gateway executable, alongside mock_gateway.c (fixture-
 backed THESAURUS/SPELL_CHECK) and ollama_gateway.c (real-LLM-backed
 THESAURUS). This one answers OFFLOAD_CONVERT_IMPORT for format_id=ODT,
 and OFFLOAD_CONVERT_EXPORT for format_id=ODT or format_id=PDF --
-everything else responds OFFLOAD_UNSUPPORTED. There is deliberately no
+and OFFLOAD_PRINT -- the PDF, printed on this machine's printer -- when
+it has one to print on (--printer / --print-dir, below); everything else
+responds OFFLOAD_UNSUPPORTED. There is deliberately no
 PDF *import*: PDF has no general, reliable text-reconstruction guarantee
 (docs/formats/offload-protocol.md has the reasoning), so it is export-only.
 
@@ -47,6 +49,8 @@ contract, not a silent gap.
 import io
 import os
 import re
+import shutil
+import subprocess
 import sys
 import zipfile
 import zlib
@@ -55,8 +59,8 @@ import xml.etree.ElementTree as ET
 
 from wire_protocol import (
     STATUS_OK, STATUS_UNSUPPORTED, STATUS_ERR,
-    OP_CONVERT_IMPORT, OP_CONVERT_EXPORT,
-    run_gateway,
+    OP_CONVERT_IMPORT, OP_CONVERT_EXPORT, OP_PRINT,
+    parse_gateway_args, run_gateway_with_args,
 )
 
 FORMAT_ODT = 1
@@ -1893,17 +1897,98 @@ def handle_convert_export(payload):
         return STATUS_ERR, b''
 
 
+# Where OFFLOAD_PRINT goes, set from the command line in main(): a
+# printer through the print command (CUPS's lp), or a directory each
+# printout is written into as a PDF -- for tests, and for a Pi whose
+# "printer" is a folder shared out to something else.
+PRINT_TO = {'dir': None, 'command': 'lp', 'printer': None}
+
+
+def _reply(text):
+    return text.encode('utf-8')[:200]
+
+
+def handle_print(payload):
+    """OFFLOAD_PRINT: a copy count, then the document's RTF. Printed from
+    the same PDF CONVERT_EXPORT would answer; the reply is one line for
+    the writer either way, with STATUS_ERR when nothing was printed."""
+    if len(payload) < 2:
+        return STATUS_ERR, _reply('Nothing to print')
+    copies = max(1, min(payload[0], 99))
+    rtf_bytes = payload[1:]
+    try:
+        paragraphs = rtf_bytes_to_paragraphs(rtf_bytes)
+        sections = rtf_sections(rtf_bytes)
+        page, header, footer = sections[0]
+        pdf = paragraphs_to_pdf_bytes(paragraphs, page, header, footer, sections)
+    except Exception:
+        return STATUS_ERR, _reply('The gateway could not lay that out')
+    pages = pdf.count(b'/Type /Page ')
+    what = '1 page' if pages == 1 else '%d pages' % pages
+
+    if PRINT_TO['dir']:
+        try:
+            # Past the highest number there, so a printout someone has
+            # since deleted never has its successor written over.
+            taken = [int(m.group(1)) for m in
+                     (re.match(r'print-(\d+)\.pdf$', n) for n in os.listdir(PRINT_TO['dir']))
+                     if m]
+            name = 'print-%04d.pdf' % (max(taken, default=0) + 1)
+            # One file, whatever the copies: they are the reader's to print.
+            with open(os.path.join(PRINT_TO['dir'], name), 'wb') as f:
+                f.write(pdf)
+            return STATUS_OK, _reply('Printed %s to %s' % (what, name))
+        except OSError:
+            return STATUS_ERR, _reply('The gateway could not save the printout')
+
+    cmd = [PRINT_TO['command'], '-t', 'RetroWP', '-n', str(copies)]
+    if PRINT_TO['printer']:
+        cmd += ['-d', PRINT_TO['printer']]
+    try:
+        done = subprocess.run(cmd, input=pdf, capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return STATUS_ERR, _reply('The gateway could not reach its printer')
+    if done.returncode != 0:
+        err = done.stderr.decode('utf-8', 'replace').strip().splitlines()
+        return STATUS_ERR, _reply(err[-1] if err else 'The printer refused the document')
+    where = (' on ' + PRINT_TO['printer']) if PRINT_TO['printer'] else ''
+    return STATUS_OK, _reply('Printed %s%s' % (what, where))
+
+
 def handle_request(op, payload):
     if op == OP_CONVERT_IMPORT:
         return handle_convert_import(payload)
     if op == OP_CONVERT_EXPORT:
         return handle_convert_export(payload)
+    if op == OP_PRINT and (PRINT_TO['dir'] or PRINT_TO['printer'] is not None):
+        return handle_print(payload)
     return STATUS_UNSUPPORTED, b''
 
 
 def main():
+    args = parse_gateway_args(__doc__, [
+        (('--printer',), {'default': None, 'metavar': 'NAME',
+                          'help': 'answer OFFLOAD_PRINT on this CUPS printer ("" for '
+                                  'the default one), through --print-command'}),
+        (('--print-command',), {'default': 'lp',
+                                'help': 'what prints a PDF from stdin, lp\'s flags '
+                                        '(default: lp)'}),
+        (('--print-dir',), {'default': None, 'metavar': 'DIR',
+                            'help': 'answer OFFLOAD_PRINT by writing each printout '
+                                    'into DIR as print-NNNN.pdf instead'}),
+    ])
+    PRINT_TO['dir'] = args.print_dir
+    PRINT_TO['command'] = args.print_command
+    if args.printer is not None and not args.print_dir:
+        if shutil.which(args.print_command) is None:
+            print('odt-gateway: no %s here, so no printing' % args.print_command,
+                  file=sys.stderr, flush=True)
+        else:
+            PRINT_TO['printer'] = args.printer
     ops_supported = (1 << OP_CONVERT_IMPORT) | (1 << OP_CONVERT_EXPORT)
-    return run_gateway(handle_request, ops_supported, 'odt-gateway', description=__doc__)
+    if PRINT_TO['dir'] or PRINT_TO['printer'] is not None:
+        ops_supported |= 1 << OP_PRINT
+    return run_gateway_with_args(args, handle_request, ops_supported, 'odt-gateway')
 
 
 if __name__ == '__main__':

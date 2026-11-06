@@ -22,13 +22,18 @@ typedef enum {
                                  target's own color ceiling (M15); see
                                  docs/formats/offload-protocol.md's
                                  OFFLOAD_IMAGE section for the wire shape */
-    OFFLOAD_DICTATE          /* listen on the GATEWAY's own microphone ->
+    OFFLOAD_DICTATE,         /* listen on the GATEWAY's own microphone ->
                                  UTF-8 text (T174). The audio never crosses
                                  the link: the request is 4 fixed bytes and
                                  the response is just the transcript, which
                                  is why this stays comfortable even at 9600
                                  baud. See docs/formats/offload-protocol.md's
                                  OFFLOAD_DICTATE section for the wire shape */
+    OFFLOAD_PRINT            /* RTF -> printed on the GATEWAY's printer,
+                                 from the PDF CONVERT_EXPORT would make;
+                                 the reply is one line for the writer.
+                                 docs/formats/offload-protocol.md's
+                                 OFFLOAD_PRINT section has the shape */
 } offload_op;
 
 /* The format_id byte that leads an OFFLOAD_CONVERT_IMPORT/EXPORT payload

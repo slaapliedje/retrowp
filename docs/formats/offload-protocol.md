@@ -446,6 +446,41 @@ because the protocol is strictly request/response and a second op would
 be needed — `TRIM_SILENCE` exists precisely so the writer does not have
 to sit out the full timeout after every sentence.
 
+### `OFFLOAD_PRINT` (op 8)
+
+File > Print on the gateway's printer (`wp_action_file_print`,
+platform/common/actions.c). The engine sends the document the way
+`CONVERT_EXPORT` does, as its own RTF; the gateway lays it out as the
+same PDF `CONVERT_EXPORT` with `format_id=2` would answer, and prints that.
+
+- **Request payload:**
+  ```
+  offset  size  field
+  0       1     copies     1..99 (a gateway clamps anything else)
+  1       ...   RTF bytes, from format_rtf_export()
+  ```
+- **Response payload:** one line of UTF-8 for the writer, no newline --
+  `"Printed 3 pages on Office"` -- whatever the status. `OFFLOAD_OK`
+  means the printout was handed to the printer (or the folder, below);
+  `OFFLOAD_ERR` means nothing was printed, and the line says why, from
+  the print command's own last line of stderr where there is one. The
+  program shows the line as it came, cut to a status line's length.
+
+The CAPS bit is set only by a gateway that has somewhere to print, so a
+program offers the gateway's printer only when it is there.
+`odt_gateway.py` answers it when started with `--printer NAME` (CUPS's
+`lp -d NAME`; `--printer ""` is lp's default printer, and
+`--print-command` names a program taking lp's flags `-t`, `-n` and
+`-d`) and that command exists, or with `--print-dir DIR`, which writes
+each printout into DIR as `print-NNNN.pdf`, numbered past the highest one
+already there -- for tests, and for a Pi whose "printer" is a folder
+something else picks up. Without either the bit is clear and a request
+anyway is `OFFLOAD_UNSUPPORTED`. Payloads past one frame go in request
+parts, as for `CONVERT_EXPORT`.
+
+A machine's own printer port is not this op: that printout is made on
+the machine, by `format_prn` (docs/formats/prn.md).
+
 ### Any other op
 
 The mock gateway responds `RESPONSE` with `status = OFFLOAD_UNSUPPORTED`
@@ -651,6 +686,18 @@ writer with its own text layout (word-wrap, pagination, per-line
 positioning against real Adobe AFM glyph metrics), since unlike ODT, a
 PDF has no importer downstream to defer layout to. `FORMAT_PDF` is
 export-only; there is no PDF import.
+
+It answers `OFFLOAD_PRINT` too, from that same PDF, when it is given a
+printer: `--printer NAME` (CUPS; `""` for the default printer) prints
+through `--print-command` (default `lp`), and `--print-dir DIR` writes the
+printouts into a folder instead. Without either it leaves the CAPS bit
+clear. See the op's own section above. On a Pi with CUPS and a printer
+set up, the serial gateway becomes a print server with, e.g.:
+
+```
+odt_gateway.py --serial-rx /dev/ttyAMA0 --serial-tx /dev/ttyAMA0 \
+    --serial-baud 19200 --printer ""
+```
 
 ## Shared Python gateway plumbing (`offload/gateway/wire_protocol.py`, M15)
 

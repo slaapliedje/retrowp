@@ -633,6 +633,9 @@ void test_offload_submit_fails_after_gateway_killed(void);
 
 /* offload/gateway/odt_gateway.py (M7 T7.2) */
 void test_convert_odt_import_via_gateway(void);
+void test_convert_print_needs_a_printer(void);
+void test_convert_print_to_a_folder(void);
+void test_convert_print_through_lp(void);
 void test_convert_odt_export_roundtrip_via_gateway(void);
 void test_convert_pdf_export_via_gateway(void);
 void test_convert_pdf_export_uses_the_document_page(void);
@@ -1240,6 +1243,9 @@ static const test_case g_cases[] = {
     { "offload_short_frame_times_out", test_offload_short_frame_times_out },
     { "offload_submit_fails_after_gateway_killed", test_offload_submit_fails_after_gateway_killed },
     { "convert_odt_import_via_gateway", test_convert_odt_import_via_gateway },
+    { "convert_print_needs_a_printer", test_convert_print_needs_a_printer },
+    { "convert_print_to_a_folder", test_convert_print_to_a_folder },
+    { "convert_print_through_lp", test_convert_print_through_lp },
     { "convert_odt_export_roundtrip_via_gateway", test_convert_odt_export_roundtrip_via_gateway },
     { "convert_pdf_export_via_gateway", test_convert_pdf_export_via_gateway },
     { "convert_pdf_export_uses_the_document_page", test_convert_pdf_export_uses_the_document_page },

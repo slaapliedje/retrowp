@@ -709,3 +709,135 @@ void test_convert_a_large_document_goes_in_parts(void)
     offload_shutdown();
     gateway_stop(&gw);
 }
+
+/* ---- OFFLOAD_PRINT ---------------------------------------------------- */
+
+#include <sys/stat.h>
+
+#define PRINT_DIR "build/test_print"
+
+/* The folder empty of printouts, which a test elsewhere leaves there. */
+static void print_dir_fresh(void)
+{
+    char name[40] = PRINT_DIR "/print-000N.pdf";
+    char *digit = name + sizeof(PRINT_DIR "/print-000") - 1;
+
+    for (*digit = '1'; *digit <= '9'; (*digit)++) (void)remove(name);
+    (void)remove(PRINT_DIR "/lp.args");
+    (void)remove(PRINT_DIR "/lp.pdf");
+    (void)mkdir("build", 0755);
+    (void)mkdir(PRINT_DIR, 0755);
+}
+
+/* "Alpha", a one-page document, as the action sends it: a copy count,
+   then its RTF. */
+static u32 print_payload(u8 *buf, u32 cap, u8 copies)
+{
+    static const char rtf[] = "{\\rtf1\\ansi{\\fonttbl{\\f0 Helvetica;}}\\f0\\fs24 Alpha\\par}";
+    u32 n = (u32)sizeof(rtf) - 1;
+
+    if (n + 1 > cap) return 0;
+    buf[0] = copies;
+    memcpy(buf + 1, rtf, n);
+    return n + 1;
+}
+
+static void submit_print(const char *const *args, offload_status want_status, const char *want_reply)
+{
+    gateway_handle gw;
+    offload_capabilities caps;
+    offload_request req;
+    offload_response resp;
+    u8 payload[256];
+    u32 n = (u32)strlen(want_reply);
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, args, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    ASSERT_TRUE(offload_query(&caps) == WP_OK);
+    ASSERT_TRUE((caps.ops_supported & (1uL << OFFLOAD_PRINT)) != 0);
+
+    req.op = OFFLOAD_PRINT;
+    req.payload = payload;
+    req.payload_len = print_payload(payload, sizeof(payload), 2);
+    req.timeout_ms = 10000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_EQ_U32(resp.status, want_status);
+    ASSERT_EQ_U32(resp.result_len, n);
+    if (resp.result_len == n) ASSERT_MEM_EQ(resp.result, want_reply, n);
+    offload_response_free(&resp);
+
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+/* No printer configured: the CAPS bit is clear, so a program never
+   offers it, and a request anyway is unsupported. */
+void test_convert_print_needs_a_printer(void)
+{
+    gateway_handle gw;
+    offload_capabilities caps;
+    offload_request req;
+    offload_response resp;
+    u8 payload[256];
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    ASSERT_TRUE(offload_query(&caps) == WP_OK);
+    ASSERT_TRUE((caps.ops_supported & (1uL << OFFLOAD_PRINT)) == 0);
+
+    req.op = OFFLOAD_PRINT;
+    req.payload = payload;
+    req.payload_len = print_payload(payload, sizeof(payload), 1);
+    req.timeout_ms = 5000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_EQ_U32(resp.status, OFFLOAD_UNSUPPORTED);
+    offload_response_free(&resp);
+
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+/* --print-dir: the printout is the PDF, in the folder. */
+void test_convert_print_to_a_folder(void)
+{
+    static const char *const args[] = { "--print-dir", PRINT_DIR, NULL };
+    char head[8];
+    plat_file *f;
+    u32 got = 0;
+
+    print_dir_fresh();
+    submit_print(args, OFFLOAD_OK, "Printed 1 page to print-0001.pdf");
+    ASSERT_TRUE(plat_file_open(PRINT_DIR "/print-0001.pdf", PLAT_FILE_READ, &f) == WP_OK);
+    ASSERT_TRUE(plat_file_read(f, (u8 *)head, 4, &got) == WP_OK);
+    plat_file_close(f);
+    ASSERT_EQ_U32(got, 4);
+    ASSERT_MEM_EQ(head, "%PDF", 4);
+}
+
+/* --printer: the PDF goes to the print command's stdin with lp's flags
+   -- a title, the copies, the printer -- and a refusal comes back as
+   STATUS_ERR with a line the program can show. */
+void test_convert_print_through_lp(void)
+{
+    static const char *const args[] = { "--printer", "Office",
+                                        "--print-command", "host/tests/fake_lp.sh", NULL };
+    static const char *const refuses[] = { "--printer", "", "--print-command", "false", NULL };
+    char got[64];
+    plat_file *f;
+    u32 n = 0;
+
+    print_dir_fresh();
+    submit_print(args, OFFLOAD_OK, "Printed 1 page on Office");
+    ASSERT_TRUE(plat_file_open(PRINT_DIR "/lp.args", PLAT_FILE_READ, &f) == WP_OK);
+    ASSERT_TRUE(plat_file_read(f, (u8 *)got, sizeof(got) - 1, &n) == WP_OK);
+    plat_file_close(f);
+    got[n] = '\0';
+    ASSERT_EQ_STR(got, "-t\nRetroWP\n-n\n2\n-d\nOffice\n");
+    ASSERT_TRUE(plat_file_open(PRINT_DIR "/lp.pdf", PLAT_FILE_READ, &f) == WP_OK);
+    ASSERT_TRUE(plat_file_read(f, (u8 *)got, 4, &n) == WP_OK);
+    plat_file_close(f);
+    ASSERT_MEM_EQ(got, "%PDF", 4);
+
+    submit_print(refuses, OFFLOAD_ERR, "The printer refused the document");
+}
+

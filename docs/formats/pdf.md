@@ -205,17 +205,14 @@ properties the automated test's size constraint can't exercise):
 
 ## Known gaps
 
-- **No images, tables, or headers/footers** -- text-only layout of the
-  same attribute subset `docs/formats/rtf.md` documents. Image support
-  is deliberately NOT attempted as an extension of this gateway: there
-  is currently no image concept anywhere in the core document model
-  (`engine/include/docmodel.h`) and no real import path that could ever
-  produce one (RTF's `\pict` group is discarded on import, ODT has no
-  frame/image handling here) -- adding it properly means extending the
-  document model first, per CLAUDE.md's "document model is the single
-  source of truth" rule, a cross-cutting lift on the order of a platform
-  milestone. Tracked as its own future milestone item in
-  `docs/milestones.md`, not silently dropped or half-implemented here.
+- **No images or tables** -- text-only layout of the same attribute
+  subset `docs/formats/rtf.md` documents, plus the page, sections and
+  headers/footers above. The document model has pictures (M15), but the
+  RTF this gateway reads drops `\pict`, so a picture is left out of the
+  PDF rather than drawn; drawing one means decoding the RTF's DIB here.
+  The same PDF is what File > Print prints on the gateway's printer
+  (`OFFLOAD_PRINT`, docs/formats/offload-protocol.md), so it shares the
+  gap.
 - **Extended-charset (non-ASCII) glyph widths are approximated** for any
   style slot still on Tier 0 (no `fonttools`, or that particular
   Liberation face missing on this host) -- see the width-table note
