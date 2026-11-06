@@ -124,7 +124,8 @@ typedef enum {
     WP_WSACTION_SAVE_QUIT,     /* ^KX -- save & exit */
     WP_WSACTION_FORMAT_BOLD,      /* ^PB */
     WP_WSACTION_FORMAT_ITALIC,    /* ^PY */
-    WP_WSACTION_FORMAT_UNDERLINE  /* ^PS */
+    WP_WSACTION_FORMAT_UNDERLINE, /* ^PS */
+    WP_WSACTION_PRINT             /* ^KP -- File > Print */
 } wp_wordstar_action_kind;
 
 /* doc/journal are borrowed, same convention wp_vimode_init already

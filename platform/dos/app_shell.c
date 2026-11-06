@@ -1407,6 +1407,10 @@ void app_shell_run(void)
         wp_config_load(WP_DOS_CONFIG_PATH, &cfg);
         wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_doc, &g_journal);
         g_ctx.ensure_offload = ensure_offload; /* ODT/PDF in the shared file flow */
+        /* DOS's printer device, LPT1 unless MODE says otherwise; a
+           printer on a PC takes the PC's own character set. */
+        g_ctx.printer_path = "PRN";
+        g_ctx.printer_codepage = 437;
         g_ctx.view.line_px = dos_line_rows;
     }
 

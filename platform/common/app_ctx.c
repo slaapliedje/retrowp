@@ -24,6 +24,8 @@ void wp_app_ctx_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
     wp_viewport_init(&ctx->view, NULL);
     ctx->doc_path[0] = '\0';
     ctx->ensure_offload = NULL;
+    ctx->printer_path = NULL;
+    ctx->printer_codepage = 0;
     memset(&ctx->prompt, 0, sizeof(ctx->prompt));
 
     ctx->doc_loaded = WP_FALSE;

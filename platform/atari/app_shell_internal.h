@@ -218,7 +218,9 @@
 /* File > Save As. Appended, like New and Undo: array order is nothing
    to the AES. OF_LASTOB moves to this final object. */
 #define WP_MENU_OBJ_FILE_SAVE_AS         47
-#define WP_MENU_OBJ_COUNT        48
+/* File > Print..., appended the same way; OF_LASTOB moves here. */
+#define WP_MENU_OBJ_FILE_PRINT           48
+#define WP_MENU_OBJ_COUNT        49
 
 extern WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 

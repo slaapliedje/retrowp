@@ -8,6 +8,8 @@
 #include "gateway_harness.h"
 #include "draw_host.h"
 #include "window_host.h"
+#include <stdio.h>
+#include <sys/stat.h>
 
 static void build_doc_with_text(wp_document *doc, const char *text)
 {
@@ -1669,3 +1671,78 @@ void test_actions_delete_across_a_section_break(void)
     ASSERT_EQ_STR(t, "first\nsecond\n half\n");
     ctx_teardown(&doc, &journal, &ctx);
 }
+
+/* File > Print: the machine's own printer (a file here) when there is no
+   link; the gateway's when its CAPS says it prints; the writer's choice
+   between them, the gateway's by default; and what the writer is told
+   when there is neither. */
+void test_actions_file_print_routes(void)
+{
+    static const char prn[] = "build/test_actions.prn";
+    static const char *const print_dir[] = { "--print-dir", "build/test_print", NULL };
+    char old[] = "build/test_print/print-000N.pdf";
+    char *digit = old + sizeof("build/test_print/print-000") - 1;
+    gateway_handle gw;
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[4096];
+    u32 n;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Alpha\nBeta\n");
+    ctx.ensure_offload = no_link;
+
+    /* Neither. */
+    ASSERT_TRUE(wp_action_file_print(&ctx) != WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "Printing needs a printer or a gateway");
+
+    /* Here: the printout, CR LF lines, a form feed to end the page. */
+    (void)remove(prn);
+    ctx.printer_path = prn;
+    ctx.printer_codepage = 437;
+    ASSERT_TRUE(wp_action_file_print(&ctx) == WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "Printed 1 page");
+    read_whole_file(prn, text, sizeof(text));
+    ASSERT_TRUE(strstr(text, "Alpha\r\n") != NULL);
+    ASSERT_TRUE(strstr(text, "Beta\r\n") != NULL);
+    n = (u32)strlen(text);
+    ASSERT_TRUE(n > 0 && text[n - 1] == '\f');
+
+    /* A printer that cannot be opened. */
+    ctx.printer_path = "build/no-such-dir/printer";
+    ASSERT_TRUE(wp_action_file_print(&ctx) != WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "The printer isn't ready");
+
+    /* A gateway that does not print, and nothing here. */
+    ASSERT_TRUE(gateway_start_bin("offload/gateway/odt_gateway.py", NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    ctx.ensure_offload = NULL;
+    ctx.printer_path = NULL;
+    ASSERT_TRUE(wp_action_file_print(&ctx) != WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "The gateway has no printer");
+    offload_shutdown();
+    gateway_stop(&gw);
+
+    /* A gateway that prints: it alone, then the choice. */
+    (void)mkdir("build/test_print", 0755);
+    for (*digit = '1'; *digit <= '9'; (*digit)++) (void)remove(old);
+    ASSERT_TRUE(gateway_start_bin("offload/gateway/odt_gateway.py", print_dir, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    ASSERT_TRUE(wp_action_file_print(&ctx) == WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "Printed 1 page to print-0001.pdf");
+
+    ctx.printer_path = prn;
+    ASSERT_TRUE(wp_action_file_print(&ctx) == WP_OK);          /* the default: the gateway */
+    ASSERT_EQ_STR(window_host_last_title(), "Printed 1 page to print-0002.pdf");
+    (void)remove(prn);
+    window_host_next_choice(1);                                 /* this machine's */
+    ASSERT_TRUE(wp_action_file_print(&ctx) == WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "Printed 1 page");
+    read_whole_file(prn, text, sizeof(text));
+    ASSERT_TRUE(strstr(text, "Alpha\r\n") != NULL);
+
+    offload_shutdown();
+    gateway_stop(&gw);
+    ctx_teardown(&doc, &journal, &ctx);
+}
+

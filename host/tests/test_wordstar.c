@@ -401,6 +401,12 @@ void test_wordstar_kx_returns_save_quit_and_kq_returns_quit(void)
     action = wp_wordstar_feed_key(&vs, key);
     ASSERT_TRUE(action == WP_WSACTION_QUIT);
 
+    key.mods = (u8)WP_MOD_CTRL; key.codepoint = 'k';
+    wp_wordstar_feed_key(&vs, key);
+    key.mods = 0; key.codepoint = 'p';
+    action = wp_wordstar_feed_key(&vs, key);
+    ASSERT_TRUE(action == WP_WSACTION_PRINT);
+
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
 }

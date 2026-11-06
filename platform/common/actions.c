@@ -6,6 +6,7 @@
 #include "format_rtf.h"
 #include "format_ws.h"
 #include "format_md.h"
+#include "format_prn.h"
 #include "offload.h"
 #include "keymap.h"
 #include "editing.h"
@@ -1367,7 +1368,8 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_PAGE_FOOTER,       WP_MENU_FORMAT, "Footer...",      0,        0,    act_page_footer, NULL },
     { WP_ACT_FORMAT_FONT,       WP_MENU_FORMAT, "Font...",        0,        0,    act_format_font, NULL },
     { WP_ACT_PAGE_SETUP,        WP_MENU_FILE,   "Page Setup...",  0,        0,    act_page_setup, NULL },
-    { WP_ACT_SECTION_BREAK,     WP_MENU_FORMAT, "Section Break",  0,        0,    act_section_break, NULL }
+    { WP_ACT_SECTION_BREAK,     WP_MENU_FORMAT, "Section Break",  0,        0,    act_section_break, NULL },
+    { WP_ACT_FILE_PRINT,        WP_MENU_FILE,   "Print...",       "Ctrl+P", 0x10, wp_action_file_print, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)
@@ -1579,6 +1581,153 @@ static wp_status convert_export(wp_app_ctx *ctx, const char *native_path, u8 for
         wp_action_remember_path(ctx, native_path);
     }
     return WP_OK;
+}
+
+/* ---- Print (see actions.h) ------------------------------------------ */
+
+static wp_bool gateway_prints(void)
+{
+    offload_capabilities caps;
+
+    return (wp_bool)(offload_available() && offload_query(&caps) == WP_OK &&
+                     (caps.ops_supported & (1uL << (u32)OFFLOAD_PRINT)) != 0);
+}
+
+/* The gateway's one-line answer, told as it came, else `fallback`. */
+static void tell_reply(wp_app_ctx *ctx, const offload_response *resp, const char *fallback)
+{
+    char line[64];
+    u32 n = 0;
+
+    while (resp->result != NULL && n < resp->result_len && n < (u32)sizeof(line) - 1 &&
+           resp->result[n] != '\n' && resp->result[n] != '\0') {
+        line[n] = (char)resp->result[n];
+        n++;
+    }
+    /* Cut short, it ends on a whole character. */
+    if (resp->result != NULL && n < resp->result_len) {
+        while (n > 0 && ((u8)line[n] & 0xC0u) == 0x80u) n--;
+    }
+    line[n] = '\0';
+    wp_action_tell(ctx, n > 0 ? line : fallback);
+}
+
+/* The document as RTF behind a copy count, to the gateway's printer. */
+static wp_status print_on_gateway(wp_app_ctx *ctx)
+{
+    u32 rtf_len = 0;
+    u8 *payload;
+    offload_request req;
+    offload_response resp;
+    wp_bool ok;
+
+    format_rtf_export(ctx->doc, NULL, 0, &rtf_len);
+    if (rtf_len + 1 > convert_max_file()) {
+        wp_action_tell(ctx, "The document is too large to send to the gateway");
+        return WP_RANGE;
+    }
+    payload = (u8 *)mem_alloc(rtf_len + 1);
+    if (payload == NULL) {
+        wp_action_tell(ctx, "Not enough memory to print");
+        return WP_NOMEM;
+    }
+    payload[0] = 1;   /* copies */
+    if (format_rtf_export(ctx->doc, payload + 1, rtf_len, &rtf_len) != WP_OK) {
+        mem_free(payload);
+        wp_action_tell(ctx, "Couldn't build the document to print");
+        return WP_ERR;
+    }
+
+    req.op = OFFLOAD_PRINT;
+    req.payload = payload;
+    req.payload_len = rtf_len + 1;
+    req.timeout_ms = (u32)WP_ACTION_CONVERT_TIMEOUT_MS;
+    if (offload_submit(&req, &resp) != WP_OK) {
+        mem_free(payload);
+        wp_action_tell(ctx, "Printing failed or timed out");
+        return WP_ERR;
+    }
+    mem_free(payload);
+    ok = (wp_bool)(resp.status == OFFLOAD_OK);
+    tell_reply(ctx, &resp, ok ? "Sent to the gateway's printer" : "The gateway couldn't print that");
+    offload_response_free(&resp);
+    return ok ? WP_OK : WP_ERR;
+}
+
+static wp_status write_printer(void *user, const u8 *bytes, u32 len)
+{
+    return plat_file_write((plat_file *)user, bytes, len);
+}
+
+/* format_prn's printout, to the machine's own printer. */
+static wp_status print_here(wp_app_ctx *ctx)
+{
+    wp_prn_options opt;
+    plat_file *prn;
+    u32 pages = 0;
+    wp_status st;
+
+    if (plat_file_open(ctx->printer_path, PLAT_FILE_WRITE, &prn) != WP_OK) {
+        wp_action_tell(ctx, "The printer isn't ready");
+        return WP_ERR;
+    }
+    memset(&opt, 0, sizeof(opt));
+    opt.codepage = ctx->printer_codepage;
+    opt.crlf = WP_TRUE;
+    st = format_prn_export(ctx->doc, &opt, write_printer, prn, &pages);
+    plat_file_close(prn);
+    if (st == WP_NOMEM) {
+        wp_action_tell(ctx, "Not enough memory to print");
+    } else if (st != WP_OK) {
+        wp_action_tell(ctx, "The printer stopped taking the document");
+    } else if (pages == 0) {
+        wp_action_tell(ctx, "There is nothing to print");
+    } else {
+        /* "Printed 12 pages" */
+        char msg[32] = "Printed ";
+        char digits[12];
+        u32 pos = 8, n = 0;
+        while (pages > 0 && n < (u32)sizeof(digits)) {
+            digits[n++] = (char)('0' + pages % 10u);
+            pages /= 10u;
+        }
+        while (n > 0) msg[pos++] = digits[--n];
+        strcpy(msg + pos, (pos == 9 && msg[8] == '1') ? " page" : " pages");
+        wp_action_tell(ctx, msg);
+    }
+    return st;
+}
+
+wp_status wp_action_file_print(wp_app_ctx *ctx)
+{
+    wp_bool up, on_gateway, here;
+
+    if (ctx == NULL || !ctx->doc_loaded) return WP_OK;
+    here = (wp_bool)(ctx->printer_path != NULL);
+    up = (ctx->ensure_offload != NULL) ? ctx->ensure_offload() : offload_available();
+    on_gateway = (wp_bool)(up && gateway_prints());
+
+    if (on_gateway && here) {
+        static const char *const labels[2] = { "The gateway's printer", "This machine's printer" };
+        const u8 *ptrs[2];
+        u32 lens[2], chosen = 0;
+        wp_bool cancelled = WP_TRUE;
+        u32 i;
+
+        for (i = 0; i < 2; i++) {
+            ptrs[i] = (const u8 *)labels[i];
+            lens[i] = (u32)strlen(labels[i]);
+        }
+        if (plat_dialog_choice(ctx->window, (const u8 *)"Print on", 8, ptrs, lens, 2, 0,
+                               &cancelled, &chosen) != WP_OK || cancelled) {
+            return WP_OK;
+        }
+        return chosen == 0 ? print_on_gateway(ctx) : print_here(ctx);
+    }
+    if (on_gateway) return print_on_gateway(ctx);
+    if (here) return print_here(ctx);
+    wp_action_tell(ctx, up ? "The gateway has no printer" : "Printing needs a printer or a gateway");
+    return WP_ERR;
 }
 
 wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image_sink *sink)

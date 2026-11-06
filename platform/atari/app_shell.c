@@ -148,10 +148,10 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_DESK_DUMMY5,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 20, 1 },
     { WP_MENU_OBJ_DESK_DUMMY6,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 20, 1 },
     { WP_MENU_OBJ_DESK_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  7, 20, 1 },
-    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_NEW,    WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 6,  0, 12, 5 },
+    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_NEW,    WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 6,  0, 12, 6 },
     { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 12, 1 },
     { WP_MENU_OBJ_FILE_SAVE_AS,  -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 12, 1 },
-    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  4, 12, 1 },
+    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 12, 1 },
     { WP_MENU_OBJ_TOOLS_BOX,     WP_MENU_OBJ_EDIT_UNDO,   WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 12, 0, 8,  4 },
     { WP_MENU_OBJ_EDIT_COPY,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 8,  1 },
     { WP_MENU_OBJ_EDIT_PASTE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 8,  1 },
@@ -193,10 +193,14 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_EDIT_CUT,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  0, 8,  1 },
     /* File > Save As, appended for the same reason as New above: the
        AES walks ob_next, not array order. Third in the File chain, so
-       its ob_next is Quit (y 3, Quit moved to y 4, the box to five rows
-       and twelve columns for the longer label). OF_LASTOB lives here
-       now, on the final array entry, and nowhere else. */
-    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  3, 12, 1 }
+       its ob_next was Quit (y 3; the box went to twelve columns for the
+       longer label) and is Print's now. */
+    { WP_MENU_OBJ_FILE_PRINT,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  3, 12, 1 },
+    /* File > Print..., appended the same way: after Save As in the File
+       chain, so its ob_next is Quit (y 4; Quit to y 5, the box to six
+       rows). OF_LASTOB lives here now, on the final array entry, and
+       nowhere else. */
+    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  4, 12, 1 }
 };
 
 /* T169: how many text fragments the paint loop has actually drawn since
@@ -215,6 +219,7 @@ static WP_AES_NEAR char g_text_new[]   = "  New";
 static WP_AES_NEAR char g_text_open[]  = "  Open";
 static WP_AES_NEAR char g_text_save[]  = "  Save";
 static WP_AES_NEAR char g_text_save_as[] = "  Save As...";
+static WP_AES_NEAR char g_text_print[] = "  Print...";
 static WP_AES_NEAR char g_text_quit[]  = "  Quit";
 static WP_AES_NEAR char g_text_undo[]  = "  Undo";
 static WP_AES_NEAR char g_text_cut[]   = "  Cut";
@@ -335,6 +340,7 @@ void wp_menu_tree_init(short wcell, short hcell,
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_OPEN],  g_text_open);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE],  g_text_save);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS], g_text_save_as);
+    OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_PRINT], g_text_print);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_QUIT],  g_text_quit);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO],  g_text_undo);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_CUT],  g_text_cut);
@@ -505,7 +511,7 @@ static wp_bool child_chain_ok(short parent)
    the table nor the local-item list, i.e. drawn, highlightable, and
    silently inert. Bumping it remains the prompt to go wire the item up. */
 #define WP_ATARI_MENU_TITLES              6   /* Desk File Edit Tools Format Help */
-#define WP_ATARI_MENU_DISPATCHED_LEAVES  25   /* About + 5 File + 4 Edit + 4 Tools + 8 Format + 3 Help */
+#define WP_ATARI_MENU_DISPATCHED_LEAVES  26   /* About + 6 File + 4 Edit + 4 Tools + 8 Format + 3 Help */
 #define WP_ATARI_MENU_INERT_LEAVES        7   /* separator + 6 AES-reserved Desk slots */
 
 /* Defined next to the dispatch table it validates, far below -- this
@@ -736,8 +742,10 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_OPEN], g_text_open)) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_next != WP_MENU_OBJ_FILE_SAVE_AS) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE], g_text_save)) TREE_FAIL();
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_next != WP_MENU_OBJ_FILE_QUIT) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_next != WP_MENU_OBJ_FILE_PRINT) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS], g_text_save_as)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_PRINT].ob_next != WP_MENU_OBJ_FILE_QUIT) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_PRINT], g_text_print)) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_next != WP_MENU_OBJ_FILE_BOX) TREE_FAIL();
     if ((wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_QUIT], g_text_quit)) TREE_FAIL();
@@ -840,9 +848,13 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_tail != -1) TREE_FAIL();
     if ((wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
     if ((wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Save As was appended */
-    if ((wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Print was appended */
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_PRINT].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_type != G_STRING) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_type != G_STRING) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_PRINT].ob_type != G_STRING) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_PRINT].ob_head != -1) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_PRINT].ob_tail != -1) TREE_FAIL();
     if ((wp_menu_tree[WP_MENU_OBJ_FILE_NEW].ob_flags & OF_HIDETREE) != 0) TREE_FAIL();
 
     /* Every item this menu bar shows must resolve to a real action, and
@@ -4379,6 +4391,7 @@ static const wp_menu_action_pair g_menu_actions[] = {
     { WP_MENU_OBJ_FILE_OPEN,          WP_ACT_FILE_OPEN },
     { WP_MENU_OBJ_FILE_SAVE,          WP_ACT_FILE_SAVE },
     { WP_MENU_OBJ_FILE_SAVE_AS,       WP_ACT_FILE_SAVE_AS },
+    { WP_MENU_OBJ_FILE_PRINT,         WP_ACT_FILE_PRINT },
     { WP_MENU_OBJ_FILE_QUIT,          WP_ACT_FILE_QUIT },
     { WP_MENU_OBJ_EDIT_UNDO,          WP_ACT_EDIT_UNDO },
     { WP_MENU_OBJ_EDIT_CUT,           WP_ACT_EDIT_CUT },
@@ -5024,6 +5037,13 @@ void app_shell_run(void)
            doesn't run until load_sample_document below). */
         wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_doc, &g_journal);
         g_ctx.ensure_offload = ensure_offload; /* ODT/PDF in the shared file flow */
+#ifndef GEM4XE_APP_GEM_H
+        /* GEMDOS's printer, the Centronics port: an Epson-style printer
+           takes the PC character set, which the ST's own largely is.
+           gem4xe has no printer device, so Print there is the gateway's. */
+        g_ctx.printer_path = "PRN:";
+        g_ctx.printer_codepage = 437;
+#endif
         g_ctx.view.line_px = atari_twips_to_px_y; /* the conversion paint_document advances y with */
     }
 

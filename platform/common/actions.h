@@ -91,6 +91,9 @@ typedef enum {
        this one's paper, margins, header and footer to start with. One
        undo step; Backspace at a section's start removes the break. */
     WP_ACT_SECTION_BREAK,
+    /* File > Print: the gateway's printer, or the machine's own
+       (wp_action_file_print). */
+    WP_ACT_FILE_PRINT,
     WP_ACT_COUNT
 } wp_action_id;
 
@@ -286,6 +289,14 @@ wp_status wp_action_file_open(struct wp_app_ctx *ctx, wp_pick_path_fn pick,
    name before the shared exporter sees it. */
 wp_bool wp_action_save_path(struct wp_app_ctx *ctx, wp_bool save_as, wp_pick_path_fn pick,
                             char *path_out, u32 cap);
+
+/* File > Print, whole. The gateway's printer when the link is up and
+   its gateway prints (OFFLOAD_PRINT: the document as RTF, printed there
+   from its PDF); else the machine's own, ctx->printer_path, as
+   format_prn lays it out; when both are there the writer is asked which.
+   With neither, the writer is told. WP_OK when nothing was done
+   (declined, nothing to print). */
+wp_status wp_action_file_print(struct wp_app_ctx *ctx);
 
 /* File > Save (save_as false) or Save As (true), whole. */
 wp_status wp_action_file_save(struct wp_app_ctx *ctx, wp_bool save_as, wp_pick_path_fn pick,

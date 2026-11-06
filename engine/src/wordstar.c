@@ -508,6 +508,7 @@ static wp_wordstar_action_kind handle_prefix_key(wp_wordstar_state *vs, wp_key_e
         case 's': case 'd': return WP_WSACTION_SAVE;
         case 'x': return WP_WSACTION_SAVE_QUIT;
         case 'q': return WP_WSACTION_QUIT;
+        case 'p': return WP_WSACTION_PRINT;
         default: return WP_WSACTION_BEEP;
         }
     case 'q':

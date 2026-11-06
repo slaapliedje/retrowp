@@ -84,6 +84,13 @@ typedef struct wp_app_ctx {
        NULL means the link is whatever offload_available() says. */
     wp_bool (*ensure_offload)(void);
 
+    /* The machine's own printer, as a file to write -- the ST's "PRN:",
+       the Amiga's "PRT:", DOS's "PRN" -- and the code page it reads
+       (codepage.h; 0 is plain ASCII). NULL when there is none to print
+       on without a gateway. File > Print (wp_action_file_print). */
+    const char *printer_path;
+    u16         printer_codepage;
+
     wp_prompt prompt;   /* the status line's one-line text prompt (prompt.h) */
 
     wp_bool doc_loaded;

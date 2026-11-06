@@ -205,6 +205,10 @@ static wp_keymap_outcome feed_key_ws(wp_app_ctx *ctx, wp_key_event ev)
         outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
         outcome.action_id = (u8)WP_ACT_FORMAT_UNDERLINE;
         break;
+    case WP_WSACTION_PRINT:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FILE_PRINT;
+        break;
     case WP_WSACTION_BEEP:
         outcome.kind = (u8)WP_KEYMAP_RESULT_BEEP;
         break;

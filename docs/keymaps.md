@@ -234,6 +234,7 @@ The "diamond" cursor cluster (`^S`/`^D` char, `^E`/`^X` line/paragraph,
 | Save (keep editing) | `^KS` or `^KD` |
 | Save & exit | `^KX` |
 | Abandon (no save) | `^KQ` |
+| Print | `^KP` |
 | Bold / Italic / Underline | `^PB` / `^PY` / `^PS` |
 | Find | `^QF` |
 | Find and Replace | `^QA` |

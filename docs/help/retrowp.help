@@ -16,6 +16,7 @@ Pick a topic:
 {Command Line|CommandLine}
 {Undo and Redo|UndoRedo}
 {Format Menu and Shortcuts|Format}
+{Printing|Print}
 {About RetroWP|About}
 @endnode
 
@@ -209,6 +210,28 @@ On DOS the buttons are letters in brackets and the ruler is a
 row of dots: [ and ] are the margins, > the first-line indent,
 | the left indent, < the right, and L R C D the tab stops.
 Where > and | share a cell, dragging there moves both.
+
+{Back to Main|Main}
+@endnode
+
+@node Print "Printing"
+File > Print (Ctrl+P) prints the document, on one of two
+printers:
+
+  The gateway's -- a printer the offload gateway (the Pi on the
+  serial line) has. It prints the document as its PDF would
+  look: the fonts, sizes and styles, pictures left out.
+
+  This machine's -- the printer port: PRN: on the ST, PRT: on
+  the Amiga (through the Printer preferences), PRN on DOS. It
+  prints plain text at ten characters to the inch and six
+  lines to the inch, with the page's paper and margins, the
+  paragraphs' alignment, indents, tab stops and spacing, and
+  the header and footer. Bold, italic and fonts are not
+  printed.
+
+When both are there you are asked which; the gateway's is
+picked first. The Mac and gem4xe print on the gateway's only.
 
 {Back to Main|Main}
 @endnode
