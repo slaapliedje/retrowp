@@ -519,6 +519,17 @@ void test_format_txt_import_no_trailing_newline(void);
 void test_format_txt_import_crlf(void);
 void test_format_txt_import_empty_creates_zero_paragraphs(void);
 void test_format_txt_export_reports_size_on_overflow(void);
+void test_format_prn_letter_page(void);
+void test_format_prn_crlf(void);
+void test_format_prn_wraps_at_words(void);
+void test_format_prn_cuts_a_long_word(void);
+void test_format_prn_alignment(void);
+void test_format_prn_indents_and_tabs(void);
+void test_format_prn_spacing(void);
+void test_format_prn_pages_header_footer(void);
+void test_format_prn_page_break_and_top_space(void);
+void test_format_prn_encodings(void);
+void test_format_prn_empty_document(void);
 
 /* format_rtf_import.c */
 void test_format_rtf_import_rejects_bad_header(void);
@@ -1122,6 +1133,17 @@ static const test_case g_cases[] = {
     { "format_txt_import_crlf", test_format_txt_import_crlf },
     { "format_txt_import_empty_creates_zero_paragraphs", test_format_txt_import_empty_creates_zero_paragraphs },
     { "format_txt_export_reports_size_on_overflow", test_format_txt_export_reports_size_on_overflow },
+    { "format_prn_letter_page", test_format_prn_letter_page },
+    { "format_prn_crlf", test_format_prn_crlf },
+    { "format_prn_wraps_at_words", test_format_prn_wraps_at_words },
+    { "format_prn_cuts_a_long_word", test_format_prn_cuts_a_long_word },
+    { "format_prn_alignment", test_format_prn_alignment },
+    { "format_prn_indents_and_tabs", test_format_prn_indents_and_tabs },
+    { "format_prn_spacing", test_format_prn_spacing },
+    { "format_prn_pages_header_footer", test_format_prn_pages_header_footer },
+    { "format_prn_page_break_and_top_space", test_format_prn_page_break_and_top_space },
+    { "format_prn_encodings", test_format_prn_encodings },
+    { "format_prn_empty_document", test_format_prn_empty_document },
 
     { "format_rtf_import_rejects_bad_header", test_format_rtf_import_rejects_bad_header },
     { "format_rtf_import_decodes_other_code_pages", test_format_rtf_import_decodes_other_code_pages },
