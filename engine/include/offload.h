@@ -29,11 +29,14 @@ typedef enum {
                                  is why this stays comfortable even at 9600
                                  baud. See docs/formats/offload-protocol.md's
                                  OFFLOAD_DICTATE section for the wire shape */
-    OFFLOAD_PRINT            /* RTF -> printed on the GATEWAY's printer,
+    OFFLOAD_PRINT,           /* RTF -> printed on the GATEWAY's printer,
                                  from the PDF CONVERT_EXPORT would make;
                                  the reply is one line for the writer.
                                  docs/formats/offload-protocol.md's
                                  OFFLOAD_PRINT section has the shape */
+    OFFLOAD_PRINT_OPTIONS    /* nothing -> the gateway printer's options,
+                                 one tab-separated line each: key, label,
+                                 default, name=label choices. Same section */
 } offload_op;
 
 /* The format_id byte that leads an OFFLOAD_CONVERT_IMPORT/EXPORT payload

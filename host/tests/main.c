@@ -640,6 +640,8 @@ void test_convert_print_through_lp(void);
 void test_convert_hello_mid_session_is_a_new_handshake(void);
 void test_convert_gateway_resyncs_past_noise(void);
 void test_convert_request_without_hello(void);
+void test_convert_print_options_listed(void);
+void test_convert_print_option_refused(void);
 void test_convert_odt_export_roundtrip_via_gateway(void);
 void test_convert_pdf_export_via_gateway(void);
 void test_convert_pdf_export_uses_the_document_page(void);
@@ -1254,6 +1256,8 @@ static const test_case g_cases[] = {
     { "convert_hello_mid_session_is_a_new_handshake", test_convert_hello_mid_session_is_a_new_handshake },
     { "convert_gateway_resyncs_past_noise", test_convert_gateway_resyncs_past_noise },
     { "convert_request_without_hello", test_convert_request_without_hello },
+    { "convert_print_options_listed", test_convert_print_options_listed },
+    { "convert_print_option_refused", test_convert_print_option_refused },
     { "convert_odt_export_roundtrip_via_gateway", test_convert_odt_export_roundtrip_via_gateway },
     { "convert_pdf_export_via_gateway", test_convert_pdf_export_via_gateway },
     { "convert_pdf_export_uses_the_document_page", test_convert_pdf_export_uses_the_document_page },

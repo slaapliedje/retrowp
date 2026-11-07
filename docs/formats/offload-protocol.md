@@ -453,12 +453,26 @@ platform/common/actions.c). The engine sends the document the way
 `CONVERT_EXPORT` does, as its own RTF; the gateway lays it out as the
 same PDF `CONVERT_EXPORT` with `format_id=2` would answer, and prints that.
 
-- **Request payload:**
+- **Request payload,** one of two shapes. The first byte tells them
+  apart, since a copy count is never 0:
   ```
   offset  size  field
   0       1     copies     1..99 (a gateway clamps anything else)
   1       ...   RTF bytes, from format_rtf_export()
   ```
+  or, carrying the writer's options (from `OFFLOAD_PRINT_OPTIONS`, below):
+  ```
+  offset  size  field
+  0       1     0          (the options form)
+  1       1     copies     1..99
+  2       2     length     big-endian, of the options text
+  4       n     options    "key=value" lines, LF-ended: the choices that
+                           differ from the printer's defaults
+  4+n     ...   RTF bytes
+  ```
+  The gateway checks every value against what it offered and refuses one
+  it did not (`OFFLOAD_ERR`, "Two-sided cannot be sideways on this
+  printer"); an unknown key is ignored.
 - **Response payload:** one line of UTF-8 for the writer, no newline --
   `"Printed 3 pages on Office"` -- whatever the status. `OFFLOAD_OK`
   means the printout was handed to the printer (or the folder, below);
@@ -477,6 +491,34 @@ already there -- for tests, and for a Pi whose "printer" is a folder
 something else picks up. Without either the bit is clear and a request
 anyway is `OFFLOAD_UNSUPPORTED`. Payloads past one frame go in request
 parts, as for `CONVERT_EXPORT`.
+
+### `OFFLOAD_PRINT_OPTIONS` (op 9)
+
+What the gateway's printer lets a writer choose, for File > Print's
+options. The request is empty. The reply (`OFFLOAD_OK`) is UTF-8 text, one
+line per option, tab-separated:
+
+```
+key<TAB>label<TAB>default<TAB>name=label<TAB>name=label...<LF>
+```
+
+for example
+
+```
+sides	Two-sided	one-sided	one-sided=Off	two-sided-long-edge=Long edge	two-sided-short-edge=Short edge
+```
+
+The set is small and fixed, so every program can show it with a choice
+dialog: `copies` (1-5, 10), `sides` (when the queue has a Duplex
+option), `color` (Colour or Gray, from the queue's ColorModel or HP's
+HPPJLColorAsGray), `tray` (its InputSlot choices, named for reading) and
+`collate`. `odt_gateway.py` maps them from `lpoptions -l` on the queue
+(`--print-options-command` names another program taking its flags) and
+turns the choices back into lp arguments -- `sides=` as CUPS's own,
+the rest as the queue's PPD options. Printer-specific extras (halftones,
+edge control, media weights) are left out on purpose. The CAPS bit is set
+alongside `OFFLOAD_PRINT`'s; a gateway without it gets the copy-count
+form and the printer's defaults.
 
 A machine's own printer port is not this op: that printout is made on
 the machine, by `format_prn` (docs/formats/prn.md).

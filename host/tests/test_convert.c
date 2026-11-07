@@ -963,3 +963,83 @@ void test_convert_request_without_hello(void)
 
     ASSERT_TRUE(request_without_hello(strict, &got, reply, sizeof(reply), &len) != WP_OK);
 }
+
+/* ---- OFFLOAD_PRINT_OPTIONS -------------------------------------------- */
+
+static const char *const options_gateway[] = {
+    "--printer", "Office", "--print-command", "host/tests/fake_lp.sh",
+    "--print-options-command", "host/tests/fake_lpoptions.sh", NULL };
+
+/* The gateway lists its printer's options, mapped from the queue's own
+   (the M477fdn's, by fake_lpoptions.sh): copies, two-sided from its
+   Duplex, colour from HPPJLColorAsGray, paper feed from InputSlot, collate
+   -- and nothing printer-specific like EconoMode. */
+void test_convert_print_options_listed(void)
+{
+    gateway_handle gw;
+    offload_capabilities caps;
+    offload_request req;
+    offload_response resp;
+    char text[1024];
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, options_gateway, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    ASSERT_TRUE(offload_query(&caps) == WP_OK);
+    ASSERT_TRUE((caps.ops_supported & (1uL << OFFLOAD_PRINT_OPTIONS)) != 0);
+    req.op = OFFLOAD_PRINT_OPTIONS;
+    req.payload = NULL;
+    req.payload_len = 0;
+    req.timeout_ms = 10000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_EQ_U32(resp.status, OFFLOAD_OK);
+    ASSERT_TRUE(resp.result_len < sizeof(text));
+    memcpy(text, resp.result, resp.result_len);
+    text[resp.result_len] = '\0';
+    offload_response_free(&resp);
+    ASSERT_EQ_STR(text,
+        "copies\tCopies\t1\t1=1\t2=2\t3=3\t4=4\t5=5\t10=10\n"
+        "sides\tTwo-sided\tone-sided\tone-sided=Off\ttwo-sided-long-edge=Long edge\t"
+            "two-sided-short-edge=Short edge\n"
+        "color\tColour\tcolor\tcolor=Colour\tgray=Gray\n"
+        "tray\tPaper feed\tAuto\tAuto=Automatic\tTray1=Tray 1\tTray2=Tray 2\tTray3=Tray 3\t"
+            "ManualFeed=Manual feed\n"
+        "collate\tCollate\toff\toff=Off\ton=On\n");
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+/* A choice the printer does not offer is refused, with the reason. */
+void test_convert_print_option_refused(void)
+{
+    gateway_handle gw;
+    offload_request req;
+    offload_response resp;
+    static const char rtf[] = "{\\rtf1\\ansi{\\fonttbl{\\f0 Helvetica;}}\\f0\\fs24 Alpha\\par}";
+    static const char opts[] = "tray=Tray9\n";
+    u8 payload[256];
+    u32 n = 0;
+    const char *want = "Paper feed cannot be Tray9 on this printer";
+
+    payload[n++] = 0;
+    payload[n++] = 1;
+    payload[n++] = 0;
+    payload[n++] = (u8)(sizeof(opts) - 1);
+    memcpy(payload + n, opts, sizeof(opts) - 1);
+    n += (u32)sizeof(opts) - 1;
+    memcpy(payload + n, rtf, sizeof(rtf) - 1);
+    n += (u32)sizeof(rtf) - 1;
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, options_gateway, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    req.op = OFFLOAD_PRINT;
+    req.payload = payload;
+    req.payload_len = n;
+    req.timeout_ms = 10000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_EQ_U32(resp.status, OFFLOAD_ERR);
+    ASSERT_EQ_U32(resp.result_len, (u32)strlen(want));
+    if (resp.result_len == strlen(want)) ASSERT_MEM_EQ(resp.result, want, resp.result_len);
+    offload_response_free(&resp);
+    offload_shutdown();
+    gateway_stop(&gw);
+}

@@ -45,6 +45,7 @@ import io
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import zipfile
@@ -54,7 +55,7 @@ import xml.etree.ElementTree as ET
 
 from wire_protocol import (
     STATUS_OK, STATUS_UNSUPPORTED, STATUS_ERR,
-    OP_CONVERT_IMPORT, OP_CONVERT_EXPORT, OP_PRINT,
+    OP_CONVERT_IMPORT, OP_CONVERT_EXPORT, OP_PRINT, OP_PRINT_OPTIONS,
     parse_gateway_args, run_gateway_with_args,
 )
 
@@ -1896,7 +1897,108 @@ def handle_convert_export(payload):
 # printer through the print command (CUPS's lp), or a directory each
 # printout is written into as a PDF -- for tests, and for a Pi whose
 # "printer" is a folder shared out to something else.
-PRINT_TO = {'dir': None, 'command': 'lp', 'printer': None}
+PRINT_TO = {'dir': None, 'command': 'lp', 'printer': None, 'options_command': 'lpoptions'}
+
+COPIES_CHOICES = ('1', '2', '3', '4', '5', '10')
+
+
+def _pretty_choice(name):
+    """A PPD choice name as a writer reads it: ManualFeed is "Manual
+    feed", Tray1 is "Tray 1", Auto is "Automatic"."""
+    if name == 'Auto':
+        return 'Automatic'
+    words = re.sub(r'(?<=[a-z])(?=[A-Z0-9])', ' ', name).split(' ')
+    return ' '.join([words[0]] + [w.lower() if w.isalpha() else w for w in words[1:]])
+
+
+def _queue_options():
+    """The printer queue's own options, from lpoptions -l: {key: (label,
+    default, [choices])}; {} when there is no printer to ask."""
+    if PRINT_TO['printer'] is None:
+        return {}
+    cmd = [PRINT_TO['options_command'], '-l']
+    if PRINT_TO['printer']:
+        cmd += ['-p', PRINT_TO['printer']]
+    try:
+        done = subprocess.run(cmd, capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    found = {}
+    for line in done.stdout.decode('utf-8', 'replace').splitlines():
+        head, sep, rest = line.partition(':')
+        if not sep:
+            continue
+        key, _, label = head.partition('/')
+        choices, default = [], None
+        for word in rest.split():
+            if word.startswith('*'):
+                word = word[1:]
+                default = word
+            choices.append(word)
+        if choices:
+            found[key.strip()] = (label.strip() or key.strip(), default or choices[0], choices)
+    return found
+
+
+def printer_options():
+    """What a writer may choose for this printer: a short, fixed set of
+    options every program can show, mapped from whatever the queue calls
+    them. Each is (key, label, default, [(name, label)], to_lp) where
+    to_lp(name) is the lp arguments for that choice. Printer-specific
+    extras (halftones, edge control) are left out on purpose."""
+    q = _queue_options()
+    opts = [('copies', 'Copies', '1', [(c, c) for c in COPIES_CHOICES],
+             lambda n: ['-n', n])]
+    if 'Duplex' in q:
+        default = {'DuplexNoTumble': 'two-sided-long-edge',
+                   'DuplexTumble': 'two-sided-short-edge'}.get(q['Duplex'][1], 'one-sided')
+        opts.append(('sides', 'Two-sided', default,
+                     [('one-sided', 'Off'), ('two-sided-long-edge', 'Long edge'),
+                      ('two-sided-short-edge', 'Short edge')],
+                     lambda n: ['-o', 'sides=' + n]))
+    if 'HPPJLColorAsGray' in q:
+        default = 'gray' if q['HPPJLColorAsGray'][1] == 'on' else 'color'
+        opts.append(('color', 'Colour', default, [('color', 'Colour'), ('gray', 'Gray')],
+                     lambda n: ['-o', 'HPPJLColorAsGray=' + ('on' if n == 'gray' else 'off')]))
+    elif 'ColorModel' in q:
+        names = q['ColorModel'][2]
+        gray = next((c for c in names if c.lower().startswith('gray')), None)
+        colour = next((c for c in names if not c.lower().startswith('gray')), None)
+        if gray and colour:
+            default = 'gray' if q['ColorModel'][1] == gray else 'color'
+            opts.append(('color', 'Colour', default, [('color', 'Colour'), ('gray', 'Gray')],
+                         lambda n, g=gray, c=colour: ['-o', 'ColorModel=' + (g if n == 'gray' else c)]))
+    if 'InputSlot' in q:
+        label, default, names = q['InputSlot']
+        opts.append(('tray', 'Paper feed', default, [(n, _pretty_choice(n)) for n in names],
+                     lambda n: ['-o', 'InputSlot=' + n]))
+    if 'Collate' in q:
+        default = 'on' if q['Collate'][1] == 'True' else 'off'
+        opts.append(('collate', 'Collate', default, [('off', 'Off'), ('on', 'On')],
+                     lambda n: ['-o', 'Collate=' + ('True' if n == 'on' else 'False')]))
+    return opts
+
+
+def handle_print_options(payload):
+    """OFFLOAD_PRINT_OPTIONS: one line an option -- key, label, default,
+    then name=label choices, tab-separated (docs/formats/offload-protocol.md)."""
+    lines = []
+    for key, label, default, choices, _ in printer_options():
+        lines.append('\t'.join([key, label, default] + ['%s=%s' % c for c in choices]))
+    return STATUS_OK, ('\n'.join(lines) + '\n').encode('utf-8')
+
+
+def _print_args(chosen):
+    """lp arguments for the writer's choices, each checked against what
+    printer_options() offers; None, and the reason, for one that is not."""
+    args = []
+    for key, label, default, choices, to_lp in printer_options():
+        name = chosen.get(key, default)
+        if name not in [c[0] for c in choices]:
+            return None, '%s cannot be %s on this printer' % (label, name)
+        if key == 'copies' or name != default:
+            args += to_lp(name)
+    return args, None
 
 
 def _reply(text):
@@ -1904,13 +2006,32 @@ def _reply(text):
 
 
 def handle_print(payload):
-    """OFFLOAD_PRINT: a copy count, then the document's RTF. Printed from
-    the same PDF CONVERT_EXPORT would answer; the reply is one line for
+    """OFFLOAD_PRINT: a copy count then the document's RTF; or, with a 0
+    first byte, the writer's options (key=value lines) between them. Printed
+    from the same PDF CONVERT_EXPORT would answer; the reply is one line for
     the writer either way, with STATUS_ERR when nothing was printed."""
     if len(payload) < 2:
         return STATUS_ERR, _reply('Nothing to print')
-    copies = max(1, min(payload[0], 99))
-    rtf_bytes = payload[1:]
+    chosen = {}
+    if payload[0] == 0:
+        if len(payload) < 5:
+            return STATUS_ERR, _reply('Nothing to print')
+        n = struct.unpack('>H', payload[2:4])[0]
+        for line in payload[4:4 + n].decode('utf-8', 'replace').splitlines():
+            key, sep, value = line.partition('=')
+            if sep:
+                chosen[key.strip()] = value.strip()
+        chosen.setdefault('copies', str(max(1, min(payload[1], 99))))
+        rtf_bytes = payload[4 + n:]
+    else:
+        chosen['copies'] = str(max(1, min(payload[0], 99)))
+        rtf_bytes = payload[1:]
+    if PRINT_TO['dir']:
+        copies = int(chosen['copies']) if chosen['copies'].isdigit() else 1
+    else:
+        lp_args, why = _print_args(chosen)
+        if lp_args is None:
+            return STATUS_ERR, _reply(why)
     try:
         paragraphs = rtf_bytes_to_paragraphs(rtf_bytes)
         sections = rtf_sections(rtf_bytes)
@@ -1936,7 +2057,7 @@ def handle_print(payload):
         except OSError:
             return STATUS_ERR, _reply('The gateway could not save the printout')
 
-    cmd = [PRINT_TO['command'], '-t', 'RetroWP', '-n', str(copies)]
+    cmd = [PRINT_TO['command'], '-t', 'RetroWP'] + lp_args
     if PRINT_TO['printer']:
         cmd += ['-d', PRINT_TO['printer']]
     try:
@@ -1957,6 +2078,8 @@ def handle_request(op, payload):
         return handle_convert_export(payload)
     if op == OP_PRINT and (PRINT_TO['dir'] or PRINT_TO['printer'] is not None):
         return handle_print(payload)
+    if op == OP_PRINT_OPTIONS and (PRINT_TO['dir'] or PRINT_TO['printer'] is not None):
+        return handle_print_options(payload)
     return STATUS_UNSUPPORTED, b''
 
 
@@ -1968,12 +2091,16 @@ def main():
         (('--print-command',), {'default': 'lp',
                                 'help': 'what prints a PDF from stdin, lp\'s flags '
                                         '(default: lp)'}),
+        (('--print-options-command',), {'default': 'lpoptions',
+                                        'help': 'what lists the printer\'s options, '
+                                                'lpoptions\' -l and -p (default: lpoptions)'}),
         (('--print-dir',), {'default': None, 'metavar': 'DIR',
                             'help': 'answer OFFLOAD_PRINT by writing each printout '
                                     'into DIR as print-NNNN.pdf instead'}),
     ])
     PRINT_TO['dir'] = args.print_dir
     PRINT_TO['command'] = args.print_command
+    PRINT_TO['options_command'] = args.print_options_command
     if args.printer is not None and not args.print_dir:
         if shutil.which(args.print_command) is None:
             print('odt-gateway: no %s here, so no printing' % args.print_command,
@@ -1982,7 +2109,7 @@ def main():
             PRINT_TO['printer'] = args.printer
     ops_supported = (1 << OP_CONVERT_IMPORT) | (1 << OP_CONVERT_EXPORT)
     if PRINT_TO['dir'] or PRINT_TO['printer'] is not None:
-        ops_supported |= 1 << OP_PRINT
+        ops_supported |= (1 << OP_PRINT) | (1 << OP_PRINT_OPTIONS)
     return run_gateway_with_args(args, handle_request, ops_supported, 'odt-gateway')
 
 
