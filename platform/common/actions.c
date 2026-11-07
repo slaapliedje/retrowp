@@ -1667,7 +1667,8 @@ static wp_status print_here(wp_app_ctx *ctx)
     u32 pages = 0;
     wp_status st;
 
-    if (plat_file_open(ctx->printer_path, PLAT_FILE_WRITE, &prn) != WP_OK) {
+    if ((ctx->printer_ready != NULL && !ctx->printer_ready()) ||
+        plat_file_open(ctx->printer_path, PLAT_FILE_WRITE, &prn) != WP_OK) {
         wp_action_tell(ctx, "The printer isn't ready");
         return WP_ERR;
     }

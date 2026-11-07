@@ -1723,6 +1723,17 @@ static wp_bool g_offload_init_attempted = WP_FALSE;
    a multi-second stall on every single offload-backed action thereafter
    (Thesaurus, Grammar Check, Chat, Insert Image). The shared file flow
    reaches it through g_ctx.ensure_offload for ODT/PDF; see actions.h. */
+#ifndef GEM4XE_APP_GEM_H
+/* GEMDOS's printer status (Cprnos): -1 when PRN: will take a character.
+   With nothing on the Centronics port TOS would otherwise wait on every
+   byte of a printout, and the program looks hung -- found printing on a
+   MiSTer ST core, whose printer port goes nowhere. */
+static wp_bool atari_printer_ready(void)
+{
+    return (wp_bool)(Cprnos() != 0);
+}
+#endif
+
 static wp_bool ensure_offload(void)
 {
     if (!g_offload_init_attempted) {
@@ -5043,6 +5054,7 @@ void app_shell_run(void)
            gem4xe has no printer device, so Print there is the gateway's. */
         g_ctx.printer_path = "PRN:";
         g_ctx.printer_codepage = 437;
+        g_ctx.printer_ready = atari_printer_ready;
 #endif
         g_ctx.view.line_px = atari_twips_to_px_y; /* the conversion paint_document advances y with */
     }

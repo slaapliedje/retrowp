@@ -952,6 +952,16 @@ void test_actions_load_file_reads_text_and_rtf_and_keeps_the_name(void)
 }
 
 static wp_bool no_link(void) { return WP_FALSE; }
+static wp_bool printer_off(void) { return WP_FALSE; }
+
+static wp_bool file_exists(const char *path)
+{
+    plat_file *f;
+
+    if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) return WP_FALSE;
+    plat_file_close(f);
+    return WP_TRUE;
+}
 
 /* ODT and PDF through the real ODT gateway (the one test_convert.c
    drives), by way of the shared file flow this time: the extension
@@ -1707,6 +1717,15 @@ void test_actions_file_print_routes(void)
     ASSERT_TRUE(strstr(text, "Beta\r\n") != NULL);
     n = (u32)strlen(text);
     ASSERT_TRUE(n > 0 && text[n - 1] == '\f');
+
+    /* A printer the shell says is not ready (none on the port): told, and
+       never opened, so a port with nothing on it cannot hang the program. */
+    (void)remove(prn);
+    ctx.printer_ready = printer_off;
+    ASSERT_TRUE(wp_action_file_print(&ctx) != WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "The printer isn't ready");
+    ASSERT_TRUE(!file_exists(prn));
+    ctx.printer_ready = NULL;
 
     /* A printer that cannot be opened. */
     ctx.printer_path = "build/no-such-dir/printer";

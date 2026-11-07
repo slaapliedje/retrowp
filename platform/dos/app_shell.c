@@ -150,6 +150,22 @@ static void read_key(unsigned char *ascii_out, unsigned char *scan_out)
     *scan_out = regs.h.ah;
 }
 
+/* BIOS INT 17h AH=02h, LPT1's status: ready when not busy (bit 7) and
+   selected (bit 4), with no paper-out (5), I/O error (3) or time-out
+   (0). Without asking, DOS's own "Not ready writing device PRN, Abort,
+   Retry, Fail?" would come up over the screen for a printout to a port
+   with no printer on it. A MODE redirection of LPT1 answers this for
+   the port it redirects to. */
+static wp_bool dos_printer_ready(void)
+{
+    union REGS regs;
+
+    regs.h.ah = 0x02;
+    regs.x.dx = 0;
+    int86(0x17, &regs, &regs);
+    return (wp_bool)((regs.h.ah & 0x90) == 0x90 && (regs.h.ah & 0x29) == 0);
+}
+
 /* BIOS INT 16h AH=02h: bit0=RShift bit1=LShift bit2=Ctrl bit3=Alt. */
 static u8 get_shift_status(void)
 {
@@ -1411,6 +1427,7 @@ void app_shell_run(void)
            printer on a PC takes the PC's own character set. */
         g_ctx.printer_path = "PRN";
         g_ctx.printer_codepage = 437;
+        g_ctx.printer_ready = dos_printer_ready;
         g_ctx.view.line_px = dos_line_rows;
     }
 

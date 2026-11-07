@@ -90,6 +90,12 @@ typedef struct wp_app_ctx {
        on without a gateway. File > Print (wp_action_file_print). */
     const char *printer_path;
     u16         printer_codepage;
+    /* Whether that printer will take bytes now: on, selected, paper in.
+       Asked before the printout is opened, because a port with no
+       printer on it does not fail -- TOS waits on every character, DOS
+       stops for "Not ready writing device PRN" -- and the program would
+       freeze. NULL when the shell cannot ask, and the printer is tried. */
+    wp_bool   (*printer_ready)(void);
 
     wp_prompt prompt;   /* the status line's one-line text prompt (prompt.h) */
 

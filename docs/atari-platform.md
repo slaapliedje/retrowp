@@ -2597,3 +2597,30 @@ from 150s to 250s depending on host load), and Hatari is **not** wrapped
 in `timeout` when backgrounded, because `$!` would then be `timeout`'s
 PID and the `kill -9` would reap the wrapper while orphaning a real
 Hatari process per matrix entry.
+
+## Printing from the MiSTer ST core (2026-11-07)
+
+RetroWP on the MiSTer AtariST core printed through the gateway (File >
+Print, the gateway's printer), with RETROWP.PRG on a floppy image and the
+core's MFP serial port on the MiSTer's /dev/ttyS1, relayed by
+`host/tools/mister/pace_relay.py 9600 0` over a USB-serial cable to the
+gateway Pi. Unlike the MacPlus core, the ST core honours the baud rate
+RetroWP programs (9600 here) and needs no pacing. What the runs found:
+
+- **A stray byte as the port opens.** The MFP sent one 0xFF a second
+  before the HELLO; the gateway took it for a frame and dropped the
+  session. The gateway now resyncs on the magic, as wire.c does.
+- **A slow Print dialog.** The gateway ends an idle session after 120 s;
+  a request sent after that was refused, and RetroWP waited out its own
+  two-minute timeout. Over serial the gateway now serves a request that
+  arrives without a fresh HELLO.
+- **A printer port with no printer.** With no gateway, Print fell back
+  to PRN:, and TOS waited on every byte of an empty Centronics port --
+  the program looked hung. RetroWP asks Cprnos() first now and says the
+  printer is not ready.
+- **Messages.** A one-option plat_dialog_choice is a form_alert now
+  (retroplat), not the choice form with the message on its title line.
+- The MGL floppy mount does not take on that core release; mount through
+  the OSD. The card's default ST config boots a game VHD whose
+  DESKTOP.INF has no floppy icon (Options > Install Disk Drive). Use
+  medium resolution: in low, RetroWP warns and the layout is cramped.
