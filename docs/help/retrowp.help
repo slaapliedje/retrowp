@@ -215,8 +215,8 @@ Where > and | share a cell, dragging there moves both.
 @endnode
 
 @node Print "Printing"
-File > Print (Ctrl+P) prints the document, on one of two
-printers:
+File > Print (Ctrl+P; on DOS also Shift+F7, as in WordPerfect)
+prints the document, on one of two printers:
 
   The gateway's -- a printer the offload gateway (the Pi on the
   serial line) has. It prints the document as its PDF would

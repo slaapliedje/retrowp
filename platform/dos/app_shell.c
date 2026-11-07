@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <i86.h>
+#include <bios.h>
 #include <conio.h>
 #include <string.h>
 #include "app_shell.h"
@@ -164,6 +165,48 @@ static wp_bool dos_printer_ready(void)
     regs.x.dx = 0;
     int86(0x17, &regs, &regs);
     return (wp_bool)((regs.h.ah & 0x90) == 0x90 && (regs.h.ah & 0x29) == 0);
+}
+
+/* Whether a key is waiting, from the BIOS (INT 16h AH=01h: ZF clear when
+   one is). Not kbhit(): Watcom's asks DOS (INT 21h AH=0Bh), and DOS takes
+   its own control keys out of the buffer on that call whatever BREAK
+   says -- Ctrl+C to stop the program, Ctrl+S to pause, Ctrl+P to echo
+   the screen to PRN. Ctrl+P never reached RetroWP's Print on a MiSTer
+   ao486's MS-DOS 7, and the echo into a printer port with no printer
+   froze it. (DOSBox's DOS implements none of them, so it never showed.) */
+static wp_bool key_waiting(void)
+{
+    /* INT 16h AH=01h answers in ZF, which int86's REGS does not carry
+       (its cflag is the carry alone); the C library's BIOS call reads it. */
+    return (wp_bool)(_bios_keybrd(_KEYBRD_READY) != 0);
+}
+
+/* DOS's BREAK setting (INT 21h AX=3300h/3301h), off while RetroWP runs
+   and put back as the writer had it: with it on, DOS treats a Ctrl+C --
+   RetroWP's Copy -- typed during any DOS call as "terminate the program",
+   and the document goes with it. */
+static u8 g_dos_break_was = 0xFF;
+
+static void dos_break_off(void)
+{
+    union REGS regs;
+
+    regs.x.ax = 0x3300;
+    int86(0x21, &regs, &regs);
+    g_dos_break_was = regs.h.dl;
+    regs.x.ax = 0x3301;
+    regs.h.dl = 0;
+    int86(0x21, &regs, &regs);
+}
+
+static void dos_break_restore(void)
+{
+    union REGS regs;
+
+    if (g_dos_break_was == 0xFF) return;
+    regs.x.ax = 0x3301;
+    regs.h.dl = g_dos_break_was;
+    int86(0x21, &regs, &regs);
 }
 
 /* BIOS INT 16h AH=02h: bit0=RShift bit1=LShift bit2=Ctrl bit3=Alt. */
@@ -1278,6 +1321,15 @@ static wp_bool dos_dispatch_key(void)
     shift = get_shift_status();
     ev = dos_translate_key(ascii, scan, shift);
 
+    /* Shift+F7 is Print, as in WordPerfect for DOS -- the print key a DOS
+       writer reaches for, and one DOS itself never claims, where Ctrl+P
+       is DOS's own printer-echo toggle on every other program. No keymap
+       here binds a shifted function key. */
+    if (!g_help_active && ascii == 0 && scan == 0x5A) {
+        if (g_ctx.doc_loaded) (void)wp_action_file_print(&g_ctx);
+        return WP_FALSE;
+    }
+
     if (g_help_active) {
         if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
         return WP_FALSE;
@@ -1416,6 +1468,7 @@ void app_shell_run(void)
     wp_bool quit = WP_FALSE;
 
     set_text_mode();
+    dos_break_off();
 
     {
         wp_config cfg;
@@ -1452,7 +1505,7 @@ void app_shell_run(void)
         int col, row;
 
         /* A key or a click; otherwise yield and look again. */
-        if (kbhit()) {
+        if (key_waiting()) {
             quit = dos_dispatch_key();
         } else if (dos_mouse_pressed(&col, &row)) {
             dos_click(col, row);
@@ -1482,6 +1535,7 @@ void app_shell_run(void)
 
     clear_rows(0, DOS_SCREEN_ROWS - 1, DOS_ATTR_NORMAL);
     move_cursor(0, 0);
+    dos_break_restore();
 }
 
 /* T14.2's own selfcheck, mirroring wp_atari_layout_selfcheck's/

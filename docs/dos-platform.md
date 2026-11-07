@@ -500,3 +500,36 @@ asserting a nonzero painted-fragment count. `SMOKE.EXE` passed
 throughout, on all three machine profiles, because it never lays out a
 document for display. A gate that only proves the binary starts would
 have shipped this.
+
+## Printing from the MiSTer ao486 (2026-11-07)
+
+RetroWP on the MiSTer ao486 core, booted from MS-DOS 7 with RETROWP.EXE on
+a floppy image, printed through the gateway with both Ctrl+P and Shift+F7.
+What it took, in the order it was found:
+
+- **Ctrl+P never reached RetroWP.** The event loop polled with Watcom's
+  kbhit(), which is DOS INT 21h AH=0Bh, and on that call MS-DOS takes its
+  own control keys out of the buffer: Ctrl+P toggled DOS's printer echo,
+  and the echo into an empty LPT1 froze the program. DOSBox's DOS
+  implements none of this, so no gate could see it. The loop asks the
+  BIOS now (INT 16h AH=01h), BREAK is off while RetroWP runs (restored at
+  exit, so a Ctrl+C -- Copy -- cannot stop the program mid-document), and
+  Shift+F7, WordPerfect's Print, is Print too.
+- **A printer port with no printer.** RetroWP asks INT 17h first (see
+  `dos_printer_ready`) and says the printer is not ready.
+- **The serial line.** The transport used to be BIOS INT 14h, whose send
+  waits for the modem's DSR and CTS before transmitting -- the IBM BIOS's
+  definition -- and stops at 9600 baud. It drives the 16550 directly now
+  (retroplat's transport_dos.c), as DOS communication programs do.
+- **The core's UART mode.** ao486 sends its MPU-401 out on the MiSTer's
+  UART instead of COM1 when its UART mode is MIDI or above (ao486.sv:
+  `UART_TXD = ~hps_mpu ? uart1_tx : mpu_tx`), so COM1 is simply not
+  connected; the mode has to be None for the test (the user's was MIDI,
+  restored afterwards). The relay was `host/tools/mister/pace_relay.py
+  9600 0`.
+- MGL mounts do not take on that core release; the drives were set in
+  config/ao486sys.cfg (1024-byte slots: floppy A, B, IDE 0-0, 0-1). A data
+  floppy must not carry the 55AA boot signature, or the BIOS boots it
+  ahead of the hard disk and stops.
+
+The Phase 4 section above describes the INT 14h transport as it was.
