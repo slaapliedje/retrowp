@@ -10,6 +10,8 @@
 #include <libraries/mui.h>
 #include <libraries/asl.h>
 #include <devices/inputevent.h>
+#include <devices/printer.h>
+#include <devices/parallel.h>
 #include <clib/alib_protos.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -446,6 +448,39 @@ static void show_message(const char *title, const char *msg)
 #define WP_AMIGA_SPELL_DICT_PATH        "PROGDIR:WPSPELL.DIC"
 
 static wp_bool g_offload_init_attempted = WP_FALSE;
+
+/* printer.device's own status (PRD_QUERY): a parallel printer is ready
+   when it is not busy and has paper. With nothing on the port the lines
+   float to busy and paper-out, and printing to PRT: there brings up the
+   system's "Printer Trouble" requester over the program -- seen on a
+   MiSTer Minimig. A serial printer (io_Actual 2) is not asked, and a
+   printer.device that will not open leaves the decision to PRT:. */
+static wp_bool amiga_printer_ready(void)
+{
+    struct MsgPort *port;
+    struct IOStdReq *io;
+    UBYTE status[2];
+    wp_bool ready = WP_TRUE;
+
+    port = CreateMsgPort();
+    if (port == NULL) return WP_TRUE;
+    io = (struct IOStdReq *)CreateIORequest(port, (ULONG)sizeof(struct IOStdReq));
+    if (io != NULL) {
+        if (OpenDevice((CONST_STRPTR)"printer.device", 0, (struct IORequest *)io, 0) == 0) {
+            status[0] = status[1] = 0;
+            io->io_Command = PRD_QUERY;
+            io->io_Data = (APTR)status;
+            if (DoIO((struct IORequest *)io) == 0 && io->io_Actual == 1 &&
+                (status[0] & (IOPTF_PARBUSY | IOPTF_PAPEROUT)) != 0) {
+                ready = WP_FALSE;
+            }
+            CloseDevice((struct IORequest *)io);
+        }
+        DeleteIORequest((struct IORequest *)io);
+    }
+    DeleteMsgPort(port);
+    return ready;
+}
 
 static wp_bool ensure_offload(void)
 {
@@ -1862,7 +1897,7 @@ wp_status plat_dialog_choice(plat_window *parent,
                               wp_bool *out_cancelled, u32 *out_index)
 {
     char gadgets[256];
-    char titlebuf[64];
+    char body[256];
     u32 i, pos, n;
     LONG result;
 
@@ -1877,14 +1912,30 @@ wp_status plat_dialog_choice(plat_window *parent,
         memcpy(gadgets + pos, option_labels_utf8[i], n);
         pos += n;
     }
+    /* MUI_Request numbers its gadgets 1, 2, ... from the left and gives the
+       RIGHTMOST 0, its cancel answer -- so a choice needs a Cancel of its
+       own on the right, or its last option can never be picked: Page
+       Setup's "Margins..." read as a cancel, and a mouse user had no way
+       out of it but a size. A message (one option) keeps its lone OK. */
+    if (option_count > 1 && pos + 7 < sizeof(gadgets)) {
+        memcpy(gadgets + pos, "|Cancel", 7);
+        pos += 7;
+    }
     gadgets[pos] = '\0';
 
-    n = (title_len < sizeof(titlebuf) - 1) ? title_len : (u32)sizeof(titlebuf) - 1;
-    memcpy(titlebuf, title_utf8, n);
-    titlebuf[n] = '\0';
+    /* The message is the requester's BODY, under the program's name, as an
+       Amiga requester has it. It used to be the window title over an empty
+       body, which MUI drew as a requester a few pixels wide with nothing in
+       it -- every message RetroWP showed on the Amiga, seen on a MiSTer
+       Minimig. The body is a format string, so a '%' is doubled. */
+    for (i = 0, pos = 0; i < title_len && pos < sizeof(body) - 2; i++) {
+        if (title_utf8[i] == '%') body[pos++] = '%';
+        body[pos++] = (char)title_utf8[i];
+    }
+    body[pos] = '\0';
 
-    result = MUI_Request(g_app, g_win, 0, (CONST_STRPTR)titlebuf,
-                          (CONST_STRPTR)gadgets, (CONST_STRPTR)"");
+    result = MUI_Request(g_app, g_win, 0, (CONST_STRPTR)"RetroWP",
+                          (CONST_STRPTR)gadgets, (CONST_STRPTR)body);
     if (result <= 0) {
         if (out_cancelled) *out_cancelled = WP_TRUE;
         return WP_OK;
@@ -1922,6 +1973,7 @@ void app_shell_run(void)
        take the Amiga's own ISO 8859-1. */
     g_ctx.printer_path = "PRT:";
     g_ctx.printer_codepage = 1252;
+    g_ctx.printer_ready = amiga_printer_ready;
     g_ctx.view.line_px = amiga_twips_to_px_y; /* the conversion editor_draw advances y with */
     load_sample_document();
 

@@ -1566,3 +1566,30 @@ This is the same underlying fact `docs/atari-platform.md` records for
 Hatari ("fast synthetic input outruns the app"), just with a sharper
 consequence -- there it garbled a repaint, here it silently dropped a
 save.
+
+## Printing from the MiSTer Minimig (2026-11-07)
+
+RetroWP on the MiSTer Minimig core, booted into the MegaAGS setup, printed
+through the gateway (Project > Print..., the gateway's printer). The binary
+went in through the core's shared folder (games/Amiga/shared, the MiSTer:
+volume), not onto an HDF. Paula's serial reaches the MiSTer's /dev/ttyS1 at
+the 9600 RetroWP programs, relayed by `host/tools/mister/pace_relay.py 9600
+0` to the gateway Pi. What it took:
+
+- **MUI.** MegaAGS has none. MUI 3.8 from the amiberry fixture went into the
+  shared folder, and `assign MUI: MiSTer:MUI` plus `assign LIBS:
+  MiSTer:MUI/Libs ADD` made it visible for the session.
+- **pppd's line discipline.** That setup's UART mode is PPP, so Main runs
+  /sbin/uartmode 1, a loop that restarts pppd on ttyS1, and pppd puts the
+  port in the PPP line discipline, where incoming bytes never reach an
+  ordinary reader. Even AmigaDOS's `echo >SER:` seemed to vanish until the
+  uartmode loop and pppd were stopped and the relay started after them.
+  Both come back on the next core load.
+- **Three Amiga bugs it found**, all in platform/amiga/app_shell.c:
+  messages went in MUI_Request's title over an empty body (a requester a
+  few pixels wide with nothing in it); the last option of every choice
+  read as a cancel, since MUI_Request gives its rightmost gadget 0, so
+  Page Setup's Margins... could not be picked (choices get their own
+  Cancel now); and printing to PRT: with nothing on the parallel port
+  raised printer.device's "Printer Trouble" requester (RetroWP asks
+  PRD_QUERY first now).
