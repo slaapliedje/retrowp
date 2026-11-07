@@ -11,13 +11,11 @@ offload/gateway/gw_common.c already applies on the C side
 independently of offload/transport/wire.c (which is C) rather than
 linking against it -- there is no Python binding for that module, and
 docs/formats/offload-protocol.md's own byte layout is the shared
-source of truth both language sides derive from separately. Deliberately
-does NOT reimplement wire.c's magic-byte resync-on-corrupt-frame
-behavior -- this is host-side tooling on a reliable local transport
-(TCP loopback, or the FIFO bridge ci_atari_serial.sh-style tooling
-uses), and a malformed frame here just tears down the connection, an
-honest, narrower scope than wire.c's own resync contract, not a silent
-gap.
+source of truth both language sides derive from separately. Like
+wire.c's reader, read_frame resyncs on the magic: noise before a frame,
+and a frame with a bad version or CRC, are skipped rather than ending
+the session -- needed since the gateway serves real serial lines (a
+MiSTer core's port, a real ST), which deliver stray bytes.
 """
 
 import argparse
@@ -59,6 +57,8 @@ if os.environ.get('RETROWP_GATEWAY_PART_TEST'):
  OP_DICTATE, OP_PRINT) = range(9)
 
 STATUS_OK, STATUS_TIMEOUT, STATUS_UNSUPPORTED, STATUS_ERR = range(4)
+
+WIRE_MAX_PAYLOAD = 65536  # wire.h: a frame's payload, at most
 
 CAPS_PAYLOAD_SIZE = 42  # 2 (version) + 4 (ops_supported) + 4 (max_payload) + 32 (name)
 
@@ -108,21 +108,33 @@ def read_exact(read_fd, n, deadline):
 
 
 def read_frame(read_fd, timeout_s):
+    """The next good frame within timeout_s. Anything before the magic, and
+    any frame whose version or CRC is wrong, is line noise to skip, the
+    way wire.c's reader resyncs: a real serial line delivers a stray byte
+    as a port opens (an Atari ST core's first byte was 0xFF, a second
+    before its HELLO), and a gateway that gave up on it lost the HELLO
+    behind it. Only the deadline ends the hunt."""
     deadline = time.monotonic() + timeout_s
-    header = read_exact(read_fd, WIRE_HEADER_SIZE, deadline)
-    if header[0] != WIRE_MAGIC0 or header[1] != WIRE_MAGIC1:
-        raise GatewayError('bad magic')
-    version, msg_type, op, status = header[2], header[3], header[4], header[5]
-    seq = struct.unpack('>H', header[6:8])[0]
-    length = struct.unpack('>I', header[8:12])[0]
-    if version != WIRE_VERSION:
-        raise GatewayError('bad version')
-    payload = read_exact(read_fd, length, deadline) if length else b''
-    crc_bytes = read_exact(read_fd, WIRE_CRC_SIZE, deadline)
-    expected = crc16_ccitt_false(header[2:] + payload)
-    if struct.unpack('>H', crc_bytes)[0] != expected:
-        raise GatewayError('crc mismatch')
-    return {'type': msg_type, 'op': op, 'status': status, 'seq': seq}, payload
+    while True:
+        if read_exact(read_fd, 1, deadline)[0] != WIRE_MAGIC0:
+            continue
+        second = read_exact(read_fd, 1, deadline)[0]
+        while second == WIRE_MAGIC0:            # "WWP": the frame starts later
+            second = read_exact(read_fd, 1, deadline)[0]
+        if second != WIRE_MAGIC1:
+            continue
+        rest = read_exact(read_fd, WIRE_HEADER_SIZE - 2, deadline)
+        header = bytes([WIRE_MAGIC0, WIRE_MAGIC1]) + rest
+        version, msg_type, op, status = header[2], header[3], header[4], header[5]
+        seq = struct.unpack('>H', header[6:8])[0]
+        length = struct.unpack('>I', header[8:12])[0]
+        if version != WIRE_VERSION or length > WIRE_MAX_PAYLOAD:
+            continue
+        payload = read_exact(read_fd, length, deadline) if length else b''
+        crc_bytes = read_exact(read_fd, WIRE_CRC_SIZE, deadline)
+        if struct.unpack('>H', crc_bytes)[0] != crc16_ccitt_false(header[2:] + payload):
+            continue
+        return {'type': msg_type, 'op': op, 'status': status, 'seq': seq}, payload
 
 
 def open_fifo_rdwr(path, baud=None, flow='none'):
@@ -202,29 +214,44 @@ def open_fifo_rdwr(path, baud=None, flow='none'):
     return fd
 
 
-def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, handle_request):
+def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, handle_request,
+          lenient=False):
     """The HELLO/CAPS handshake plus the request/response loop, shared
     verbatim by every Python gateway: read HELLO, answer CAPS, then
     repeatedly read a REQUEST and dispatch it to handle_request(op,
     payload) -> (status, response_payload). Returns a process exit
     code (0 = clean shutdown, e.g. the peer closed the connection; 1 =
     handshake failure)."""
+    caps_payload = encode_caps(ops_supported, gateway_name)
     try:
-        hdr, _ = read_frame(read_fd, hello_timeout_ms / 1000.0)
+        hdr, payload = read_frame(read_fd, hello_timeout_ms / 1000.0)
     except GatewayError:
         return 1
-    if hdr['type'] != MSG_HELLO:
+    # lenient: a request where a HELLO was expected is served, not refused.
+    # On a serial line the session's end is only this side's idle timeout,
+    # which the client never hears about -- a writer who takes two minutes
+    # over a Print dialog sends a request into what the gateway now thinks
+    # is a new session, and refusing it left a MiSTer ST waiting out its
+    # own two-minute timeout. The client did its handshake; the gateway
+    # merely forgot it. TCP, which has a real connection, stays strict.
+    first = None
+    if hdr['type'] == MSG_HELLO:
+        os.write(write_fd, encode_frame(MSG_CAPS, 0, 0, 0, caps_payload))
+    elif lenient and hdr['type'] in (MSG_REQUEST, MSG_REQUEST_PART):
+        first = (hdr, payload)
+    else:
         return 1
-
-    caps_payload = encode_caps(ops_supported, gateway_name)
-    os.write(write_fd, encode_frame(MSG_CAPS, 0, 0, 0, caps_payload))
 
     parts = []          # a request's MSG_REQUEST_PART payloads, so far
     while True:
-        try:
-            hdr, payload = read_frame(read_fd, 120.0)
-        except GatewayError:
-            break
+        if first is not None:
+            hdr, payload = first
+            first = None
+        else:
+            try:
+                hdr, payload = read_frame(read_fd, 120.0)
+            except GatewayError:
+                break
         # A HELLO mid-session is the peer starting over -- a machine reset,
         # the program quit and run again -- and on a serial line there is
         # no connection boundary to say so. Answered as a new handshake, not
@@ -279,6 +306,10 @@ def parse_gateway_args(description=None, extra_args=None):
                              'a mismatch silently wedges the link. No XON/XOFF '
                              'option exists -- this protocol is binary.')
     parser.add_argument('--hello-timeout-ms', type=int, default=5000)
+    parser.add_argument('--lenient-handshake', action='store_true',
+                        help='serve a request that arrives where a HELLO was expected '
+                             '(always on over a serial line, where a session ends '
+                             'without the client knowing)')
     if extra_args:
         for name_tuple, kwargs in extra_args:
             parser.add_argument(*name_tuple, **kwargs)
@@ -326,7 +357,8 @@ def run_gateway_with_args(args, handle_request, ops_supported, gateway_name):
         # these four configurations were never actually tested" into
         # "nothing works", which is the worst kind of wrong answer.
         if getattr(args, 'serial_once', False):
-            return serve(rx_fd, tx_fd, args.hello_timeout_ms, ops_supported, gateway_name, handle_request)
+            return serve(rx_fd, tx_fd, args.hello_timeout_ms, ops_supported, gateway_name,
+                         handle_request, lenient=True)
 
         cycle = 0
         while True:
@@ -334,7 +366,7 @@ def run_gateway_with_args(args, handle_request, ops_supported, gateway_name):
             print('serial: waiting for HELLO (cycle %d)' % cycle,
                   file=sys.stderr, flush=True)
             rc = serve(rx_fd, tx_fd, args.hello_timeout_ms, ops_supported,
-                       gateway_name, handle_request)
+                       gateway_name, handle_request, lenient=True)
             print('serial: session ended rc=%d' % rc, file=sys.stderr, flush=True)
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -345,7 +377,8 @@ def run_gateway_with_args(args, handle_request, ops_supported, gateway_name):
     conn, _ = srv.accept()
     srv.close()
     fd = conn.fileno()
-    return serve(fd, fd, args.hello_timeout_ms, ops_supported, gateway_name, handle_request)
+    return serve(fd, fd, args.hello_timeout_ms, ops_supported, gateway_name, handle_request,
+                 lenient=getattr(args, 'lenient_handshake', False))
 
 
 def run_gateway(handle_request, ops_supported, gateway_name, description=None):

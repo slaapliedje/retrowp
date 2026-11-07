@@ -881,3 +881,85 @@ void test_convert_hello_mid_session_is_a_new_handshake(void)
     plat_transport_close(t);
     gateway_stop(&gw);
 }
+
+/* Line noise before a frame, and a frame with a bad CRC, are skipped,
+   not the end of the session: a MiSTer ST core sent one 0xFF as its port
+   opened, a second before its HELLO, and a gateway that gave up on it
+   lost the HELLO behind it. */
+void test_convert_gateway_resyncs_past_noise(void)
+{
+    gateway_handle gw;
+    plat_transport *t;
+    wire_header h, got;
+    u8 frame[WIRE_HEADER_SIZE + WIRE_CRC_SIZE];
+    u8 noise[3] = { 0xFF, 'W', 'x' };
+    u8 bad[WIRE_HEADER_SIZE + WIRE_CRC_SIZE];
+    u8 payload[64];
+    u32 n, len = 0;
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
+    ASSERT_TRUE(plat_transport_open(gw.endpoint, 2000, &t) == WP_OK);
+    memset(&h, 0, sizeof(h));
+    h.type = WIRE_MSG_HELLO;
+    n = wire_encode_frame(&h, NULL, frame, sizeof(frame));
+    memcpy(bad, frame, n);
+    bad[n - 1] ^= 0x5A;                       /* a HELLO with a broken CRC */
+    ASSERT_TRUE(plat_transport_write(t, noise, sizeof(noise), 2000) == WP_OK);
+    ASSERT_TRUE(plat_transport_write(t, bad, n, 2000) == WP_OK);
+    ASSERT_TRUE(plat_transport_write(t, frame, n, 2000) == WP_OK);
+    ASSERT_TRUE(wire_read_frame(raw_read, t, 5000, &got, payload, sizeof(payload), &len) == WP_OK);
+    ASSERT_EQ_U32(got.type, WIRE_MSG_CAPS);
+    ASSERT_EQ_U32(len, 42);
+    plat_transport_close(t);
+    gateway_stop(&gw);
+}
+
+/* A request where a HELLO was expected: served by a lenient gateway (what
+   serial mode always is), refused by a strict one. A writer who took two
+   minutes over the Print dialog on a MiSTer ST sent the request after the
+   gateway's idle timeout had ended its session; refusing it left the ST
+   waiting out its own two-minute timeout. */
+static wp_status request_without_hello(const char *const *args, wire_header *got,
+                                       u8 *reply, u32 cap, u32 *len)
+{
+    gateway_handle gw;
+    plat_transport *t;
+    wire_header h;
+    static u8 frame[512];
+    u8 payload[256];
+    u32 n, plen;
+    wp_status st;
+
+    if (gateway_start_bin(GATEWAY_BINARY, args, &gw) != WP_OK) return WP_ERR;
+    if (plat_transport_open(gw.endpoint, 2000, &t) != WP_OK) { gateway_stop(&gw); return WP_ERR; }
+    plen = print_payload(payload, sizeof(payload), 1);
+    memset(&h, 0, sizeof(h));
+    h.type = WIRE_MSG_REQUEST;
+    h.op = OFFLOAD_PRINT;
+    h.seq = 7;
+    h.length = plen;
+    n = wire_encode_frame(&h, payload, frame, sizeof(frame));
+    st = plat_transport_write(t, frame, n, 2000);
+    if (st == WP_OK) st = wire_read_frame(raw_read, t, 5000, got, reply, cap, len);
+    plat_transport_close(t);
+    gateway_stop(&gw);
+    return st;
+}
+
+void test_convert_request_without_hello(void)
+{
+    static const char *const lenient[] = { "--print-dir", PRINT_DIR, "--lenient-handshake", NULL };
+    static const char *const strict[] = { "--print-dir", PRINT_DIR, NULL };
+    wire_header got;
+    u8 reply[128];
+    u32 len = 0;
+
+    print_dir_fresh();
+    ASSERT_TRUE(request_without_hello(lenient, &got, reply, sizeof(reply), &len) == WP_OK);
+    ASSERT_EQ_U32(got.type, WIRE_MSG_RESPONSE);
+    ASSERT_EQ_U32(got.seq, 7);
+    ASSERT_EQ_U32(got.status, OFFLOAD_OK);
+    ASSERT_TRUE(len > 7 && memcmp(reply, "Printed", 7) == 0);
+
+    ASSERT_TRUE(request_without_hello(strict, &got, reply, sizeof(reply), &len) != WP_OK);
+}

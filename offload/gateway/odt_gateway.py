@@ -37,13 +37,8 @@ Python rather than sharing code with offload/transport/wire.c (which is
 C) -- exactly like mock_gateway.c and ollama_gateway.c don't share code
 with each other beyond gw_common.c (also C-only); a Python gateway has
 no analogous shared module to link against, so it re-derives the same
-documented byte layout from docs/formats/offload-protocol.md instead.
-Deliberately does NOT reimplement wire.c's magic-byte resync-on-corrupt-
-frame behavior -- this is host-side tooling on a reliable local
-transport (TCP loopback, or the FIFO bridge ci_atari_serial.sh-style
-tooling uses), and a malformed frame here just tears down the
-connection, an honest, narrower scope than wire.c's own resync
-contract, not a silent gap.
+documented byte layout from docs/formats/offload-protocol.md instead,
+resyncing on the magic as wire.c's reader does (see wire_protocol.py).
 """
 
 import io
