@@ -1612,27 +1612,218 @@ static void tell_reply(wp_app_ctx *ctx, const offload_response *resp, const char
     wp_action_tell(ctx, n > 0 ? line : fallback);
 }
 
-/* The document as RTF behind a copy count, to the gateway's printer. */
+/* The gateway printer's options (OFFLOAD_PRINT_OPTIONS), parsed in place
+   in the reply: each points into `text`, which this owns. A heap block --
+   the Amiga's 4 KB stack has no room for it. */
+#define PRINT_MAX_OPTS    8   /* the summary dialog's "Print" plus these: 9 */
+#define PRINT_MAX_CHOICES 8
+typedef struct {
+    const char *key, *label;
+    u32 key_len, label_len;
+    u32 count, chosen, dflt;
+    const char *name[PRINT_MAX_CHOICES], *text[PRINT_MAX_CHOICES];
+    u32 name_len[PRINT_MAX_CHOICES], text_len[PRINT_MAX_CHOICES];
+} print_opt;
+typedef struct {
+    offload_response resp;
+    u32 count;
+    print_opt opt[PRINT_MAX_OPTS];
+    u8 labels[PRINT_MAX_OPTS + 1][48];
+} print_opts;
+
+/* The next tab- or line-ended field of s[*at..end); WP_FALSE at a line end. */
+static wp_bool next_field(const char *s, u32 end, u32 *at, const char **out, u32 *len)
+{
+    u32 start = *at;
+
+    if (start >= end || s[start] == '\n') return WP_FALSE;
+    while (*at < end && s[*at] != '\t' && s[*at] != '\n') (*at)++;
+    *out = s + start;
+    *len = *at - start;
+    if (*at < end && s[*at] == '\t') (*at)++;
+    return WP_TRUE;
+}
+
+/* Asks the gateway what its printer offers; NULL when it does not say
+   (an older gateway, or no answer) -- the print then goes as it always
+   did, with the printer's own defaults. */
+static print_opts *fetch_print_options(void)
+{
+    offload_capabilities caps;
+    offload_request req;
+    print_opts *po;
+    const char *s;
+    u32 end, at = 0;
+
+    if (offload_query(&caps) != WP_OK ||
+        (caps.ops_supported & (1uL << (u32)OFFLOAD_PRINT_OPTIONS)) == 0) return NULL;
+    po = (print_opts *)mem_alloc((u32)sizeof(print_opts));
+    if (po == NULL) return NULL;
+    memset(po, 0, sizeof(*po));
+    req.op = OFFLOAD_PRINT_OPTIONS;
+    req.payload = NULL;
+    req.payload_len = 0;
+    req.timeout_ms = 10000uL;
+    if (offload_submit(&req, &po->resp) != WP_OK || po->resp.status != OFFLOAD_OK) {
+        offload_response_free(&po->resp);
+        mem_free(po);
+        return NULL;
+    }
+    s = (const char *)po->resp.result;
+    end = po->resp.result_len;
+    while (at < end && po->count < PRINT_MAX_OPTS) {
+        print_opt *o = &po->opt[po->count];
+        const char *dflt = NULL, *f;
+        u32 dflt_len = 0, flen, i;
+
+        if (next_field(s, end, &at, &o->key, &o->key_len) &&
+            next_field(s, end, &at, &o->label, &o->label_len) &&
+            next_field(s, end, &at, &dflt, &dflt_len)) {
+            while (next_field(s, end, &at, &f, &flen)) {
+                for (i = 0; i < flen && f[i] != '='; i++) { }
+                if (i == flen || o->count >= PRINT_MAX_CHOICES) continue;
+                o->name[o->count] = f;
+                o->name_len[o->count] = i;
+                o->text[o->count] = f + i + 1;
+                o->text_len[o->count] = flen - i - 1;
+                if (i == dflt_len && memcmp(f, dflt, i) == 0) o->dflt = o->count;
+                o->count++;
+            }
+            if (o->count > 0) {
+                o->chosen = o->dflt;
+                po->count++;
+            }
+        }
+        while (at < end && s[at] != '\n') at++;    /* the rest of the line */
+        if (at < end) at++;
+    }
+    return po;
+}
+
+static void free_print_options(print_opts *po)
+{
+    if (po == NULL) return;
+    offload_response_free(&po->resp);
+    mem_free(po);
+}
+
+static u32 append_bytes(u8 *dst, u32 at, u32 cap, const char *src, u32 n)
+{
+    while (n-- > 0 && at < cap) dst[at++] = (u8)*src++;
+    return at;
+}
+
+/* The summary: "Print", then each option as "Label: choice"; picking an
+   option asks for its choice and comes back here. WP_FALSE when the
+   writer cancelled. */
+static wp_bool choose_print_options(wp_app_ctx *ctx, print_opts *po)
+{
+    const u8 *ptrs[PRINT_MAX_OPTS + 1];
+    u32 lens[PRINT_MAX_OPTS + 1];
+    const u8 *cptrs[PRINT_MAX_CHOICES];
+    u32 clens[PRINT_MAX_CHOICES];
+    u32 i, picked;
+    wp_bool cancelled;
+
+    for (;;) {
+        ptrs[0] = (const u8 *)"Print";
+        lens[0] = 5;
+        for (i = 0; i < po->count; i++) {
+            print_opt *o = &po->opt[i];
+            u32 n = 0;
+            n = append_bytes(po->labels[i], n, 47, o->label, o->label_len);
+            n = append_bytes(po->labels[i], n, 47, ": ", 2);
+            n = append_bytes(po->labels[i], n, 47, o->text[o->chosen], o->text_len[o->chosen]);
+            ptrs[i + 1] = po->labels[i];
+            lens[i + 1] = n;
+        }
+        cancelled = WP_TRUE;
+        picked = 0;
+        if (plat_dialog_choice(ctx->window, (const u8 *)"Print", 5, ptrs, lens,
+                               po->count + 1, 0, &cancelled, &picked) != WP_OK || cancelled) {
+            return WP_FALSE;
+        }
+        if (picked == 0) return WP_TRUE;
+        {
+            print_opt *o = &po->opt[picked - 1];
+            u32 c = o->chosen;
+            for (i = 0; i < o->count; i++) {
+                cptrs[i] = (const u8 *)o->text[i];
+                clens[i] = o->text_len[i];
+            }
+            cancelled = WP_TRUE;
+            if (plat_dialog_choice(ctx->window, (const u8 *)o->label, o->label_len, cptrs, clens,
+                                   o->count, o->chosen, &cancelled, &c) == WP_OK && !cancelled) {
+                o->chosen = c;
+            }
+        }
+    }
+}
+
+/* The document as RTF to the gateway's printer: behind a copy count, or,
+   when the gateway listed its options, behind the writer's choices -- a
+   0, the copies, a big-endian length, then "key=value" lines for each
+   choice that is not the printer's default (docs/formats/offload-
+   protocol.md's OFFLOAD_PRINT). */
 static wp_status print_on_gateway(wp_app_ctx *ctx)
 {
-    u32 rtf_len = 0;
+    u32 rtf_len = 0, head = 1, i;
     u8 *payload;
+    u8 opts_text[256];
+    u32 opts_len = 0;
+    u8 copies = 1;
     offload_request req;
     offload_response resp;
     wp_bool ok;
+    print_opts *po = fetch_print_options();
+
+    if (po != NULL) {
+        if (!choose_print_options(ctx, po)) {
+            free_print_options(po);
+            return WP_OK;
+        }
+        for (i = 0; i < po->count; i++) {
+            print_opt *o = &po->opt[i];
+            if (o->key_len == 6 && memcmp(o->key, "copies", 6) == 0) {
+                u32 k, v = 0;
+                for (k = 0; k < o->name_len[o->chosen]; k++) {
+                    char d = o->name[o->chosen][k];
+                    if (d >= '0' && d <= '9') v = v * 10u + (u32)(d - '0');
+                }
+                copies = (u8)(v >= 1 && v <= 99 ? v : 1);
+                continue;
+            }
+            if (o->chosen == o->dflt) continue;
+            opts_len = append_bytes(opts_text, opts_len, sizeof(opts_text), o->key, o->key_len);
+            opts_len = append_bytes(opts_text, opts_len, sizeof(opts_text), "=", 1);
+            opts_len = append_bytes(opts_text, opts_len, sizeof(opts_text),
+                                    o->name[o->chosen], o->name_len[o->chosen]);
+            opts_len = append_bytes(opts_text, opts_len, sizeof(opts_text), "\n", 1);
+        }
+        free_print_options(po);
+        head = 4 + opts_len;
+    }
 
     format_rtf_export(ctx->doc, NULL, 0, &rtf_len);
-    if (rtf_len + 1 > convert_max_file()) {
+    if (rtf_len + head > convert_max_file()) {
         wp_action_tell(ctx, "The document is too large to send to the gateway");
         return WP_RANGE;
     }
-    payload = (u8 *)mem_alloc(rtf_len + 1);
+    payload = (u8 *)mem_alloc(rtf_len + head);
     if (payload == NULL) {
         wp_action_tell(ctx, "Not enough memory to print");
         return WP_NOMEM;
     }
-    payload[0] = 1;   /* copies */
-    if (format_rtf_export(ctx->doc, payload + 1, rtf_len, &rtf_len) != WP_OK) {
+    if (head == 1) {
+        payload[0] = copies;
+    } else {
+        payload[0] = 0;
+        payload[1] = copies;
+        payload[2] = (u8)(opts_len >> 8);
+        payload[3] = (u8)(opts_len & 0xFFu);
+        memcpy(payload + 4, opts_text, opts_len);
+    }
+    if (format_rtf_export(ctx->doc, payload + head, rtf_len, &rtf_len) != WP_OK) {
         mem_free(payload);
         wp_action_tell(ctx, "Couldn't build the document to print");
         return WP_ERR;
@@ -1640,7 +1831,7 @@ static wp_status print_on_gateway(wp_app_ctx *ctx)
 
     req.op = OFFLOAD_PRINT;
     req.payload = payload;
-    req.payload_len = rtf_len + 1;
+    req.payload_len = rtf_len + head;
     req.timeout_ms = (u32)WP_ACTION_CONVERT_TIMEOUT_MS;
     if (offload_submit(&req, &resp) != WP_OK) {
         mem_free(payload);

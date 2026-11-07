@@ -1765,3 +1765,42 @@ void test_actions_file_print_routes(void)
     ctx_teardown(&doc, &journal, &ctx);
 }
 
+
+/* File > Print's options, walked through the real dialogs: the summary,
+   Two-sided -> Long edge, Colour -> Gray, Copies -> 2, then Print. What
+   reaches lp (fake_lp.sh keeps its arguments) is those choices and no
+   others -- the printer's defaults are not sent. */
+void test_actions_file_print_options(void)
+{
+    static const char *const args[] = {
+        "--printer", "Office", "--print-command", "host/tests/fake_lp.sh",
+        "--print-options-command", "host/tests/fake_lpoptions.sh", NULL };
+    gateway_handle gw;
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[256];
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Alpha\nBeta\n");
+    (void)mkdir("build/test_print", 0755);
+    (void)remove("build/test_print/lp.args");
+    ASSERT_TRUE(gateway_start_bin("offload/gateway/odt_gateway.py", args, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    ctx.ensure_offload = NULL;
+    ctx.printer_path = NULL;
+
+    /* Summary rows: 0 Print, 1 Copies, 2 Two-sided, 3 Colour, 4 Paper feed, 5 Collate. */
+    window_host_next_choice(2); window_host_next_choice(1);   /* Two-sided: Long edge */
+    window_host_next_choice(3); window_host_next_choice(1);   /* Colour: Gray */
+    window_host_next_choice(1); window_host_next_choice(1);   /* Copies: 2 */
+    window_host_next_choice(0);                               /* Print */
+    ASSERT_TRUE(wp_action_file_print(&ctx) == WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "Printed 1 page on Office");
+    read_whole_file("build/test_print/lp.args", text, sizeof(text));
+    ASSERT_EQ_STR(text, "-t\nRetroWP\n-n\n2\n-o\nsides=two-sided-long-edge\n"
+                        "-o\nHPPJLColorAsGray=on\n-d\nOffice\n");
+
+    offload_shutdown();
+    gateway_stop(&gw);
+    ctx_teardown(&doc, &journal, &ctx);
+}

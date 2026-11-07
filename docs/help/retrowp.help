@@ -233,6 +233,11 @@ prints the document, on one of two printers:
 When both are there you are asked which; the gateway's is
 picked first. The Mac and gem4xe print on the gateway's only.
 
+On the gateway's printer you then see what it offers: Copies,
+Two-sided (long or short edge), Colour or Gray, Paper feed and
+Collate, as the printer has them. Pick one to change it, then
+Print.
+
 {Back to Main|Main}
 @endnode
 
