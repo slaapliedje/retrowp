@@ -1481,6 +1481,12 @@ void app_shell_run(void)
         g_ctx.printer_path = "PRN";
         g_ctx.printer_codepage = 437;
         g_ctx.printer_ready = dos_printer_ready;
+        /* Its language and two-sided printing, chosen in File > Print and
+           kept in the config, as a DOS word processor's printer selection. */
+        g_ctx.printer_driver = cfg.printer_driver;
+        g_ctx.printer_sides = cfg.printer_sides;
+        g_ctx.printer_choosable = WP_TRUE;
+        g_ctx.config_path = WP_DOS_CONFIG_PATH;
         g_ctx.view.line_px = dos_line_rows;
     }
 

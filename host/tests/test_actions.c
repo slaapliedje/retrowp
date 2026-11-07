@@ -1804,3 +1804,42 @@ void test_actions_file_print_options(void)
     gateway_stop(&gw);
     ctx_teardown(&doc, &journal, &ctx);
 }
+
+/* The machine's own printer, where its language is chosen (the ST, DOS):
+   Printer -> HP PCL, Two-sided -> Long edge, Print. The printout is PCL
+   with long-edge duplex, and the choice is in the config afterwards,
+   beside the writer's own keymap. */
+void test_actions_file_print_choose_printer(void)
+{
+    static const char prn[] = "build/test_actions_pcl.prn";
+    static const char cfgp[] = "build/test_actions_print.cfg";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[2048];
+    plat_file *f;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Alpha\nBeta\n");
+    ASSERT_TRUE(plat_file_open(cfgp, PLAT_FILE_WRITE, &f) == WP_OK);
+    ASSERT_TRUE(plat_file_write(f, (const u8 *)"keymap=wordstar\n", 16) == WP_OK);
+    plat_file_close(f);
+    (void)remove(prn);
+    ctx.ensure_offload = no_link;
+    ctx.printer_path = prn;
+    ctx.printer_codepage = 437;
+    ctx.printer_choosable = WP_TRUE;
+    ctx.config_path = cfgp;
+
+    /* Summary: 0 Print, 1 Printer; then, for PCL, 2 Two-sided. */
+    window_host_next_choice(1); window_host_next_choice(2);   /* Printer: HP PCL */
+    window_host_next_choice(2); window_host_next_choice(1);   /* Two-sided: Long edge */
+    window_host_next_choice(0);                               /* Print */
+    ASSERT_TRUE(wp_action_file_print(&ctx) == WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "Printed 1 page");
+    read_whole_file(prn, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "\033E\033&l1S", 7) == 0);
+    ASSERT_TRUE(strstr(text, "Alpha\r\n") != NULL);
+    read_whole_file(cfgp, text, sizeof(text));
+    ASSERT_EQ_STR(text, "keymap=wordstar\nprinter=pcl\nduplex=long\n");
+    ctx_teardown(&doc, &journal, &ctx);
+}

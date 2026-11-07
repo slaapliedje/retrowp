@@ -28,6 +28,7 @@
 #include "docmodel.h"
 #include "layout.h"
 #include "format_txt.h"
+#include "format_prn.h"
 #include "format_ws.h"
 #include "editing.h"
 #include "vimode.h"
@@ -1974,6 +1975,10 @@ void app_shell_run(void)
     g_ctx.printer_path = "PRT:";
     g_ctx.printer_codepage = 1252;
     g_ctx.printer_ready = amiga_printer_ready;
+    /* printer.device's own command codes for bold, italic and underline;
+       the Printer preferences turn them into the chosen printer's. No
+       choice in RetroWP: Workbench made it. */
+    g_ctx.printer_driver = WP_PRN_AMIGA;
     g_ctx.view.line_px = amiga_twips_to_px_y; /* the conversion editor_draw advances y with */
     load_sample_document();
 

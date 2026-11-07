@@ -224,11 +224,14 @@ prints the document, on one of two printers:
 
   This machine's -- the printer port: PRN: on the ST, PRT: on
   the Amiga (through the Printer preferences), PRN on DOS. It
-  prints plain text at ten characters to the inch and six
-  lines to the inch, with the page's paper and margins, the
-  paragraphs' alignment, indents, tab stops and spacing, and
-  the header and footer. Bold, italic and fonts are not
-  printed.
+  prints at ten characters to the inch and six lines to the
+  inch, with the page's paper and margins, the paragraphs'
+  alignment, indents, tab stops and spacing, and the header
+  and footer. On the ST and DOS you choose what the printer
+  understands -- Plain text, Epson, HP PCL or PostScript --
+  and, for PCL and PostScript, two-sided printing; RetroWP
+  remembers it. Epson, PCL, PostScript and the Amiga print
+  bold, italic and underlined text; fonts are not printed.
 
 When both are there you are asked which; the gateway's is
 picked first. The Mac and gem4xe print on the gateway's only.

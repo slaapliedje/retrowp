@@ -13,7 +13,10 @@
    functions, must never #include a native header. */
 
 typedef struct {
-    u8 keymap_id; /* wp_keymap_id; always a valid, already-clamped value */
+    u8 keymap_id;      /* wp_keymap_id; always a valid, already-clamped value */
+    u8 printer_driver; /* wp_prn_driver for the machine's own printer:
+                          "printer=plain|epson|pcl|postscript" (plain) */
+    u8 printer_sides;  /* wp_prn_sides: "duplex=off|long|short" (off) */
 } wp_config;
 
 /* Line-based `key=value` text, `#`/`;` comment lines, blank lines
@@ -45,5 +48,12 @@ wp_status wp_config_parse(const u8 *bytes, u32 len, wp_config *out);
    functions. native_path is an opaque native filesystem path, same
    convention as plat_file_open's own. */
 wp_status wp_config_load(const char *native_path, wp_config *out);
+
+/* Writes the printer settings into the config file at native_path: its
+   printer= and duplex= lines replaced (or added), every other line kept
+   as it was -- the writer's own keymap and comments with it. The file is
+   made if there is none. What the Printer choice in File > Print saves,
+   so it stays chosen. WP_ERR if the file cannot be written. */
+wp_status wp_config_save_printer(const char *native_path, u8 driver, u8 sides);
 
 #endif /* WP_CONFIG_H */

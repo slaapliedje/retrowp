@@ -2,6 +2,7 @@
 #include <string.h>
 #include "test.h"
 #include "config.h"
+#include "format_prn.h"
 
 static wp_keymap_id parse(const char *src)
 {
@@ -141,4 +142,43 @@ void test_config_sample_inert_keys_do_not_alter_defaults(void)
                                 (u32)(sizeof(inert) - 1), &cfg) == WP_OK);
     /* The one real key still takes effect, past all the noise. */
     ASSERT_EQ_U32((u32)cfg.keymap_id, (u32)WP_KEYMAP_EMACS);
+}
+
+/* printer= and duplex=, for the machine's own printer. */
+void test_config_printer_keys(void)
+{
+    static const char text[] = "keymap=wordstar\nprinter=PCL\nduplex=long\n";
+    wp_config cfg;
+
+    ASSERT_TRUE(wp_config_parse((const u8 *)text, (u32)sizeof(text) - 1, &cfg) == WP_OK);
+    ASSERT_EQ_U32(cfg.keymap_id, WP_KEYMAP_WORDSTAR);
+    ASSERT_EQ_U32(cfg.printer_driver, WP_PRN_PCL);
+    ASSERT_EQ_U32(cfg.printer_sides, WP_PRN_DUPLEX_LONG);
+    ASSERT_TRUE(wp_config_parse((const u8 *)"", 0, &cfg) == WP_OK);
+    ASSERT_EQ_U32(cfg.printer_driver, WP_PRN_PLAIN);
+    ASSERT_EQ_U32(cfg.printer_sides, WP_PRN_SIMPLEX);
+}
+
+/* Saving the printer keeps the writer's other lines -- a comment and the
+   keymap -- and replaces its own, with the file read back the same. */
+void test_config_save_printer(void)
+{
+    static const char path[] = "build/test_config_save.cfg";
+    plat_file *f;
+    char text[256];
+    u32 n = 0;
+    wp_config cfg;
+
+    ASSERT_TRUE(plat_file_open(path, PLAT_FILE_WRITE, &f) == WP_OK);
+    ASSERT_TRUE(plat_file_write(f, (const u8 *)"# mine\nkeymap=emacs\nprinter=epson", 33) == WP_OK);
+    plat_file_close(f);
+    ASSERT_TRUE(wp_config_save_printer(path, WP_PRN_POSTSCRIPT, WP_PRN_DUPLEX_SHORT) == WP_OK);
+    ASSERT_TRUE(plat_file_open(path, PLAT_FILE_READ, &f) == WP_OK);
+    ASSERT_TRUE(plat_file_read(f, (u8 *)text, sizeof(text) - 1, &n) == WP_OK);
+    plat_file_close(f);
+    text[n] = '\0';
+    ASSERT_EQ_STR(text, "# mine\nkeymap=emacs\nprinter=postscript\nduplex=short\n");
+    ASSERT_TRUE(wp_config_load(path, &cfg) == WP_OK);
+    ASSERT_EQ_U32(cfg.keymap_id, WP_KEYMAP_EMACS);
+    ASSERT_EQ_U32(cfg.printer_driver, WP_PRN_POSTSCRIPT);
 }

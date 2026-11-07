@@ -96,6 +96,17 @@ typedef struct wp_app_ctx {
        stops for "Not ready writing device PRN" -- and the program would
        freeze. NULL when the shell cannot ask, and the printer is tried. */
     wp_bool   (*printer_ready)(void);
+    /* What that printer understands (wp_prn_driver) and whether to print
+       on both sides (wp_prn_sides). When printer_choosable, File > Print
+       lets the writer change them and saves the choice to config_path
+       (wp_config_save_printer) -- the ST and DOS, where a word processor
+       carried its own printer drivers. Not on the Amiga, whose Printer
+       preferences choose the printer and RetroWP sends printer.device's
+       own codes. */
+    u8          printer_driver;
+    u8          printer_sides;
+    wp_bool     printer_choosable;
+    const char *config_path;
 
     wp_prompt prompt;   /* the status line's one-line text prompt (prompt.h) */
 

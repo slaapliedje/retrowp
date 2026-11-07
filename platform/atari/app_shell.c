@@ -5055,6 +5055,13 @@ void app_shell_run(void)
         g_ctx.printer_path = "PRN:";
         g_ctx.printer_codepage = 437;
         g_ctx.printer_ready = atari_printer_ready;
+        /* The printer's language and two-sided printing from RETROWP.CFG,
+           chosen in File > Print and saved back -- an ST word processor's
+           own printer drivers, the way 1st Word Plus carried them. */
+        g_ctx.printer_driver = cfg.printer_driver;
+        g_ctx.printer_sides = cfg.printer_sides;
+        g_ctx.printer_choosable = WP_TRUE;
+        g_ctx.config_path = WP_ATARI_CONFIG_PATH;
 #endif
         g_ctx.view.line_px = atari_twips_to_px_y; /* the conversion paint_document advances y with */
     }

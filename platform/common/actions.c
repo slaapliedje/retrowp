@@ -7,6 +7,7 @@
 #include "format_ws.h"
 #include "format_md.h"
 #include "format_prn.h"
+#include "config.h"
 #include "offload.h"
 #include "keymap.h"
 #include "editing.h"
@@ -1850,13 +1851,77 @@ static wp_status write_printer(void *user, const u8 *bytes, u32 len)
     return plat_file_write((plat_file *)user, bytes, len);
 }
 
-/* format_prn's printout, to the machine's own printer. */
+/* The machine's own printer's settings, where the writer chooses them
+   (ctx->printer_choosable): a summary -- Print, the printer's language,
+   and two-sided for the ones that can (PCL, PostScript) -- each change
+   saved to the config at once. WP_FALSE when the writer cancelled. */
+static wp_bool choose_printer(wp_app_ctx *ctx)
+{
+    static const char *const drivers[] = { "Plain text", "Epson", "HP PCL", "Amiga", "PostScript" };
+    static const u8 driver_of[] = { WP_PRN_PLAIN, WP_PRN_EPSON, WP_PRN_PCL, WP_PRN_POSTSCRIPT };
+    static const char *const sides[] = { "Off", "Long edge", "Short edge" };
+    for (;;) {
+        u8 labels[3][40];
+        const u8 *ptrs[3];
+        u32 lens[3], count = 2, picked = 0, n;
+        wp_bool cancelled = WP_TRUE;
+        wp_bool can_duplex = (wp_bool)(ctx->printer_driver == WP_PRN_PCL ||
+                                       ctx->printer_driver == WP_PRN_POSTSCRIPT);
+
+        ptrs[0] = (const u8 *)"Print";
+        lens[0] = 5;
+        n = append_bytes(labels[1], 0, 39, "Printer: ", 9);
+        n = append_bytes(labels[1], n, 39, drivers[ctx->printer_driver < 5 ? ctx->printer_driver : 0],
+                         (u32)strlen(drivers[ctx->printer_driver < 5 ? ctx->printer_driver : 0]));
+        ptrs[1] = labels[1];
+        lens[1] = n;
+        if (can_duplex) {
+            n = append_bytes(labels[2], 0, 39, "Two-sided: ", 11);
+            n = append_bytes(labels[2], n, 39, sides[ctx->printer_sides < 3 ? ctx->printer_sides : 0],
+                             (u32)strlen(sides[ctx->printer_sides < 3 ? ctx->printer_sides : 0]));
+            ptrs[2] = labels[2];
+            lens[2] = n;
+            count = 3;
+        }
+        if (plat_dialog_choice(ctx->window, (const u8 *)"Print", 5, ptrs, lens, count, 0,
+                               &cancelled, &picked) != WP_OK || cancelled) {
+            return WP_FALSE;
+        }
+        if (picked == 0) return WP_TRUE;
+        {
+            const u8 *cptrs[4];
+            u32 clens[4], i, c = 0, ccount = picked == 1 ? 4u : 3u, dflt = 0;
+
+            for (i = 0; i < ccount; i++) {
+                const char *t = picked == 1 ? drivers[driver_of[i]] : sides[i];
+                cptrs[i] = (const u8 *)t;
+                clens[i] = (u32)strlen(t);
+                if (picked == 1 ? driver_of[i] == ctx->printer_driver : i == ctx->printer_sides) dflt = i;
+            }
+            cancelled = WP_TRUE;
+            if (plat_dialog_choice(ctx->window, (const u8 *)(picked == 1 ? "Printer" : "Two-sided"),
+                                   picked == 1 ? 7u : 9u, cptrs, clens, ccount, dflt,
+                                   &cancelled, &c) == WP_OK && !cancelled) {
+                if (picked == 1) ctx->printer_driver = driver_of[c];
+                else ctx->printer_sides = (u8)c;
+                if (ctx->config_path != NULL) {
+                    (void)wp_config_save_printer(ctx->config_path, ctx->printer_driver,
+                                                 ctx->printer_sides);
+                }
+            }
+        }
+    }
+}
+
+/* format_prn's printout, to the machine's own printer, in its language. */
 static wp_status print_here(wp_app_ctx *ctx)
 {
     wp_prn_options opt;
     plat_file *prn;
     u32 pages = 0;
     wp_status st;
+
+    if (ctx->printer_choosable && !choose_printer(ctx)) return WP_OK;
 
     if ((ctx->printer_ready != NULL && !ctx->printer_ready()) ||
         plat_file_open(ctx->printer_path, PLAT_FILE_WRITE, &prn) != WP_OK) {
@@ -1866,6 +1931,8 @@ static wp_status print_here(wp_app_ctx *ctx)
     memset(&opt, 0, sizeof(opt));
     opt.codepage = ctx->printer_codepage;
     opt.crlf = WP_TRUE;
+    opt.driver = ctx->printer_driver;
+    opt.sides = ctx->printer_sides;
     st = format_prn_export(ctx->doc, &opt, write_printer, prn, &pages);
     plat_file_close(prn);
     if (st == WP_NOMEM) {
