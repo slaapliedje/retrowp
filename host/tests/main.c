@@ -532,6 +532,13 @@ void test_format_prn_pages_header_footer(void);
 void test_format_prn_page_break_and_top_space(void);
 void test_format_prn_encodings(void);
 void test_format_prn_empty_document(void);
+void test_format_prn_epson(void);
+void test_format_prn_pcl(void);
+void test_format_prn_pcl_paper(void);
+void test_format_prn_amiga(void);
+void test_format_prn_postscript(void);
+void test_format_prn_driver_empty(void);
+void test_format_prn_postscript_file(void);
 
 /* format_rtf_import.c */
 void test_format_rtf_import_rejects_bad_header(void);
@@ -1156,6 +1163,13 @@ static const test_case g_cases[] = {
     { "format_prn_page_break_and_top_space", test_format_prn_page_break_and_top_space },
     { "format_prn_encodings", test_format_prn_encodings },
     { "format_prn_empty_document", test_format_prn_empty_document },
+    { "format_prn_epson", test_format_prn_epson },
+    { "format_prn_pcl", test_format_prn_pcl },
+    { "format_prn_pcl_paper", test_format_prn_pcl_paper },
+    { "format_prn_amiga", test_format_prn_amiga },
+    { "format_prn_postscript", test_format_prn_postscript },
+    { "format_prn_driver_empty", test_format_prn_driver_empty },
+    { "format_prn_postscript_file", test_format_prn_postscript_file },
 
     { "format_rtf_import_rejects_bad_header", test_format_rtf_import_rejects_bad_header },
     { "format_rtf_import_decodes_other_code_pages", test_format_rtf_import_decodes_other_code_pages },

@@ -250,3 +250,195 @@ void test_format_prn_empty_document(void)
     ASSERT_EQ_U32(k.len, 0);
     wp_document_free(&doc);
 }
+
+/* ---- Drivers ---------------------------------------------------------- */
+
+/* Appends a run of `text` in `flags` (WP_STYLE_*) to paragraph 0. */
+static void add_run(wp_document *doc, const char *text, u16 flags)
+{
+    wp_char_style cs = *wp_document_cstyle_get(doc, doc->default_cstyle);
+    wp_cstyle h;
+    wp_span span;
+    u16 ri;
+
+    cs.flags = flags;
+    ASSERT_TRUE(wp_document_cstyle_find_or_add(doc, &cs, &h) == WP_OK);
+    ASSERT_TRUE(wp_strpool_append(&doc->strings, (const u8 *)text, (u32)strlen(text), &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(wp_section_paragraph_get(wp_document_section_get(doc, 0), 0),
+                                     span, h, &ri) == WP_OK);
+}
+
+static void print_with(const wp_document *doc, u8 driver, u8 sides, prn_sink *k)
+{
+    wp_prn_options opt;
+
+    memset(&opt, 0, sizeof(opt));
+    opt.driver = driver;
+    opt.sides = sides;
+    k->len = 0;
+    ASSERT_TRUE(format_prn_export(doc, &opt, sink_write, k, NULL) == WP_OK);
+}
+
+/* "a " then a bold "b": each driver's own codes around the bold, back to
+   none by the line's end. */
+void test_format_prn_epson(void)
+{
+    wp_document doc;
+    prn_sink k;
+
+    make_doc(&doc, "a \n", 20, 10, 0, 0);
+    add_run(&doc, "b", WP_STYLE_BOLD);
+    add_run(&doc, "c", (u16)(WP_STYLE_ITALIC | WP_STYLE_UNDERLINE));
+    print_with(&doc, WP_PRN_EPSON, 0, &k);
+    /* reset, 1/6" lines, 10 cpi, page length 10 lines, then the line */
+    assert_out(&k, "\033@\0332\033P\033C\012a \033Eb\033F\0334\033-1c\0335\033-0\n\f");
+    wp_document_free(&doc);
+}
+
+void test_format_prn_pcl(void)
+{
+    wp_document doc;
+    prn_sink k;
+
+    make_doc(&doc, "a \n", 20, 30, 0, 0);     /* taller than wide: portrait */
+    add_run(&doc, "b", WP_STYLE_BOLD);
+    print_with(&doc, WP_PRN_PCL, WP_PRN_DUPLEX_LONG, &k);
+    assert_out(&k, "\033E\033&l1S\033&l0L\033&l6D\033(10U\033(s0p10h0s0b3T"
+                   "\033&l0O\033&l0E"
+                   "a \033(s3Bb\033(s0B\n\f\033E");
+    wp_document_free(&doc);
+}
+
+/* PCL's paper code follows the section's page: Letter is 2, A4 26, and a
+   page wider than tall is landscape. */
+void test_format_prn_pcl_paper(void)
+{
+    wp_document doc;
+    wp_section *sec;
+    prn_sink k;
+
+    make_doc(&doc, "a\n", 20, 10, 0, 0);
+    sec = wp_document_section_get(&doc, 0);
+    sec->page_width = 16838;  sec->page_height = 11906;     /* A4, on its side */
+    print_with(&doc, WP_PRN_PCL, 0, &k);
+    k.buf[k.len] = 0;
+    ASSERT_TRUE(strstr((const char *)k.buf, "\033&l26A\033&l1O") != NULL);
+    ASSERT_TRUE(strstr((const char *)k.buf, "\033&l0S") != NULL);
+    wp_document_free(&doc);
+}
+
+void test_format_prn_amiga(void)
+{
+    wp_document doc;
+    prn_sink k;
+
+    make_doc(&doc, "a \n", 20, 10, 0, 0);
+    add_run(&doc, "b", WP_STYLE_BOLD);
+    print_with(&doc, WP_PRN_AMIGA, 0, &k);
+    assert_out(&k, "\033#1\033[0w\033[1z" "a \033[1mb\033[22m\n\f");
+    wp_document_free(&doc);
+}
+
+/* PostScript: a page description on the same grid -- Courier faces,
+   each line moved to its place, duplex through setpagedevice, a page
+   per showpage. Checked by its parts, not byte for byte. */
+void test_format_prn_postscript(void)
+{
+    wp_document doc;
+    prn_sink k;
+    const char *t;
+
+    make_doc(&doc, "a (x)\n", 20, 10, 1, 1);
+    add_run(&doc, "b", WP_STYLE_BOLD);
+    add_run(&doc, "u", WP_STYLE_UNDERLINE);
+    print_with(&doc, WP_PRN_POSTSCRIPT, WP_PRN_DUPLEX_SHORT, &k);
+    ASSERT_TRUE(k.len < sizeof(k.buf));
+    k.buf[k.len] = 0;
+    t = (const char *)k.buf;
+    ASSERT_TRUE(strncmp(t, "%!PS-Adobe-3.0\n", 15) == 0);
+    ASSERT_TRUE(strstr(t, "/F1n /Courier-Bold RE") != NULL);
+    ASSERT_TRUE(strstr(t, "<< /Duplex true /Tumble true >> setpagedevice") != NULL);
+    /* 22 columns of 7.2 pt by 10 lines of 12 pt */
+    ASSERT_TRUE(strstr(t, "%%Page: 1 1\n<< /PageSize [158.4 120.0] >> setpagedevice") != NULL);
+    /* a left margin of one column (7.2 pt); one line of top margin, then
+       the baseline 9 pt into its 12 pt line: 120 - 12 - 9 = 99 */
+    ASSERT_TRUE(strstr(t, "F0 7.2 99.0 M (a \\(x\\)) S\n") != NULL);
+    ASSERT_TRUE(strstr(t, "F1 43.2 99.0 M (b) S\n") != NULL);
+    ASSERT_TRUE(strstr(t, "7.2 50.4 97.5 U F0 50.4 99.0 M (u) S\n") != NULL);
+    ASSERT_TRUE(strstr(t, "showpage\n%%EOF\n") != NULL);
+    wp_document_free(&doc);
+}
+
+/* No pages, no bytes -- not even a driver's reset. */
+void test_format_prn_driver_empty(void)
+{
+    wp_document doc;
+    prn_sink k;
+
+    make_doc(&doc, "", 20, 10, 0, 0);
+    print_with(&doc, WP_PRN_PCL, 0, &k);
+    ASSERT_EQ_U32(k.len, 0);
+    wp_document_free(&doc);
+}
+
+static wp_status file_write(void *user, const u8 *bytes, u32 len)
+{
+    return plat_file_write((plat_file *)user, bytes, len);
+}
+
+/* A Letter page in PostScript, kept as build/test_format_prn.ps for an
+   interpreter to render (Ghostscript checks it as a real program). */
+void test_format_prn_postscript_file(void)
+{
+    wp_document doc;
+    wp_section *sec;
+    wp_para_style ps;
+    wp_span span;
+    wp_prn_options opt;
+    plat_file *f;
+    u32 pages = 0;
+
+    make_doc(&doc, "RetroWP\nThis line has \n", 65, 66, 10, 6);
+    sec = wp_document_section_get(&doc, 0);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"RetroWP|PostScript test", 23, &span) == WP_OK);
+    sec->header = span;
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"Page #", 6, &span) == WP_OK);
+    sec->footer = span;
+    ps = base_style(&doc);
+    ps.align = WP_ALIGN_CENTER;
+    set_para_style(&doc, 0, &ps);
+    {
+        /* paragraph 0 bold; paragraph 1 gets bold, italic, underline runs */
+        wp_paragraph *p0 = wp_section_paragraph_get(sec, 0);
+        wp_char_style cs = *wp_document_cstyle_get(&doc, doc.default_cstyle);
+        wp_cstyle h;
+        wp_paragraph *p1 = wp_section_paragraph_get(sec, 1);
+        u16 ri;
+        cs.flags = WP_STYLE_BOLD;
+        ASSERT_TRUE(wp_document_cstyle_find_or_add(&doc, &cs, &h) == WP_OK);
+        wp_run_cstyle_set(p0, 0, h);
+        ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"bold", 4, &span) == WP_OK);
+        ASSERT_TRUE(wp_paragraph_run_add(p1, span, h, &ri) == WP_OK);
+        ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)", ", 2, &span) == WP_OK);
+        ASSERT_TRUE(wp_paragraph_run_add(p1, span, doc.default_cstyle, &ri) == WP_OK);
+        cs.flags = WP_STYLE_ITALIC;
+        ASSERT_TRUE(wp_document_cstyle_find_or_add(&doc, &cs, &h) == WP_OK);
+        ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"italic", 6, &span) == WP_OK);
+        ASSERT_TRUE(wp_paragraph_run_add(p1, span, h, &ri) == WP_OK);
+        ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)" and ", 5, &span) == WP_OK);
+        ASSERT_TRUE(wp_paragraph_run_add(p1, span, doc.default_cstyle, &ri) == WP_OK);
+        cs.flags = WP_STYLE_UNDERLINE;
+        ASSERT_TRUE(wp_document_cstyle_find_or_add(&doc, &cs, &h) == WP_OK);
+        ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"underlined words", 16, &span) == WP_OK);
+        ASSERT_TRUE(wp_paragraph_run_add(p1, span, h, &ri) == WP_OK);
+        ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)" -- caf\xc3\xa9.", 10, &span) == WP_OK);
+        ASSERT_TRUE(wp_paragraph_run_add(p1, span, doc.default_cstyle, &ri) == WP_OK);
+    }
+    memset(&opt, 0, sizeof(opt));
+    opt.driver = WP_PRN_POSTSCRIPT;
+    ASSERT_TRUE(plat_file_open("build/test_format_prn.ps", PLAT_FILE_WRITE, &f) == WP_OK);
+    ASSERT_TRUE(format_prn_export(&doc, &opt, file_write, f, &pages) == WP_OK);
+    plat_file_close(f);
+    ASSERT_EQ_U32(pages, 1);
+    wp_document_free(&doc);
+}
