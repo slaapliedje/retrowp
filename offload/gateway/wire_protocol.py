@@ -225,6 +225,16 @@ def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, hand
             hdr, payload = read_frame(read_fd, 120.0)
         except GatewayError:
             break
+        # A HELLO mid-session is the peer starting over -- a machine reset,
+        # the program quit and run again -- and on a serial line there is
+        # no connection boundary to say so. Answered as a new handshake, not
+        # as a request for op 0 (which is how a Mac Plus's second launch was
+        # once told "unsupported" and gave up), and any half-sent request
+        # from the old session is dropped.
+        if hdr['type'] == MSG_HELLO:
+            parts = []
+            os.write(write_fd, encode_frame(MSG_CAPS, 0, 0, 0, caps_payload))
+            continue
         if hdr['type'] == MSG_REQUEST_PART:
             parts.append(payload)
             continue

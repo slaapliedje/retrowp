@@ -841,3 +841,43 @@ void test_convert_print_through_lp(void)
     submit_print(refuses, OFFLOAD_ERR, "The printer refused the document");
 }
 
+
+/* ---- A HELLO mid-session --------------------------------------------- */
+
+#include "wire.h"
+
+static wp_status raw_read(void *ctx, u8 *out, u32 cap, u32 timeout_ms, u32 *out_len)
+{
+    return plat_transport_read((plat_transport *)ctx, out, cap, timeout_ms, out_len);
+}
+
+/* A machine reset, or the program run again, says HELLO on a line the
+   gateway still thinks is mid-session -- there is no connection boundary
+   on a serial port. The answer must be CAPS, a fresh handshake, not a
+   RESPONSE to a "request" for op 0: a Mac Plus on a MiSTer was told
+   "unsupported" that way on its second launch and gave up. */
+void test_convert_hello_mid_session_is_a_new_handshake(void)
+{
+    gateway_handle gw;
+    plat_transport *t;
+    wire_header h, got;
+    u8 frame[WIRE_HEADER_SIZE + WIRE_CRC_SIZE];
+    u8 payload[64];
+    u32 n, len = 0;
+    int round;
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
+    ASSERT_TRUE(plat_transport_open(gw.endpoint, 2000, &t) == WP_OK);
+    memset(&h, 0, sizeof(h));
+    h.type = WIRE_MSG_HELLO;
+    n = wire_encode_frame(&h, NULL, frame, sizeof(frame));
+    ASSERT_TRUE(n == sizeof(frame));
+    for (round = 0; round < 2; round++) {
+        ASSERT_TRUE(plat_transport_write(t, frame, n, 2000) == WP_OK);
+        ASSERT_TRUE(wire_read_frame(raw_read, t, 5000, &got, payload, sizeof(payload), &len) == WP_OK);
+        ASSERT_EQ_U32(got.type, WIRE_MSG_CAPS);
+        ASSERT_EQ_U32(len, 42);
+    }
+    plat_transport_close(t);
+    gateway_stop(&gw);
+}

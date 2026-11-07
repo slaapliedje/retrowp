@@ -637,6 +637,7 @@ void test_convert_odt_import_via_gateway(void);
 void test_convert_print_needs_a_printer(void);
 void test_convert_print_to_a_folder(void);
 void test_convert_print_through_lp(void);
+void test_convert_hello_mid_session_is_a_new_handshake(void);
 void test_convert_odt_export_roundtrip_via_gateway(void);
 void test_convert_pdf_export_via_gateway(void);
 void test_convert_pdf_export_uses_the_document_page(void);
@@ -1248,6 +1249,7 @@ static const test_case g_cases[] = {
     { "convert_print_needs_a_printer", test_convert_print_needs_a_printer },
     { "convert_print_to_a_folder", test_convert_print_to_a_folder },
     { "convert_print_through_lp", test_convert_print_through_lp },
+    { "convert_hello_mid_session_is_a_new_handshake", test_convert_hello_mid_session_is_a_new_handshake },
     { "convert_odt_export_roundtrip_via_gateway", test_convert_odt_export_roundtrip_via_gateway },
     { "convert_pdf_export_via_gateway", test_convert_pdf_export_via_gateway },
     { "convert_pdf_export_uses_the_document_page", test_convert_pdf_export_uses_the_document_page },
