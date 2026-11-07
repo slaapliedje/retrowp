@@ -669,8 +669,14 @@ define dos_depfix
 tr ' ' '\n' < $(1) | sed -n 's/^\(.*\.h\)$$/\1:/p' >> $(1)
 endef
 
-DOS_STRICT_CFLAGS  = -0 -ml -bt=dos -za -zastd=c89 -we -wx
-DOS_RELAXED_CFLAGS = -0 -ml -bt=dos -wx
+# -zt256: in the large model, a data object over 256 bytes gets a far
+# segment of its own instead of a place in DGROUP, the one 64 KB group
+# every near datum shares. Without it DGROUP filled up a feature at a
+# time (the DOS choice box's save buffer, then the printer drivers' tables
+# each overflowed it); with it only small data and the stack's statics
+# compete for it.
+DOS_STRICT_CFLAGS  = -0 -ml -bt=dos -zt256 -za -zastd=c89 -we -wx
+DOS_RELAXED_CFLAGS = -0 -ml -bt=dos -zt256 -wx
 # Project headers first, Watcom's h/ LAST, deliberately: Watcom ships a
 # same-named endian.h (OS/2-oriented) that shadowed the real one when
 # searched first, producing bizarre parse errors deep inside Watcom's
