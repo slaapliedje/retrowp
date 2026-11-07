@@ -831,6 +831,29 @@ static void translate_mac_key(EventRecord *e, wp_key_event *out)
     default: break;
     }
 
+    /* A control character is a Control combination only when Control is
+       held. Otherwise it is the key itself, under a key code the table
+       above does not list -- the original Mac Plus keyboard's arrows, for
+       one, are not the Extended Keyboard's 0x7B-0x7E -- and its character
+       code says which: Right Arrow's 0x1D read as Ctrl+], Font Size, and
+       a Mac IIci under BasiliskII opened the Font Size dialog on every
+       arrow key the CI gate sent. */
+    if (ch < 0x20 && (e->modifiers & (ControlKey | rightControlKey)) == 0) {
+        switch (ch) {
+        case 0x1C: out->special = (u16)WP_KEY_LEFT;      return;
+        case 0x1D: out->special = (u16)WP_KEY_RIGHT;     return;
+        case 0x1E: out->special = (u16)WP_KEY_UP;        return;
+        case 0x1F: out->special = (u16)WP_KEY_DOWN;      return;
+        case 0x1B: out->special = (u16)WP_KEY_ESCAPE;    return;
+        case 0x0D: case 0x03: out->special = (u16)WP_KEY_ENTER; return;
+        case 0x09: out->special = (u16)WP_KEY_TAB;       return;
+        case 0x08: out->special = (u16)WP_KEY_BACKSPACE; return;
+        case 0x0B: out->special = (u16)WP_KEY_PAGE_UP;   return;
+        case 0x0C: out->special = (u16)WP_KEY_PAGE_DOWN; return;
+        default: break;
+        }
+    }
+
     if (ch < 0x20) {
         out->codepoint = (u32)(ch + ('a' - 1));
         out->mods |= (u8)WP_MOD_CTRL;
@@ -876,7 +899,15 @@ static wp_bool mac_dispatch_key(wp_key_event ev)
 
     {
         wp_pos before = *wp_keymap_cursor(&g_ctx);
-        outcome = wp_keymap_feed_key(&g_ctx, ev, g_last_ascii);
+        /* A special key has no shortcut byte. The Toolbox gives arrows,
+           Escape, Tab and Return control-character codes too -- Right
+           Arrow's is 0x1D, Ctrl+]'s, Font Size's shortcut -- and the vi
+           arm's shortcut fallback took the raw code at its word: every
+           Right Arrow opened Font Size (unseen while the choice dialog
+           was a popup that closed at once; a modal one froze the Mac CI
+           gate on it). */
+        outcome = wp_keymap_feed_key(&g_ctx, ev,
+                                     ev.special != (u16)WP_KEY_NONE ? (u8)0 : g_last_ascii);
         wp_action_after_key(&g_ctx, before, outcome.inserted_char);
     }
 
