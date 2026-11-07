@@ -1054,3 +1054,31 @@ the next time:
 - The Mac Plus keyboard has no Control key: shortcuts there are the
   menus' Command keys (Command-P prints).
 
+
+
+## Printing from the MiSTer Mac Plus (2026-11-07)
+
+RetroWP on the MiSTer MacPlus core printed through the gateway: File >
+Print, the gateway's printer, "Printed 1 page on
+HP-Color-LaserJet-MFP-M477fdn". The route, and what each part needed:
+
+- **Mac to MiSTer.** The core wires the SCC's channel A (the modem port,
+  `serial:modem:...`) to the MiSTer's /dev/ttyS1. Its SCC model ignores
+  the baud rate the Mac programs -- the WR12/13 decoder is commented out
+  and the divider is a constant -- so the port always runs at about
+  115200, whatever RetroWP asks for. It also keeps no receive FIFO, so a
+  burst at line rate into the Mac is overrun: the gateway's CAPS arrived
+  whole at ttyS1 and the Mac still saw nothing.
+- **MiSTer to the gateway Pi.** An FTDI USB-serial adapter on the MiSTer,
+  null-modem to the gateway Pi's RS-232 HAT. `host/tools/mister/
+  pace_relay.py` joins ttyS1 to /dev/ttyUSB0 at 115200 and paces bytes
+  into the Mac at 2 ms each; the core's UART mode must be None, and the
+  relay restarted after any core load. (socat works for the Mac-to-Pi
+  half but cannot pace the other.)
+- **The gateway** at 115200, printing to a CUPS queue on another machine
+  (`CUPS_SERVER=...`, `--printer NAME`). The run also found that a HELLO
+  mid-session used to be answered as a request for op 0; it is a fresh
+  handshake now.
+
+A core change would remove the relay's pacing: decode WR12/13 to the
+divider and give the SCC model the real 8530's 3-byte receive FIFO.
