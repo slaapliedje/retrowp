@@ -1851,15 +1851,33 @@ static wp_status write_printer(void *user, const u8 *bytes, u32 len)
     return plat_file_write((plat_file *)user, bytes, len);
 }
 
-/* The machine's own printer's settings, where the writer chooses them
-   (ctx->printer_choosable): a summary -- Print, the printer's language,
-   and two-sided for the ones that can (PCL, PostScript) -- each change
-   saved to the config at once. WP_FALSE when the writer cancelled. */
-static wp_bool choose_printer(wp_app_ctx *ctx)
+/* A printer_driver's name in File > Print. */
+static const char *printer_name(const wp_app_ctx *ctx, u8 driver)
 {
     static const char *const drivers[] = { "Plain text", "Epson", "HP PCL", "Amiga", "PostScript" };
-    static const u8 driver_of[] = { WP_PRN_PLAIN, WP_PRN_EPSON, WP_PRN_PCL, WP_PRN_POSTSCRIPT };
+
+    if (driver == WP_PRINTER_PAGES && ctx->print_pages_name != NULL) return ctx->print_pages_name;
+    return drivers[driver < 5 ? driver : 0];
+}
+
+/* The machine's own printer's settings, where the writer chooses them
+   (ctx->printer_choosable): a summary -- Print, the printer, and
+   two-sided for the ones that can (PCL, PostScript) -- each change saved
+   to the config at once. The machine's own page printing (GDOS), when it
+   has one, heads the list of printers. WP_FALSE when the writer
+   cancelled. */
+static wp_bool choose_printer(wp_app_ctx *ctx)
+{
+    static const u8 all_drivers[] = { WP_PRINTER_PAGES, WP_PRN_PLAIN, WP_PRN_EPSON, WP_PRN_PCL,
+                                      WP_PRN_POSTSCRIPT };
     static const char *const sides[] = { "Off", "Long edge", "Short edge" };
+    /* Without page printing the list starts past it. */
+    const u8 *driver_of = all_drivers + (ctx->print_pages != NULL ? 0 : 1);
+    u32 driver_count = ctx->print_pages != NULL ? 5u : 4u;
+
+    if (ctx->printer_driver == WP_PRINTER_PAGES && ctx->print_pages == NULL) {
+        ctx->printer_driver = WP_PRN_PLAIN;
+    }
     for (;;) {
         u8 labels[3][40];
         const u8 *ptrs[3];
@@ -1871,8 +1889,8 @@ static wp_bool choose_printer(wp_app_ctx *ctx)
         ptrs[0] = (const u8 *)"Print";
         lens[0] = 5;
         n = append_bytes(labels[1], 0, 39, "Printer: ", 9);
-        n = append_bytes(labels[1], n, 39, drivers[ctx->printer_driver < 5 ? ctx->printer_driver : 0],
-                         (u32)strlen(drivers[ctx->printer_driver < 5 ? ctx->printer_driver : 0]));
+        n = append_bytes(labels[1], n, 39, printer_name(ctx, ctx->printer_driver),
+                         (u32)strlen(printer_name(ctx, ctx->printer_driver)));
         ptrs[1] = labels[1];
         lens[1] = n;
         if (can_duplex) {
@@ -1889,11 +1907,11 @@ static wp_bool choose_printer(wp_app_ctx *ctx)
         }
         if (picked == 0) return WP_TRUE;
         {
-            const u8 *cptrs[4];
-            u32 clens[4], i, c = 0, ccount = picked == 1 ? 4u : 3u, dflt = 0;
+            const u8 *cptrs[5];
+            u32 clens[5], i, c = 0, ccount = picked == 1 ? driver_count : 3u, dflt = 0;
 
             for (i = 0; i < ccount; i++) {
-                const char *t = picked == 1 ? drivers[driver_of[i]] : sides[i];
+                const char *t = picked == 1 ? printer_name(ctx, driver_of[i]) : sides[i];
                 cptrs[i] = (const u8 *)t;
                 clens[i] = (u32)strlen(t);
                 if (picked == 1 ? driver_of[i] == ctx->printer_driver : i == ctx->printer_sides) dflt = i;
@@ -1913,7 +1931,28 @@ static wp_bool choose_printer(wp_app_ctx *ctx)
     }
 }
 
-/* format_prn's printout, to the machine's own printer, in its language. */
+/* "Printed 12 pages", or that there was nothing to. */
+static void tell_printed(wp_app_ctx *ctx, u32 pages)
+{
+    char msg[32] = "Printed ";
+    char digits[12];
+    u32 pos = 8, n = 0;
+
+    if (pages == 0) {
+        wp_action_tell(ctx, "There is nothing to print");
+        return;
+    }
+    while (pages > 0 && n < (u32)sizeof(digits)) {
+        digits[n++] = (char)('0' + pages % 10u);
+        pages /= 10u;
+    }
+    while (n > 0) msg[pos++] = digits[--n];
+    strcpy(msg + pos, (pos == 9 && msg[8] == '1') ? " page" : " pages");
+    wp_action_tell(ctx, msg);
+}
+
+/* The machine's own printer: its page printing (GDOS) when that is the
+   printer chosen, else format_prn's printout in the printer's language. */
 static wp_status print_here(wp_app_ctx *ctx)
 {
     wp_prn_options opt;
@@ -1923,6 +1962,11 @@ static wp_status print_here(wp_app_ctx *ctx)
 
     if (ctx->printer_choosable && !choose_printer(ctx)) return WP_OK;
 
+    if (ctx->printer_driver == WP_PRINTER_PAGES && ctx->print_pages != NULL) {
+        st = ctx->print_pages(ctx, &pages);
+        if (st == WP_OK) tell_printed(ctx, pages);
+        return st;
+    }
     if ((ctx->printer_ready != NULL && !ctx->printer_ready()) ||
         plat_file_open(ctx->printer_path, PLAT_FILE_WRITE, &prn) != WP_OK) {
         wp_action_tell(ctx, "The printer isn't ready");
@@ -1939,20 +1983,8 @@ static wp_status print_here(wp_app_ctx *ctx)
         wp_action_tell(ctx, "Not enough memory to print");
     } else if (st != WP_OK) {
         wp_action_tell(ctx, "The printer stopped taking the document");
-    } else if (pages == 0) {
-        wp_action_tell(ctx, "There is nothing to print");
     } else {
-        /* "Printed 12 pages" */
-        char msg[32] = "Printed ";
-        char digits[12];
-        u32 pos = 8, n = 0;
-        while (pages > 0 && n < (u32)sizeof(digits)) {
-            digits[n++] = (char)('0' + pages % 10u);
-            pages /= 10u;
-        }
-        while (n > 0) msg[pos++] = digits[--n];
-        strcpy(msg + pos, (pos == 9 && msg[8] == '1') ? " page" : " pages");
-        wp_action_tell(ctx, msg);
+        tell_printed(ctx, pages);
     }
     return st;
 }

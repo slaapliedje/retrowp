@@ -62,6 +62,7 @@ static void parse_line(const u8 *bytes, u32 len, wp_config *out)
         else if (ascii_ieq(v, val_len, "epson")) out->printer_driver = (u8)WP_PRN_EPSON;
         else if (ascii_ieq(v, val_len, "pcl")) out->printer_driver = (u8)WP_PRN_PCL;
         else if (ascii_ieq(v, val_len, "postscript") || ascii_ieq(v, val_len, "ps")) out->printer_driver = (u8)WP_PRN_POSTSCRIPT;
+        else if (ascii_ieq(v, val_len, "gdos")) out->printer_driver = (u8)WP_PRINTER_PAGES;
         return;
     }
     if (ascii_ieq(bytes + key_start, key_len, "duplex")) {
@@ -174,13 +175,13 @@ static wp_bool line_sets(const u8 *line, u32 len, const char *key)
 
 wp_status wp_config_save_printer(const char *native_path, u8 driver, u8 sides)
 {
-    static const char *const drivers[] = { "plain", "epson", "pcl", "plain", "postscript" };
+    static const char *const drivers[] = { "plain", "epson", "pcl", "plain", "postscript", "gdos" };
     static const char *const sides_names[] = { "off", "long", "short" };
     plat_file *f;
     u32 size = 0, read_len = 0, i, line_start, n = 0;
     u8 *old = NULL, *out;
     wp_bool exists = WP_FALSE;
-    const char *dv = driver < 5 ? drivers[driver] : "plain";
+    const char *dv = driver <= WP_PRINTER_PAGES ? drivers[driver] : "plain";
     const char *sv = sides < 3 ? sides_names[sides] : "off";
 
     if (plat_file_exists(native_path, &exists) == WP_OK && exists &&

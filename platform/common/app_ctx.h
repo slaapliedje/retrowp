@@ -106,6 +106,14 @@ typedef struct wp_app_ctx {
     u8          printer_driver;
     u8          printer_sides;
     wp_bool     printer_choosable;
+    /* The machine's own page printing, where it has one: the ST's GDOS
+       printer workstation, which draws each page with real fonts
+       (pageprint.h). Prints the document and says how many pages, or
+       WP_ERR having told the writer why. When set, File > Print offers
+       it among the printers as print_pages_name ("GDOS printer"), as
+       printer_driver WP_PRINTER_PAGES. NULL where there is none. */
+    wp_status (*print_pages)(struct wp_app_ctx *ctx, u32 *pages_out);
+    const char *print_pages_name;
     const char *config_path;
 
     wp_prompt prompt;   /* the status line's one-line text prompt (prompt.h) */

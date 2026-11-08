@@ -12,10 +12,16 @@
    Build discipline: platform/common/ rule as ever -- may call platform.h
    functions, must never #include a native header. */
 
+/* printer_driver's one value past wp_prn_driver's: the machine's own
+   page printing (wp_app_ctx.print_pages, the ST's GDOS printer), saved
+   as "printer=gdos". */
+#define WP_PRINTER_PAGES 5
+
 typedef struct {
     u8 keymap_id;      /* wp_keymap_id; always a valid, already-clamped value */
-    u8 printer_driver; /* wp_prn_driver for the machine's own printer:
-                          "printer=plain|epson|pcl|postscript" (plain) */
+    u8 printer_driver; /* wp_prn_driver for the machine's own printer, or
+                          WP_PRINTER_PAGES: "printer=plain|epson|pcl|
+                          postscript|gdos" (plain) */
     u8 printer_sides;  /* wp_prn_sides: "duplex=off|long|short" (off) */
 } wp_config;
 

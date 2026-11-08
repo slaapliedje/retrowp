@@ -318,6 +318,8 @@ void test_actions_file_print_routes(void);
 void test_actions_file_print_options(void);
 void test_actions_file_print_choose_printer(void);
 void test_config_printer_keys(void);
+void test_pageprint_pages(void);
+void test_pageprint_printable_area(void);
 void test_config_save_printer(void);
 void test_actions_file_open_asks_picks_and_a_new_document_forgets_the_name(void);
 void test_actions_paragraph_buttons_change_the_caret_paragraph(void);
@@ -983,6 +985,8 @@ static const test_case g_cases[] = {
     { "actions_file_print_options", test_actions_file_print_options },
     { "actions_file_print_choose_printer", test_actions_file_print_choose_printer },
     { "config_printer_keys", test_config_printer_keys },
+    { "pageprint_pages", test_pageprint_pages },
+    { "pageprint_printable_area", test_pageprint_printable_area },
     { "config_save_printer", test_config_save_printer },
     { "actions_file_open_asks_picks_and_a_new_document_forgets_the_name", test_actions_file_open_asks_picks_and_a_new_document_forgets_the_name },
     { "actions_paragraph_buttons_change_the_caret_paragraph", test_actions_paragraph_buttons_change_the_caret_paragraph },
