@@ -91,6 +91,13 @@ config file as `printer=plain|epson|pcl|postscript` and
 `duplex=off|long|short` (`wp_config_save_printer` rewrites just those
 lines).
 
+An ST with GDOS loaded has a third way, not this format at all:
+`printer=gdos` draws each page on GDOS's printer workstation (device 21)
+with real fonts, through `platform/common/pageprint.c` -- the document
+laid out again with the printer's own metrics (retroplat's
+`atari_metrics_printer`), each line drawn where that layout puts it, the
+header and footer by the same `|` and `#` rules as below.
+
 ## Headers and footers
 
 A section's header prints on the middle line of the top margin and its

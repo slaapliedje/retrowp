@@ -233,6 +233,11 @@ prints the document, on one of two printers:
   remembers it. Epson, PCL, PostScript and the Amiga print
   bold, italic and underlined text; fonts are not printed.
 
+  On an ST with GDOS loaded (SpeedoGDOS or NVDI), "GDOS
+  printer" heads that list: the printer ASSIGN.SYS gives
+  device 21 prints each page the way it looks, in GDOS's own
+  fonts and sizes, laid out for the paper.
+
 When both are there you are asked which; the gateway's is
 picked first. The Mac and gem4xe print on the gateway's only.
 

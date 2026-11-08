@@ -31,6 +31,7 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "pageview.h"
+#include "pageprint.h"
 #include "rulerbar.h"
 #include "selspan.h"
 #include "menucheck.h"
@@ -1731,6 +1732,74 @@ static wp_bool g_offload_init_attempted = WP_FALSE;
 static wp_bool atari_printer_ready(void)
 {
     return (wp_bool)(Cprnos() != 0);
+}
+
+/* GDOS's printer: the VDI workstation ASSIGN.SYS gives device 21, the
+   first printer, the way GEM applications have always found it. */
+#define ATARI_GDOS_PRINTER 21
+
+/* A page is drawn: print it (v_updwk) and start the next (v_clrwk). */
+static wp_status gdos_end_page(void *user)
+{
+    VdiHdl h = *(VdiHdl *)user;
+
+    v_updwk(h);
+    v_clrwk(h);
+    return WP_OK;
+}
+
+/* File > Print on GDOS's printer (wp_app_ctx.print_pages): the printer
+   workstation opened with its fonts, the document measured and laid out
+   for it and drawn page by page (pageprint.h), then measuring handed
+   back to the screen, whose next paint lays the document out again.
+   SpeedoGDOS prints as it goes; NVDI hands each page to its spooler. */
+static wp_status atari_print_pages(wp_app_ctx *ctx, u32 *pages_out)
+{
+    short work_in[16];
+    short work_out[57];
+    VdiHdl h = 0;
+    short i, faces;
+    atari_gc gc;
+    wp_page_device dev;
+    wp_status st;
+
+    *pages_out = 0;
+    for (i = 0; i < 16; i++) work_in[i] = 0;   /* 11 on: paper and output file, the driver's own */
+    for (i = 1; i < 10; i++) work_in[i] = 1;
+    work_in[0] = ATARI_GDOS_PRINTER;
+    work_in[10] = 2;                            /* raster coordinates */
+    graf_mouse(BUSYBEE, NULL);
+    v_opnwk(work_in, &h, work_out);
+    if (h <= 0) {
+        graf_mouse(ARROW, NULL);
+        wp_action_tell(ctx, "GDOS has no printer (device 21 in ASSIGN.SYS)");
+        return WP_ERR;
+    }
+    faces = (short)(work_out[10] + vst_load_fonts(h, 0));
+    if (atari_metrics_printer(h, work_out, faces) != WP_OK) {
+        vst_unload_fonts(h, 0);
+        v_clswk(h);
+        graf_mouse(ARROW, NULL);
+        wp_action_tell(ctx, "The GDOS printer didn't say its resolution");
+        return WP_ERR;
+    }
+    memset(&gc, 0, sizeof(gc));
+    gc.vdi = h;
+    memset(&dev, 0, sizeof(dev));
+    dev.gc = (plat_gc *)&gc;
+    dev.x_px = atari_twips_to_px_x;
+    dev.y_px = atari_twips_to_px_y;
+    dev.device_w_px = (i32)work_out[0] + 1;
+    dev.device_h_px = (i32)work_out[1] + 1;
+    dev.end_page = gdos_end_page;
+    dev.user = &h;
+    st = wp_pageprint(ctx->doc, &dev, pages_out);
+    atari_metrics_screen();
+    vst_unload_fonts(h, 0);
+    v_clswk(h);
+    graf_mouse(ARROW, NULL);
+    if (st != WP_OK) wp_action_tell(ctx, "The GDOS printer stopped");
+    return st;
 }
 #endif
 
@@ -5062,6 +5131,12 @@ void app_shell_run(void)
         g_ctx.printer_sides = cfg.printer_sides;
         g_ctx.printer_choosable = WP_TRUE;
         g_ctx.config_path = WP_ATARI_CONFIG_PATH;
+        /* With a GDOS loaded (SpeedoGDOS, NVDI), its printer heads the
+           list: real fonts and sizes on paper, as GEM programs print. */
+        if (vq_gdos() != 0) {
+            g_ctx.print_pages = atari_print_pages;
+            g_ctx.print_pages_name = "GDOS printer";
+        }
 #endif
         g_ctx.view.line_px = atari_twips_to_px_y; /* the conversion paint_document advances y with */
     }
