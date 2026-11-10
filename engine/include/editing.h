@@ -272,6 +272,21 @@ wp_status wp_edit_merge_section(wp_document *doc, wp_undo_journal *journal,
    else -- the scheme's own backspace applies. */
 wp_bool wp_edit_backspace_section(wp_document *doc, wp_undo_journal *journal, wp_pos *cursor);
 
+/* A paragraph's table fields (docs/document-model.md, "Tables"): its row
+   shape and its cell and row ends. Journaled, one WP_OP_SET_TABLE. */
+wp_status wp_edit_set_table(wp_document *doc, wp_undo_journal *journal,
+                            u32 section, u32 paragraph, wp_trow trow, u8 tflags);
+
+/* An empty paragraph put in at index `paragraph` with this style and
+   these table fields, or the empty paragraph there taken out (refused if
+   it has text: delete that first, journaled, or the section's last
+   paragraph). Journaled; how table rows and columns come and go. */
+wp_status wp_edit_insert_empty_paragraph(wp_document *doc, wp_undo_journal *journal,
+                                         u32 section, u32 paragraph,
+                                         wp_pstyle style, wp_trow trow, u8 tflags);
+wp_status wp_edit_remove_empty_paragraph(wp_document *doc, wp_undo_journal *journal,
+                                         u32 section, u32 paragraph);
+
 wp_status wp_edit_split_paragraph(wp_document *doc, wp_undo_journal *journal,
                                    wp_pos pos, wp_pos *out_pos);
 wp_status wp_edit_merge_paragraph(wp_document *doc, wp_undo_journal *journal,

@@ -205,6 +205,120 @@ void wp_undo_group_end(wp_undo_journal *journal)
     push_marker_op(journal, WP_OP_GROUP_END);
 }
 
+/* An empty paragraph at index `paragraph`, with these fields. */
+static wp_status put_empty_paragraph(wp_document *doc, u32 section, u32 paragraph,
+                                     wp_pstyle style, wp_trow trow, u8 tflags)
+{
+    wp_section *sec = wp_document_section_get(doc, section);
+    wp_paragraph *para;
+    u32 idx;
+    wp_status st;
+
+    if (sec == NULL || paragraph > sec->para_count) return WP_RANGE;
+    st = paragraph_insert_at(sec, paragraph, &idx);
+    if (st != WP_OK) return st;
+    para = wp_section_paragraph_get(sec, idx);
+    para->style = style;
+    para->trow = trow;
+    para->tflags = tflags;
+    para->layout_dirty = WP_TRUE;
+    return WP_OK;
+}
+
+/* Takes out the empty paragraph at index `paragraph`; a paragraph with
+   text in it is refused (its text must go, journaled, first). */
+static wp_status take_empty_paragraph(wp_document *doc, u32 section, u32 paragraph)
+{
+    wp_section *sec = wp_document_section_get(doc, section);
+    wp_paragraph *para = sec != NULL ? wp_section_paragraph_get(sec, paragraph) : NULL;
+    u16 i;
+
+    if (para == NULL || sec->para_count < 2) return WP_RANGE;
+    if (para->kind != (u8)WP_PARA_TEXT) return WP_RANGE;
+    for (i = 0; i < para->run_count; i++) if (para->runs[i].text.length > 0) return WP_RANGE;
+    paragraph_remove_at(sec, paragraph);
+    return WP_OK;
+}
+
+static wp_status push_para_op(wp_document *doc, wp_undo_journal *journal, wp_op_kind kind,
+                              u32 section, u32 paragraph, wp_pstyle style, wp_trow trow, u8 tflags)
+{
+    wp_op *op = op_new();
+
+    if (op == NULL) return WP_NOMEM;
+    op->kind = (u8)kind;
+    op->at.section = section;
+    op->at.paragraph = paragraph;
+    op->at.run = tflags;
+    op->at.offset = 0;
+    op->text.offset = 0;
+    op->text.length = 0;
+    op->style_before = style;
+    op->style_after = trow;
+    commit_edit(doc, journal);
+    op->next = journal->undo_top;
+    journal->undo_top = op;
+    return WP_OK;
+}
+
+wp_status wp_edit_insert_empty_paragraph(wp_document *doc, wp_undo_journal *journal,
+                                         u32 section, u32 paragraph,
+                                         wp_pstyle style, wp_trow trow, u8 tflags)
+{
+    wp_status st = put_empty_paragraph(doc, section, paragraph, style, trow, tflags);
+    if (st != WP_OK) return st;
+    return push_para_op(doc, journal, WP_OP_INSERT_PARA, section, paragraph, style, trow, tflags);
+}
+
+wp_status wp_edit_remove_empty_paragraph(wp_document *doc, wp_undo_journal *journal,
+                                         u32 section, u32 paragraph)
+{
+    wp_section *sec = wp_document_section_get(doc, section);
+    wp_paragraph *para = sec != NULL ? wp_section_paragraph_get(sec, paragraph) : NULL;
+    wp_pstyle style;
+    wp_trow trow;
+    u8 tflags;
+    wp_status st;
+
+    if (para == NULL) return WP_RANGE;
+    style = para->style;
+    trow = para->trow;
+    tflags = para->tflags;
+    st = take_empty_paragraph(doc, section, paragraph);
+    if (st != WP_OK) return st;
+    return push_para_op(doc, journal, WP_OP_REMOVE_PARA, section, paragraph, style, trow, tflags);
+}
+
+wp_status wp_edit_set_table(wp_document *doc, wp_undo_journal *journal,
+                            u32 section, u32 paragraph, wp_trow trow, u8 tflags)
+{
+    wp_section *sec = wp_document_section_get(doc, section);
+    wp_paragraph *para = sec != NULL ? wp_section_paragraph_get(sec, paragraph) : NULL;
+    wp_op *op;
+
+    if (para == NULL) return WP_RANGE;
+    if (para->trow == trow && para->tflags == tflags) return WP_OK;
+    op = op_new();
+    if (op == NULL) return WP_NOMEM;
+    op->kind = (u8)WP_OP_SET_TABLE;
+    op->at.section = section;
+    op->at.paragraph = paragraph;
+    op->at.run = para->tflags;
+    op->at.offset = tflags;
+    op->text.offset = 0;
+    op->text.length = 0;
+    op->style_before = para->trow;
+    op->style_after = trow;
+    para->trow = trow;
+    para->tflags = tflags;
+    para->layout_dirty = WP_TRUE;
+
+    commit_edit(doc, journal);
+    op->next = journal->undo_top;
+    journal->undo_top = op;
+    return WP_OK;
+}
+
 wp_status wp_edit_split_paragraph(wp_document *doc, wp_undo_journal *journal,
                                    wp_pos pos, wp_pos *out_pos)
 {
@@ -748,6 +862,23 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
     sec = wp_document_section_get(doc, op->at.section);
     para = wp_section_paragraph_get(sec, op->at.paragraph);
 
+    if (op->kind == (u8)WP_OP_INSERT_PARA) {
+        (void)take_empty_paragraph(doc, op->at.section, op->at.paragraph);
+        return;
+    }
+    if (op->kind == (u8)WP_OP_REMOVE_PARA) {
+        (void)put_empty_paragraph(doc, op->at.section, op->at.paragraph, (wp_pstyle)op->style_before,
+                                  (wp_trow)op->style_after, (u8)op->at.run);
+        return;
+    }
+    if (op->kind == (u8)WP_OP_SET_TABLE) {
+        if (para != NULL) {
+            para->trow = (wp_trow)op->style_before;
+            para->tflags = (u8)op->at.run;
+            para->layout_dirty = WP_TRUE;
+        }
+        return;
+    }
     if (op->kind == (u8)WP_OP_INSERT_TEXT) {
         u16 idx = find_run_by_span(para, op->text);
         run_remove_at(para, idx);
@@ -831,6 +962,13 @@ static wp_status apply_single_redo_op(wp_document *doc, wp_op *op)
     if (op->kind == (u8)WP_OP_MERGE_SECTION) {
         return wp_document_merge_section_raw(doc, op->at.section);
     }
+    if (op->kind == (u8)WP_OP_INSERT_PARA) {
+        return put_empty_paragraph(doc, op->at.section, op->at.paragraph, (wp_pstyle)op->style_before,
+                                   (wp_trow)op->style_after, (u8)op->at.run);
+    }
+    if (op->kind == (u8)WP_OP_REMOVE_PARA) {
+        return take_empty_paragraph(doc, op->at.section, op->at.paragraph);
+    }
     sec = wp_document_section_get(doc, op->at.section);
     para = wp_section_paragraph_get(sec, op->at.paragraph);
 
@@ -875,6 +1013,10 @@ static wp_status apply_single_redo_op(wp_document *doc, wp_op *op)
         }
     } else if (op->kind == (u8)WP_OP_SET_CSTYLE) {
         wp_run_cstyle_set(para, (u16)op->at.run, (wp_cstyle)op->style_after);
+        para->layout_dirty = WP_TRUE;
+    } else if (op->kind == (u8)WP_OP_SET_TABLE && para != NULL) {
+        para->trow = (wp_trow)op->style_after;
+        para->tflags = (u8)op->at.offset;
         para->layout_dirty = WP_TRUE;
     }
 

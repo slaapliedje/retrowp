@@ -4,6 +4,7 @@
 #include "layout.h"
 #include "format_rtf.h"
 #include "editing.h"
+#include "table.h"
 #include "pageview.h"
 #include "pageprint.h"
 #include "draw_host.h"
@@ -16,6 +17,13 @@
 static const char g_row[] =
     "{\\rtf1\\ansi\\trowd\\trgaph100\\cellx2000\\cellx4000"
     "\\intbl Alpha\\cell B\\par C\\cell\\row\\pard after\\par}";
+
+static wp_pos cell_start_pos(u32 para)
+{
+    wp_pos p;
+    p.section = 0; p.paragraph = para; p.run = 0; p.offset = 0;
+    return p;
+}
 
 static wp_line *line0(wp_document *doc, u32 para)
 {
@@ -166,6 +174,113 @@ void test_table_enter_and_backspace_keep_cells(void)
     /* "B" starts the second cell: joining it to "Alpha" is refused. */
     ASSERT_TRUE(wp_document_merge_paragraph_raw(&doc, 0, 0, &after) != WP_OK);
     ASSERT_EQ_U32(doc.sections[0].para_count, 4);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* ---- Editing tables (table.h) ---------------------------------------- */
+
+static void flags_are(wp_document *doc, u32 from, const u8 *want, u32 n)
+{
+    u32 i;
+    for (i = 0; i < n; i++) {
+        ASSERT_EQ_U32(doc->sections[0].paras[from + i].tflags, want[i]);
+        ASSERT_TRUE(doc->sections[0].paras[from + i].trow != 0);
+    }
+}
+
+/* Insert a 2x3 table after "Hello": six empty cells, each a cell end,
+   each row's last a row end; Tab and Shift+Tab walk them, across rows,
+   and stop at the table's edges. */
+void test_table_insert_and_move(void)
+{
+    static const u8 two_rows[6] = { 1, 1, 3, 1, 1, 3 };
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_pos at, cell, next;
+    const wp_table_row *row;
+
+    ASSERT_TRUE(format_rtf_import((const u8 *)"{\\rtf1 Hello\\par}", 17, &doc) == WP_OK);
+    wp_undo_journal_init(&journal);
+    at = cell_start_pos(0);
+    ASSERT_TRUE(wp_edit_table_insert(&doc, &journal, at, 2, 3, 6000, &cell) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 7);
+    flags_are(&doc, 1, two_rows, 6);
+    ASSERT_EQ_U32(cell.paragraph, 1);
+    row = wp_document_trow_get(&doc, doc.sections[0].paras[1].trow);
+    ASSERT_TRUE(row != NULL && row->cell_count == 3 && row->cell_right[2] == 6000);
+    ASSERT_TRUE(wp_table_cell_move(&doc, &cell, WP_FALSE, &next) && next.paragraph == 2);
+    cell.paragraph = 3;   /* row 1's last cell: Tab goes to row 2 */
+    ASSERT_TRUE(wp_table_cell_move(&doc, &cell, WP_FALSE, &next) && next.paragraph == 4);
+    ASSERT_TRUE(wp_table_cell_move(&doc, &next, WP_TRUE, &cell) && cell.paragraph == 3);
+    cell.paragraph = 6;   /* the table's last cell */
+    ASSERT_TRUE(!wp_table_cell_move(&doc, &cell, WP_FALSE, &next));
+    cell.paragraph = 1;
+    ASSERT_TRUE(!wp_table_cell_move(&doc, &cell, WP_TRUE, &next));
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 1);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* Rows and columns on that table, each undone: a row after the first
+   (three more cells); a column after the first cell, in every row,
+   taking the second half of its width; the middle column deleted, the
+   cells after it moving left; a row with text in it deleted, and the
+   text back on undo. */
+void test_table_rows_and_columns(void)
+{
+    static const u8 four[4] = { 1, 1, 1, 3 };
+    static const u8 two[2] = { 1, 3 };
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_pos cell, out;
+    const wp_table_row *row;
+    wp_pos in;
+
+    ASSERT_TRUE(format_rtf_import((const u8 *)"{\\rtf1 Hello\\par}", 17, &doc) == WP_OK);
+    wp_undo_journal_init(&journal);
+    ASSERT_TRUE(wp_edit_table_insert(&doc, &journal, cell_start_pos(0), 2, 3, 6000, &cell) == WP_OK);
+
+    ASSERT_TRUE(wp_edit_table_insert_row(&doc, &journal, cell, &out) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 10);
+    ASSERT_EQ_U32(out.paragraph, 4);
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 7);
+
+    ASSERT_TRUE(wp_edit_table_insert_column(&doc, &journal, cell, &out) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 9);
+    flags_are(&doc, 1, four, 4);
+    flags_are(&doc, 5, four, 4);
+    row = wp_document_trow_get(&doc, doc.sections[0].paras[1].trow);
+    ASSERT_TRUE(row != NULL && row->cell_count == 4);
+    if (row != NULL) {
+        ASSERT_EQ_U32((u32)row->cell_right[0], 1000);
+        ASSERT_EQ_U32((u32)row->cell_right[1], 2000);
+        ASSERT_EQ_U32((u32)row->cell_right[3], 6000);
+    }
+    ASSERT_EQ_U32(doc.sections[0].paras[5].trow, doc.sections[0].paras[1].trow);
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 7);
+
+    cell.paragraph = 2;   /* the middle column */
+    ASSERT_TRUE(wp_edit_table_delete_column(&doc, &journal, cell, &out) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 5);
+    flags_are(&doc, 1, two, 2);
+    flags_are(&doc, 3, two, 2);
+    row = wp_document_trow_get(&doc, doc.sections[0].paras[1].trow);
+    ASSERT_TRUE(row != NULL && row->cell_count == 2 && row->cell_right[1] == 4000);
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 7);
+
+    in = cell_start_pos(5);
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, in, (const u8 *)"Strength", 8, &out) == WP_OK);
+    ASSERT_TRUE(wp_edit_table_delete_row(&doc, &journal, in, &out) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 4);
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 7);
+    ASSERT_EQ_U32(doc.sections[0].paras[5].runs[0].text.length, 8);
+    ASSERT_EQ_U32(doc.sections[0].paras[6].tflags, WP_TCELL_END | WP_TROW_END);
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
 }

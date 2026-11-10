@@ -425,6 +425,8 @@ void test_table_rtf_round_trip(void);
 void test_table_pageprint_places_cells(void);
 void test_table_hit_test_finds_the_cell(void);
 void test_table_enter_and_backspace_keep_cells(void);
+void test_table_insert_and_move(void);
+void test_table_rows_and_columns(void);
 void test_rtf_borders_round_trip(void);
 void test_layout_geometry_border_middle_and_double(void);
 void test_layout_geometry_later_lines_use_the_left_indent_only(void);
@@ -1082,6 +1084,8 @@ static const test_case g_cases[] = {
     { "table_pageprint_places_cells", test_table_pageprint_places_cells },
     { "table_hit_test_finds_the_cell", test_table_hit_test_finds_the_cell },
     { "table_enter_and_backspace_keep_cells", test_table_enter_and_backspace_keep_cells },
+    { "table_insert_and_move", test_table_insert_and_move },
+    { "table_rows_and_columns", test_table_rows_and_columns },
     { "rtf_borders_round_trip", test_rtf_borders_round_trip },
     { "layout_geometry_border_middle_and_double", test_layout_geometry_border_middle_and_double },
     { "layout_geometry_later_lines_use_the_left_indent_only", test_layout_geometry_later_lines_use_the_left_indent_only },

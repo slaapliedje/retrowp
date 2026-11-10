@@ -323,6 +323,16 @@ typedef enum {
        absorbed section's page setup and header and footer are kept in
        op->extra (a wp_section, no paragraphs) so undo puts them back. */
     WP_OP_MERGE_SECTION,
+    /* M16: a paragraph's table fields changed (wp_edit_set_table):
+       at.section/at.paragraph name it; style_before/style_after are its
+       old and new trow, at.run/at.offset its old and new tflags. */
+    WP_OP_SET_TABLE,
+    /* M16: an empty paragraph put in at, or taken out of, index
+       at.paragraph of section at.section (wp_edit_insert_empty_paragraph,
+       wp_edit_remove_empty_paragraph) -- how table rows and columns come
+       and go. style_before is its style, style_after its trow, at.run its
+       tflags; each kind's undo is the other. */
+    WP_OP_INSERT_PARA, WP_OP_REMOVE_PARA,
     /* M8.5: markers, not edits -- bracket a run of ops on the undo stack
        so wp_edit_undo/redo treats them as one user-facing step. Carry no
        payload (at/text/style_before/style_after all unused). See
