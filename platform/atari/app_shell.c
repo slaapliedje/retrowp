@@ -2959,6 +2959,7 @@ static void do_insert_image(void)
         g_atari_image_cache_counter++;
 
         memset(&desc, 0, sizeof(desc));
+        memset(&desc, 0, sizeof(desc));   /* no field left unset, now or later */
         desc.width_px = (i32)width_px;
         desc.height_px = (i32)height_px;
         desc.display_width_twips = atari_px_to_twips_x((i32)width_px);

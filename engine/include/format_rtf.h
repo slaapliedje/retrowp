@@ -36,8 +36,9 @@ typedef struct {
 
 /* Imports RTF bytes into doc, materialising any \pict\dibitmap through
    `sink`. With a NULL sink -- which is what format_rtf_import is --
-   pictures are skipped exactly as they were before import understood
-   them at all. */
+   bitmaps are skipped exactly as they were before import understood
+   them at all. A \pict\wmetafile becomes a drawing (drawing.h) either
+   way: it lives in the document, and needs no file. */
 wp_status format_rtf_import_images(const u8 *bytes, u32 len, wp_document *doc,
                                     const wp_image_sink *sink);
 

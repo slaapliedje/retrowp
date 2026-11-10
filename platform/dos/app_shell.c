@@ -1247,6 +1247,7 @@ static void do_insert_image(void)
         g_dos_image_cache_counter++;
 
         memset(&desc, 0, sizeof(desc));
+        memset(&desc, 0, sizeof(desc));   /* no field left unset, now or later */
         desc.width_px = (i32)width_px;
         desc.height_px = (i32)height_px;
         desc.display_width_twips = dos_col_to_twips((i32)WP_DOS_IMAGE_MARKER_COLS);

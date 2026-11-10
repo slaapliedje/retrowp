@@ -350,6 +350,43 @@ from the keyboard); there is no command to make a frame -- frames come
 from RTF; character printers print a frame's paragraphs where they fall
 in the text, at the full width.
 
+## Drawings (M16, T16.4)
+
+A drawing is scalable art -- a heading's flourish, a form's rules, a
+logo -- kept as a list of primitives rather than pixels, so it is drawn
+as sharp as the device it lands on: a screen, a 300 dpi laser.
+
+It is a picture paragraph (`WP_PARA_IMAGE`) like any other -- a fixed
+box, its own undo, one layout line, a placeholder where a machine can't
+draw it -- whose descriptor carries a `drawing` span instead of a pixel
+cache. For a drawing, `width_px`/`height_px` are its own coordinate
+extent; `display_width_twips`/`display_height_twips` are the box as
+always; `blob_path` and the palette are unused. `WP_IMAGE_IS_DRAWING`
+tells the two apart. The primitive list is small and stays resident in
+the string pool, as a run's text does; drawing.h gives its encoding --
+pen, brush, polyline, polygon, rectangle, rounded rectangle, ellipse,
+arc, big-endian, in the drawing's own coordinates -- and a Windows
+metafile's defaults (a one-pixel black pen, a white brush), so one
+round-trips unchanged.
+
+`wp_drawing_render` flattens the list for a device: scaled to the box,
+curves into enough straight segments to look round at that size (from 8
+to 64 to an ellipse, by a sine table in 256ths of a turn -- no floating
+point on the targets), handed to a sink as polylines with a pen width in
+pixels and filled polygons with a colour. The platform layer needs only
+those two calls (stage 2).
+
+RTF carries a drawing as a Windows metafile (docs/formats/rtf.md,
+"Drawings"). engine/src/format_wmf.c reads SetWindowOrg/Ext (the origin
+moved to 0, a negative extent flipping the axis), CreatePenIndirect,
+CreateBrushIndirect (hatched brushes as a half-tone of their colour),
+SelectObject, DeleteObject (and the other object-making records, so the
+numbering stays right), MoveTo/LineTo (a run of LineTos as one line),
+Polyline, Polygon, PolyPolygon (each polygon filled on its own -- holes
+are filled over), Rectangle, RoundRect, Ellipse and Arc; Pie and Chord
+are drawn as their arc. Text, bitmaps, clipping and the rest are
+skipped. It writes the same records back.
+
 ## Images (M15)
 
 An image is a **paragraph-level, fixed-size, non-flowing block** -- not

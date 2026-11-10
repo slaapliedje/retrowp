@@ -158,6 +158,12 @@ typedef struct {
     wp_span source_name;            /* pool ref, optional; original
                                         filename/caption; offset 0/
                                         length 0 = unset */
+    wp_span drawing;                /* M16 (T16.4): pool ref to a vector
+                                        drawing's primitive list
+                                        (drawing.h); length 0 = a bitmap.
+                                        For a drawing width_px/height_px
+                                        are its own coordinate extent and
+                                        there is no pixel cache. */
 } wp_image_desc;
 
 typedef enum {

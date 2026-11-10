@@ -277,3 +277,23 @@ flip was deliberately broken to confirm it fails — and, the first time,
 the break made a variable unused, `-Werror` stopped the build, `make
 test` never ran the suite, and "no failures" was printed by a suite that
 had not executed. A sabotage that does not compile proves nothing.
+
+## Drawings (`\pict\wmetafile8`)
+
+A drawing (docs/document-model.md, "Drawings") exports as a Windows
+metafile picture, the form Word and the other word processors read:
+`{\pict\wmetafile8\picwN\pichN\picwgoalN\pichgoalN hex}`, where
+`\picw`/`\pich` are the metafile's size in hundredths of a millimetre
+(the RTF rule for a metafile; a bitmap's are pixels) and the goals the
+display box in twips. The metafile is written by `drawing_to_wmf`
+(engine/src/format_wmf.c) with no placeable header -- RTF gives the
+size -- in two counting passes, so the exporter's measure pass and
+write pass produce the same bytes without allocating.
+
+Import reads `\wmetafile` pictures with or without a sink: a drawing
+lives in the document and needs no file. The size comes from
+`\picwgoal`/`\pichgoal`, else `\picw`/`\pich` converted from
+hundredths of a millimetre, scaled by `\picscalex`/`\picscaley` (which
+now scale a bitmap's size too). A metafile this reader can make no
+primitive of is dropped, as an unreadable bitmap is. Which records are
+read is in document-model.md.

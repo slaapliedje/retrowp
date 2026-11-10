@@ -6,6 +6,7 @@
 #include "growth_internal.h"
 #include "format_rtf_internal.h"
 #include "codepage.h"
+#include "format_wmf.h"
 
 /* Classic RTF 1.x import. Full scope, supported control words, and
    documented simplifications are in docs/formats/rtf.md -- read it
@@ -86,6 +87,8 @@ typedef struct {
        needs the last row before it can write the first. */
     rtf_buf  pict_buf;
     wp_bool  pict_is_dib;
+    wp_bool  pict_is_wmf;          /* \wmetafile: a drawing (drawing.h) */
+    i32      pict_scale_x, pict_scale_y;   /* \picscalex, \picscaley: percent */
     wp_bool  pict_nibble_pending;
     u8       pict_nibble;
     i32      pict_w, pict_h;
@@ -476,7 +479,9 @@ static void rtf_emit_bytes(rtf_parser *p, const u8 *bytes, u32 n)
            data: the control words were consumed before it.  Decoded a
            nibble at a time so that whitespace anywhere in the hex --
            which every emitter inserts, this one included -- costs
-           nothing to tolerate. */
+           nothing to tolerate.  A bitmap is kept only with a sink to
+           put it in; a metafile, which becomes a drawing, always. */
+        if (p->sink == NULL && !p->pict_is_wmf) return;
         for (i = 0; i < n; i++) {
             u8 c = bytes[i];
             if (!is_hex(c)) continue;
@@ -571,6 +576,40 @@ static u16 dib_rd16(const u8 *p)
     return (u16)((u16)p[0] | ((u16)p[1] << 8));
 }
 
+static void rtf_place_image(rtf_parser *p, wp_image handle);
+
+/* A metafile: its records become a drawing's primitives, sized by
+   \picwgoal (or \picw, which a metafile gives in hundredths of a
+   millimetre) and \picscalex. One this reader can make nothing of is
+   dropped, as a bitmap is. */
+static void rtf_finish_drawing(rtf_parser *p)
+{
+    wp_drawing_builder b;
+    i32 ext_w = 0, ext_h = 0, dw, dh;
+    wp_image handle;
+
+    wp_drawing_builder_init(&b);
+    if (wmf_to_drawing(p->pict_buf.bytes, p->pict_buf.length, &b, &ext_w, &ext_h) != WP_OK ||
+        b.length == 0) {
+        if (b.error == WP_NOMEM) p->error = WP_NOMEM;
+        wp_drawing_builder_free(&b);
+        return;
+    }
+    if (ext_w <= 0 || ext_h <= 0) { ext_w = p->pict_w; ext_h = p->pict_h; }
+    dw = p->pict_goal_w > 0 ? p->pict_goal_w : (p->pict_w * 1440L) / 2540L;
+    dh = p->pict_goal_h > 0 ? p->pict_goal_h : (p->pict_h * 1440L) / 2540L;
+    dw = (dw * p->pict_scale_x) / 100;
+    dh = (dh * p->pict_scale_y) / 100;
+    if (ext_w <= 0 || ext_h <= 0 || dw <= 0 || dh <= 0) { wp_drawing_builder_free(&b); return; }
+    if (wp_document_drawing_add(p->doc, b.bytes, b.length, ext_w, ext_h, dw, dh, NULL, &handle) != WP_OK) {
+        p->error = WP_NOMEM;
+        wp_drawing_builder_free(&b);
+        return;
+    }
+    wp_drawing_builder_free(&b);
+    rtf_place_image(p, handle);
+}
+
 static void rtf_finish_pict(rtf_parser *p)
 {
     const u8 *dib = p->pict_buf.bytes;
@@ -583,12 +622,11 @@ static void rtf_finish_pict(rtf_parser *p)
     char path[128];
     u32 path_len = 0;
     u32 i;
-    wp_section *sec;
-    u32 new_idx;
-    wp_paragraph *para;
 
     p->pict_nibble_pending = WP_FALSE;
-    if (p->error != WP_OK || p->sink == NULL || !p->pict_is_dib) return;
+    if (p->error != WP_OK) return;
+    if (p->pict_is_wmf) { rtf_finish_drawing(p); return; }
+    if (p->sink == NULL || !p->pict_is_dib) return;
     if (len < 40u) return;
 
     hdr = dib_rd32(dib + 0);
@@ -623,8 +661,8 @@ static void rtf_finish_pict(rtf_parser *p)
     /* \picwgoal is the display size in twips and is what the model
        stores; without one, fall back to the pixel count so the image is
        at least placed rather than collapsed to nothing. */
-    desc.display_width_twips  = p->pict_goal_w > 0 ? p->pict_goal_w : w * 15;
-    desc.display_height_twips = p->pict_goal_h > 0 ? p->pict_goal_h : h * 15;
+    desc.display_width_twips  = ((p->pict_goal_w > 0 ? p->pict_goal_w : w * 15) * p->pict_scale_x) / 100;
+    desc.display_height_twips = ((p->pict_goal_h > 0 ? p->pict_goal_h : h * 15) * p->pict_scale_y) / 100;
 
     if (p->sink->begin == NULL || p->sink->write == NULL) return;
     if (p->sink->begin(p->sink->user, w, h, path, (u32)sizeof(path), &path_len) != WP_OK) return;
@@ -647,9 +685,17 @@ static void rtf_finish_pict(rtf_parser *p)
     if (wp_strpool_append(&p->doc->strings, (const u8 *)path, path_len,
                            &desc.blob_path) != WP_OK) { p->error = WP_NOMEM; return; }
     if (wp_document_image_add(p->doc, &desc, &handle) != WP_OK) { p->error = WP_NOMEM; return; }
+    rtf_place_image(p, handle);
+}
 
-    /* An image is its own paragraph, the same shape wp_edit_insert_image
-       gives it. */
+/* A picture's paragraph: its own, the same shape wp_edit_insert_image
+   gives it. */
+static void rtf_place_image(rtf_parser *p, wp_image handle)
+{
+    wp_section *sec;
+    u32 new_idx;
+    wp_paragraph *para;
+
     rtf_flush_run(p);
     if (p->error != WP_OK) return;
     rtf_ensure_paragraph(p);
@@ -878,13 +924,14 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         return;
     }
     if (strcmp(name, "pict") == 0) {
-        /* Read rather than skipped, but only when the caller gave us
-           somewhere to put the pixels -- without a sink there is no file
-           to name and the picture may as well be skipped, which is what
-           this parser did for its whole life before now. */
-        st->dest = p->sink ? RTF_DEST_PICT : RTF_DEST_SKIP;
+        /* Always read: a metafile becomes a drawing, which needs nothing
+           from the caller. A bitmap's pixels are kept only when the
+           caller gave a sink to put them in (the text path checks). */
+        st->dest = RTF_DEST_PICT;
         p->pict_buf.length = 0;
         p->pict_is_dib = WP_FALSE;
+        p->pict_is_wmf = WP_FALSE;
+        p->pict_scale_x = p->pict_scale_y = 100;
         p->pict_nibble_pending = WP_FALSE;
         p->pict_w = p->pict_h = 0;
         p->pict_goal_w = p->pict_goal_h = 0;
@@ -892,6 +939,9 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
     }
     if (st->dest == RTF_DEST_PICT) {
         if (strcmp(name, "dibitmap") == 0)  { p->pict_is_dib = WP_TRUE; return; }
+        if (strcmp(name, "wmetafile") == 0) { p->pict_is_wmf = WP_TRUE; return; }
+        if (strcmp(name, "picscalex") == 0) { if (has_param && param > 0) p->pict_scale_x = param; return; }
+        if (strcmp(name, "picscaley") == 0) { if (has_param && param > 0) p->pict_scale_y = param; return; }
         if (strcmp(name, "picw") == 0)      { p->pict_w = param; return; }
         if (strcmp(name, "pich") == 0)      { p->pict_h = param; return; }
         if (strcmp(name, "picwgoal") == 0)  { p->pict_goal_w = param; return; }

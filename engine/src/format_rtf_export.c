@@ -4,6 +4,7 @@
 #include "utf8.h"
 #include "format_rtf_internal.h"
 #include "codepage.h"
+#include "format_wmf.h"
 #include "platform.h"   /* mem_alloc/mem_free -- CLAUDE.md's allocator rule */
 
 /* Classic RTF 1.x export -- the inverse of format_rtf_import.c. Full
@@ -330,6 +331,34 @@ static void rtf_emit_image_placeholder(rtf_writer *w, const wp_document *doc,
     rtf_write_str(w, "]}");
 }
 
+static void put_wmf_hex(void *user, const u8 *bytes, u32 n)
+{
+    rtf_write_hex((rtf_writer *)user, bytes, n);
+}
+
+/* A drawing: a Windows metafile picture, which Word and the rest read
+   (docs/document-model.md, "Drawings"). \picw/\pich are a metafile's
+   size in hundredths of a millimetre; the goal is the display box. */
+static void rtf_emit_drawing(rtf_writer *w, const wp_document *doc, const wp_image_desc *desc)
+{
+    const u8 *ops = wp_strpool_get(&doc->strings, desc->drawing);
+
+    if (drawing_to_wmf(ops, desc->drawing.length, desc->width_px, desc->height_px,
+                       NULL, NULL, NULL) != WP_OK) {
+        rtf_emit_image_placeholder(w, doc, desc);
+        return;
+    }
+    rtf_write_str(w, "{\\pict\\wmetafile8");
+    rtf_write_str(w, "\\picw");     rtf_write_i32(w, (desc->display_width_twips * 2540L) / 1440L);
+    rtf_write_str(w, "\\pich");     rtf_write_i32(w, (desc->display_height_twips * 2540L) / 1440L);
+    rtf_write_str(w, "\\picwgoal"); rtf_write_i32(w, desc->display_width_twips);
+    rtf_write_str(w, "\\pichgoal"); rtf_write_i32(w, desc->display_height_twips);
+    rtf_write_str(w, "\r\n");
+    (void)drawing_to_wmf(ops, desc->drawing.length, desc->width_px, desc->height_px,
+                         put_wmf_hex, w, NULL);
+    rtf_write_str(w, "}");
+}
+
 static void rtf_emit_image(rtf_writer *w, const wp_document *doc,
                             const wp_paragraph *para, const wp_image_source *src)
 {
@@ -337,6 +366,11 @@ static void rtf_emit_image(rtf_writer *w, const wp_document *doc,
     u32 row_bytes, padded, y;
     u8 header[40];
     u8 *row;
+
+    if (desc != NULL && WP_IMAGE_IS_DRAWING(desc)) {
+        rtf_emit_drawing(w, doc, desc);
+        return;
+    }
 
     if (desc == NULL || desc->width_px <= 0 || desc->height_px <= 0 ||
         desc->palette_count < 1 || src == NULL || src->read == NULL) {
