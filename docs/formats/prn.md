@@ -112,6 +112,21 @@ printed, and the blank lines of spacing inside a box of several
 paragraphs carry no side rules. A rule with no room left of the text
 (an unindented paragraph) is left out rather than printed over it.
 
+## Tables
+
+A table row is laid out in the grid: each cell's paragraphs at the
+cell's own width in columns (its edges from the row's shape, less a
+column for its rule and the gap each side), into that cell's columns of
+up to 64 shared lines, then printed a line at a time with a rule at
+every cell edge, and a rule line above each row (`┌─┬─┐` over the
+first, `├─┼─┤` between rows) and below the table (`└─┴─┘`) -- code page
+437's box drawing where the printer takes it, else `+ - |`. A row with
+no cell borders prints its cells in their columns without rules. A row
+that does not fit the rest of the page starts the next one. First cut:
+spacing inside a cell is not printed, a cell longer than 64 lines is
+cut, and a cell's shading is not printed. The line buffers are taken
+only for a document with a table: 64 lines of 256 columns, twice.
+
 ## Headers and footers
 
 A section's header prints on the middle line of the top margin and its

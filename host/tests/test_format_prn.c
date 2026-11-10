@@ -3,6 +3,7 @@
 #include "test.h"
 #include "format_prn.h"
 #include "format_txt.h"
+#include "format_rtf.h"
 #include "platform.h"
 
 /* format_prn's printouts, worked out by hand at 10 cpi and 6 lpi: 144
@@ -469,5 +470,36 @@ void test_format_prn_border_box(void)
     assert_out(&k, " +----------------+\n"
                    " |Alpha           |\n"
                    " +----------------+\n\f");
+    wp_document_free(&doc);
+}
+
+/* A table row on a 20-column page: two ruled cells of 10 columns, no
+   gap, side by side -- the rules at each cell's edge, a rule line above
+   and below; box drawing in code page 437, + - | in ASCII. */
+void test_format_prn_table(void)
+{
+    static const char rtf[] =
+        "{\\rtf1\\ansi\\trowd"
+        "\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrb\\brdrs\\clbrdrr\\brdrs\\cellx1440"
+        "\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrb\\brdrs\\clbrdrr\\brdrs\\cellx2880"
+        "\\intbl Alpha\\cell B\\cell\\row}";
+    wp_document doc;
+    wp_section *sec;
+    prn_sink k;
+    u32 pages;
+
+    ASSERT_TRUE(format_rtf_import((const u8 *)rtf, (u32)strlen(rtf), &doc) == WP_OK);
+    sec = wp_document_section_get(&doc, 0);
+    sec->page_width = 20 * 144;
+    sec->page_height = 10 * 240;
+    sec->margin_left = sec->margin_right = sec->margin_top = sec->margin_bottom = 0;
+    print_doc(&doc, 437, &k, &pages);
+    assert_out(&k, "\xDA\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC2\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xBF\n"
+                   "\xB3" "Alpha    \xB3" "B        \xB3\n"
+                   "\xC0\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC1\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xD9\n\f");
+    print_doc(&doc, 0, &k, &pages);
+    assert_out(&k, "+---------+---------+\n"
+                   "|Alpha    |B        |\n"
+                   "+---------+---------+\n\f");
     wp_document_free(&doc);
 }

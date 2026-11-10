@@ -2115,7 +2115,7 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       the ST's buttons and menus later). Open: character printers print no shading, and the spacing
       lines inside a multi-paragraph box carry no side rules; top and
       bottom rules on DOS need a row of spacing.
-- [ ] T16.2 Tables. Rows of cells, each cell its own paragraphs, cell
+- [x] T16.2 Tables. Rows of cells, each cell its own paragraphs, cell
       widths and borders per row, rows never split across a page (first
       cut). The model follows RTF's own flat shape rather than nesting:
       a paragraph carries the table, row and cell it belongs to, and a
@@ -2158,8 +2158,12 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       gaps rather than drop a button where they would not fit (the ST).
       Seen on DOS: a table inserted with Alt+T, typed across with Tab,
       Shift+Tab back.
-      [ ] Stage 3: format_prn's grid -- until then a table prints there
-      as its cells one after another.
+      [x] Stage 3 (2026-11-10): format_prn lays a row out side by side,
+      each cell at its width into its columns of shared line buffers,
+      with rules at the cell edges and rule lines above each row and
+      below the table (box drawing in code page 437, else + - |); a row
+      that does not fit starts a page. Spacing inside cells, shading and
+      cells past 64 lines are left out (docs/formats/prn.md).
 - [ ] T16.3 Frames. A text box placed at a fixed spot on the page --
       a form's labelled fields, a sidebar -- with T16.1's borders. First
       cut: frames sit at their page position and the body text does not

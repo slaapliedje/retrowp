@@ -551,6 +551,7 @@ void test_format_prn_encodings(void);
 void test_format_prn_empty_document(void);
 void test_format_prn_epson(void);
 void test_format_prn_border_box(void);
+void test_format_prn_table(void);
 void test_format_prn_pcl(void);
 void test_format_prn_pcl_paper(void);
 void test_format_prn_amiga(void);
@@ -1200,6 +1201,7 @@ static const test_case g_cases[] = {
     { "format_prn_empty_document", test_format_prn_empty_document },
     { "format_prn_epson", test_format_prn_epson },
     { "format_prn_border_box", test_format_prn_border_box },
+    { "format_prn_table", test_format_prn_table },
     { "format_prn_pcl", test_format_prn_pcl },
     { "format_prn_pcl_paper", test_format_prn_pcl_paper },
     { "format_prn_amiga", test_format_prn_amiga },

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "format_prn.h"
+#include "layout.h"
 #include "codepage.h"
 #include "platform.h"
 #include "utf8.h"
@@ -8,6 +9,7 @@
 /* The widest line this lays out: 25.5 inches at 10 cpi, past any paper
    a character printer feeds. A wider page is printed this wide. */
 #define PRN_MAX_COLS 255u
+#define PRN_CAP_LINES 64u    /* a table row's lines, at most (one cell's longer is cut) */
 
 typedef struct {
     const wp_document    *doc;
@@ -36,6 +38,13 @@ typedef struct {
 
     /* The paragraph being printed's border, in the grid: its rules'
        columns and the printer bytes they are drawn with. */
+    /* A table row being laid out: each cell's lines go into its columns
+       of cap_text/cap_attr (PRN_CAP_LINES lines of PRN_MAX_COLS + 1)
+       instead of to the printer, from column cap_col. */
+    wp_bool capturing;
+    u32     cap_col, cap_line, cap_max;
+    u8     *cap_text, *cap_attr;
+
     u8      bsides;          /* WP_BORDER_*; 0 = none */
     u32     bl, br;          /* the left and right rules' columns */
     u8      rv, rh, rtl, rtr, rbl, rbr;   /* vertical, horizontal, corners */
@@ -526,6 +535,18 @@ static void add_space(prn_state *s, i32 twips)
 
 static void emit_text_line(prn_state *s, const u8 *text, const u8 *attr, u32 len)
 {
+    if (s->capturing) {
+        if (s->cap_line < PRN_CAP_LINES) {
+            u32 at = s->cap_line * (PRN_MAX_COLS + 1u) + s->cap_col;
+            if (s->cap_col + len > PRN_MAX_COLS) len = s->cap_col < PRN_MAX_COLS ? PRN_MAX_COLS - s->cap_col : 0;
+            memcpy(s->cap_text + at, text, len);
+            memcpy(s->cap_attr + at, attr, len);
+            s->cap_line++;
+            if (s->cap_line > s->cap_max) s->cap_max = s->cap_line;
+        }
+        s->pending = 0;   /* spacing inside a cell is not printed (a first cut) */
+        return;
+    }
     if (s->page_open && s->row >= s->body) end_page(s);
     if (!s->page_open) begin_page(s);
     if (s->row > 0) {
@@ -783,7 +804,7 @@ static void print_paragraph(prn_state *s, const wp_paragraph *para, u8 *buf, u8 
     u32 n = 0;
     u16 ri;
 
-    if (ps != NULL && ps->page_break_before && s->page_open && s->row > 0) {
+    if (ps != NULL && ps->page_break_before && s->page_open && s->row > 0 && !s->capturing) {
         end_page(s);
     }
     if (ps != NULL && s->page_open && s->row > 0) add_space(s, ps->space_before);
@@ -813,6 +834,99 @@ static void print_paragraph(prn_state *s, const wp_paragraph *para, u8 *buf, u8 
     if (s->bsides & WP_BORDER_BOTTOM) border_rule_line(s, WP_FALSE);
     s->bsides = 0;
     if (ps != NULL) add_space(s, ps->space_after);
+}
+
+/* ---- Tables ------------------------------------------------------------
+
+   A table row laid out in the grid (docs/formats/prn.md, "Tables"):
+   each cell's paragraphs at the cell's width, into its own columns of
+   the capture lines, then the row printed a line at a time with a rule
+   at each cell edge -- code page 437's box drawing where the printer
+   takes it, else + - | -- and rule lines above each row and below the
+   table. A row that does not fit the page's rest starts the next page. */
+
+/* A table rule line: top (┌┬┐), between rows (├┼┤) or bottom (└┴┘). */
+static void table_rule_line(prn_state *s, const u32 *edge, u32 n, int which)
+{
+    static const u8 b437[3][4] = {
+        { 0xDA, 0xC2, 0xBF, 0xC4 },   /* top: left, junction, right, horizontal */
+        { 0xC3, 0xC5, 0xB4, 0xC4 },   /* middle */
+        { 0xC0, 0xC1, 0xD9, 0xC4 }    /* bottom */
+    };
+    const u8 *g = b437[which];
+    wp_bool ascii = (wp_bool)(s->opt->codepage != 437);
+    u32 c, k, end = edge[n];
+
+    memset(s->lb, ' ', end + 1u);
+    memset(s->la, 0, end + 1u);
+    for (c = edge[0]; c <= end; c++) s->lb[c] = ascii ? (u8)'-' : g[3];
+    for (k = 0; k <= n; k++) {
+        u8 ch = k == 0 ? g[0] : k == n ? g[2] : g[1];
+        s->lb[edge[k]] = ascii ? (u8)'+' : ch;
+    }
+    emit_text_line(s, s->lb, s->la, end + 1u);
+}
+
+static void print_row(prn_state *s, const wp_section *sec, u32 first, u32 last,
+                      wp_bool first_row, wp_bool last_row, u8 *buf, u8 *abuf)
+{
+    const wp_table_row *row = wp_document_trow_get(s->doc, sec->paras[first].trow);
+    u32 edge[WP_MAX_CELLS + 1], n = 0, k, pi, i, lines, gap, saved_cols = s->cols;
+    wp_bool ruled = WP_FALSE;
+    u8 v = s->opt->codepage == 437 ? 0xB3 : (u8)'|';
+
+    if (row == NULL) return;
+    if (s->cap_text == NULL) {
+        u32 size = PRN_CAP_LINES * (PRN_MAX_COLS + 1u);
+        s->cap_text = (u8 *)mem_alloc(size);
+        s->cap_attr = (u8 *)mem_alloc(size);
+        if (s->cap_text == NULL || s->cap_attr == NULL) { s->st = WP_NOMEM; return; }
+    }
+    for (pi = first; pi <= last; pi++) if (sec->paras[pi].tflags & WP_TCELL_END) n++;
+    if (n == 0) n = 1;
+    if (n > WP_MAX_CELLS) n = WP_MAX_CELLS;
+    for (k = 0; k <= n; k++) {
+        i32 l, r;
+        wp_table_cell_edges(row, k < n ? k : n - 1, &l, &r);
+        edge[k] = twips_to(k < n ? l : r, s->cpi);
+        if (edge[k] > PRN_MAX_COLS - 2u) edge[k] = PRN_MAX_COLS - 2u;
+        if (k > 0 && edge[k] <= edge[k - 1] + 1u) edge[k] = edge[k - 1] + 2u;
+    }
+    for (k = 0; k < n && k < row->cell_count; k++) if (row->cell_borders[k]) ruled = WP_TRUE;
+    gap = twips_to(row->gap, s->cpi);
+
+    memset(s->cap_text, ' ', PRN_CAP_LINES * (PRN_MAX_COLS + 1u));
+    memset(s->cap_attr, 0, PRN_CAP_LINES * (PRN_MAX_COLS + 1u));
+    s->cap_max = 0;
+    pi = first;
+    for (k = 0; k < n && pi <= last; k++) {
+        u32 tc = edge[k] + (ruled ? 1u : 0u) + gap;
+        u32 w = edge[k + 1] > tc + gap ? edge[k + 1] - tc - gap : 1u;
+        s->cap_col = tc;
+        s->cap_line = 0;
+        s->cols = w;
+        s->capturing = WP_TRUE;
+        for (; pi <= last; pi++) {
+            print_paragraph(s, &sec->paras[pi], buf, abuf);
+            if (sec->paras[pi].tflags & WP_TCELL_END) { pi++; break; }
+        }
+    }
+    s->capturing = WP_FALSE;
+    s->cols = saved_cols;
+    s->pending = 0;
+    s->space_acc = 0;
+
+    lines = s->cap_max > 0 ? s->cap_max : 1u;
+    if (s->page_open && s->row > 0 && s->row + lines + (ruled ? 1u : 0u) > s->body) end_page(s);
+    if (ruled) table_rule_line(s, edge, n, first_row ? 0 : 1);
+    for (i = 0; i < lines && s->st == WP_OK; i++) {
+        u32 len = edge[n] + 1u;
+        memcpy(s->lb, s->cap_text + i * (PRN_MAX_COLS + 1u), len);
+        memcpy(s->la, s->cap_attr + i * (PRN_MAX_COLS + 1u), len);
+        if (ruled) for (k = 0; k <= n; k++) { s->lb[edge[k]] = v; s->la[edge[k]] = 0; }
+        emit_text_line(s, s->lb, s->la, len);
+    }
+    if (ruled && last_row) table_rule_line(s, edge, n, 2);
 }
 
 wp_status format_prn_export(const wp_document *doc, const wp_prn_options *opt_in,
@@ -875,6 +989,17 @@ wp_status format_prn_export(const wp_document *doc, const wp_prn_options *opt_in
         end_page(s);                /* a section begins a page */
         set_section(s, sec);
         for (pi = 0; pi < sec->para_count && s->st == WP_OK; pi++) {
+            if (sec->paras[pi].trow != 0) {
+                /* A table row: up to its end, or the table's. */
+                u32 last = pi;
+                while (last + 1 < sec->para_count && !(sec->paras[last].tflags & WP_TROW_END) &&
+                       sec->paras[last + 1].trow != 0) last++;
+                print_row(s, sec, pi, last, (wp_bool)(pi == 0 || sec->paras[pi - 1].trow == 0),
+                          (wp_bool)(last + 1 >= sec->para_count || sec->paras[last + 1].trow == 0),
+                          buf, abuf);
+                pi = last;
+                continue;
+            }
             print_paragraph(s, &sec->paras[pi], buf, abuf);
         }
     }
@@ -883,6 +1008,8 @@ wp_status format_prn_export(const wp_document *doc, const wp_prn_options *opt_in
 
     st = s->st;
     if (out_pages != NULL && st == WP_OK) *out_pages = s->page_no;
+    if (s->cap_text != NULL) mem_free(s->cap_text);
+    if (s->cap_attr != NULL) mem_free(s->cap_attr);
     mem_free(abuf);
     mem_free(buf);
     mem_free(s);
