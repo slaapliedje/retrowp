@@ -2059,7 +2059,12 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       SpeedoGDOS's FX80 driver ignores vrt_cpyfm entirely, so without
       NVDI the ST draws a picture as runs of filled bars; NVDI's drivers
       take the raster copy, which printed the test picture in 30 s
-      against 5.5 min as runs, pixel for pixel the same.
+      against 5.5 min as runs, pixel for pixel the same. The test is
+      NVDI's cookie, since NVDI brings its own GDOS. Open: NVDI with its
+      GDOS switched off in favour of SpeedoGDOS would take the copy and
+      could print pictures blank; FSMC cannot tell (NVDI also points it
+      at '_SPD', version 5.00, where this SpeedoGDOS says 4.00), and
+      NVDI's configuration word (0x0215 here) is undocumented.
       AC met: an RTF with a 3 x 1.5 inch grey-ramp picture printed under
       SpeedoGDOS (FX80, TOS 1.04) and under NVDI with MagiC (PCL, 300
       dpi, from the user's Falcon disk), both decoded and checked; host
@@ -2084,7 +2089,7 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       \brdrwN \brspN, \shadingN \cbpatN.
       UI: Format > Borders (plat_dialog_choice: none, box, top, bottom,
       top and bottom; single, double, thick; shading none/10/25/50%).
-      Undoable like every paragraph-style change.
+      Not journaled, like every paragraph-style change today.
       AC: host tests for layout geometry, merging, RTF round-trip and
       format_prn output per driver; screenshots on ST, Amiga, Mac and
       DOS; a GDOS printout matching the screen.

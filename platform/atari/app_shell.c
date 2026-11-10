@@ -2,7 +2,7 @@
 #include <gem.h>
 #include "gemcompat.h"
 #ifndef GEM4XE_APP_GEM_H
-#include <mint/cookie.h>   /* Getcookie: is NVDI the GDOS? (atari_print_pages) */
+#include <mint/cookie.h>   /* Getcookie: which GDOS prints (atari_gdos_takes_raster_copy) */
 #endif
 #include <string.h>
 #include "types.h"
@@ -1751,6 +1751,22 @@ static wp_status gdos_end_page(void *user)
     return WP_OK;
 }
 
+/* Whether the GDOS printing a picture takes a raster copy (vrt_cpyfm).
+   NVDI's own GDOS does; SpeedoGDOS's FX80 driver prints nothing for one,
+   and then a picture goes to paper as runs of filled bars -- the same
+   pixels, but under NVDI the copy printed a 3 x 1.5 inch picture at
+   300 dpi in a tenth of the time. NVDI's cookie is the test, because
+   NVDI brings its own GDOS. Its FSMC cookie cannot tell them apart:
+   NVDI points it at '_SPD' too, imitating SpeedoGDOS. Not covered: NVDI
+   with its GDOS switched off in favour of SpeedoGDOS, where a picture
+   could print blank (docs/milestones.md, T16.0). */
+static wp_bool atari_gdos_takes_raster_copy(void)
+{
+    long nvdi;
+
+    return (wp_bool)(Getcookie(C_NVDI, &nvdi) == C_FOUND);
+}
+
 /* File > Print on GDOS's printer (wp_app_ctx.print_pages): the printer
    workstation opened with its fonts, the document measured and laid out
    for it and drawn page by page (pageprint.h), then measuring handed
@@ -1794,15 +1810,7 @@ static wp_status atari_print_pages(wp_app_ctx *ctx, u32 *pages_out)
     dev.y_px = atari_twips_to_px_y;
     dev.device_w_px = (i32)work_out[0] + 1;
     dev.device_h_px = (i32)work_out[1] + 1;
-    /* A picture's dots: NVDI's printer drivers take a raster copy, but
-       SpeedoGDOS's FX80 prints nothing for vrt_cpyfm, so without NVDI a
-       picture goes to paper as runs of filled bars. The same pixels
-       either way; under NVDI the copy printed a 3 x 1.5 inch picture at
-       300 dpi in a tenth of the time. */
-    {
-        long nvdi;
-        dev.draw_mono = (Getcookie(C_NVDI, &nvdi) == C_FOUND) ? NULL : plat_mono_by_runs;
-    }
+    dev.draw_mono = atari_gdos_takes_raster_copy() ? NULL : plat_mono_by_runs;
     dev.end_page = gdos_end_page;
     dev.user = &h;
     st = wp_pageprint(ctx->doc, &dev, pages_out);
