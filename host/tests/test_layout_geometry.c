@@ -265,3 +265,74 @@ void test_layout_geometry_page_break_before_starts_a_page(void)
 
     wp_document_free(&doc);
 }
+
+/* A boxed paragraph: 100 twips before, 200 after, indented 300, a
+   single 15-twip rule standing 80 twips off the text. Its one line puts
+   the text 100 + 15 + 80 = 195 down, and the box is 300 of text plus
+   195 above and 95 + 200 below: 790. The box covers x from 300 - 80 - 15
+   to the 4000 column + 80 + 15, and y from the space before (100) to
+   the space after (790 - 200), every side ruled on this one line. */
+void test_layout_geometry_border_box(void)
+{
+    wp_document doc;
+    wp_paragraph *para = one_para(&doc, "Alpha\n");
+    wp_para_style ps;
+    wp_paragraph_layout *l;
+    wp_border_slice s;
+
+    memset(&ps, 0, sizeof(ps));
+    ps.space_before = 100;
+    ps.space_after = 200;
+    ps.indent_left = 300;
+    ps.border_sides = WP_BORDER_BOX;
+    ps.border_space = 80;
+    set_style(&doc, para, &ps);
+    l = relayout(&doc, para, 4000);
+    ASSERT_TRUE(l != NULL && l->line_count == 1);
+    if (l == NULL || l->line_count != 1) { wp_document_free(&doc); return; }
+    ASSERT_EQ_U32((u32)l->lines[0].text_top_twips, 195);
+    ASSERT_EQ_U32((u32)l->lines[0].height_twips, 790);
+    ASSERT_EQ_U32((u32)l->lines[0].x_twips, 300);   /* the text keeps its indent */
+    ASSERT_TRUE(wp_line_border_slice(&doc, para, &l->lines[0], WP_TRUE, WP_TRUE, 4000, &s));
+    ASSERT_EQ_U32((u32)s.x0, 205);
+    ASSERT_EQ_U32((u32)s.x1, 4095);
+    ASSERT_EQ_U32((u32)s.top, 100);
+    ASSERT_EQ_U32((u32)s.bottom, 590);
+    ASSERT_EQ_U32(s.sides, WP_BORDER_BOX);
+    ASSERT_EQ_U32((u32)s.thickness, 15);
+    wp_document_free(&doc);
+}
+
+/* A double rule is three rules thick (45 at the default 15); the middle
+   of a three-paragraph box is ruled left and right only and gains no
+   height; a paragraph with neither borders nor shading has no slice;
+   and the style table keeps a bordered style apart from a plain one. */
+void test_layout_geometry_border_middle_and_double(void)
+{
+    wp_document doc;
+    wp_paragraph *para = one_para(&doc, "Alpha\n");
+    wp_para_style ps;
+    wp_paragraph_layout *l;
+    wp_border_slice s;
+    wp_pstyle plain, boxed;
+
+    memset(&ps, 0, sizeof(ps));
+    ASSERT_TRUE(wp_document_pstyle_find_or_add(&doc, &ps, &plain) == WP_OK);
+    ps.border_sides = WP_BORDER_LEFT | WP_BORDER_RIGHT;
+    ps.border_kind = WP_BORDER_DOUBLE;
+    ASSERT_TRUE(wp_document_pstyle_find_or_add(&doc, &ps, &boxed) == WP_OK);
+    ASSERT_TRUE(plain != boxed);
+    wp_paragraph_pstyle_set(para, boxed);
+    l = relayout(&doc, para, 4000);
+    ASSERT_TRUE(l != NULL && l->line_count == 1);
+    if (l == NULL || l->line_count != 1) { wp_document_free(&doc); return; }
+    ASSERT_EQ_U32((u32)l->lines[0].height_twips, 300);
+    ASSERT_TRUE(wp_line_border_slice(&doc, para, &l->lines[0], WP_TRUE, WP_TRUE, 4000, &s));
+    ASSERT_EQ_U32((u32)s.thickness, 45);
+    ASSERT_EQ_U32((u32)s.x0, (u32)-45);
+    ASSERT_EQ_U32(s.sides, WP_BORDER_LEFT | WP_BORDER_RIGHT);
+    wp_paragraph_pstyle_set(para, plain);
+    l = relayout(&doc, para, 4000);
+    ASSERT_TRUE(l != NULL && !wp_line_border_slice(&doc, para, &l->lines[0], WP_TRUE, WP_TRUE, 4000, &s));
+    wp_document_free(&doc);
+}

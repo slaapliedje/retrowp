@@ -72,11 +72,30 @@ typedef enum {
     WP_TAB_LEFT = 0, WP_TAB_CENTER = 1, WP_TAB_RIGHT = 2, WP_TAB_DECIMAL = 3
 } wp_tab_kind;
 
+/* Paragraph borders (RTF \brdrt \brdrb \brdrl \brdrr \box). Each
+   paragraph rules its own sides: a box around three paragraphs is the
+   first ruled top, left and right, the middle one left and right, the
+   last bottom, left and right -- so layout never looks at a neighbour,
+   and Word reads the result as one box. As Word places them, the text
+   keeps its indents and the rules stand outside it by border_space;
+   space before and after lies outside the box. See docs/layout.md. */
+#define WP_BORDER_TOP    0x01
+#define WP_BORDER_BOTTOM 0x02
+#define WP_BORDER_LEFT   0x04
+#define WP_BORDER_RIGHT  0x08
+#define WP_BORDER_BOX    0x0F
+#define WP_BORDER_DEFAULT_WIDTH 15   /* twips: 3/4 pt, Word's \brdrw15 */
+typedef enum {
+    WP_BORDER_SINGLE = 0,   /* one rule, border_width thick (\brdrs) */
+    WP_BORDER_DOUBLE = 1,   /* two rules and the gap between, each border_width (\brdrdb) */
+    WP_BORDER_THICK  = 2    /* one rule, twice border_width (\brdrth) */
+} wp_border_kind;
+
 typedef struct {
     u8  align;          /* wp_align */
     u8  tab_count;      /* explicit stops in tab_pos/tab_kind, sorted by position */
     u8  page_break_before;  /* start this paragraph on a new page (RTF \pagebb) */
-    u8  _pad;
+    u8  border_sides;   /* WP_BORDER_* bits; 0 = none */
     i32 indent_left;
     i32 indent_right;
     i32 indent_first;   /* first-line indent; may be negative */
@@ -88,6 +107,11 @@ typedef struct {
        line clipped to less than its own text is not something this
        engine draws). The extra goes below the text. */
     i32 line_spacing;
+    u8  border_kind;    /* wp_border_kind */
+    u8  shading;        /* grey behind the paragraph, percent (\shadingN / 100); 0 = none */
+    u8  _pad2[2];
+    i32 border_width;   /* one rule's thickness in twips; 0 = WP_BORDER_DEFAULT_WIDTH */
+    i32 border_space;   /* twips between the text and the rule (\brspN) */
     wp_str style_name;  /* named style ("Heading 1"), optional */
     u8  tab_kind[WP_MAX_TABS];  /* wp_tab_kind */
     i32 tab_pos[WP_MAX_TABS];   /* twips from the column's left edge */

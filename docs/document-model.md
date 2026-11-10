@@ -179,6 +179,31 @@ typedef struct wp\_op {
     struct wp\_op *next;    /* journal linkage                    */
 } wp\_op;
 
+## Paragraph borders and shading (M16, T16.1)
+
+`wp_para_style` carries a border: `border_sides` (`WP_BORDER_TOP`,
+`_BOTTOM`, `_LEFT`, `_RIGHT`; `WP_BORDER_BOX` is all four), one
+`border_kind` (`WP_BORDER_SINGLE`, `_DOUBLE`, `_THICK`), one
+`border_width` (a rule, in twips; 0 is `WP_BORDER_DEFAULT_WIDTH`, 15)
+and one `border_space` (twips between the text and the rules) for every
+side, and `shading` (percent grey behind the paragraph, 0 for none).
+Two styles that differ only in their border are different styles
+(`wp_document_pstyle_find_or_add` compares every field).
+
+**Each paragraph rules its own sides.** A box around three paragraphs is
+the first ruled top, left and right, the middle left and right, the last
+bottom, left and right. So layout never looks at a paragraph's
+neighbours. RTF writes a boxed section the other way round, the same
+`\box` on every paragraph, and Word draws a run of paragraphs with the
+same borders and indents as one box; the importer turns such a run into
+the model's form (`rtf_join_border_groups`), and the exporter writes each
+paragraph's own sides, which Word draws as the same box.
+
+Borders sit where Word puts them: the text keeps its indents, the rules
+stand outside it by `border_space`, and space before and after lies
+outside the box. Format > Borders also moves a boxed paragraph's text in
+by the rule and its spacing, so the box stays inside the column.
+
 ## Images (M15)
 
 An image is a **paragraph-level, fixed-size, non-flowing block** -- not

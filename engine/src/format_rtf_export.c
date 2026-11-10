@@ -421,6 +421,23 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
         if (ps->space_before != 0)  { rtf_write_str(w, "\\sb"); rtf_write_i32(w, ps->space_before); }
         if (ps->space_after != 0)   { rtf_write_str(w, "\\sa"); rtf_write_i32(w, ps->space_after); }
         if (ps->page_break_before)  rtf_write_str(w, "\\pagebb");
+        if (ps->border_sides != 0) {
+            /* \box for all four, else each side; every side carries the
+               one kind, width and spacing the model keeps. */
+            static const char *const side_words[4] = { "\\brdrt", "\\brdrb", "\\brdrl", "\\brdrr" };
+            u8 k;
+            for (k = 0; k < 4; k++) {
+                if (ps->border_sides == WP_BORDER_BOX && k > 0) break;
+                if (ps->border_sides != WP_BORDER_BOX && !(ps->border_sides & (1u << k))) continue;
+                rtf_write_str(w, ps->border_sides == WP_BORDER_BOX ? "\\box" : side_words[k]);
+                rtf_write_str(w, ps->border_kind == WP_BORDER_DOUBLE ? "\\brdrdb" :
+                                 ps->border_kind == WP_BORDER_THICK ? "\\brdrth" : "\\brdrs");
+                rtf_write_str(w, "\\brdrw");
+                rtf_write_i32(w, ps->border_width > 0 ? ps->border_width : WP_BORDER_DEFAULT_WIDTH);
+                if (ps->border_space != 0) { rtf_write_str(w, "\\brsp"); rtf_write_i32(w, ps->border_space); }
+            }
+        }
+        if (ps->shading != 0) { rtf_write_str(w, "\\shading"); rtf_write_i32(w, (i32)ps->shading * 100); }
         /* The model's line spacing back to RTF's (docmodel.h). */
         if (ps->line_spacing > 0) {
             rtf_write_str(w, "\\sl"); rtf_write_i32(w, ps->line_spacing); rtf_write_str(w, "\\slmult1");

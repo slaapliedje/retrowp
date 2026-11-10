@@ -243,6 +243,28 @@ a full from-scratch pagination of the same document -- a direct,
 quantitative proof that editing paragraph K does not re-measure every
 other paragraph's text.
 
+## Borders and shading (M16, T16.1)
+
+A top rule adds `wp_border_thickness + border_space` above the first
+line's text, below its space before (`text_top_twips` grows, and the
+line box with it); a bottom rule the same below the last line, above its
+space after. Left and right rules change nothing in layout: they stand
+outside the text's indents. `wp_border_thickness` is one rule for
+single, three for double (two rules and the gap between), two for thick.
+
+`wp_line_border_slice` gives a painter one line's share of the box, in
+twips from the column's left edge and the line box's top: the area to
+shade, which spans the space before to the space after on that line,
+and which rules to draw there -- left and right on every line, top only
+on the first line, bottom only on the last. Every pixel painter (ST,
+Amiga, Mac and the page printer) draws it the same way through
+`platform/common/paraborder.c`: `plat_fill_shade`, the device's own grey
+pattern, then the rules in black, each at least a pixel. DOS draws it in
+code page 437's box-drawing characters with a blue background for the
+shading; a top or bottom rule there needs a row of its own, so it
+appears only where the spacing makes one. `format_prn` draws borders in
+its character grid (docs/formats/prn.md).
+
 ## Paragraph Kind: Image Paragraphs (M15)
 
 `wp_paragraph_relayout` opens with an early branch on `para->kind`

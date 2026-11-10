@@ -256,6 +256,7 @@ typedef struct {
     u8  align;
     i32 indent_left, indent_right, indent_first;
     i32 space_before, space_after, line_spacing;
+    i32 border_top, border_bottom;   /* a top or bottom rule and its spacing */
     const wp_para_style *pstyle;
     i32 content_width;
 } para_geom;
@@ -282,8 +283,9 @@ static void line_box(const para_geom *g, wp_line *line, i32 text_h, wp_bool firs
         box = -g->line_spacing;
     }
     line->text_height_twips = text_h;
-    line->text_top_twips = first ? g->space_before : 0;
-    line->height_twips = box + line->text_top_twips + (last ? g->space_after : 0);
+    line->text_top_twips = first ? g->space_before + g->border_top : 0;
+    line->height_twips = box + line->text_top_twips +
+                         (last ? g->border_bottom + g->space_after : 0);
 }
 
 static void line_place(const para_geom *g, wp_line *line, wp_bool first)
@@ -400,6 +402,10 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
         g.space_before = g.pstyle->space_before;
         g.space_after = g.pstyle->space_after;
         g.line_spacing = g.pstyle->line_spacing;
+        if (g.pstyle->border_sides & WP_BORDER_TOP)
+            g.border_top = wp_border_thickness(g.pstyle) + g.pstyle->border_space;
+        if (g.pstyle->border_sides & WP_BORDER_BOTTOM)
+            g.border_bottom = wp_border_thickness(g.pstyle) + g.pstyle->border_space;
     }
 
     layout = (wp_paragraph_layout *)para->layout;
@@ -560,4 +566,39 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
     mem_free(tokens);
     para->layout_dirty = WP_FALSE;
     return WP_OK;
+}
+
+i32 wp_border_thickness(const wp_para_style *ps)
+{
+    i32 w;
+
+    if (ps == NULL) return 0;
+    w = ps->border_width > 0 ? ps->border_width : WP_BORDER_DEFAULT_WIDTH;
+    if (ps->border_kind == WP_BORDER_DOUBLE) return 3 * w;
+    if (ps->border_kind == WP_BORDER_THICK) return 2 * w;
+    return w;
+}
+
+wp_bool wp_line_border_slice(const wp_document *doc, const wp_paragraph *para,
+                             const wp_line *line, wp_bool first, wp_bool last,
+                             i32 column_twips, wp_border_slice *out)
+{
+    const wp_para_style *ps = wp_document_pstyle_get(doc, para->style);
+    i32 t, sp;
+
+    if (ps == NULL || (ps->border_sides == 0 && ps->shading == 0)) return WP_FALSE;
+    t = wp_border_thickness(ps);
+    sp = ps->border_space;
+    out->rule = ps->border_width > 0 ? ps->border_width : WP_BORDER_DEFAULT_WIDTH;
+    out->kind = ps->border_kind;
+    out->shading = ps->shading;
+    out->thickness = t;
+    out->sides = (u8)(ps->border_sides & (WP_BORDER_LEFT | WP_BORDER_RIGHT));
+    if (first) out->sides = (u8)(out->sides | (ps->border_sides & WP_BORDER_TOP));
+    if (last) out->sides = (u8)(out->sides | (ps->border_sides & WP_BORDER_BOTTOM));
+    out->x0 = ps->indent_left - sp - ((ps->border_sides & WP_BORDER_LEFT) ? t : 0);
+    out->x1 = column_twips - ps->indent_right + sp + ((ps->border_sides & WP_BORDER_RIGHT) ? t : 0);
+    out->top = first ? ps->space_before : 0;
+    out->bottom = line->height_twips - (last ? ps->space_after : 0);
+    return WP_TRUE;
 }

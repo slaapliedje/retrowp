@@ -41,6 +41,12 @@ typedef struct {
     u8  uc;             /* \ucN: fallback characters after each \uN */
     u8  hidden;         /* \v: text not imported */
     u8  pagebb;         /* \pagebb: this paragraph starts a page */
+    u8  border_sides;   /* WP_BORDER_* from \brdrt \brdrb \brdrl \brdrr \box */
+    u8  border_side;    /* the side the border words now describe (\brdrnone clears it) */
+    u8  border_kind;    /* wp_border_kind, the last \brdrs \brdrdb \brdrth */
+    u8  shading;        /* \shadingN, in percent */
+    i32 border_width;   /* \brdrwN, twips */
+    i32 border_space;   /* \brspN, twips */
     u8  fidx;           /* \fN: its fmap entry + 1; 0 = the target default */
     u16 cp;             /* that font's \fcharset as a code page; 0 = the document's */
     rtf_dest dest;
@@ -279,6 +285,13 @@ static void rtf_apply_pstyle_to_current_paragraph(rtf_parser *p)
         else ps.line_spacing = -(st->sl < 0 ? -st->sl : st->sl);
     }
     ps.page_break_before = (u8)(st->pagebb || p->break_this);
+    ps.border_sides = st->border_sides;
+    if (st->border_sides != 0) {
+        ps.border_kind = st->border_kind;
+        ps.border_width = st->border_width;
+        ps.border_space = st->border_space;
+    }
+    ps.shading = st->shading;
     p->break_this = 0;
     ps.tab_count = p->tab_count;
     memcpy(ps.tab_kind, p->tab_kind, sizeof(ps.tab_kind));
@@ -871,6 +884,10 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         st->space_before = 0; st->space_after = 0;
         st->sl = 0; st->slmult = 0;
         st->pagebb = 0;
+        st->border_sides = st->border_side = 0;
+        st->border_kind = (u8)WP_BORDER_SINGLE;
+        st->border_width = 0; st->border_space = 0;
+        st->shading = 0;
         p->tab_count = 0;
         p->tab_kind_pending = (u8)WP_TAB_LEFT;
         return;
@@ -889,6 +906,24 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
     if (strcmp(name, "sl") == 0) { st->sl = has_param ? param : 0; return; }
     if (strcmp(name, "pagebb") == 0) { st->pagebb = (u8)(!has_param || param != 0); return; }
     if (strcmp(name, "slmult") == 0) { st->slmult = (u8)(has_param && param != 0); return; }
+    /* Borders: a side word, then the words describing it. The model has
+       one kind, width and spacing for every side; the last given wins. */
+    if (strcmp(name, "brdrt") == 0) { st->border_side = WP_BORDER_TOP; st->border_sides |= WP_BORDER_TOP; return; }
+    if (strcmp(name, "brdrb") == 0) { st->border_side = WP_BORDER_BOTTOM; st->border_sides |= WP_BORDER_BOTTOM; return; }
+    if (strcmp(name, "brdrl") == 0) { st->border_side = WP_BORDER_LEFT; st->border_sides |= WP_BORDER_LEFT; return; }
+    if (strcmp(name, "brdrr") == 0) { st->border_side = WP_BORDER_RIGHT; st->border_sides |= WP_BORDER_RIGHT; return; }
+    if (strcmp(name, "box") == 0) { st->border_side = WP_BORDER_BOX; st->border_sides = WP_BORDER_BOX; return; }
+    if (strcmp(name, "brdrnone") == 0) { st->border_sides = (u8)(st->border_sides & ~st->border_side); return; }
+    if (strcmp(name, "brdrs") == 0) { st->border_kind = (u8)WP_BORDER_SINGLE; return; }
+    if (strcmp(name, "brdrdb") == 0) { st->border_kind = (u8)WP_BORDER_DOUBLE; return; }
+    if (strcmp(name, "brdrth") == 0) { st->border_kind = (u8)WP_BORDER_THICK; return; }
+    if (strcmp(name, "brdrw") == 0) { st->border_width = (has_param && param > 0) ? param : 0; return; }
+    if (strcmp(name, "brsp") == 0) { st->border_space = (has_param && param > 0) ? param : 0; return; }
+    if (strcmp(name, "shading") == 0) {
+        i32 pct = has_param ? (param + 50) / 100 : 0;   /* hundredths of a percent */
+        st->shading = (u8)(pct < 0 ? 0 : pct > 100 ? 100 : pct);
+        return;
+    }
     if (strcmp(name, "tqr") == 0) { p->tab_kind_pending = (u8)WP_TAB_RIGHT; return; }
     if (strcmp(name, "tqc") == 0) { p->tab_kind_pending = (u8)WP_TAB_CENTER; return; }
     if (strcmp(name, "tqdec") == 0) { p->tab_kind_pending = (u8)WP_TAB_DECIMAL; return; }
@@ -1174,6 +1209,62 @@ static void rtf_finish(rtf_parser *p)
     rtf_apply_pstyle_to_current_paragraph(p);
 }
 
+/* Word draws consecutive paragraphs with the same borders and indents as
+   one box -- that is how RTF writes a boxed section: \box on every
+   paragraph. The model rules each paragraph's own sides (docmodel.h), so
+   inside such a run every paragraph but the first loses its top rule
+   and every one but the last its bottom. */
+static wp_bool same_box(const wp_para_style *a, const wp_para_style *b)
+{
+    return (wp_bool)(a != NULL && b != NULL && a->border_sides != 0 &&
+                     a->border_sides == b->border_sides && a->border_kind == b->border_kind &&
+                     a->border_width == b->border_width && a->border_space == b->border_space &&
+                     a->indent_left == b->indent_left && a->indent_right == b->indent_right);
+}
+
+static wp_status set_sides(wp_document *doc, wp_paragraph *para, u8 sides)
+{
+    const wp_para_style *cur = wp_document_pstyle_get(doc, para->style);
+    wp_para_style ps;
+    wp_pstyle h;
+
+    if (cur == NULL || cur->border_sides == sides) return WP_OK;
+    ps = *cur;
+    ps.border_sides = sides;
+    if (wp_document_pstyle_find_or_add(doc, &ps, &h) != WP_OK) return WP_NOMEM;
+    wp_paragraph_pstyle_set(para, h);
+    return WP_OK;
+}
+
+static wp_status rtf_join_border_groups(wp_document *doc)
+{
+    u32 si, pi;
+
+    for (si = 0; si < doc->section_count; si++) {
+        wp_section *sec = wp_document_section_get(doc, si);
+
+        for (pi = 0; pi < sec->para_count; ) {
+            const wp_para_style *first = wp_document_pstyle_get(doc, sec->paras[pi].style);
+            u32 end = pi + 1, k;
+            u8 sides;
+
+            while (end < sec->para_count &&
+                   same_box(first, wp_document_pstyle_get(doc, sec->paras[end].style))) end++;
+            if (end - pi < 2) { pi = end; continue; }
+            sides = first->border_sides;
+            for (k = pi; k < end; k++) {
+                u8 s = sides;
+                if (k > pi) s = (u8)(s & ~WP_BORDER_TOP);
+                if (k + 1 < end) s = (u8)(s & ~WP_BORDER_BOTTOM);
+                if (set_sides(doc, &sec->paras[k], s) != WP_OK) return WP_NOMEM;
+                first = wp_document_pstyle_get(doc, sec->paras[pi].style);   /* the table may have moved */
+            }
+            pi = end;
+        }
+    }
+    return WP_OK;
+}
+
 wp_status format_rtf_import_images(const u8 *bytes, u32 len, wp_document *doc,
                                     const wp_image_sink *sink)
 {
@@ -1249,6 +1340,7 @@ wp_status format_rtf_import_images(const u8 *bytes, u32 len, wp_document *doc,
 
     st = p->error;
     mem_free(p);
+    if (st == WP_OK) st = rtf_join_border_groups(doc);
     if (st != WP_OK) {
         wp_document_free(doc);
         return st;

@@ -179,6 +179,39 @@ void wp_line_fragment_iter_init(wp_line_fragment_iter *iter, const wp_line *line
 wp_bool wp_line_next_fragment(wp_document *doc, wp_paragraph *para, const wp_line *line,
                                wp_line_fragment_iter *iter, wp_line_fragment *out);
 
+/* ------------------------------------------------------------------ */
+/* Borders and shading (docmodel.h's WP_BORDER_*)                      */
+/* ------------------------------------------------------------------ */
+
+/* All of a border's rules together, in twips: one rule for single, two
+   rules and their gap for double, twice the rule for thick. */
+i32 wp_border_thickness(const wp_para_style *ps);
+
+/* The part of a paragraph's box one of its lines covers, for a painter
+   to draw before the line's text: shading over [x0, x1) x [top, bottom),
+   then the rules in `sides` -- left and right on every line, the top
+   rule only on the first line and the bottom only on the last, each
+   `thickness` thick at that edge of the area (a double border is a
+   `rule`-thick line at each side of the edge's thickness with a gap of
+   one rule between). x is from the column's left edge, y from the top
+   of the line's box; the area excludes space before and after, which lie
+   outside the box. WP_FALSE when the paragraph has no border or
+   shading. */
+typedef struct {
+    i32 x0, x1;          /* the box's outer left and right edges */
+    i32 top, bottom;     /* this line's share of the box */
+    i32 thickness;       /* all of a border's rules (wp_border_thickness) */
+    i32 rule;            /* one rule */
+    u8  kind;            /* wp_border_kind */
+    u8  sides;           /* WP_BORDER_* to draw on this line */
+    u8  shading;         /* percent grey, 0 none */
+    u8  _pad;
+} wp_border_slice;
+
+wp_bool wp_line_border_slice(const wp_document *doc, const wp_paragraph *para,
+                             const wp_line *line, wp_bool first, wp_bool last,
+                             i32 column_twips, wp_border_slice *out);
+
 /* 0 unless align is WP_ALIGN_JUSTIFY, the line is not its paragraph's
    last (matching PDF export's own left-align-last-line convention),
    it has no tab (stretching gaps would pull tabbed columns out of their

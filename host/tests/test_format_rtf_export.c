@@ -184,3 +184,49 @@ void test_format_rtf_roundtrip_full_attribute_set(void)
     wp_document_free(&doc);
     wp_document_free(&doc2);
 }
+
+/* Borders the way Word writes a boxed section: the same \box on each of
+   three paragraphs. They import as one box -- the first ruled top, left
+   and right, the middle left and right, the last bottom, left and
+   right -- with the double rule, its width and spacing, and 25% shading;
+   the export says so per side, and imports back the same. */
+static u8 border_sides_of(wp_document *doc, u32 para)
+{
+    return wp_document_pstyle_get(doc, wp_document_section_get(doc, 0)->paras[para].style)->border_sides;
+}
+
+void test_rtf_borders_round_trip(void)
+{
+    static const char src[] =
+        "{\\rtf1\\ansi"
+        "\\pard\\box\\brdrdb\\brdrw10\\brsp60\\shading2500 One\\par"
+        "\\pard\\box\\brdrdb\\brdrw10\\brsp60\\shading2500 Two\\par"
+        "\\pard\\box\\brdrdb\\brdrw10\\brsp60\\shading2500 Three\\par"
+        "\\pard Plain\\par}";
+    wp_document doc, back;
+    u8 out[2048];
+    u32 len = 0;
+    const wp_para_style *ps;
+
+    ASSERT_TRUE(format_rtf_import((const u8 *)src, (u32)strlen(src), &doc) == WP_OK);
+    ASSERT_EQ_U32(border_sides_of(&doc, 0), WP_BORDER_TOP | WP_BORDER_LEFT | WP_BORDER_RIGHT);
+    ASSERT_EQ_U32(border_sides_of(&doc, 1), WP_BORDER_LEFT | WP_BORDER_RIGHT);
+    ASSERT_EQ_U32(border_sides_of(&doc, 2), WP_BORDER_BOTTOM | WP_BORDER_LEFT | WP_BORDER_RIGHT);
+    ASSERT_EQ_U32(border_sides_of(&doc, 3), 0);
+    ps = wp_document_pstyle_get(&doc, wp_document_section_get(&doc, 0)->paras[1].style);
+    ASSERT_EQ_U32(ps->border_kind, WP_BORDER_DOUBLE);
+    ASSERT_EQ_U32((u32)ps->border_width, 10);
+    ASSERT_EQ_U32((u32)ps->border_space, 60);
+    ASSERT_EQ_U32(ps->shading, 25);
+
+    ASSERT_TRUE(format_rtf_export(&doc, out, sizeof(out) - 1, &len) == WP_OK);
+    out[len] = '\0';
+    ASSERT_TRUE(strstr((const char *)out, "\\brdrt\\brdrdb\\brdrw10\\brsp60\\brdrl\\brdrdb") != NULL);
+    ASSERT_TRUE(strstr((const char *)out, "\\shading2500") != NULL);
+    ASSERT_TRUE(format_rtf_import(out, len, &back) == WP_OK);
+    ASSERT_EQ_U32(border_sides_of(&back, 0), WP_BORDER_TOP | WP_BORDER_LEFT | WP_BORDER_RIGHT);
+    ASSERT_EQ_U32(border_sides_of(&back, 1), WP_BORDER_LEFT | WP_BORDER_RIGHT);
+    ASSERT_EQ_U32(border_sides_of(&back, 2), WP_BORDER_BOTTOM | WP_BORDER_LEFT | WP_BORDER_RIGHT);
+    wp_document_free(&back);
+    wp_document_free(&doc);
+}
