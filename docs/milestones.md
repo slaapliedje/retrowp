@@ -2022,6 +2022,132 @@ genuinely new content type. `services/` stays untouched throughout.
 
 ---
 
+## M16 — Page Furniture: Boxes, Tables, Frames, Vector Art
+Goal: documents that are laid out, not just written -- the user's test
+case is a tabletop RPG character sheet (Powers & Perils, GURPS 3rd
+edition): boxed sections, grids of stats, ruled write-in lines, a
+decorated heading. Today the model is paragraphs of text plus picture
+paragraphs (M15), so none of that can be built. Decided with the user
+(2026-11-09):
+
+- **Paper matches the screen.** Whatever a document shows is what every
+  printer path draws -- GDOS (pageprint), PostScript and PCL rules where
+  they can, box-drawing characters where only text can be sent. No
+  printer-only substitutions (the default font prints as the screen's).
+- **Boxes and tables first**, then frames, then vector art, then
+  clipart: each step is useful alone, and the cheap ones cover most of a
+  character sheet.
+- **RTF carries all of it.** Every addition reads and writes standard RTF
+  (borders, tables, frames, metafile pictures), so a sheet made in Word
+  or another word processor opens here, and one made here opens there.
+
+Rules carried from earlier milestones: the model is the single source of
+truth (each feature starts in `docmodel.h`, not in a painter); every
+backend draws it or degrades honestly and documents how -- DOS text mode
+gets code page 437 box-drawing characters, never a parallel pixel layer
+(M15's precedent); 1 MB ST stays the baseline; `format_prn` degrades the
+same way the screen does. Fixtures are our own layouts "in the spirit
+of" those sheets, not copies -- the published sheets are copyrighted.
+
+- [x] T16.0 Print pictures. pageprint (GDOS) drew a picture paragraph's
+      frame only; it now draws its pixels at the printer's resolution:
+      scaled to the box, dithered to black and white by brightness (a 4x4
+      ordered dither -- a printer has two colours and the screen's
+      palette pens are not its), 32 rows at a time through a 1-bit call,
+      so a full-page picture costs a band of bits, not a page.
+      The 1-bit call is the device's choice (wp_page_device.draw_mono):
+      SpeedoGDOS's FX80 driver ignores vrt_cpyfm entirely, so without
+      NVDI the ST draws a picture as runs of filled bars; NVDI's drivers
+      take the raster copy, which printed the test picture in 30 s
+      against 5.5 min as runs, pixel for pixel the same.
+      AC met: an RTF with a 3 x 1.5 inch grey-ramp picture printed under
+      SpeedoGDOS (FX80, TOS 1.04) and under NVDI with MagiC (PCL, 300
+      dpi, from the user's Falcon disk), both decoded and checked; host
+      test for the band, the runs and the frame fallback.
+      Found on the way, not fixed here: a picture paragraph ignores its
+      alignment (a centred one sits at the left margin, on screen and on
+      paper); on the Falcon's 16-bit true-colour screen a picture draws
+      scrambled (plat_draw_image's palette-pen path assumes planes).
+- [ ] T16.1 Paragraph borders and shading. A box, or any of its four
+      sides, around a paragraph: single, double or thick rule, a width,
+      the gap to the text; and a grey or colour fill behind it.
+      Consecutive paragraphs with the same borders share one box (Word's
+      rule), which is how a boxed section of several paragraphs is made.
+      Model: border and shading fields in wp_para_style (a sides mask,
+      kind, width and spacing in twips, fill colour/percent). Layout:
+      the box's space added to the first and last line boxes.
+      Drawing: every painter (ST, Amiga, Mac by plat_fill_rect; DOS by
+      box-drawing characters); pageprint; format_prn (PostScript and PCL
+      draw rules and fills, Epson and plain text box-drawing characters
+      in code page 437 or ASCII +-|).
+      RTF: \brdrt \brdrb \brdrl \brdrr \box, \brdrs \brdrdb \brdrth,
+      \brdrwN \brspN, \shadingN \cbpatN.
+      UI: Format > Borders (plat_dialog_choice: none, box, top, bottom,
+      top and bottom; single, double, thick; shading none/10/25/50%).
+      Undoable like every paragraph-style change.
+      AC: host tests for layout geometry, merging, RTF round-trip and
+      format_prn output per driver; screenshots on ST, Amiga, Mac and
+      DOS; a GDOS printout matching the screen.
+- [ ] T16.2 Tables. Rows of cells, each cell its own paragraphs, cell
+      widths and borders per row, rows never split across a page (first
+      cut). The model follows RTF's own flat shape rather than nesting:
+      a paragraph carries the table, row and cell it belongs to, and a
+      row-definition table holds each row's cell edges and borders, so
+      the editing, undo and paragraph-walking code keeps its one list.
+      T16.2a writes that design into docs/document-model.md before code.
+      Layout: a row's cells laid out side by side at their widths, the
+      row as tall as its tallest cell. Editing: Tab and Shift+Tab move
+      between cells; Insert Table (rows x columns), insert and delete
+      row and column. Drawing: cell borders as T16.1's rules; DOS and
+      character printers by box-drawing characters.
+      RTF: \trowd \cellxN \clbrdrX \intbl \cell \row \trgaphN \trleftN.
+      AC: host tests (layout of a 3x4 table, cursor movement between
+      cells, RTF round-trip of a Word-made table fixture); screenshots on
+      every target; a character-sheet stat grid built and printed.
+- [ ] T16.3 Frames. A text box placed at a fixed spot on the page --
+      a form's labelled fields, a sidebar -- with T16.1's borders. First
+      cut: frames sit at their page position and the body text does not
+      flow around them (wrap-around is a later task, noted here).
+      RTF: frame paragraphs (\posxN \posyN \absw \absh \phpg \pvpg).
+      AC: host tests for placement and RTF round-trip; a two-column
+      character-sheet header made of frames, on screen and printed.
+- [ ] T16.4 Vector drawings. Scalable art kept in the document as a list
+      of primitives in twips -- line, polyline, filled polygon,
+      rectangle, rounded rectangle, ellipse, arc -- with a line width and
+      a fill; drawn on screen and printed at the printer's own
+      resolution, so it stays sharp on paper. Saved in RTF as a Windows
+      metafile picture (\pict\wmetafile8), which Word and other word
+      processors read; read back from the same.
+      platform.h gains drawing calls (polyline, filled polygon), in
+      retroplat for every backend: ST VDI (thick lines drawn as polygons
+      -- SpeedoGDOS faults on wide v_pline), Amiga graphics.library, Mac
+      QuickDraw, host stub recording; DOS shows a labelled placeholder,
+      as it does for pictures.
+      Getting art in: the gateway converts SVG (and WMF/EMF) into the
+      primitive list (offload capability, as images are); the ST reads
+      GEM metafiles (.GEM, GEM Draw's format) natively, and its GDOS
+      printer plays them. A drawing editor is out of scope here.
+      AC: host tests for the primitive list, scaling and WMF round-trip;
+      an SVG heading inserted through the gateway, shown on ST, Amiga
+      and Mac, printed through GDOS and PostScript.
+- [ ] T16.5 Clipart. Bitmap clipart opened directly on each machine, no
+      gateway needed: GEM .IMG (ST), IFF ILBM (Amiga), MacPaint/PICT
+      (Mac), PCX/BMP (DOS), converted to the model's indexed image. A
+      small bundled set of our own chapter headings, borders and
+      flourishes (vector, T16.4) under clipart/, and Insert Clipart,
+      which browses it.
+      AC: each target opens its native format; the bundled set inserts
+      and prints.
+- [ ] T16.6 The worked example: an original character sheet (stat grid,
+      skill table, boxed notes, ruled write-in lines, decorated title)
+      kept as a fixture, opened, screenshotted and printed on every
+      target as part of the gates -- the milestone's acceptance test.
+
+Artifact: a character sheet made in RetroWP, saved as RTF that Word
+opens, printed through GDOS, PostScript and PCL, matching the screen.
+
+---
+
 ## Cross-Cutting "Done" Checklist (apply to every task)
 - [ ] Builds on host (+ target backend or stub).
 - [ ] Platform-free logic unit-tested on host.
