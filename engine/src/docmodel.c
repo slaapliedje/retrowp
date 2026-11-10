@@ -188,6 +188,39 @@ wp_status wp_document_image_add(wp_document *doc, const wp_image_desc *desc, wp_
     return WP_OK;
 }
 
+wp_status wp_document_trow_find_or_add(wp_document *doc, const wp_table_row *row, wp_trow *out)
+{
+    u16 i;
+
+    for (i = 1; i < doc->trow_count; i++) {
+        if (memcmp(&doc->trows[i], row, sizeof(*row)) == 0) { *out = (wp_trow)i; return WP_OK; }
+    }
+    if (doc->trow_count == 0xFFFFu) return WP_RANGE;
+    if ((u32)doc->trow_count + 1u > doc->trow_capacity) {
+        u32 need = doc->trow_count == 0 ? 2u : (u32)doc->trow_count + 1u;
+        u32 new_cap = wp_grow_capacity(doc->trow_capacity, need, 4);
+        void *mem = mem_realloc(doc->trows, (u32)doc->trow_capacity * (u32)sizeof(wp_table_row),
+                                new_cap * (u32)sizeof(wp_table_row));
+        if (mem == NULL) return WP_NOMEM;
+        doc->trows = (wp_table_row *)mem;
+        doc->trow_capacity = (u16)new_cap;
+    }
+    if (doc->trow_count == 0) {
+        memset(&doc->trows[0], 0, sizeof(wp_table_row));
+        doc->trow_count = 1;
+    }
+    doc->trows[doc->trow_count] = *row;
+    *out = (wp_trow)doc->trow_count;
+    doc->trow_count++;
+    return WP_OK;
+}
+
+const wp_table_row *wp_document_trow_get(const wp_document *doc, wp_trow handle)
+{
+    if (handle == 0 || handle >= doc->trow_count) return NULL;
+    return &doc->trows[handle];
+}
+
 const wp_image_desc *wp_document_image_get(const wp_document *doc, wp_image handle)
 {
     if (handle == 0 || handle >= doc->image_count) return NULL;
@@ -315,6 +348,9 @@ wp_status wp_document_init(wp_document *doc)
     doc->images = NULL;
     doc->image_count = 0;
     doc->image_capacity = 0;
+    doc->trows = NULL;
+    doc->trow_count = 0;
+    doc->trow_capacity = 0;
     doc->fonts = NULL;
     doc->font_count = 0;
     doc->font_capacity = 0;
@@ -383,6 +419,7 @@ void wp_document_free(wp_document *doc)
     mem_free(doc->cstyles);
     mem_free(doc->pstyles);
     mem_free(doc->images);
+    mem_free(doc->trows);
     mem_free(doc->fonts);
     wp_strpool_free(&doc->strings);
 }

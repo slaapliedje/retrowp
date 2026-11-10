@@ -204,6 +204,102 @@ stand outside it by `border_space`, and space before and after lies
 outside the box. Format > Borders also moves a boxed paragraph's text in
 by the rule and its spacing, so the box stays inside the column.
 
+## Tables (M16, T16.2) -- design
+
+Written before the code (T16.2a); the code follows it, and where it
+departs this section is corrected, not left behind.
+
+### The model: RTF's flat shape
+
+A table is not a nested object. As in RTF, it is ordinary paragraphs
+that say where they belong, so the one paragraph list -- which editing,
+undo, search, every importer and exporter and every paint loop walk --
+stays one list.
+
+- `wp_paragraph.trow` -- 0 for a paragraph outside any table; else a
+  handle into `doc->trows`, the row definition the paragraph's row uses.
+- `wp_paragraph.tflags` -- `WP_TCELL_END` on a cell's last paragraph,
+  `WP_TROW_END` (with `WP_TCELL_END`) on a row's last. A row is the
+  run of table paragraphs up to and including a `WP_TROW_END`; its cells
+  are the runs up to each `WP_TCELL_END`. A cell's number is its count
+  of `WP_TCELL_END`s from the row's start, so no paragraph stores one
+  and inserting a paragraph into a cell renumbers nothing.
+- `wp_table_row` (in `doc->trows`, append-only like the other side
+  tables, found-or-added so a thousand alike rows share one): `left`
+  (`\trleftN`, the row's left edge from the column's), `gap`
+  (`\trgaphN`, half the space between cells: text sits `gap` in from
+  each cell edge), `cell_count` and `cell_right[]` (`\cellxN`, each
+  cell's right edge from the column's left edge, up to
+  `WP_MAX_CELLS` = 16), and per cell its borders (`WP_BORDER_*` sides,
+  one kind and width as a paragraph's) and shading.
+
+A row definition with more cells than a row has paragraphs-cells is
+legal (the rest are empty); a row with more cells than its definition
+puts the extra cells after the last edge, one default width each.
+
+### Layout
+
+- **Width.** A table paragraph wraps at its cell's text width:
+  `cell_right[k] - cell_left[k] - 2 * gap`, where `cell_left[0]` is
+  `left` and `cell_left[k]` is `cell_right[k-1]`. The two relayout
+  walks (`wp_pageview_relayout`, `wp_document_paginate`) already go
+  through paragraphs in order, so they know the row and cell as they go
+  (`wp_paragraph_wrap_twips` answers it for anyone else, by walking
+  back to the row's start -- a row is a few paragraphs).
+- **Placement.** Every `wp_line` gains three fields, set by a table pass
+  that `wp_document_mark_pages` runs first (it walks every line anyway):
+  - `cell_x0`, `cell_x1` -- the cell's edges, from the column's left
+    edge; 0 and 0 outside a table. A painter draws a line at
+    `column + cell_x0 + x_twips` and clears only `[cell_x0, cell_x1)`
+    behind it, not the whole width, or it would wipe the cell beside.
+  - `advance_twips` -- how far down the next line starts, which is what
+    every walker (painters, viewport, hit test, page breaks) now adds,
+    instead of `height_twips`. Outside a table it equals the height. In
+    a row, each cell's lines advance normally except the cell's last,
+    which returns to the row's top -- or, for the row's last cell, goes
+    to the row's bottom, the tallest cell's height below its top. So a
+    row's advances sum to its height, and a walker that knows nothing
+    of tables still lands on the right line after it.
+  - `WP_LINE_ROW_FIRST` in a new `flags` byte on a row's first line, so
+    a painter draws the row's cell borders and shading there (the row's
+    cells and height from `wp_table_row_geometry`), and the page breaker
+    keeps a row on one page: a row that does not fit starts a new page
+    (a row taller than a page is cut, a first cut).
+- `height_twips` keeps meaning the line's own box -- what the caret,
+  selection and paragraph borders use.
+
+### Hit testing and the caret
+
+A click's y can fall on lines of several cells; the line chosen is the
+one whose cell's `[cell_x0, cell_x1)` holds the click's x. The caret
+and selection are per line, as now, at `cell_x0 + x`.
+
+### Editing
+
+Tab moves to the next cell's start (Shift+Tab the previous); at the
+last cell, Tab adds a row. Enter splits a paragraph inside its cell: the
+new paragraph takes the row, and the cell and row ends move to whichever
+of the two is last. Backspace at a cell's start does not join it to the
+cell before. Insert Table makes rows x columns of empty cells, evenly
+across the column; insert and delete row and column edit the run and the
+row definitions. Undo journals the paragraph fields with the text, as
+it does the style.
+
+### RTF
+
+`\trowd \trleftN \trgaphN \cellxN \clbrdrt \clbrdrb \clbrdrl \clbrdrr`
+(with the border words as for paragraphs) `\clshdngN \intbl \cell \row`
+in, and the same out. Nested tables (`\itap`) come in flattened.
+
+### Stages
+
+1. The model, RTF in and out, layout and drawing on every screen and
+   the page printer: a Word table opens, shows and prints through GDOS.
+2. Editing: Tab, Enter, Backspace, Insert Table, rows and columns.
+3. Character printers (`format_prn`): rows laid out side by side in the
+   grid, cell rules in box-drawing characters. Until then a table prints
+   there as its cells one after another.
+
 ## Images (M15)
 
 An image is a **paragraph-level, fixed-size, non-flowing block** -- not

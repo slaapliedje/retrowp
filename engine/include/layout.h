@@ -46,7 +46,27 @@ typedef struct {
     u32 tab_count;          /* tabs on this line */
     u32 page;               /* 0-based page the line falls on (wp_document_mark_pages) */
     wp_bool page_start;     /* first line of its page */
+    /* Tables (docs/document-model.md, "Tables"), set by the table pass
+       wp_document_mark_pages runs first; outside a table cell_x0 = cell_x1
+       = row_dy = 0, advance = height_twips, flags 0. */
+    u8  flags;              /* WP_LINE_ROW_FIRST */
+    i32 advance_twips;      /* how far down the next line starts */
+    i32 cell_x0, cell_x1;   /* the cell's text edges from the column's left; the line sits at cell_x0 + x_twips */
+    i32 row_dy_twips;       /* a table line's top below its row's top */
+    i32 row_h_twips;        /* on a row's first line: the row's height */
 } wp_line;
+
+#define WP_LINE_ROW_FIRST 0x01   /* the first line of a table row */
+
+/* The width a paragraph wraps at: its cell's text width in a table
+   (the cell less the row's gap each side), else `column_twips`. Walks
+   back to the row's start to count cells; a row is a few paragraphs. */
+i32 wp_paragraph_wrap_twips(const wp_document *doc, const wp_section *sec, u32 para_index,
+                            i32 column_twips);
+
+/* A table row's cell `k`: its left and right edges from the column's
+   left edge (cells past the shape's last are one inch each). */
+void wp_table_cell_edges(const wp_table_row *row, u32 k, i32 *left, i32 *right);
 
 typedef struct {
     wp_line *lines;

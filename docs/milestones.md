@@ -2131,6 +2131,24 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       AC: host tests (layout of a 3x4 table, cursor movement between
       cells, RTF round-trip of a Word-made table fixture); screenshots on
       every target; a character-sheet stat grid built and printed.
+      [x] T16.2a the design, in docs/document-model.md ("Tables").
+      [x] Stage 1 (2026-11-09): the model (wp_paragraph.trow/tflags, the
+      document's row shapes), RTF \trowd \trleft \trgaph \cellx
+      \clbrdr* \clshdng \intbl \cell \row in and out (tables used to
+      import as tab-separated paragraphs), layout at each cell's width,
+      the table pass placing every line (cell edges, offset in its row,
+      the row's height, an advance that walks a table-blind walker past
+      it, rows kept on one page), and drawing on every screen and the
+      page printer -- a shared line walker that sums each line's
+      rounded height (a converted total rounds differently: DOS), cell
+      borders and shading at a row's first line with shared edges ruled
+      once; DOS rules cells with vertical box characters. Clicks find
+      the cell by x; Enter in a cell keeps both halves in it; Backspace
+      at a cell's start joins nothing. Seen on the ST (screen and
+      SpeedoGDOS print), Amiga and DOS; the Mac builds.
+      [ ] Stage 2: Tab and Shift+Tab between cells, Insert Table, rows
+      and columns. [ ] Stage 3: format_prn's grid -- until then a table
+      prints there as its cells one after another.
 - [ ] T16.3 Frames. A text box placed at a fixed spot on the page --
       a form's labelled fields, a sidebar -- with T16.1's borders. First
       cut: frames sit at their page position and the body text does not

@@ -270,6 +270,11 @@ wp_status wp_document_split_paragraph_raw(wp_document *doc, wp_pos pos, wp_pos *
     para = &sec->paras[pos.paragraph];
     new_para = &sec->paras[new_idx];
     new_para->style = para->style;
+    /* In a table the new half stays in the cell, and the cell's (and
+       row's) end moves to it, the last of the two. */
+    new_para->trow = para->trow;
+    new_para->tflags = para->tflags;
+    para->tflags = 0;
     {
         /* A page break belongs before the paragraph's first line, so the
            half that moves down does not inherit it -- or every Enter at
@@ -502,6 +507,14 @@ wp_status wp_document_merge_paragraph_raw(wp_document *doc, u32 section,
     first = &sec->paras[paragraph];
     second = &sec->paras[paragraph + 1];
 
+    /* A table's cells do not run together: no joining across a cell's
+       end, or a table paragraph to one outside the table (Backspace at
+       a cell's start does nothing, as at the document's). */
+    if ((first->trow != 0 && (first->tflags & WP_TCELL_END)) ||
+        ((first->trow == 0) != (second->trow == 0))) {
+        return WP_RANGE;
+    }
+
     /* Capture the join point BEFORE mutating first -- the position
        immediately after first's ORIGINAL last codepoint (or (0,0) if
        first was empty), the exact convention wp_pos_next/prev's own
@@ -524,6 +537,12 @@ wp_status wp_document_merge_paragraph_raw(wp_document *doc, u32 section,
        on: absorbed, it simply goes (it has no runs to move); surviving,
        it becomes the text paragraph. A survivor with nothing to absorb
        stays a picture, which is what undoing an Enter on one needs. */
+    /* Joining two paragraphs of a cell: the survivor ends whatever the
+       absorbed one ended -- the inverse of a split. */
+    if (first->trow != 0 && second->trow == first->trow) {
+        first->tflags = (u8)(first->tflags | second->tflags);
+    }
+
     if (first->kind == (u8)WP_PARA_IMAGE && second->kind != (u8)WP_PARA_IMAGE &&
         second->run_count > 0) {
         first->kind = (u8)WP_PARA_TEXT;

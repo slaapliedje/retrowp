@@ -47,6 +47,7 @@ typedef struct {
     u8  shading;        /* \shadingN, in percent */
     i32 border_width;   /* \brdrwN, twips */
     i32 border_space;   /* \brspN, twips */
+    u8  intbl;          /* \intbl: this paragraph is in a table row */
     u8  fidx;           /* \fN: its fmap entry + 1; 0 = the target default */
     u16 cp;             /* that font's \fcharset as a code page; 0 = the document's */
     rtf_dest dest;
@@ -102,6 +103,13 @@ typedef struct {
        page back to the document's (\paperw...). */
     u8  sect_pending;
     u8  sec_has_header, sec_has_footer;   /* this section's own, read already */
+
+    /* Tables: the row shape \trowd ... \cellxN builds, and the cell
+       border words waiting for the \cellx they belong to. */
+    wp_table_row trow;
+    u8  cell_borders_pending;
+    u8  cell_shade_pending;
+    u8  border_on_cell;  /* the border words now describe a cell, not the paragraph */
     i32 doc_page[6];   /* \paperw \paperh \margl \margr \margt \margb */
     u8  star_pending;  /* \* just seen: the next control word may be one we read anyway */
     u8  fld_is_page;   /* the last field instruction was PAGE */
@@ -292,6 +300,19 @@ static void rtf_apply_pstyle_to_current_paragraph(rtf_parser *p)
         ps.border_space = st->border_space;
     }
     ps.shading = st->shading;
+    {
+        /* A paragraph in a table row takes the row's shape. */
+        wp_section *tsec = wp_document_section_get(p->doc, p->section_idx);
+        wp_paragraph *tpara = wp_section_paragraph_get(tsec, p->para_idx);
+        if (tpara != NULL) {
+            tpara->trow = 0;
+            if (st->intbl && p->trow.cell_count > 0 &&
+                wp_document_trow_find_or_add(p->doc, &p->trow, &tpara->trow) != WP_OK) {
+                p->error = WP_NOMEM;
+                return;
+            }
+        }
+    }
     p->break_this = 0;
     ps.tab_count = p->tab_count;
     memcpy(ps.tab_kind, p->tab_kind, sizeof(ps.tab_kind));
@@ -888,6 +909,8 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         st->border_kind = (u8)WP_BORDER_SINGLE;
         st->border_width = 0; st->border_space = 0;
         st->shading = 0;
+        st->intbl = 0;
+        p->border_on_cell = 0;
         p->tab_count = 0;
         p->tab_kind_pending = (u8)WP_TAB_LEFT;
         return;
@@ -908,17 +931,67 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
     if (strcmp(name, "slmult") == 0) { st->slmult = (u8)(has_param && param != 0); return; }
     /* Borders: a side word, then the words describing it. The model has
        one kind, width and spacing for every side; the last given wins. */
-    if (strcmp(name, "brdrt") == 0) { st->border_side = WP_BORDER_TOP; st->border_sides |= WP_BORDER_TOP; return; }
-    if (strcmp(name, "brdrb") == 0) { st->border_side = WP_BORDER_BOTTOM; st->border_sides |= WP_BORDER_BOTTOM; return; }
-    if (strcmp(name, "brdrl") == 0) { st->border_side = WP_BORDER_LEFT; st->border_sides |= WP_BORDER_LEFT; return; }
-    if (strcmp(name, "brdrr") == 0) { st->border_side = WP_BORDER_RIGHT; st->border_sides |= WP_BORDER_RIGHT; return; }
-    if (strcmp(name, "box") == 0) { st->border_side = WP_BORDER_BOX; st->border_sides = WP_BORDER_BOX; return; }
+    if (strcmp(name, "brdrt") == 0) { p->border_on_cell = 0; st->border_side = WP_BORDER_TOP; st->border_sides |= WP_BORDER_TOP; return; }
+    if (strcmp(name, "brdrb") == 0) { p->border_on_cell = 0; st->border_side = WP_BORDER_BOTTOM; st->border_sides |= WP_BORDER_BOTTOM; return; }
+    if (strcmp(name, "brdrl") == 0) { p->border_on_cell = 0; st->border_side = WP_BORDER_LEFT; st->border_sides |= WP_BORDER_LEFT; return; }
+    if (strcmp(name, "brdrr") == 0) { p->border_on_cell = 0; st->border_side = WP_BORDER_RIGHT; st->border_sides |= WP_BORDER_RIGHT; return; }
+    if (strcmp(name, "box") == 0) { p->border_on_cell = 0; st->border_side = WP_BORDER_BOX; st->border_sides = WP_BORDER_BOX; return; }
     if (strcmp(name, "brdrnone") == 0) { st->border_sides = (u8)(st->border_sides & ~st->border_side); return; }
-    if (strcmp(name, "brdrs") == 0) { st->border_kind = (u8)WP_BORDER_SINGLE; return; }
-    if (strcmp(name, "brdrdb") == 0) { st->border_kind = (u8)WP_BORDER_DOUBLE; return; }
-    if (strcmp(name, "brdrth") == 0) { st->border_kind = (u8)WP_BORDER_THICK; return; }
-    if (strcmp(name, "brdrw") == 0) { st->border_width = (has_param && param > 0) ? param : 0; return; }
+    if (strcmp(name, "brdrs") == 0) { if (p->border_on_cell) p->trow.border_kind = (u8)WP_BORDER_SINGLE; else st->border_kind = (u8)WP_BORDER_SINGLE; return; }
+    if (strcmp(name, "brdrdb") == 0) { if (p->border_on_cell) p->trow.border_kind = (u8)WP_BORDER_DOUBLE; else st->border_kind = (u8)WP_BORDER_DOUBLE; return; }
+    if (strcmp(name, "brdrth") == 0) { if (p->border_on_cell) p->trow.border_kind = (u8)WP_BORDER_THICK; else st->border_kind = (u8)WP_BORDER_THICK; return; }
+    if (strcmp(name, "brdrw") == 0) {
+        i32 w = (has_param && param > 0) ? param : 0;
+        if (p->border_on_cell) p->trow.border_width = w; else st->border_width = w;
+        return;
+    }
     if (strcmp(name, "brsp") == 0) { st->border_space = (has_param && param > 0) ? param : 0; return; }
+    /* Tables (docs/document-model.md, "Tables"). */
+    if (strcmp(name, "trowd") == 0) {
+        memset(&p->trow, 0, sizeof(p->trow));
+        p->cell_borders_pending = 0;
+        p->cell_shade_pending = 0;
+        return;
+    }
+    if (strcmp(name, "trleft") == 0) { p->trow.left = has_param ? param : 0; return; }
+    if (strcmp(name, "trgaph") == 0) { p->trow.gap = (has_param && param > 0) ? param : 0; return; }
+    if (strcmp(name, "clbrdrt") == 0) { p->border_on_cell = 1; p->cell_borders_pending |= WP_BORDER_TOP; return; }
+    if (strcmp(name, "clbrdrb") == 0) { p->border_on_cell = 1; p->cell_borders_pending |= WP_BORDER_BOTTOM; return; }
+    if (strcmp(name, "clbrdrl") == 0) { p->border_on_cell = 1; p->cell_borders_pending |= WP_BORDER_LEFT; return; }
+    if (strcmp(name, "clbrdrr") == 0) { p->border_on_cell = 1; p->cell_borders_pending |= WP_BORDER_RIGHT; return; }
+    if (strcmp(name, "clshdng") == 0) {
+        i32 pct = has_param ? (param + 50) / 100 : 0;
+        p->cell_shade_pending = (u8)(pct < 0 ? 0 : pct > 100 ? 100 : pct);
+        return;
+    }
+    if (strcmp(name, "cellx") == 0) {
+        if (p->trow.cell_count < WP_MAX_CELLS) {
+            u8 k = p->trow.cell_count++;
+            p->trow.cell_right[k] = has_param ? param : 0;
+            p->trow.cell_borders[k] = p->cell_borders_pending;
+            p->trow.cell_shading[k] = p->cell_shade_pending;
+        }
+        p->cell_borders_pending = 0;
+        p->cell_shade_pending = 0;
+        p->border_on_cell = 0;
+        return;
+    }
+    if (strcmp(name, "intbl") == 0) { st->intbl = 1; return; }
+    if (strcmp(name, "cell") == 0 || strcmp(name, "row") == 0) {
+        wp_section *tsec;
+        wp_paragraph *tpara;
+        wp_bool is_row = (wp_bool)(name[0] == 'r');
+
+        /* \cell ends its paragraph; \row marks the one \cell just ended. */
+        if (!is_row) rtf_end_paragraph(p);
+        if (p->error != WP_OK) return;
+        tsec = wp_document_section_get(p->doc, p->section_idx);
+        tpara = wp_section_paragraph_get(tsec, p->para_idx);
+        if (tpara != NULL && tpara->trow != 0) {
+            tpara->tflags = (u8)(tpara->tflags | WP_TCELL_END | (is_row ? WP_TROW_END : 0));
+        }
+        return;
+    }
     if (strcmp(name, "shading") == 0) {
         i32 pct = has_param ? (param + 50) / 100 : 0;   /* hundredths of a percent */
         st->shading = (u8)(pct < 0 ? 0 : pct > 100 ? 100 : pct);
@@ -992,11 +1065,11 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         }
         return;
     }
-    /* Tables arrive as rows of tab-separated cells, which the ruler's tab
-       stops can then line up: no table model yet, but no glued-together
-       cell text either. */
-    if (strcmp(name, "cell") == 0 || strcmp(name, "nestcell") == 0) { rtf_emit_char(p, '\t'); return; }
-    if (strcmp(name, "row") == 0 || strcmp(name, "nestrow") == 0) {
+    /* A nested table (\itap 2 and deeper) comes in flattened into its
+       outer cell: its cells tab-separated, its rows paragraphs. (\cell and
+       \row themselves are tables, above.) */
+    if (strcmp(name, "nestcell") == 0) { rtf_emit_char(p, '\t'); return; }
+    if (strcmp(name, "nestrow") == 0) {
         if (p->run_buf.length > 0 && p->run_buf.bytes[p->run_buf.length - 1] == '\t') p->run_buf.length--;
         rtf_end_paragraph(p);
         return;

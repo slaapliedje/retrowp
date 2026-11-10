@@ -169,6 +169,25 @@ typedef enum {
     WP_PARA_IMAGE = 1
 } wp_para_kind;
 
+/* A table row's shape (RTF \trowd ... \cellxN): where each cell ends,
+   the gap between cells, and each cell's borders and shading. Shared by
+   every row of that shape; see docs/document-model.md, "Tables". */
+#define WP_MAX_CELLS 16
+#define WP_TCELL_END 0x01
+#define WP_TROW_END  0x02
+typedef u16 wp_trow;
+typedef struct {
+    i32 left;                        /* the row's left edge from the column's (\trleftN) */
+    i32 gap;                         /* half the space between cells; text sits this far in (\trgaphN) */
+    i32 cell_right[WP_MAX_CELLS];    /* each cell's right edge from the column's left edge (\cellxN) */
+    u8  cell_borders[WP_MAX_CELLS];  /* WP_BORDER_* per cell (\clbrdrt ...) */
+    u8  cell_shading[WP_MAX_CELLS];  /* percent grey per cell (\clshdngN / 100) */
+    u8  cell_count;                  /* 1..WP_MAX_CELLS */
+    u8  border_kind;                 /* wp_border_kind, every cell's */
+    u8  _pad[2];
+    i32 border_width;                /* one rule, twips; 0 = WP_BORDER_DEFAULT_WIDTH */
+} wp_table_row;
+
 typedef struct {
     wp_run   *runs;
     u16       run_count;
@@ -179,6 +198,11 @@ typedef struct {
     wp_image  image;        /* meaningful only when kind == WP_PARA_IMAGE */
     void     *layout;       /* opaque layout cache, not serialized; unused before M3 */
     wp_bool   layout_dirty;
+    /* Tables (M16; docs/document-model.md, "Tables"): the row definition
+       this paragraph's table row uses (0: not in a table), and whether it
+       ends its cell or its row (WP_TCELL_END, WP_TROW_END). */
+    wp_trow   trow;
+    u8        tflags;
 } wp_paragraph;
 
 typedef struct {
@@ -216,6 +240,11 @@ typedef struct {
                                  paragraph referencing an entry is undone */
     u16            image_count;
     u16            image_capacity;
+
+    wp_table_row  *trows;    /* M16 table row shapes; append-only, entry 0
+                                 reserved (a paragraph outside a table) */
+    u16            trow_count;
+    u16            trow_capacity;
 
     wp_font_desc  *fonts;    /* the typefaces runs name; append-only, entry
                                  0 the reserved "target default" sentinel */
@@ -372,6 +401,12 @@ wp_status wp_document_image_add(wp_document *doc, const wp_image_desc *desc,
 
 /* Returns NULL for handle 0 or any handle >= the table's count. */
 const wp_image_desc *wp_document_image_get(const wp_document *doc, wp_image handle);
+
+/* -- Table rows (M16) ------------------------------------------------------
+   A row shape found or added (equal shapes share a handle); NULL for
+   handle 0 or past the table. */
+wp_status wp_document_trow_find_or_add(wp_document *doc, const wp_table_row *row, wp_trow *out);
+const wp_table_row *wp_document_trow_get(const wp_document *doc, wp_trow handle);
 
 /* -- Font table --------------------------------------------------------
    Find-or-add by name (ASCII case ignored, as every target's font

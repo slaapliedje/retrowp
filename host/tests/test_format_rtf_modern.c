@@ -105,18 +105,30 @@ void test_rtf_modern_word_noise_stays_out_of_the_body(void)
     wp_document_free(&doc);
 }
 
+/* A table row is a table now (M16): a paragraph per cell, the first
+   ending its cell, the second its row, both on a two-cell shape; the
+   paragraph after is outside the table. Was tab-separated paragraphs. */
 void test_rtf_modern_table_rows_become_tabbed_paragraphs(void)
 {
     wp_document doc;
     char t[64];
+    const wp_table_row *row;
 
     ASSERT_TRUE(import("{\\rtf1\\ansi\\trowd\\cellx1000\\cellx2000 \\intbl a\\cell b\\cell\\row"
                        "\\pard after\\par}", &doc) == WP_OK);
-    ASSERT_EQ_U32(doc.sections[0].para_count, 2);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 3);
     para_all(&doc, 0, t, sizeof(t));
-    ASSERT_EQ_STR(t, "a\tb");
+    ASSERT_EQ_STR(t, "a");
     para_all(&doc, 1, t, sizeof(t));
+    ASSERT_EQ_STR(t, "b");
+    para_all(&doc, 2, t, sizeof(t));
     ASSERT_EQ_STR(t, "after");
+    ASSERT_EQ_U32(doc.sections[0].paras[0].tflags, WP_TCELL_END);
+    ASSERT_EQ_U32(doc.sections[0].paras[1].tflags, WP_TCELL_END | WP_TROW_END);
+    ASSERT_EQ_U32(doc.sections[0].paras[2].trow, 0);
+    row = wp_document_trow_get(&doc, doc.sections[0].paras[0].trow);
+    ASSERT_TRUE(row != NULL && row->cell_count == 2 && row->cell_right[1] == 2000);
+    ASSERT_EQ_U32(doc.sections[0].paras[1].trow, doc.sections[0].paras[0].trow);
     wp_document_free(&doc);
 }
 

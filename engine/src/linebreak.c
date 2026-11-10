@@ -324,6 +324,10 @@ static wp_status emit_line(wp_paragraph_layout *layout, u32 start_run, u32 start
     line->tab_count = 0;
     line->page = 0;
     line->page_start = WP_FALSE;
+    line->flags = 0;
+    line->advance_twips = height;
+    line->cell_x0 = line->cell_x1 = 0;
+    line->row_dy_twips = line->row_h_twips = 0;
     layout->line_count++;
     return WP_OK;
 }

@@ -404,6 +404,8 @@ static void rtf_emit_image(rtf_writer *w, const wp_document *doc,
     rtf_write_str(w, "}");
 }
 
+static void rtf_emit_row_shape(rtf_writer *w, const wp_table_row *row);
+
 static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_paragraph *para,
                                 const rtf_color_table *ct, const wp_image_source *src)
 {
@@ -411,6 +413,7 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
     u16 ri;
 
     rtf_write_str(w, "\\pard");
+    if (para->trow != 0) rtf_write_str(w, "\\intbl");
     if (ps != NULL) {
         if (ps->align == WP_ALIGN_RIGHT)  rtf_write_str(w, "\\qr");
         if (ps->align == WP_ALIGN_CENTER) rtf_write_str(w, "\\qc");
@@ -465,7 +468,35 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
         }
     }
 
-    rtf_write_str(w, "\\par\r\n");
+    /* A table paragraph ends its cell, its row, or just itself. */
+    if (para->trow != 0 && (para->tflags & WP_TROW_END)) rtf_write_str(w, "\\cell\\row\r\n");
+    else if (para->trow != 0 && (para->tflags & WP_TCELL_END)) rtf_write_str(w, "\\cell\r\n");
+    else rtf_write_str(w, "\\par\r\n");
+}
+
+/* A table row's shape before its first paragraph: \trowd, the gap and
+   left edge, then each cell's borders, shading and right edge. */
+static void rtf_emit_row_shape(rtf_writer *w, const wp_table_row *row)
+{
+    static const char *const sides[4] = { "\\clbrdrt", "\\clbrdrb", "\\clbrdrl", "\\clbrdrr" };
+    u8 k, b;
+
+    if (row == NULL) return;
+    rtf_write_str(w, "\\trowd\\trgaph"); rtf_write_i32(w, row->gap);
+    rtf_write_str(w, "\\trleft"); rtf_write_i32(w, row->left);
+    for (k = 0; k < row->cell_count && k < WP_MAX_CELLS; k++) {
+        for (b = 0; b < 4; b++) {
+            if (!(row->cell_borders[k] & (1u << b))) continue;
+            rtf_write_str(w, sides[b]);
+            rtf_write_str(w, row->border_kind == WP_BORDER_DOUBLE ? "\\brdrdb" :
+                             row->border_kind == WP_BORDER_THICK ? "\\brdrth" : "\\brdrs");
+            rtf_write_str(w, "\\brdrw");
+            rtf_write_i32(w, row->border_width > 0 ? row->border_width : WP_BORDER_DEFAULT_WIDTH);
+        }
+        if (row->cell_shading[k] != 0) { rtf_write_str(w, "\\clshdng"); rtf_write_i32(w, (i32)row->cell_shading[k] * 100); }
+        rtf_write_str(w, "\\cellx"); rtf_write_i32(w, row->cell_right[k]);
+    }
+    rtf_write_str(w, "\r\n");
 }
 
 /* A running header or footer (docmodel.h): one paragraph, its '|' parts
@@ -533,7 +564,12 @@ static void rtf_emit_document(rtf_writer *w, const wp_document *doc, const rtf_c
             rtf_emit_margin_text(w, doc, sec, "footer", sec->footer);
         }
         for (pi = 0; pi < sec->para_count; pi++) {
-            rtf_emit_paragraph(w, doc, &sec->paras[pi], ct, src);
+            const wp_paragraph *para = &sec->paras[pi];
+            if (para->trow != 0 &&
+                (pi == 0 || sec->paras[pi - 1].trow == 0 || (sec->paras[pi - 1].tflags & WP_TROW_END))) {
+                rtf_emit_row_shape(w, wp_document_trow_get(doc, para->trow));
+            }
+            rtf_emit_paragraph(w, doc, para, ct, src);
         }
     }
 
