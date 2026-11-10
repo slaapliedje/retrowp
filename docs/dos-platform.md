@@ -533,3 +533,19 @@ What it took, in the order it was found:
   ahead of the hard disk and stops.
 
 The Phase 4 section above describes the INT 14h transport as it was.
+
+## Opening a file from the command line; code page 437 (M16)
+
+`RETROWP SHEET.RTF` opens SHEET.RTF at start-up in place of the sample
+(`main` hands `argv[1]` to `app_shell_set_start_file`), the way a DOS
+program is given its file; the Amiga takes the same from its Shell.
+
+The backend's `plat_utf8_to_native` and `plat_native_to_utf8` used to
+pass plain ASCII and turn everything else into `?`, so an accented
+letter showed as `?` on screen. They now map code page 437's whole upper
+half both ways -- the PC's accented letters, box-drawing characters and
+symbols -- which is also what draws paragraph borders here: `│ ─ ┌ ┐ └ ┘`,
+their doubles, and full blocks for thick (docs/layout.md). Shading is a
+blue background, since a grey one would hide the screen's light grey
+text. Alt+R opens Format > Borders, since its button does not fit the
+button bar's eighty columns.

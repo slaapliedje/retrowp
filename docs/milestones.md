@@ -2073,7 +2073,7 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       alignment (a centred one sits at the left margin, on screen and on
       paper); on the Falcon's 16-bit true-colour screen a picture draws
       scrambled (plat_draw_image's palette-pen path assumes planes).
-- [ ] T16.1 Paragraph borders and shading. A box, or any of its four
+- [x] T16.1 Paragraph borders and shading. A box, or any of its four
       sides, around a paragraph: single, double or thick rule, a width,
       the gap to the text; and a grey or colour fill behind it.
       Consecutive paragraphs with the same borders share one box (Word's
@@ -2093,6 +2093,28 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       AC: host tests for layout geometry, merging, RTF round-trip and
       format_prn output per driver; screenshots on ST, Amiga, Mac and
       DOS; a GDOS printout matching the screen.
+      Done (2026-11-09). Each paragraph rules its own sides, so layout
+      stays local; RTF's \box-on-every-paragraph is joined into one box
+      on import. Shading draws through a new retroplat call,
+      plat_fill_shade (VDI and QuickDraw patterns; a real grey on colour
+      screens; a blue background on DOS), so it survives mono screens
+      and printers; ST text is now drawn transparent so it does not
+      punch holes in shading, and VDI's fill perimeter is off for it.
+      Verified: ST screen and SpeedoGDOS printout of a test sheet (title
+      under a double rule, a shaded three-paragraph box, a thick rule, a
+      shaded paragraph) match; DOS shows the box in code page 437 (its
+      conversion now covers 437's upper half, accents included), opened
+      as RETROWP TEST.RTF -- DOS and the Amiga now take a file on the
+      command line. The Amiga, given TEST.RTF in its Shell, shows the
+      same rules and box, its shading an area pattern (Workbench's four
+      pens have no light grey) under text now drawn JAM1. The Mac builds
+      with the painter wired; its screenshot waits for T16.6's fixture
+      (it opens no file at start-up yet).
+      DOS sets borders with Alt+R (decided with the user: its button
+      bar has no room, 80 columns for 26 buttons; gem4dos will give DOS
+      the ST's buttons and menus later). Open: character printers print no shading, and the spacing
+      lines inside a multi-paragraph box carry no side rules; top and
+      bottom rules on DOS need a row of spacing.
 - [ ] T16.2 Tables. Rows of cells, each cell its own paragraphs, cell
       widths and borders per row, rows never split across a page (first
       cut). The model follows RTF's own flat shape rather than nesting:

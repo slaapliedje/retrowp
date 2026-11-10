@@ -94,6 +94,11 @@ typedef enum {
     /* File > Print: the gateway's printer, or the machine's own
        (wp_action_file_print). */
     WP_ACT_FILE_PRINT,
+    /* Format > Borders...: a box or rules around the paragraphs the
+       selection touches (else the caret's) -- none, a box, top, bottom,
+       or top and bottom; single, double or thick -- and shading behind
+       them. A box over several paragraphs is one box (docmodel.h). */
+    WP_ACT_FORMAT_BORDERS,
     WP_ACT_COUNT
 } wp_action_id;
 

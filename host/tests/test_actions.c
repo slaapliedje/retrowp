@@ -1843,3 +1843,37 @@ void test_actions_file_print_choose_printer(void)
     ASSERT_EQ_STR(text, "keymap=wordstar\nprinter=pcl\nduplex=long\n");
     ctx_teardown(&doc, &journal, &ctx);
 }
+
+/* Format > Borders on the caret's paragraph: Box, Double, 25% shading
+   gives it all four sides, double rules standing off 80 twips, the
+   shading -- and indents of 80 + 45 so the box keeps inside the column.
+   None with no shading takes them off again (the indents stay). */
+void test_actions_format_borders(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    const wp_para_style *ps;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Alpha\nBeta\n");
+    window_host_next_choice(1);   /* Box */
+    window_host_next_choice(1);   /* Double */
+    window_host_next_choice(2);   /* 25% shading */
+    ASSERT_TRUE(wp_action_find(WP_ACT_FORMAT_BORDERS)->handler(&ctx) == WP_OK);
+    ps = wp_document_pstyle_get(&doc, wp_document_section_get(&doc, 0)->paras[0].style);
+    ASSERT_EQ_U32(ps->border_sides, WP_BORDER_BOX);
+    ASSERT_EQ_U32(ps->border_kind, WP_BORDER_DOUBLE);
+    ASSERT_EQ_U32((u32)ps->border_space, 80);
+    ASSERT_EQ_U32(ps->shading, 25);
+    ASSERT_EQ_U32((u32)ps->indent_left, 125);
+    ASSERT_EQ_U32((u32)ps->indent_right, 125);
+    ASSERT_EQ_U32(wp_document_pstyle_get(&doc, wp_document_section_get(&doc, 0)->paras[1].style)->border_sides, 0);
+
+    window_host_next_choice(0);   /* None (no line choice follows) */
+    window_host_next_choice(0);   /* No shading */
+    ASSERT_TRUE(wp_action_find(WP_ACT_FORMAT_BORDERS)->handler(&ctx) == WP_OK);
+    ps = wp_document_pstyle_get(&doc, wp_document_section_get(&doc, 0)->paras[0].style);
+    ASSERT_EQ_U32(ps->border_sides, 0);
+    ASSERT_EQ_U32(ps->shading, 0);
+    ctx_teardown(&doc, &journal, &ctx);
+}

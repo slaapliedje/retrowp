@@ -35,6 +35,7 @@
 #include "actions.h"
 #include "pageview.h"
 #include "pageprint.h"
+#include "paraborder.h"
 #include "rulerbar.h"
 #include "selspan.h"
 #include "menucheck.h"
@@ -1327,6 +1328,16 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                                   atari_twips_to_px_y(line->height_twips));
                 if (line->page_start && line->page > 0) {
                     wp_pageview_draw_break((plat_gc *)&gc, area.g_x, y_px, area.g_w);
+                }
+                {   /* the paragraph's border and shading, under its text */
+                    wp_border_slice bs;
+                    if (wp_line_border_slice(&g_doc, para, line, (wp_bool)(li == 0),
+                                             (wp_bool)(li == layout->line_count - 1),
+                                             layout->wrap_twips, &bs)) {
+                        wp_border_draw_slice((plat_gc *)&gc, &bs, area.g_x, y_px,
+                                             atari_twips_to_px_x, atari_twips_to_px_y,
+                                             area.g_x, area.g_x + area.g_w);
+                    }
                 }
 
                 /* Alignment never changes where lines BREAK (both engine
@@ -4537,6 +4548,7 @@ static wp_bool action_exempt_from_menu(wp_action_id id)
     case WP_ACT_FORMAT_FONT:
     case WP_ACT_PAGE_SETUP:
     case WP_ACT_SECTION_BREAK:
+    case WP_ACT_FORMAT_BORDERS:
         return WP_TRUE;
     /* Ctrl+G only, by design -- see actions.c's own comment on why this
        one stays off the hand-built OBJECT tree. */

@@ -38,6 +38,7 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "pageview.h"
+#include "paraborder.h"
 #include "rulerbar.h"
 #include "selspan.h"
 #include "tools.h"
@@ -298,6 +299,13 @@ static wp_bool set_document_from_text(const u8 *utf8, u32 len)
        treats as needing a rebuild. */
     wp_action_replace_document(&g_ctx, &new_doc);
     return WP_TRUE;
+}
+
+static const char *g_start_file = NULL;
+
+void app_shell_set_start_file(const char *path)
+{
+    g_start_file = path;
 }
 
 static void load_sample_document(void)
@@ -1400,6 +1408,17 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                     wp_pageview_draw_break((plat_gc *)&gc, _mleft(obj), y,
                                            _mright(obj) - _mleft(obj) + 1);
                 }
+                {   /* the paragraph's border and shading, under its text */
+                    wp_border_slice bs;
+                    if (wp_line_border_slice(&g_amiga_doc, para, line, (wp_bool)(li == 0),
+                                             (wp_bool)(li == layout->line_count - 1),
+                                             layout->wrap_twips, &bs)) {
+                        wp_border_draw_slice((plat_gc *)&gc, &bs,
+                                             _mleft(obj) + WP_EDITOR_LEFT_MARGIN_PX, y,
+                                             amiga_twips_to_px_x, amiga_twips_to_px_y,
+                                             _mleft(obj), _mright(obj) + 1);
+                    }
+                }
 
                 /* M15 T15.6: an image paragraph's single line has no run
                    bytes to fragment -- paint its real indexed-bitmap
@@ -1981,6 +2000,9 @@ void app_shell_run(void)
     g_ctx.printer_driver = WP_PRN_AMIGA;
     g_ctx.view.line_px = amiga_twips_to_px_y; /* the conversion editor_draw advances y with */
     load_sample_document();
+    if (g_start_file != NULL && g_start_file[0] != '\0') {
+        (void)wp_action_load_file(&g_ctx, g_start_file, NULL);
+    }
 
     /* M9 Phase 6: parsed ONCE at startup from the generated
        g_help_source_retrowp array (build/generated/help_retrowp.h,

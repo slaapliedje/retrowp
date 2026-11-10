@@ -527,6 +527,58 @@ static void dos_rulerbar(wp_rulerbar *rb)
     rb->x_to_twips = dos_bar_col_to_twips;
 }
 
+/* A paragraph's border on one display line, in code page 437's
+   box-drawing characters: rules in the columns just outside the text,
+   a top or bottom rule only where the spacing gives it a row of its own
+   (DOS has no half rows), and shading as plat_fill_shade's background.
+   Drawn before the line's text, which keeps the background. */
+static void dos_draw_border(plat_gc *gc, const wp_border_slice *bs, int row, int text_row,
+                            int text_c0, int text_c1)
+{
+    /* single, double, thick: vertical, horizontal, four corners */
+    static const char *const glyphs[3][6] = {
+        { "\xE2\x94\x82", "\xE2\x94\x80", "\xE2\x94\x8C", "\xE2\x94\x90", "\xE2\x94\x94", "\xE2\x94\x98" },
+        { "\xE2\x95\x91", "\xE2\x95\x90", "\xE2\x95\x94", "\xE2\x95\x97", "\xE2\x95\x9A", "\xE2\x95\x9D" },
+        { "\xE2\x96\x88", "\xE2\x96\x80", "\xE2\x96\x88", "\xE2\x96\x88", "\xE2\x96\x88", "\xE2\x96\x88" }
+    };
+    const char *const *g = glyphs[bs->kind < 3 ? bs->kind : 0];
+    int c0 = (int)dos_twips_to_col(bs->x0), c1 = (int)dos_twips_to_col(bs->x1) - 1;
+    int r0 = row + (int)dos_twips_to_row(bs->top), r1 = row + (int)dos_line_rows(bs->bottom) - 1;
+    wp_bool top = WP_FALSE, bottom = WP_FALSE;
+    plat_font *font;
+    int r, c;
+
+    /* Whole cells: the rules stand at least a column clear of the text
+       [text_c0, text_c1), however the twips round. */
+    if (c0 > text_c0 - 1) c0 = text_c0 - 1;
+    if (c1 < text_c1) c1 = text_c1;
+    if (c0 < 0) c0 = 0;
+    if (c1 > DOS_SCREEN_COLS - 1) c1 = DOS_SCREEN_COLS - 1;
+    if (r0 > text_row) r0 = text_row;
+    if (r1 < text_row) r1 = text_row;
+    if (c1 <= c0) return;
+    if (bs->shading > 0) (void)plat_fill_shade(gc, c0, r0, c1 - c0 + 1, r1 - r0 + 1, bs->shading);
+    if (bs->sides == 0 || plat_font_open((const u8 *)"", 0, 240, 0, &font) != WP_OK) return;
+    top = (wp_bool)((bs->sides & WP_BORDER_TOP) && r0 < text_row);
+    bottom = (wp_bool)((bs->sides & WP_BORDER_BOTTOM) && r1 > text_row);
+    for (r = r0; r <= r1; r++) {
+        wp_bool across = (wp_bool)((r == r0 && top) || (r == r1 && bottom));
+
+        if (across) {
+            for (c = c0; c <= c1; c++) plat_draw_text(gc, font, c, r, (const u8 *)g[1], 3, 0xAA, 0xAA, 0xAA);
+        }
+        if (bs->sides & WP_BORDER_LEFT) {
+            const char *ch = (r == r0 && top) ? g[2] : (r == r1 && bottom) ? g[4] : g[0];
+            plat_draw_text(gc, font, c0, r, (const u8 *)ch, 3, 0xAA, 0xAA, 0xAA);
+        }
+        if (bs->sides & WP_BORDER_RIGHT) {
+            const char *ch = (r == r0 && top) ? g[3] : (r == r1 && bottom) ? g[5] : g[0];
+            plat_draw_text(gc, font, c1, r, (const u8 *)ch, 3, 0xAA, 0xAA, 0xAA);
+        }
+    }
+    plat_font_close(font);
+}
+
 static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                                  int *cursor_row_out, int *cursor_col_out)
 {
@@ -579,6 +631,18 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                 if (text_row > bottom_row) {        /* spacing pushed it off the screen */
                     row = bottom_row + 1;           /* and everything after it */
                     break;
+                }
+
+                {   /* the paragraph's border and shading, under its text */
+                    wp_border_slice bs;
+                    if (wp_line_border_slice(&g_doc, para, line, (wp_bool)(li == 0),
+                                             (wp_bool)(li == layout->line_count - 1),
+                                             layout->wrap_twips, &bs)) {
+                        dos_draw_border(gc, &bs, row, text_row,
+                                        (int)dos_twips_to_col(pstyle != NULL ? pstyle->indent_left : 0),
+                                        (int)dos_twips_to_col(layout->wrap_twips -
+                                                              (pstyle != NULL ? pstyle->indent_right : 0)));
+                    }
                 }
 
                 if (para->kind == (u8)WP_PARA_IMAGE) {
@@ -917,6 +981,13 @@ static wp_bool dos_pick_path(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
 {
     WP_UNUSED(ctx);
     return prompt_for_filename(save ? "Save: " : "Open: ", out, cap);
+}
+
+static const char *g_start_file = NULL;
+
+void app_shell_set_start_file(const char *path)
+{
+    g_start_file = path;
 }
 
 static void do_file_open(void)
@@ -1329,6 +1400,18 @@ static wp_bool dos_dispatch_key(void)
         if (g_ctx.doc_loaded) (void)wp_action_file_print(&g_ctx);
         return WP_FALSE;
     }
+    /* Alt+R is Borders (rules and boxes): its button does not fit DOS's
+       eighty columns. An Alt+letter reaches us as scan code alone, which
+       no keymap here reads; R is not one of Emacs's meta keys (b, f, d,
+       w, <, >, {, }, %), should Alt ever be wired to meta. */
+    if (!g_help_active && ascii == 0 && scan == 0x13 && (shift & 0x08)) {
+        const wp_action *act = wp_action_find(WP_ACT_FORMAT_BORDERS);
+        if (g_ctx.doc_loaded && act != NULL && act->handler != NULL) {
+            (void)act->handler(&g_ctx);
+            redraw_screen();
+        }
+        return WP_FALSE;
+    }
 
     if (g_help_active) {
         if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
@@ -1495,6 +1578,9 @@ void app_shell_run(void)
                                                      &g_help_doc) == WP_OK);
 
     load_sample_document(dos_col_to_twips(DOS_SCREEN_COLS));
+    if (g_start_file != NULL && g_start_file[0] != '\0') {
+        (void)wp_action_load_file(&g_ctx, g_start_file, NULL);
+    }
 
     redraw_screen();
 

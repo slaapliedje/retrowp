@@ -168,6 +168,15 @@ the mouse. Its buttons, left to right:
   Page Setup (the paper -- Letter, A4, Legal or A5, upright or
               on its side -- or the margins; the File menu has
               it too on the Amiga and Mac)
+  Borders (a box or rules around the paragraphs you are in or
+              have selected -- none, a box, top, bottom, or top
+              and bottom; single, double or thick lines -- and
+              shading behind them. A box over several paragraphs
+              is one box, and moves their text in so the lines
+              stay inside the margins. The Format menu has it too
+              on the Amiga and Mac. DOS, with no room for the
+              button, sets them with Alt+R, and shows them as box
+              characters with a blue background for shading)
 
 Font lists the typefaces this machine has: the GDOS fonts on
 the ST, the fonts in FONTS: on the Amiga, the installed fonts on

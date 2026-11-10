@@ -8,5 +8,8 @@
    INT 16h reads (no engine/document linkage yet -- that starts once
    enough of platform.h exists, T14.2+), until Esc is pressed. */
 void app_shell_run(void);
+/* A document named on the command line ("RETROWP SHEET.RTF"), opened at
+   start-up in place of the sample. NULL or "" for none. */
+void app_shell_set_start_file(const char *path);
 
 #endif /* WP_DOS_APP_SHELL_H */

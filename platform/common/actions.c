@@ -8,6 +8,7 @@
 #include "format_md.h"
 #include "format_prn.h"
 #include "config.h"
+#include "layout.h"
 #include "offload.h"
 #include "keymap.h"
 #include "editing.h"
@@ -547,6 +548,114 @@ static wp_status act_para_onehalf(wp_app_ctx *ctx) { return change_paragraphs(ct
 static wp_status act_para_double(wp_app_ctx *ctx)  { return change_paragraphs(ctx, set_spacing, 480); }
 static wp_status act_para_indent_less(wp_app_ctx *ctx) { return change_paragraphs(ctx, shift_indent, -WP_DEFAULT_TAB_TWIPS); }
 static wp_status act_para_indent_more(wp_app_ctx *ctx) { return change_paragraphs(ctx, shift_indent, WP_DEFAULT_TAB_TWIPS); }
+
+/* ---- Borders and shading (Format > Borders...) ---------------------- */
+
+/* The paragraphs the selection touches, else the caret's. */
+static void para_range(wp_app_ctx *ctx, wp_pos *from, wp_pos *to)
+{
+    wp_selection sel;
+
+    *from = *to = *wp_keymap_cursor(ctx);
+    if (wp_keymap_selection(ctx, &sel)) {
+        if (wp_pos_compare(sel.anchor, sel.caret) <= 0) { *from = sel.anchor; *to = sel.caret; }
+        else { *from = sel.caret; *to = sel.anchor; }
+    }
+}
+
+/* One of the dialog's choices; WP_FALSE when cancelled. */
+static wp_bool choose_one(wp_app_ctx *ctx, const char *title, const char *const *labels,
+                          u32 count, u32 dflt, u32 *out)
+{
+    const u8 *ptrs[5];
+    u32 lens[5], i;
+    wp_bool cancelled = WP_TRUE;
+
+    for (i = 0; i < count; i++) {
+        ptrs[i] = (const u8 *)labels[i];
+        lens[i] = (u32)strlen(labels[i]);
+    }
+    return (wp_bool)(plat_dialog_choice(ctx->window, (const u8 *)title, (u32)strlen(title),
+                                        ptrs, lens, count, dflt, &cancelled, out) == WP_OK &&
+                     !cancelled);
+}
+
+/* The rules' standing-off from the text when a border is set here: 4 pt,
+   Word's box. */
+#define WP_BORDER_UI_SPACE 80
+
+static wp_status act_format_borders(wp_app_ctx *ctx)
+{
+    static const char *const shapes[] = { "None", "Box", "Top", "Bottom", "Top and bottom" };
+    static const char *const kinds[] = { "Single", "Double", "Thick" };
+    static const char *const shades[] = { "No shading", "10% shading", "25% shading", "50% shading" };
+    static const u8 shade_pct[] = { 0, 10, 25, 50 };
+    wp_pos from, to;
+    const wp_para_style *cur;
+    wp_section *sec;
+    u32 shape = 0, kind = 0, shade = 0, si, i;
+    wp_bool changed = WP_FALSE;
+
+    if (!ctx->doc_loaded) return WP_OK;
+    para_range(ctx, &from, &to);
+    sec = wp_document_section_get(ctx->doc, from.section);
+    if (sec == NULL || from.paragraph >= sec->para_count) return WP_OK;
+    cur = wp_document_pstyle_get(ctx->doc, sec->paras[from.paragraph].style);
+    if (cur != NULL) {
+        u8 s = cur->border_sides;
+        shape = (s & WP_BORDER_LEFT) ? 1u : (s == WP_BORDER_TOP) ? 2u : (s == WP_BORDER_BOTTOM) ? 3u :
+                (s == (WP_BORDER_TOP | WP_BORDER_BOTTOM)) ? 4u : 0u;
+        kind = cur->border_kind < 3 ? cur->border_kind : 0u;
+        for (i = 0; i < 4; i++) if (shade_pct[i] == cur->shading) shade = i;
+    }
+    if (!choose_one(ctx, "Borders", shapes, 5, shape, &shape)) return WP_OK;
+    if (shape != 0 && !choose_one(ctx, "Border lines", kinds, 3, kind, &kind)) return WP_OK;
+    if (!choose_one(ctx, "Shading", shades, 4, shade, &shade)) return WP_OK;
+
+    for (si = from.section; si <= to.section && si < ctx->doc->section_count; si++) {
+        u32 pi, last;
+
+        sec = wp_document_section_get(ctx->doc, si);
+        pi = (si == from.section) ? from.paragraph : 0;
+        last = (si == to.section) ? to.paragraph : (sec->para_count > 0 ? sec->para_count - 1 : 0);
+        for (; pi <= last && pi < sec->para_count; pi++) {
+            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            wp_bool first_p = (wp_bool)(si == from.section && pi == from.paragraph);
+            wp_bool last_p = (wp_bool)(si == to.section && pi == to.paragraph);
+            wp_para_style ps;
+            wp_pstyle handle;
+            u8 sides = 0;
+
+            cur = wp_document_pstyle_get(ctx->doc, para->style);
+            if (cur == NULL) continue;
+            ps = *cur;
+            if (shape == 1) sides = WP_BORDER_LEFT | WP_BORDER_RIGHT;
+            if ((shape == 1 || shape == 2 || shape == 4) && first_p) sides |= WP_BORDER_TOP;
+            if ((shape == 1 || shape == 3 || shape == 4) && last_p) sides |= WP_BORDER_BOTTOM;
+            ps.border_sides = sides;
+            ps.border_kind = (u8)(sides != 0 ? kind : 0);
+            ps.border_width = 0;
+            ps.border_space = sides != 0 ? WP_BORDER_UI_SPACE : 0;
+            ps.shading = shade_pct[shade];
+            /* A box keeps inside the column: the text moves in by the
+               rule and its spacing, so the rules stand where the text
+               stood rather than out in the margin (and off a screen
+               whose text starts at its edge). */
+            if (shape == 1) {
+                i32 inset = WP_BORDER_UI_SPACE + wp_border_thickness(&ps);
+                if (ps.indent_left < inset) ps.indent_left = inset;
+                if (ps.indent_right < inset) ps.indent_right = inset;
+            }
+            if (wp_document_pstyle_find_or_add(ctx->doc, &ps, &handle) != WP_OK) return WP_NOMEM;
+            if (handle != para->style) {
+                wp_paragraph_pstyle_set(para, handle);
+                changed = WP_TRUE;
+            }
+        }
+    }
+    if (changed) wp_document_mark_modified(ctx->doc);
+    return WP_OK;
+}
 
 static void toggle_page_break(wp_para_style *ps, i32 unused)
 {
@@ -1370,7 +1479,8 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_FORMAT_FONT,       WP_MENU_FORMAT, "Font...",        0,        0,    act_format_font, NULL },
     { WP_ACT_PAGE_SETUP,        WP_MENU_FILE,   "Page Setup...",  0,        0,    act_page_setup, NULL },
     { WP_ACT_SECTION_BREAK,     WP_MENU_FORMAT, "Section Break",  0,        0,    act_section_break, NULL },
-    { WP_ACT_FILE_PRINT,        WP_MENU_FILE,   "Print...",       "Ctrl+P", 0x10, wp_action_file_print, NULL }
+    { WP_ACT_FILE_PRINT,        WP_MENU_FILE,   "Print...",       "Ctrl+P", 0x10, wp_action_file_print, NULL },
+    { WP_ACT_FORMAT_BORDERS,    WP_MENU_FORMAT, "Borders...",     0,        0,    act_format_borders, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

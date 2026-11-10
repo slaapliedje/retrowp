@@ -317,6 +317,7 @@ void test_actions_odt_and_pdf_go_through_the_gateway(void);
 void test_actions_file_print_routes(void);
 void test_actions_file_print_options(void);
 void test_actions_file_print_choose_printer(void);
+void test_actions_format_borders(void);
 void test_config_printer_keys(void);
 void test_pageprint_pages(void);
 void test_pageprint_printable_area(void);
@@ -418,6 +419,9 @@ void test_help_content_retrowp_help_parses_and_all_links_resolve(void);
 /* linebreak.c */
 void test_layout_greedy_wrap_hand_computed_fixture(void);
 void test_layout_geometry_indent_and_alignment_place_the_line(void);
+void test_layout_geometry_border_box(void);
+void test_rtf_borders_round_trip(void);
+void test_layout_geometry_border_middle_and_double(void);
 void test_layout_geometry_later_lines_use_the_left_indent_only(void);
 void test_layout_geometry_spacing_shapes_the_line_boxes(void);
 void test_layout_geometry_default_tabs_advance_to_half_inches(void);
@@ -539,6 +543,7 @@ void test_format_prn_page_break_and_top_space(void);
 void test_format_prn_encodings(void);
 void test_format_prn_empty_document(void);
 void test_format_prn_epson(void);
+void test_format_prn_border_box(void);
 void test_format_prn_pcl(void);
 void test_format_prn_pcl_paper(void);
 void test_format_prn_amiga(void);
@@ -985,6 +990,7 @@ static const test_case g_cases[] = {
     { "actions_file_print_routes", test_actions_file_print_routes },
     { "actions_file_print_options", test_actions_file_print_options },
     { "actions_file_print_choose_printer", test_actions_file_print_choose_printer },
+    { "actions_format_borders", test_actions_format_borders },
     { "config_printer_keys", test_config_printer_keys },
     { "pageprint_pages", test_pageprint_pages },
     { "pageprint_printable_area", test_pageprint_printable_area },
@@ -1065,6 +1071,9 @@ static const test_case g_cases[] = {
 
     { "layout_greedy_wrap_hand_computed_fixture", test_layout_greedy_wrap_hand_computed_fixture },
     { "layout_geometry_indent_and_alignment_place_the_line", test_layout_geometry_indent_and_alignment_place_the_line },
+    { "layout_geometry_border_box", test_layout_geometry_border_box },
+    { "rtf_borders_round_trip", test_rtf_borders_round_trip },
+    { "layout_geometry_border_middle_and_double", test_layout_geometry_border_middle_and_double },
     { "layout_geometry_later_lines_use_the_left_indent_only", test_layout_geometry_later_lines_use_the_left_indent_only },
     { "layout_geometry_spacing_shapes_the_line_boxes", test_layout_geometry_spacing_shapes_the_line_boxes },
     { "layout_geometry_default_tabs_advance_to_half_inches", test_layout_geometry_default_tabs_advance_to_half_inches },
@@ -1176,6 +1185,7 @@ static const test_case g_cases[] = {
     { "format_prn_encodings", test_format_prn_encodings },
     { "format_prn_empty_document", test_format_prn_empty_document },
     { "format_prn_epson", test_format_prn_epson },
+    { "format_prn_border_box", test_format_prn_border_box },
     { "format_prn_pcl", test_format_prn_pcl },
     { "format_prn_pcl_paper", test_format_prn_pcl_paper },
     { "format_prn_amiga", test_format_prn_amiga },

@@ -9,5 +9,9 @@
    down cleanly before returning. Mirrors platform/atari/app_shell.h's
    role exactly. */
 void app_shell_run(void);
+/* A document named in the Shell ("RETROWP SHEET.RTF"), opened at
+   start-up in place of the sample. NULL or "" for none (a Workbench
+   start passes no arguments). */
+void app_shell_set_start_file(const char *path);
 
 #endif /* WP_AMIGA_APP_SHELL_H */

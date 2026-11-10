@@ -1593,3 +1593,14 @@ the 9600 RetroWP programs, relayed by `host/tools/mister/pace_relay.py 9600
   Cancel now); and printing to PRT: with nothing on the parallel port
   raised printer.device's "Printer Trouble" requester (RetroWP asks
   PRD_QUERY first now).
+
+## Shading, transparent text, and a file from the Shell (M16)
+
+`plat_fill_shade` (paragraph shading) fills with an area pattern --
+four rows of dots at about 1/8, 1/4, 1/2 or 3/4 coverage -- in the
+text pen over what is there, since Workbench's four pens have no light
+grey and the nearest pen to one is white. Text is drawn JAM1 now: JAM2
+filled each character's background and punched holes in shading, and
+MUI clears the object's background before every full redraw anyway.
+`RETROWP SHEET.RTF` from the Shell opens SHEET.RTF at start-up; from
+Workbench there are no arguments.

@@ -22,6 +22,7 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "pageview.h"
+#include "paraborder.h"
 #include "rulerbar.h"
 #include "selspan.h"
 #include "tools.h"
@@ -1252,6 +1253,15 @@ static void draw_document(WindowPtr w)
                 text_h_px = mac_twips_to_px(line->text_height_twips);
                 if (line->page_start && line->page > 0) {
                     wp_pageview_draw_break((plat_gc *)&gc, r.left, y, r.right - r.left);
+                }
+                {   /* the paragraph's border and shading, under its text */
+                    wp_border_slice bs;
+                    if (wp_line_border_slice(&g_mac_doc, para, line, (wp_bool)(li == 0),
+                                             (wp_bool)(li == layout->line_count - 1),
+                                             layout->wrap_twips, &bs)) {
+                        wp_border_draw_slice((plat_gc *)&gc, &bs, r.left + WP_DOC_LEFT_MARGIN_PX, y,
+                                             mac_twips_to_px, mac_twips_to_px, r.left, r.right);
+                    }
                 }
 
                 /* M15 T15.6: an image paragraph's single line has no run
