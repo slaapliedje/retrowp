@@ -24,7 +24,9 @@
    and bottom margins ('|' parts left, centre and right, '#' the page
    number, as format_prn and the PDF print them), then its lines where
    the layout put them -- alignment, indents, tabs, justified gaps --
-   in black. A picture prints as its frame.
+   in black. A picture prints scaled to its box at the device's
+   resolution, dithered to black and white (its frame when its pixels
+   cannot be read).
 
    platform/common rules apply: engine headers and platform.h only. */
 
@@ -40,6 +42,12 @@ typedef struct {
        measured from the paper's edge lands there on the page. */
     i32 device_w_px;
     i32 device_h_px;
+    /* How a band of a picture's black-and-white pixels is drawn:
+       plat_draw_mono when NULL. A printer whose driver ignores raster
+       copies -- SpeedoGDOS's do -- gives plat_mono_by_runs, which draws
+       each row's runs as filled rectangles. */
+    wp_status (*draw_mono)(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
+                           const u16 *rows, u32 row_words, u8 r, u8 g, u8 b);
     /* Prints the page drawn so far and starts a clean one. */
     wp_status (*end_page)(void *user);
     void *user;

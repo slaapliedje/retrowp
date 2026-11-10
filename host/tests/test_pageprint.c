@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#include <stdio.h>
 #include <string.h>
 #include "test.h"
 #include "pageprint.h"
@@ -117,5 +118,67 @@ void test_pageprint_printable_area(void)
     ASSERT_EQ_U32(pages, 0);
     ASSERT_EQ_U32(g_ends, 0);
     ASSERT_EQ_U32(draw_host_text_count(), 0);
+    wp_document_free(&doc);
+}
+
+/* A picture prints its pixels: 2x2, a black column and a white one, in
+   a box 300 twips square -- 30 device pixels at a tenth of a twip each.
+   One band of 30 rows goes to plat_draw_mono, and each row's black is
+   one run (the host draws a run as one fill): 30 black fills, and none
+   of the white column, which the dither never darkens. Unreadable
+   pixels print the frame instead. */
+static i32 tenth(i32 twips) { return twips / 10; }
+
+void test_pageprint_picture(void)
+{
+    static const char path[] = "build/test_pageprint_pic.bin";
+    static const u8 pixels[2] = { 0x01, 0x01 };   /* nibbles: black, white */
+    wp_document doc;
+    wp_page_device dev;
+    wp_image_desc desc;
+    wp_image handle;
+    wp_section *sec;
+    wp_paragraph *para;
+    plat_file *f;
+    u32 si, pi, pages = 0;
+
+    ASSERT_TRUE(plat_file_open(path, PLAT_FILE_WRITE, &f) == WP_OK);
+    ASSERT_TRUE(plat_file_write(f, pixels, 2) == WP_OK);
+    plat_file_close(f);
+
+    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
+    ASSERT_TRUE(wp_document_section_add(&doc, &si) == WP_OK);
+    sec = wp_document_section_get(&doc, si);
+    ASSERT_TRUE(wp_section_paragraph_add(sec, &pi) == WP_OK);
+    memset(&desc, 0, sizeof(desc));
+    desc.width_px = 2;
+    desc.height_px = 2;
+    desc.display_width_twips = 300;
+    desc.display_height_twips = 300;
+    desc.palette_count = 2;
+    desc.palette[1][0] = desc.palette[1][1] = desc.palette[1][2] = 255;
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)path, (u32)strlen(path),
+                                  &desc.blob_path) == WP_OK);
+    ASSERT_TRUE(wp_document_image_add(&doc, &desc, &handle) == WP_OK);
+    para = wp_section_paragraph_get(sec, pi);
+    para->kind = (u8)WP_PARA_IMAGE;
+    para->image = handle;
+    para->style = doc.default_pstyle;
+
+    memset(&dev, 0, sizeof(dev));
+    dev.gc = (plat_gc *)&dev;
+    dev.x_px = tenth;
+    dev.y_px = tenth;
+    draw_host_reset_fills();
+    ASSERT_TRUE(wp_pageprint(&doc, &dev, &pages) == WP_OK);
+    ASSERT_EQ_U32(pages, 1);
+    ASSERT_EQ_U32(draw_host_mono_calls(), 1);
+    ASSERT_EQ_U32(draw_host_grey_fills(0), 30);
+
+    (void)remove(path);
+    draw_host_reset_fills();
+    ASSERT_TRUE(wp_pageprint(&doc, &dev, &pages) == WP_OK);
+    ASSERT_EQ_U32(draw_host_mono_calls(), 0);
+    ASSERT_EQ_U32(draw_host_grey_fills(0), 4);   /* the frame's four sides */
     wp_document_free(&doc);
 }

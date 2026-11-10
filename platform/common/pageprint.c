@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <stddef.h>
+#include <string.h>
 #include "pageprint.h"
 #include "pageview.h"
 #include "layout.h"
@@ -119,6 +120,102 @@ static void draw_frame(const page_frame *fr, i32 x, i32 y, i32 w, i32 h)
     (void)plat_fill_rect(gc, x1 - 1, y0, 1, y1 - y0, 0, 0, 0);
 }
 
+/* Rows of a picture drawn at a time: a band's worth of bits is all a
+   picture costs, so a full-page one prints on a 1 MB ST. */
+#define PRINT_BAND_ROWS 32
+
+/* An ordered dither: a pixel prints black when its brightness is under
+   its cell's threshold, so greys come out as even dot patterns. */
+static const u8 g_bayer[4][4] = {
+    {  0,  8,  2, 10 },
+    { 12,  4, 14,  6 },
+    {  3, 11,  1,  9 },
+    { 15,  7, 13,  5 }
+};
+
+/* A picture's pixels, scaled to its box at the device's resolution and
+   dithered to black and white -- a printer has two colours, and a
+   screen's palette pens are not a printer's -- drawn a band of rows at
+   a time through plat_draw_mono. WP_FALSE (nothing drawn) when its
+   pixels cannot be read or a buffer cannot be had. */
+static wp_bool draw_picture(wp_document *doc, const page_frame *fr, const wp_image_desc *img,
+                            i32 x, i32 y, i32 w, i32 h)
+{
+    char path[256];
+    const u8 *path_bytes;
+    plat_file *f;
+    u32 row_bytes, size, got = 0, row_words;
+    u8 *pixels;
+    u16 *band, *src_x;
+    u8 luma[16];
+    i32 x0 = at_x(fr, x), y0 = at_y(fr, y);
+    i32 dw = at_x(fr, x + w) - x0, dh = at_y(fr, y + h) - y0;
+    i32 dx, by;
+    u32 i;
+
+    if (img->blob_path.length == 0 || img->blob_path.length >= sizeof(path)) return WP_FALSE;
+    if (img->width_px <= 0 || img->height_px <= 0 || dw <= 0 || dh <= 0) return WP_FALSE;
+    path_bytes = wp_strpool_get(&doc->strings, img->blob_path);
+    if (path_bytes == NULL) return WP_FALSE;
+    memcpy(path, path_bytes, img->blob_path.length);
+    path[img->blob_path.length] = '\0';
+
+    row_bytes = ((u32)img->width_px + 1u) / 2u;
+    size = row_bytes * (u32)img->height_px;
+    if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) return WP_FALSE;
+    pixels = (u8 *)mem_alloc(size);
+    if (pixels == NULL || plat_file_read(f, pixels, size, &got) != WP_OK || got != size) {
+        plat_file_close(f);
+        if (pixels != NULL) mem_free(pixels);
+        return WP_FALSE;
+    }
+    plat_file_close(f);
+
+    row_words = ((u32)dw + 15u) / 16u;
+    band = (u16 *)mem_alloc(row_words * PRINT_BAND_ROWS * (u32)sizeof(u16));
+    src_x = (u16 *)mem_alloc((u32)dw * (u32)sizeof(u16));
+    if (band == NULL || src_x == NULL) {
+        if (band != NULL) mem_free(band);
+        if (src_x != NULL) mem_free(src_x);
+        mem_free(pixels);
+        return WP_FALSE;
+    }
+    for (dx = 0; dx < dw; dx++) src_x[dx] = (u16)(((u32)dx * (u32)img->width_px) / (u32)dw);
+    for (i = 0; i < 16; i++) {
+        const u8 *c = img->palette[i < img->palette_count ? i : 0];
+        luma[i] = (u8)(((u32)c[0] * 299u + (u32)c[1] * 587u + (u32)c[2] * 114u) / 1000u);
+    }
+
+    for (by = 0; by < dh; by += PRINT_BAND_ROWS) {
+        i32 rows = (dh - by < PRINT_BAND_ROWS) ? dh - by : PRINT_BAND_ROWS, r;
+
+        memset(band, 0, row_words * (u32)rows * (u32)sizeof(u16));
+        for (r = 0; r < rows; r++) {
+            i32 dy = by + r;
+            const u8 *src = pixels + (((u32)dy * (u32)img->height_px) / (u32)dh) * row_bytes;
+            u16 *out = band + (u32)r * row_words;
+            const u8 *thr = g_bayer[dy & 3];
+
+            for (dx = 0; dx < dw; dx++) {
+                u16 sx = src_x[dx];
+                u8 nib = (u8)((sx & 1u) ? (src[sx >> 1] & 0x0F) : (src[sx >> 1] >> 4));
+                if (luma[nib] < (u8)(thr[dx & 3] * 16u + 8u)) {
+                    out[dx >> 4] = (u16)(out[dx >> 4] | (0x8000u >> (dx & 15)));
+                }
+            }
+        }
+        if (fr->dev->draw_mono != NULL) {
+            (void)fr->dev->draw_mono(fr->dev->gc, x0, y0 + by, dw, rows, band, row_words, 0, 0, 0);
+        } else {
+            (void)plat_draw_mono(fr->dev->gc, x0, y0 + by, dw, rows, band, row_words, 0, 0, 0);
+        }
+    }
+    mem_free(src_x);
+    mem_free(band);
+    mem_free(pixels);
+    return WP_TRUE;
+}
+
 /* One line's text, the fragment walk every painter makes: a tab moves
    to its stop, a space widens by justify's extra, a word is drawn at
    its baseline. */
@@ -220,8 +317,14 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
                     y = sec->margin_top;
                 }
                 if (para->kind == (u8)WP_PARA_IMAGE) {
-                    draw_frame(&fr, sec->margin_left + line->x_twips, y + line->text_top_twips,
-                               line->width_twips, line->text_height_twips);
+                    const wp_image_desc *img = wp_document_image_get(doc, para->image);
+                    i32 px = sec->margin_left + line->x_twips, py = y + line->text_top_twips;
+
+                    if (img == NULL ||
+                        !draw_picture(doc, &fr, img, px, py, line->width_twips,
+                                      line->text_height_twips)) {
+                        draw_frame(&fr, px, py, line->width_twips, line->text_height_twips);
+                    }
                 } else {
                     draw_line(doc, &fr, para, line, (wp_bool)(li == layout->line_count - 1),
                               sec->margin_left, y, &font, &cached, &have_font, &ascent);

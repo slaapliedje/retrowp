@@ -1,6 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <gem.h>
 #include "gemcompat.h"
+#ifndef GEM4XE_APP_GEM_H
+#include <mint/cookie.h>   /* Getcookie: is NVDI the GDOS? (atari_print_pages) */
+#endif
 #include <string.h>
 #include "types.h"
 #include "platform.h"
@@ -1791,6 +1794,15 @@ static wp_status atari_print_pages(wp_app_ctx *ctx, u32 *pages_out)
     dev.y_px = atari_twips_to_px_y;
     dev.device_w_px = (i32)work_out[0] + 1;
     dev.device_h_px = (i32)work_out[1] + 1;
+    /* A picture's dots: NVDI's printer drivers take a raster copy, but
+       SpeedoGDOS's FX80 prints nothing for vrt_cpyfm, so without NVDI a
+       picture goes to paper as runs of filled bars. The same pixels
+       either way; under NVDI the copy printed a 3 x 1.5 inch picture at
+       300 dpi in a tenth of the time. */
+    {
+        long nvdi;
+        dev.draw_mono = (Getcookie(C_NVDI, &nvdi) == C_FOUND) ? NULL : plat_mono_by_runs;
+    }
     dev.end_page = gdos_end_page;
     dev.user = &h;
     st = wp_pageprint(ctx->doc, &dev, pages_out);
