@@ -427,6 +427,10 @@ void test_table_hit_test_finds_the_cell(void);
 void test_table_enter_and_backspace_keep_cells(void);
 void test_table_insert_and_move(void);
 void test_table_rows_and_columns(void);
+void test_frame_layout(void);
+void test_frame_pageprint_and_rtf(void);
+void test_frame_boxes_stay_apart(void);
+void test_frame_walk_scrolled(void);
 void test_rtf_borders_round_trip(void);
 void test_layout_geometry_border_middle_and_double(void);
 void test_layout_geometry_later_lines_use_the_left_indent_only(void);
@@ -1087,6 +1091,10 @@ static const test_case g_cases[] = {
     { "table_enter_and_backspace_keep_cells", test_table_enter_and_backspace_keep_cells },
     { "table_insert_and_move", test_table_insert_and_move },
     { "table_rows_and_columns", test_table_rows_and_columns },
+    { "frame_layout", test_frame_layout },
+    { "frame_pageprint_and_rtf", test_frame_pageprint_and_rtf },
+    { "frame_boxes_stay_apart", test_frame_boxes_stay_apart },
+    { "frame_walk_scrolled", test_frame_walk_scrolled },
     { "rtf_borders_round_trip", test_rtf_borders_round_trip },
     { "layout_geometry_border_middle_and_double", test_layout_geometry_border_middle_and_double },
     { "layout_geometry_later_lines_use_the_left_indent_only", test_layout_geometry_later_lines_use_the_left_indent_only },

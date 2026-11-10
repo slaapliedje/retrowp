@@ -633,6 +633,7 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
     u32 flat = 0;   /* display-line index, the viewport's unit */
     int row = top_row;
     wp_line_walk walk;
+    u32 top_page;
     int last_text_row = top_row;   /* the text row of the last line painted */
     wp_pos *cursor = wp_keymap_cursor(&g_ctx);
     wp_bool cursor_found = WP_FALSE;
@@ -647,7 +648,7 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
     *cursor_row_out = top_row;
     *cursor_col_out = 0;
 
-    wp_line_walk_start(&walk, top_row);
+    wp_line_walk_start_view(&walk, top_row, &g_doc, g_ctx.view.top_line, dos_walk_rows, &top_page);
     for (si = 0; si < g_doc.section_count && walk.y <= bottom_row; si++) {
         wp_section *sec = wp_document_section_get(&g_doc, si);
         u32 pc = (sec != NULL) ? sec->para_count : 0;
@@ -670,8 +671,10 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
 
-                /* Scrolled off the top: walked, not drawn, no row used. */
-                if (flat++ < g_ctx.view.top_line) continue;
+                /* Scrolled off the top: walked, not drawn, no row used --
+                   but a frame on the top line's page is still drawn. */
+                if (flat++ < g_ctx.view.top_line &&
+                    !((line->flags & WP_LINE_FRAME) && line->page == top_page)) continue;
                 /* The line's top row: the running row, or in a table its
                    row's top plus its place in the row (pageview.h). */
                 row = (int)wp_line_walk_next(&walk, line, dos_walk_rows);
@@ -687,6 +690,9 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                     if (col <= edge) col = edge + 1;
                 }
                 text_row = row + (int)dos_twips_to_row(line->text_top_twips);
+                /* A frame line outside the view is not drawn: it may sit
+                   above the text, under the bar, or below it. */
+                if ((line->flags & WP_LINE_FRAME) && (row < top_row || text_row > bottom_row)) continue;
                 if (text_row > bottom_row) {        /* spacing pushed it off the screen */
                     walk.y = bottom_row + 1;        /* and everything after it */
                     break;

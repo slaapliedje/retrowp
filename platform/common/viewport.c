@@ -93,6 +93,7 @@ static i32 line_height(const wp_viewport *vp, const line_walk *w)
 {
     const wp_line *ln = &w->layout->lines[w->li];
 
+    if (ln->flags & WP_LINE_FRAME) return 0;   /* a frame takes no room in the text */
     if (ln->cell_x1 != 0) {
         if (!(ln->flags & WP_LINE_ROW_FIRST)) return 0;
         return vp->line_px != NULL ? vp->line_px(ln->row_h_twips) : 1;

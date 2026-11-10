@@ -275,6 +275,7 @@ wp_status wp_document_split_paragraph_raw(wp_document *doc, wp_pos pos, wp_pos *
     new_para->trow = para->trow;
     new_para->tflags = para->tflags;
     para->tflags = 0;
+    new_para->frame = para->frame;   /* the new half stays in the frame */
     {
         /* A page break belongs before the paragraph's first line, so the
            half that moves down does not inherit it -- or every Enter at

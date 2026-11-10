@@ -111,7 +111,8 @@ wp_status wp_document_paginate(wp_document *doc, wp_pagination *out)
                 wp_bool overflow = (wp_bool)((current_page_used_height + need >
                                                content_height ||
                                                (l_idx == 0 && para_breaks_page(doc, para))) &&
-                                              current_page_used_height > 0);
+                                              current_page_used_height > 0 &&
+                                              !(line->flags & WP_LINE_FRAME));   /* as page marking */
 
                 if (!have_current_page || overflow) {
                     st = pagination_add_page(out);
@@ -185,8 +186,10 @@ i32 wp_paragraph_wrap_twips(const wp_document *doc, const wp_section *sec, u32 p
 {
     const wp_paragraph *para = &sec->paras[para_index];
     const wp_table_row *row = wp_document_trow_get(doc, para->trow);
+    const wp_frame_desc *fr = row == NULL ? wp_document_frame_get(doc, para->frame) : NULL;
     i32 left, right, w;
 
+    if (fr != NULL) return fr->w > 144 ? fr->w : column_twips;
     if (row == NULL) return column_twips;
     wp_table_cell_edges(row, cell_of(sec, para_index), &left, &right);
     w = right - left - 2 * row->gap;
@@ -212,6 +215,23 @@ static void place_table_lines(wp_document *doc, wp_section *sec)
 
         if (row == NULL) {
             wp_paragraph_layout *l = (wp_paragraph_layout *)para->layout;
+            const wp_frame_desc *fr = wp_document_frame_get(doc, para->frame);
+            /* A frame: its text edges, each line's offset down the frame
+               (counting the frame's paragraphs before), no advance. */
+            i32 fx0 = 0, fx1 = 0, fdy = 0;
+            wp_bool frame_first = WP_FALSE;
+
+            if (fr != NULL) {
+                u32 q = pi;
+                fx0 = fr->x - (fr->xref == WP_FRAME_X_PAGE ? sec->margin_left : 0);
+                fx1 = fx0 + wp_paragraph_wrap_twips(doc, sec, pi, wp_section_column_twips(sec));
+                while (q > 0 && sec->paras[q - 1].frame == para->frame && sec->paras[q - 1].trow == 0) {
+                    const wp_paragraph_layout *pl = (const wp_paragraph_layout *)sec->paras[q - 1].layout;
+                    if (pl != NULL) for (j = 0; j < pl->line_count; j++) fdy += pl->lines[j].height_twips;
+                    q--;
+                }
+                frame_first = (wp_bool)(q == pi);
+            }
             if (l != NULL) {
                 for (j = 0; j < l->line_count; j++) {
                     wp_line *ln = &l->lines[j];
@@ -219,6 +239,14 @@ static void place_table_lines(wp_document *doc, wp_section *sec)
                     ln->advance_twips = ln->height_twips;
                     ln->cell_x0 = ln->cell_x1 = 0;
                     ln->row_dy_twips = ln->row_h_twips = 0;
+                    if (fr != NULL) {
+                        ln->flags = (u8)(WP_LINE_FRAME | ((frame_first && j == 0) ? WP_LINE_FRAME_FIRST : 0));
+                        ln->advance_twips = 0;
+                        ln->cell_x0 = fx0;
+                        ln->cell_x1 = fx1 > fx0 ? fx1 : fx0 + 1;
+                        ln->row_dy_twips = fdy;
+                        fdy += ln->height_twips;
+                    }
                 }
             }
             pi++;
@@ -283,7 +311,7 @@ u32 wp_document_mark_pages(wp_document *doc)
     u32 s_idx;
     u32 page = 0;
     wp_bool have_page = WP_FALSE;
-    i32 used = 0;
+    i32 used = 0, row_top = 0, frame_top = 0;
 
     for (s_idx = 0; s_idx < doc->section_count; s_idx++) {
         wp_section *sec = &doc->sections[s_idx];
@@ -305,11 +333,26 @@ u32 wp_document_mark_pages(wp_document *doc)
             for (l_idx = 0; l_idx < layout->line_count; l_idx++) {
                 wp_line *line = &layout->lines[l_idx];
                 wp_bool starts = WP_FALSE;
-
                 /* What must fit: a line, or a whole table row from its
                    first line -- a row is kept on one page. */
                 i32 need = (line->flags & WP_LINE_ROW_FIRST) ? line->row_h_twips :
                            (line->cell_x1 != 0 ? 0 : line->height_twips);
+
+                /* A frame line takes no room: it goes on the page of the
+                   text it follows, at its frame's place on that page. */
+                if (line->flags & WP_LINE_FRAME) {
+                    if (line->flags & WP_LINE_FRAME_FIRST) {
+                        const wp_frame_desc *fr = wp_document_frame_get(doc, sec->paras[p_idx].frame);
+                        frame_top = fr == NULL ? used :
+                                    fr->yref == WP_FRAME_Y_PAGE ? fr->y - sec->margin_top :
+                                    fr->yref == WP_FRAME_Y_MARGIN ? fr->y : used + fr->y;
+                    }
+                    line->page = page;   /* a frame never starts a page */
+                    line->page_start = WP_FALSE;
+                    line->frame_top_twips = frame_top;
+                    line->page_y_twips = frame_top + line->row_dy_twips;
+                    continue;
+                }
 
                 if (!have_page) {
                     have_page = WP_TRUE;
@@ -323,6 +366,8 @@ u32 wp_document_mark_pages(wp_document *doc)
                 }
                 line->page = page;
                 line->page_start = starts;
+                if (line->flags & WP_LINE_ROW_FIRST) row_top = used;
+                line->page_y_twips = line->cell_x1 != 0 ? row_top + line->row_dy_twips : used;
                 used += line->advance_twips;
             }
         }

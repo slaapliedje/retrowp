@@ -127,6 +127,13 @@ spacing inside a cell is not printed, a cell longer than 64 lines is
 cut, and a cell's shading is not printed. The line buffers are taken
 only for a document with a table: 64 lines of 256 columns, twice.
 
+## Frames
+
+A frame (docs/document-model.md, "Frames") is not placed: its
+paragraphs print where they come in the text, at the column's full
+width, with their borders as any paragraph's. Placing frames in the
+grid is a later task.
+
 ## Headers and footers
 
 A section's header prints on the middle line of the top margin and its

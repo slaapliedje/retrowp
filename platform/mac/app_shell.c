@@ -1123,6 +1123,8 @@ static void draw_document(WindowPtr w)
     Rect r;
     short y;
     wp_line_walk walk;
+    u32 top_page;
+    i32 view_top;
     short doc_bottom;
     i32 bar_h_px;
     i32 content_width_px;
@@ -1208,7 +1210,8 @@ static void draw_document(WindowPtr w)
     g_ctx.view.view_h_px = (i32)doc_bottom - (i32)y;
     wp_viewport_follow_cursor(&g_ctx.view, &g_mac_doc, wp_keymap_cursor(&g_ctx));
 
-    wp_line_walk_start(&walk, (i32)y);
+    view_top = (i32)y;
+    wp_line_walk_start_view(&walk, view_top, &g_mac_doc, g_ctx.view.top_line, mac_twips_to_px, &top_page);
     for (si = 0; si < g_mac_doc.section_count && walk.y <= doc_bottom; si++) {
         wp_section *sec = wp_document_section_get(&g_mac_doc, si);
         u32 pc = (sec != NULL) ? sec->para_count : 0;
@@ -1246,12 +1249,17 @@ static void draw_document(WindowPtr w)
                 wp_line_fragment_iter iter;
                 wp_line_fragment frag;
 
-                /* Scrolled off the top: walked, not drawn, y stays put. */
-                if (flat++ < g_ctx.view.top_line) continue;
+                /* Scrolled off the top: walked, not drawn, y stays put --
+                   but a frame on the top line's page is still drawn. */
+                if (flat++ < g_ctx.view.top_line &&
+                    !((line->flags & WP_LINE_FRAME) && line->page == top_page)) continue;
                 /* The running y, or in a table its row's top plus its
                    place in the row (pageview.h); a row's cells and their
                    borders are drawn at its first line. */
                 y = (short)wp_line_walk_next(&walk, line, mac_twips_to_px);
+                /* A frame line outside the view is not drawn: it may sit
+                   above the text, under the bar, or below it. */
+                if ((line->flags & WP_LINE_FRAME) && ((i32)y < view_top || (i32)y > (i32)doc_bottom)) continue;
                 if (line->flags & WP_LINE_ROW_FIRST) {
                     wp_border_draw_row((plat_gc *)&gc, wp_document_trow_get(&g_mac_doc, para->trow),
                                        line->row_h_twips,

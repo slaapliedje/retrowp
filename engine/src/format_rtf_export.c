@@ -414,6 +414,18 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
 
     rtf_write_str(w, "\\pard");
     if (para->trow != 0) rtf_write_str(w, "\\intbl");
+    {
+        const wp_frame_desc *fr = wp_document_frame_get(doc, para->frame);
+        if (fr != NULL && para->trow == 0) {
+            rtf_write_str(w, fr->xref == WP_FRAME_X_PAGE ? "\\phpg" : "\\phmrg");
+            rtf_write_str(w, fr->yref == WP_FRAME_Y_PAGE ? "\\pvpg" :
+                             fr->yref == WP_FRAME_Y_MARGIN ? "\\pvmrg" : "\\pvpara");
+            rtf_write_str(w, "\\posx"); rtf_write_i32(w, fr->x);
+            rtf_write_str(w, "\\posy"); rtf_write_i32(w, fr->y);
+            if (fr->w > 0) { rtf_write_str(w, "\\absw"); rtf_write_i32(w, fr->w); }
+            if (fr->h != 0) { rtf_write_str(w, "\\absh"); rtf_write_i32(w, fr->h); }
+        }
+    }
     if (ps != NULL) {
         if (ps->align == WP_ALIGN_RIGHT)  rtf_write_str(w, "\\qr");
         if (ps->align == WP_ALIGN_CENTER) rtf_write_str(w, "\\qc");

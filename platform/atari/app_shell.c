@@ -1256,6 +1256,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     u32 flat = 0;   /* display-line index, the viewport's unit (viewport.h) */
     i32 y_px = area.g_y;
     wp_line_walk walk;
+    u32 top_page;
     plat_font *font = NULL;
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
@@ -1263,9 +1264,9 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     u8 text_r = 0, text_g = 0, text_b = 0;
     wp_selection sel;
     wp_pos sel_from, sel_to;
-    wp_bool have_sel;
+    wp_bool have_sel, has_frames;
 
-    wp_line_walk_start(&walk, area.g_y);
+    wp_line_walk_start_view(&walk, area.g_y, &g_doc, g_ctx.view.top_line, atari_twips_to_px_y, &top_page);
     if (!g_ctx.doc_loaded) {
         fill_white_strip(vdi, area.g_x, area.g_y, area.g_w, area.g_h);
         return;
@@ -1275,6 +1276,11 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     gc.window_handle = window_handle;
     gc.clip_on = 0;   /* set where a blit must keep to a redraw rectangle */
     have_sel = wp_keymap_selection(&g_ctx, &sel);
+    /* A frame sits beside the text; a later line's strip, cleared
+       behind it as each line is drawn, would wipe the frame away. With
+       frames the area is cleared once, whole, instead. */
+    has_frames = (wp_bool)(g_doc.frame_count > 1);
+    if (has_frames) fill_white_strip(vdi, area.g_x, area.g_y, area.g_w, area.g_h);
 
     for (si = 0; si < g_doc.section_count; si++) {
         wp_section *sec = wp_document_section_get(&g_doc, si);
@@ -1318,12 +1324,18 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                 wp_line_fragment frag;
 
                 /* Scrolling: the lines above the view are walked, not
-                   drawn, and y does not advance for them. */
-                if (flat++ < g_ctx.view.top_line) continue;
+                   drawn, and y does not advance for them -- but a frame
+                   on the top line's page is still drawn. */
+                if (flat++ < g_ctx.view.top_line &&
+                    !((line->flags & WP_LINE_FRAME) && line->page == top_page)) continue;
                 if (walk.y > area.g_y + area.g_h) break;
                 /* Where the line goes: the running y, or in a table its
                    row's top plus its place in the row (pageview.h). */
                 y_px = wp_line_walk_next(&walk, line, atari_twips_to_px_y);
+                /* A frame line outside the view is not drawn: it may sit
+                   above the text, under the bar, or below it. */
+                if ((line->flags & WP_LINE_FRAME) &&
+                    (y_px < area.g_y || y_px > area.g_y + area.g_h)) continue;
 
                 /* Erase this line's strip right before drawing it (see
                    this function's own comment). Full width, because the
@@ -1334,14 +1346,14 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                    would wipe the cells beside them. */
                 if (line->flags & WP_LINE_ROW_FIRST) {
                     i32 row_px = wp_table_row_extent(sec, pi, atari_twips_to_px_y);
-                    fill_white_strip(vdi, area.g_x, y_px, area.g_w, row_px);
+                    if (!has_frames) fill_white_strip(vdi, area.g_x, y_px, area.g_w, row_px);
                     wp_border_draw_row((plat_gc *)&gc, wp_document_trow_get(&g_doc, para->trow),
                                        atari_px_to_twips_y(row_px),
                                        (wp_bool)(pi > 0 && sec->paras[pi - 1].trow != 0 && flat > g_ctx.view.top_line + 1),
                                        area.g_x, y_px,
                                        atari_twips_to_px_x, atari_twips_to_px_y,
                                        area.g_x, area.g_x + area.g_w);
-                } else if (line->cell_x1 == 0) {
+                } else if (line->cell_x1 == 0 && !has_frames) {
                     fill_white_strip(vdi, area.g_x, y_px, area.g_w,
                                       atari_twips_to_px_y(line->height_twips));
                 }

@@ -300,6 +300,56 @@ in, and the same out. Nested tables (`\itap`) come in flattened.
    grid, cell rules in box-drawing characters. Until then a table prints
    there as its cells one after another.
 
+## Frames (M16, T16.3)
+
+A frame is a text box at a fixed place on the page -- a form's labelled
+field, a sidebar. As with tables, it is ordinary paragraphs that say
+where they belong, keeping the one paragraph list:
+
+- `wp_paragraph.frame` -- 0 outside a frame, else a handle into
+  `doc->frames`; consecutive paragraphs with the same handle are one
+  frame's text, stacked top to bottom.
+- `wp_frame` (found-or-added, append-only): `x`, `y`, `w`, `h` in twips
+  (`\posxN \posyN \abswN \abshN`; h 0 is as tall as the text, a
+  positive h at least that, negative exactly -h -- kept and saved, but
+  layout does not use h yet: a frame is as tall as its text), what x is measured
+  from (`\phpg` the paper's edge, `\phmrg` the margin, the default)
+  and what y is measured from (`\pvpg` the paper's top, `\pvmrg` the
+  top margin, `\pvpara` the paragraph the frame follows, the default).
+
+Layout: a frame's paragraphs wrap at its width. The table pass
+(`wp_document_mark_pages`) also places frame lines: each line gains
+`page_y_twips` (its top below the page's top margin -- for every line,
+not only frames), and a frame line `WP_LINE_FRAME`, its frame's text
+edges in `cell_x0`/`cell_x1`, its offset in the frame in `row_dy_twips`,
+the frame's top below the page's top margin in `frame_top_twips`, and an
+advance of 0 -- a frame takes no room in the text, which does not flow
+round it (a first cut). A frame belongs to the page of the paragraph it
+follows. The line walker finds each page's top from the last ordinary
+line (its top less `page_y_twips`) and puts a frame line at that top
+plus `frame_top_twips` and its offset. A frame's border is its
+paragraphs' own (T16.1); RTF import joins boxed paragraphs into one box
+only within one frame, so two frames side by side are two boxes. The
+viewport gives frame lines no height. Painters draw each frame line like
+any other; where a document has frames, the ST clears the view once
+rather than a strip behind each line, which would wipe a frame drawn
+earlier (the Amiga and the Mac clear once anyway).
+
+Scrolling: a painter skips the lines above the view, and a frame's lines
+follow their paragraph, so a frame whose paragraph has scrolled off
+would vanish while it still sits lower on the page. The walk is started
+with `wp_line_walk_start_view`, which takes the page's top from the view's
+first ordinary line (its own `page_y_twips`), and a painter still draws
+a skipped frame line on that page. A frame line that would start above
+the view or below it is not drawn at all -- it would land on the ruler
+bar or the status line.
+
+First cut, still to come: the text does not flow round a frame; a click
+lands on the main text, not in a frame (the caret reaches frame text
+from the keyboard); there is no command to make a frame -- frames come
+from RTF; character printers print a frame's paragraphs where they fall
+in the text, at the full width.
+
 ## Images (M15)
 
 An image is a **paragraph-level, fixed-size, non-flowing block** -- not

@@ -215,6 +215,39 @@ wp_status wp_document_trow_find_or_add(wp_document *doc, const wp_table_row *row
     return WP_OK;
 }
 
+wp_status wp_document_frame_find_or_add(wp_document *doc, const wp_frame_desc *frame, wp_frame *out)
+{
+    u16 i;
+
+    for (i = 1; i < doc->frame_count; i++) {
+        if (memcmp(&doc->frames[i], frame, sizeof(*frame)) == 0) { *out = (wp_frame)i; return WP_OK; }
+    }
+    if (doc->frame_count == 0xFFFFu) return WP_RANGE;
+    if ((u32)doc->frame_count + 1u > doc->frame_capacity) {
+        u32 need = doc->frame_count == 0 ? 2u : (u32)doc->frame_count + 1u;
+        u32 new_cap = wp_grow_capacity(doc->frame_capacity, need, 4);
+        void *mem = mem_realloc(doc->frames, (u32)doc->frame_capacity * (u32)sizeof(wp_frame_desc),
+                                new_cap * (u32)sizeof(wp_frame_desc));
+        if (mem == NULL) return WP_NOMEM;
+        doc->frames = (wp_frame_desc *)mem;
+        doc->frame_capacity = (u16)new_cap;
+    }
+    if (doc->frame_count == 0) {
+        memset(&doc->frames[0], 0, sizeof(wp_frame_desc));
+        doc->frame_count = 1;
+    }
+    doc->frames[doc->frame_count] = *frame;
+    *out = (wp_frame)doc->frame_count;
+    doc->frame_count++;
+    return WP_OK;
+}
+
+const wp_frame_desc *wp_document_frame_get(const wp_document *doc, wp_frame handle)
+{
+    if (handle == 0 || handle >= doc->frame_count) return NULL;
+    return &doc->frames[handle];
+}
+
 const wp_table_row *wp_document_trow_get(const wp_document *doc, wp_trow handle)
 {
     if (handle == 0 || handle >= doc->trow_count) return NULL;
@@ -351,6 +384,9 @@ wp_status wp_document_init(wp_document *doc)
     doc->trows = NULL;
     doc->trow_count = 0;
     doc->trow_capacity = 0;
+    doc->frames = NULL;
+    doc->frame_count = 0;
+    doc->frame_capacity = 0;
     doc->fonts = NULL;
     doc->font_count = 0;
     doc->font_capacity = 0;
@@ -420,6 +456,7 @@ void wp_document_free(wp_document *doc)
     mem_free(doc->pstyles);
     mem_free(doc->images);
     mem_free(doc->trows);
+    mem_free(doc->frames);
     mem_free(doc->fonts);
     wp_strpool_free(&doc->strings);
 }

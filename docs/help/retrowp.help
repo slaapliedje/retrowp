@@ -199,6 +199,15 @@ length for all four margins, or four for left, right, top and
 bottom ("1 1 0.75 0.75"). A number may say cm or mm instead.
 Paper and margins belong to the section the caret is in.
 
+A file from another word processor may hold frames: text boxes
+at a fixed place on the page, such as a form's fields or a
+sidebar. RetroWP shows and prints them in their place and keeps
+them when it saves. The text does not flow round a frame yet, a
+click goes to the text rather than into a frame (the arrow keys
+reach it), and frames cannot be made here yet. A dot-matrix
+printer in its own fonts prints a frame's text where it comes in
+the document.
+
 Header and Footer ask in the status line. Type the line and
 press Enter (Esc leaves it as it was). A | splits it into parts:
 one part is centred, two go left and right, three left, centre

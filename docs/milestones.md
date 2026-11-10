@@ -2164,13 +2164,19 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       below the table (box drawing in code page 437, else + - |); a row
       that does not fit starts a page. Spacing inside cells, shading and
       cells past 64 lines are left out (docs/formats/prn.md).
-- [ ] T16.3 Frames. A text box placed at a fixed spot on the page --
+- [x] T16.3 Frames. A text box placed at a fixed spot on the page --
       a form's labelled fields, a sidebar -- with T16.1's borders. First
       cut: frames sit at their page position and the body text does not
       flow around them (wrap-around is a later task, noted here).
       RTF: frame paragraphs (\posxN \posyN \absw \absh \phpg \pvpg).
       AC: host tests for placement and RTF round-trip; a two-column
       character-sheet header made of frames, on screen and printed.
+      Done 2026-11-10: test_table.c's frame cases (placement, printed
+      positions, RTF round trip, boxes kept per frame, a scrolled view);
+      the header shown and printed on the ST under SpeedoGDOS. Still to
+      come (docs/document-model.md, "Frames"): wrap-around, clicks in a
+      frame, a Format command to make one, the set height (\absh) in
+      layout, frames placed on character printers.
 - [ ] T16.4 Vector drawings. Scalable art kept in the document as a list
       of primitives in twips -- line, polyline, filled polygon,
       rectangle, rounded rectangle, ellipse, arc -- with a line width and

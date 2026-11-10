@@ -48,6 +48,8 @@ typedef struct {
     i32 border_width;   /* \brdrwN, twips */
     i32 border_space;   /* \brspN, twips */
     u8  intbl;          /* \intbl: this paragraph is in a table row */
+    u8  framed;         /* a frame word has been seen in this paragraph's properties */
+    wp_frame_desc frame;   /* \posx \posy \absw \absh \phpg ... */
     u8  fidx;           /* \fN: its fmap entry + 1; 0 = the target default */
     u16 cp;             /* that font's \fcharset as a code page; 0 = the document's */
     rtf_dest dest;
@@ -305,6 +307,12 @@ static void rtf_apply_pstyle_to_current_paragraph(rtf_parser *p)
         wp_section *tsec = wp_document_section_get(p->doc, p->section_idx);
         wp_paragraph *tpara = wp_section_paragraph_get(tsec, p->para_idx);
         if (tpara != NULL) {
+            tpara->frame = 0;
+            if (st->framed && !st->intbl &&
+                wp_document_frame_find_or_add(p->doc, &st->frame, &tpara->frame) != WP_OK) {
+                p->error = WP_NOMEM;
+                return;
+            }
             tpara->trow = 0;
             if (st->intbl && p->trow.cell_count > 0 &&
                 wp_document_trow_find_or_add(p->doc, &p->trow, &tpara->trow) != WP_OK) {
@@ -910,6 +918,8 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         st->border_width = 0; st->border_space = 0;
         st->shading = 0;
         st->intbl = 0;
+        st->framed = 0;
+        memset(&st->frame, 0, sizeof(st->frame));
         p->border_on_cell = 0;
         p->tab_count = 0;
         p->tab_kind_pending = (u8)WP_TAB_LEFT;
@@ -977,6 +987,16 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         return;
     }
     if (strcmp(name, "intbl") == 0) { st->intbl = 1; return; }
+    /* Frames (docs/document-model.md, "Frames"). */
+    if (strcmp(name, "posx") == 0) { st->framed = 1; st->frame.x = has_param ? param : 0; return; }
+    if (strcmp(name, "posy") == 0) { st->framed = 1; st->frame.y = has_param ? param : 0; return; }
+    if (strcmp(name, "absw") == 0) { st->framed = 1; st->frame.w = (has_param && param > 0) ? param : 0; return; }
+    if (strcmp(name, "absh") == 0) { st->framed = 1; st->frame.h = has_param ? param : 0; return; }
+    if (strcmp(name, "phpg") == 0) { st->framed = 1; st->frame.xref = (u8)WP_FRAME_X_PAGE; return; }
+    if (strcmp(name, "phmrg") == 0 || strcmp(name, "phcol") == 0) { st->framed = 1; st->frame.xref = (u8)WP_FRAME_X_MARGIN; return; }
+    if (strcmp(name, "pvpg") == 0) { st->framed = 1; st->frame.yref = (u8)WP_FRAME_Y_PAGE; return; }
+    if (strcmp(name, "pvmrg") == 0) { st->framed = 1; st->frame.yref = (u8)WP_FRAME_Y_MARGIN; return; }
+    if (strcmp(name, "pvpara") == 0) { st->framed = 1; st->frame.yref = (u8)WP_FRAME_Y_PARA; return; }
     if (strcmp(name, "cell") == 0 || strcmp(name, "row") == 0) {
         wp_section *tsec;
         wp_paragraph *tpara;
@@ -1321,7 +1341,9 @@ static wp_status rtf_join_border_groups(wp_document *doc)
             u32 end = pi + 1, k;
             u8 sides;
 
-            while (end < sec->para_count &&
+            /* A box is one frame's, or the main text's: it never runs
+               from one frame into the next or out into the page. */
+            while (end < sec->para_count && sec->paras[end].frame == sec->paras[pi].frame &&
                    same_box(first, wp_document_pstyle_get(doc, sec->paras[end].style))) end++;
             if (end - pi < 2) { pi = end; continue; }
             sides = first->border_sides;

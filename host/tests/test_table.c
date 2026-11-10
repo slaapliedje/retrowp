@@ -284,3 +284,128 @@ void test_table_rows_and_columns(void)
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
 }
+
+/* ---- Frames (docs/document-model.md, "Frames") ----------------------- */
+
+/* "Before", a two-paragraph frame 3000 in from the left margin and 600
+   below the top margin, 2000 wide, then "After". Host lines are 300. */
+static const char g_frame[] =
+    "{\\rtf1\\ansi Before\\par\\pard\\phmrg\\pvmrg\\posx3000\\posy600\\absw2000 Frame one\\par"
+    " Frame two\\par\\pard After\\par}";
+
+/* The frame's lines sit at its place, 600 and 900 below the top margin,
+   between 3000 and 5000 across, and take no room: "After" follows
+   "Before" directly. */
+void test_frame_layout(void)
+{
+    wp_document doc;
+    wp_line *before, *f1, *f2, *after;
+
+    ASSERT_TRUE(format_rtf_import((const u8 *)g_frame, (u32)strlen(g_frame), &doc) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 4);
+    ASSERT_TRUE(doc.sections[0].paras[1].frame != 0);
+    ASSERT_EQ_U32(doc.sections[0].paras[2].frame, doc.sections[0].paras[1].frame);
+    ASSERT_EQ_U32(doc.sections[0].paras[3].frame, 0);
+    (void)wp_pageview_relayout(&doc, 0);
+    before = line0(&doc, 0); f1 = line0(&doc, 1); f2 = line0(&doc, 2); after = line0(&doc, 3);
+    ASSERT_TRUE(before != NULL && f1 != NULL && f2 != NULL && after != NULL);
+    if (before == NULL || f1 == NULL || f2 == NULL || after == NULL) { wp_document_free(&doc); return; }
+    ASSERT_EQ_U32(f1->flags, WP_LINE_FRAME | WP_LINE_FRAME_FIRST);
+    ASSERT_EQ_U32(f2->flags, WP_LINE_FRAME);
+    ASSERT_EQ_U32((u32)f1->cell_x0, 3000);
+    ASSERT_EQ_U32((u32)f1->cell_x1, 5000);
+    ASSERT_EQ_U32((u32)f1->page_y_twips, 600);
+    ASSERT_EQ_U32((u32)f2->page_y_twips, 900);
+    ASSERT_EQ_U32((u32)after->page_y_twips, 300);
+    ASSERT_EQ_U32((u32)f1->advance_twips, 0);
+    ASSERT_EQ_U32((u32)((wp_paragraph_layout *)doc.sections[0].paras[1].layout)->wrap_twips, 2000);
+    wp_document_free(&doc);
+}
+
+/* Printed (pixels = twips, default inch margins): the frame's first word
+   at 1440 + 3000 across and 1440 + 600 + 240 down, its second line a
+   line lower; "After" right under "Before". And out and back in RTF. */
+void test_frame_pageprint_and_rtf(void)
+{
+    wp_document doc, back;
+    wp_page_device dev;
+    u32 pages = 0, n, i;
+    i32 x, y;
+    u8 out[2048];
+    u32 len = 0;
+
+    ASSERT_TRUE(format_rtf_import((const u8 *)g_frame, (u32)strlen(g_frame), &doc) == WP_OK);
+    memset(&dev, 0, sizeof(dev));
+    dev.gc = (plat_gc *)&dev;
+    dev.x_px = tw;
+    dev.y_px = tw;
+    dev.end_page = no_end;
+    draw_host_reset_text();
+    ASSERT_TRUE(wp_pageprint(&doc, &dev, &pages) == WP_OK);
+    n = draw_host_text_count();
+    ASSERT_EQ_U32(n, 6);   /* Before, Frame, one, Frame, two, After */
+    for (i = 0; i < n; i++) {
+        const char *t = draw_host_text_at(i, &x, &y);
+        if (i == 0) { ASSERT_EQ_STR(t, "Before"); ASSERT_EQ_U32((u32)y, 1680); }
+        if (i == 1) { ASSERT_EQ_STR(t, "Frame"); ASSERT_EQ_U32((u32)x, 4440); ASSERT_EQ_U32((u32)y, 2280); }
+        if (i == 3) { ASSERT_EQ_STR(t, "Frame"); ASSERT_EQ_U32((u32)y, 2580); }
+        if (i == 5) { ASSERT_EQ_STR(t, "After"); ASSERT_EQ_U32((u32)x, 1440); ASSERT_EQ_U32((u32)y, 1980); }
+    }
+    ASSERT_TRUE(format_rtf_export(&doc, out, sizeof(out) - 1, &len) == WP_OK);
+    out[len] = '\0';
+    ASSERT_TRUE(strstr((const char *)out, "\\phmrg\\pvmrg\\posx3000\\posy600\\absw2000") != NULL);
+    ASSERT_TRUE(format_rtf_import(out, len, &back) == WP_OK);
+    ASSERT_TRUE(back.sections[0].paras[1].frame != 0 && back.sections[0].paras[3].frame == 0);
+    wp_document_free(&back);
+    wp_document_free(&doc);
+}
+
+/* Two boxed frames side by side, two paragraphs each: each frame is its
+   own box -- the first frame's last paragraph keeps its bottom rule, the
+   second's first paragraph its top. */
+void test_frame_boxes_stay_apart(void)
+{
+    static const char rtf[] =
+        "{\\rtf1\\ansi\\pard\\phmrg\\posx0\\absw4000\\box\\brdrs A\\par"
+        "\\pard\\phmrg\\posx0\\absw4000\\box\\brdrs B\\par"
+        "\\pard\\phmrg\\posx4800\\absw4000\\box\\brdrs C\\par"
+        "\\pard\\phmrg\\posx4800\\absw4000\\box\\brdrs D\\par}";
+    static const u8 want[4] = {
+        WP_BORDER_TOP | WP_BORDER_LEFT | WP_BORDER_RIGHT,
+        WP_BORDER_BOTTOM | WP_BORDER_LEFT | WP_BORDER_RIGHT,
+        WP_BORDER_TOP | WP_BORDER_LEFT | WP_BORDER_RIGHT,
+        WP_BORDER_BOTTOM | WP_BORDER_LEFT | WP_BORDER_RIGHT
+    };
+    wp_document doc;
+    u32 i;
+
+    ASSERT_TRUE(format_rtf_import((const u8 *)rtf, (u32)strlen(rtf), &doc) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 4);
+    for (i = 0; i < 4 && i < doc.sections[0].para_count; i++) {
+        const wp_para_style *ps = wp_document_pstyle_get(&doc, doc.sections[0].paras[i].style);
+        ASSERT_TRUE(ps != NULL);
+        if (ps != NULL) ASSERT_EQ_U32(ps->border_sides, want[i]);
+    }
+    wp_document_free(&doc);
+}
+
+/* Scrolled so "After" (300 below the top margin) is the view's top line
+   at y 1000: the page's top margin is at 700, and the frame -- its own
+   lines above the view -- is placed from there, its first line at 1300,
+   its second 300 lower. */
+void test_frame_walk_scrolled(void)
+{
+    wp_document doc;
+    wp_line_walk w;
+    u32 page = 7;
+
+    ASSERT_TRUE(format_rtf_import((const u8 *)g_frame, (u32)strlen(g_frame), &doc) == WP_OK);
+    (void)wp_pageview_relayout(&doc, 0);
+    wp_line_walk_start_view(&w, 1000, &doc, 3, tw, &page);
+    ASSERT_EQ_U32(page, 0);
+    ASSERT_EQ_U32((u32)w.page_top, 700);
+    ASSERT_EQ_U32((u32)wp_line_walk_next(&w, line0(&doc, 1), tw), 1300);
+    ASSERT_EQ_U32((u32)wp_line_walk_next(&w, line0(&doc, 2), tw), 1600);
+    ASSERT_EQ_U32((u32)wp_line_walk_next(&w, line0(&doc, 3), tw), 1000);
+    wp_document_free(&doc);
+}

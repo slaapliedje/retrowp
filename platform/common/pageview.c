@@ -27,7 +27,7 @@ u32 wp_pageview_relayout(wp_document *doc, i32 window_twips)
             wp_paragraph *para = wp_section_paragraph_get(sec, pi);
             const wp_paragraph_layout *layout = (const wp_paragraph_layout *)para->layout;
 
-            i32 w = para->trow != 0 ? wp_paragraph_wrap_twips(doc, sec, pi, wrap) : wrap;
+            i32 w = wp_paragraph_wrap_twips(doc, sec, pi, wrap);   /* a cell's, a frame's, or wrap */
 
             if (layout != NULL && !para->layout_dirty && layout->wrap_twips == w) continue;
             (void)wp_paragraph_relayout(doc, para, w);
@@ -74,16 +74,26 @@ void wp_line_walk_start(wp_line_walk *w, i32 y)
     w->y = y;
     w->row_top = w->row_bottom = w->cell_y = y;
     w->in_row = WP_FALSE;
+    w->page_top = w->frame_y = y;
 }
 
 i32 wp_line_walk_next(wp_line_walk *w, const wp_line *line, wp_line_walk_px_fn px)
 {
     i32 top;
 
+    /* A frame line: at its frame's place on the page the walk is on,
+       taking no room. */
+    if (line->flags & WP_LINE_FRAME) {
+        if (line->flags & WP_LINE_FRAME_FIRST) w->frame_y = w->page_top + px(line->frame_top_twips);
+        top = w->frame_y;
+        w->frame_y += px(line->height_twips);
+        return top;
+    }
     if (line->flags & WP_LINE_ROW_FIRST) {
         if (w->in_row) w->y = w->row_bottom;
         w->row_top = w->row_bottom = w->cell_y = w->y;
         w->in_row = WP_TRUE;
+        w->page_top = w->y - px(line->page_y_twips);
     }
     if (w->in_row && line->cell_x1 != 0) {
         if (line->row_dy_twips == 0) w->cell_y = w->row_top;   /* a cell's first line */
@@ -97,6 +107,7 @@ i32 wp_line_walk_next(wp_line_walk *w, const wp_line *line, wp_line_walk_px_fn p
         w->in_row = WP_FALSE;
     }
     top = w->y;
+    w->page_top = top - px(line->page_y_twips);
     w->y += px(line->height_twips);
     return top;
 }
@@ -130,4 +141,25 @@ i32 wp_table_row_extent(const wp_section *sec, u32 para_index, wp_line_walk_px_f
         if (para->tflags & WP_TROW_END) break;
     }
     return cell > tallest ? cell : tallest;
+}
+
+void wp_line_walk_start_view(wp_line_walk *w, i32 y, wp_document *doc, u32 top_line,
+                             wp_line_walk_px_fn px, u32 *page_out)
+{
+    u32 i, si, pi, li;
+
+    wp_line_walk_start(w, y);
+    *page_out = ~(u32)0;
+    if (doc->frame_count <= 1) return;   /* no frames: nothing to place */
+    /* The first ordinary line from the top: frame lines say nothing of
+       where the text is. */
+    for (i = top_line; i < top_line + 256u && wp_viewport_line_at(doc, i, &si, &pi, &li); i++) {
+        const wp_paragraph_layout *l =
+            (const wp_paragraph_layout *)doc->sections[si].paras[pi].layout;
+        const wp_line *ln = &l->lines[li];
+        if (ln->flags & WP_LINE_FRAME) continue;
+        w->page_top = y - px(ln->page_y_twips);
+        *page_out = ln->page;
+        return;
+    }
 }

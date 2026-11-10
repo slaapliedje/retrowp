@@ -188,6 +188,27 @@ typedef struct {
     i32 border_width;                /* one rule, twips; 0 = WP_BORDER_DEFAULT_WIDTH */
 } wp_table_row;
 
+/* A text box at a fixed place on the page (RTF \posx \posy \absw
+   \absh); docs/document-model.md, "Frames". */
+typedef u16 wp_frame;
+typedef enum {
+    WP_FRAME_X_MARGIN = 0,   /* x from the left margin (\phmrg, the default) */
+    WP_FRAME_X_PAGE   = 1    /* x from the paper's left edge (\phpg) */
+} wp_frame_xref;
+typedef enum {
+    WP_FRAME_Y_PARA   = 0,   /* y below the paragraph the frame follows (\pvpara, the default) */
+    WP_FRAME_Y_MARGIN = 1,   /* y from the top margin (\pvmrg) */
+    WP_FRAME_Y_PAGE   = 2    /* y from the paper's top (\pvpg) */
+} wp_frame_yref;
+typedef struct {
+    i32 x, y;        /* twips, from xref and yref */
+    i32 w;           /* width; 0 = the column's */
+    i32 h;           /* 0 = the text's height; > 0 at least; < 0 exactly -h */
+    u8  xref;        /* wp_frame_xref */
+    u8  yref;        /* wp_frame_yref */
+    u8  _pad[2];
+} wp_frame_desc;
+
 typedef struct {
     wp_run   *runs;
     u16       run_count;
@@ -203,6 +224,9 @@ typedef struct {
        ends its cell or its row (WP_TCELL_END, WP_TROW_END). */
     wp_trow   trow;
     u8        tflags;
+    /* Frames (M16; docs/document-model.md, "Frames"): the frame this
+       paragraph's text sits in (0: in the text's flow). */
+    wp_frame  frame;
 } wp_paragraph;
 
 typedef struct {
@@ -240,6 +264,10 @@ typedef struct {
                                  paragraph referencing an entry is undone */
     u16            image_count;
     u16            image_capacity;
+
+    wp_frame_desc *frames;   /* M16 frames; append-only, entry 0 reserved */
+    u16            frame_count;
+    u16            frame_capacity;
 
     wp_table_row  *trows;    /* M16 table row shapes; append-only, entry 0
                                  reserved (a paragraph outside a table) */
@@ -416,6 +444,8 @@ const wp_image_desc *wp_document_image_get(const wp_document *doc, wp_image hand
    A row shape found or added (equal shapes share a handle); NULL for
    handle 0 or past the table. */
 wp_status wp_document_trow_find_or_add(wp_document *doc, const wp_table_row *row, wp_trow *out);
+wp_status wp_document_frame_find_or_add(wp_document *doc, const wp_frame_desc *frame, wp_frame *out);
+const wp_frame_desc *wp_document_frame_get(const wp_document *doc, wp_frame handle);
 const wp_table_row *wp_document_trow_get(const wp_document *doc, wp_trow handle);
 
 /* -- Font table --------------------------------------------------------

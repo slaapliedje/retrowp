@@ -62,11 +62,22 @@ typedef struct {
     i32     row_top, row_bottom;
     i32     cell_y;       /* where the current cell's next line starts */
     wp_bool in_row;
+    i32     page_top;     /* the top margin's line of the page walked last */
+    i32     frame_y;      /* where the current frame's next line starts */
 } wp_line_walk;
 
 void wp_line_walk_start(wp_line_walk *w, i32 y);
 /* The line's top; moves past it. Call for every line drawn, in order. */
 i32  wp_line_walk_next(wp_line_walk *w, const wp_line *line, wp_line_walk_px_fn px);
+
+/* A walk for a view scrolled to display line `top_line`, its first line
+   at y: as wp_line_walk_start, and where that line's page begins, so a
+   frame whose own lines are scrolled off -- it follows text above the
+   view -- is still placed. *page_out gets the page (~0 for none); a
+   painter draws a scrolled-off frame line on that page, and only where
+   it starts inside the view. */
+void wp_line_walk_start_view(wp_line_walk *w, i32 y, wp_document *doc, u32 top_line,
+                             wp_line_walk_px_fn px, u32 *page_out);
 /* Where the lines end: past the last line, or a row it was in. */
 i32  wp_line_walk_end(wp_line_walk *w);
 

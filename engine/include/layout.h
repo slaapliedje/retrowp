@@ -54,12 +54,18 @@ typedef struct {
     i32 cell_x0, cell_x1;   /* the cell's text edges from the column's left; the line sits at cell_x0 + x_twips */
     i32 row_dy_twips;       /* a table line's top below its row's top */
     i32 row_h_twips;        /* on a row's first line: the row's height */
+    /* Frames (docs/document-model.md, "Frames"), set by page marking. */
+    i32 page_y_twips;       /* the line's top below its page's top margin */
+    i32 frame_top_twips;    /* a frame line: its frame's top below the top margin */
 } wp_line;
 
-#define WP_LINE_ROW_FIRST 0x01   /* the first line of a table row */
+#define WP_LINE_ROW_FIRST   0x01   /* the first line of a table row */
+#define WP_LINE_FRAME       0x02   /* a line in a frame: placed by frame_top + row_dy, no advance */
+#define WP_LINE_FRAME_FIRST 0x04   /* the first line of a frame */
 
-/* The width a paragraph wraps at: its cell's text width in a table
-   (the cell less the row's gap each side), else `column_twips`. Walks
+/* The width a paragraph wraps at: its frame's width in a frame, its
+   cell's text width in a table (the cell less the row's gap each side),
+   else `column_twips`. Walks
    back to the row's start to count cells; a row is a few paragraphs. */
 i32 wp_paragraph_wrap_twips(const wp_document *doc, const wp_section *sec, u32 para_index,
                             i32 column_twips);
