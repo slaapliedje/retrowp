@@ -28,4 +28,16 @@ void wp_border_draw_slice(plat_gc *gc, const wp_border_slice *s,
                           wp_border_px_fn x_px, wp_border_px_fn y_px,
                           i32 min_x_px, i32 max_x_px);
 
+/* A table row's cells, drawn at its first line before any of its text:
+   each cell of the row's shape shaded and ruled as its own box, from the
+   row's top to row_h_twips below, between its edges (wp_table_cell_edges).
+   A shared edge is ruled once, as Word draws it: a cell's left rule is
+   left out where the cell before ruled its right, and the row's top
+   rules where it sits right under another row (after_row), whose bottom
+   rules are already there. Arguments as wp_border_draw_slice's. */
+void wp_border_draw_row(plat_gc *gc, const wp_table_row *row, i32 row_h_twips, wp_bool after_row,
+                        i32 col_x_px, i32 row_top_px,
+                        wp_border_px_fn x_px, wp_border_px_fn y_px,
+                        i32 min_x_px, i32 max_x_px);
+
 #endif /* WP_PARABORDER_H */

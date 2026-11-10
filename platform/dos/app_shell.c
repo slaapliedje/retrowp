@@ -579,12 +579,54 @@ static void dos_draw_border(plat_gc *gc, const wp_border_slice *bs, int row, int
     plat_font_close(font);
 }
 
+/* The line walker's twips-to-rows (pageview.h): a line is at least a
+   row, as dos_line_rows has it, but an offset of 0 stays 0 -- a table
+   row's first lines are at its top. */
+static i32 dos_walk_rows(i32 twips)
+{
+    return twips <= 0 ? 0 : dos_line_rows(twips);
+}
+
+/* A table row's cells, at its first line: each cell's shading, and its
+   left and right rules as box characters down the row's rows -- not its
+   top and bottom, which in text mode would cover a line of text. A
+   shared edge is ruled once. */
+static void dos_draw_row(plat_gc *gc, const wp_table_row *row, int top, int rows)
+{
+    u32 k;
+
+    if (row == NULL) return;
+    for (k = 0; k < row->cell_count && k < WP_MAX_CELLS; k++) {
+        wp_border_slice s;
+        i32 l, r;
+
+        wp_table_cell_edges(row, k, &l, &r);
+        s.x0 = l;
+        s.x1 = r;
+        s.top = 0;
+        s.bottom = 0;
+        s.rule = 0;
+        s.thickness = 0;
+        s.kind = row->border_kind;
+        s.sides = (u8)(row->cell_borders[k] & (WP_BORDER_LEFT | WP_BORDER_RIGHT));
+        if (k > 0 && (row->cell_borders[k - 1] & WP_BORDER_RIGHT)) s.sides = (u8)(s.sides & ~WP_BORDER_LEFT);
+        s.shading = row->cell_shading[k];
+        s._pad = 0;
+        if (s.sides == 0 && s.shading == 0) continue;
+        /* The text row passed is the row's last, so no top or bottom
+           rule is drawn, and the cell's text columns are its edges. */
+        dos_draw_border(gc, &s, top, top + rows - 1,
+                        (int)dos_twips_to_col(l) + 1, (int)dos_twips_to_col(r) - 1);
+    }
+}
+
 static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                                  int *cursor_row_out, int *cursor_col_out)
 {
     u32 si, pi;
     u32 flat = 0;   /* display-line index, the viewport's unit */
     int row = top_row;
+    wp_line_walk walk;
     int last_text_row = top_row;   /* the text row of the last line painted */
     wp_pos *cursor = wp_keymap_cursor(&g_ctx);
     wp_bool cursor_found = WP_FALSE;
@@ -599,11 +641,12 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
     *cursor_row_out = top_row;
     *cursor_col_out = 0;
 
-    for (si = 0; si < g_doc.section_count && row <= bottom_row; si++) {
+    wp_line_walk_start(&walk, top_row);
+    for (si = 0; si < g_doc.section_count && walk.y <= bottom_row; si++) {
         wp_section *sec = wp_document_section_get(&g_doc, si);
         u32 pc = (sec != NULL) ? sec->para_count : 0;
 
-        for (pi = 0; pi < pc && row <= bottom_row; pi++) {
+        for (pi = 0; pi < pc && walk.y <= bottom_row; pi++) {
             wp_paragraph *para = wp_section_paragraph_get(sec, pi);
             wp_paragraph_layout *layout = (wp_paragraph_layout *)para->layout;
             const wp_para_style *pstyle = wp_document_pstyle_get(&g_doc, para->style);
@@ -611,7 +654,7 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
             u32 li;
 
             if (layout == NULL) continue;
-            for (li = 0; li < layout->line_count && row <= bottom_row; li++) {
+            for (li = 0; li < layout->line_count && walk.y <= bottom_row; li++) {
                 wp_line *line = &layout->lines[li];
                 int col;
                 int text_row;
@@ -623,14 +666,28 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
 
                 /* Scrolled off the top: walked, not drawn, no row used. */
                 if (flat++ < g_ctx.view.top_line) continue;
+                /* The line's top row: the running row, or in a table its
+                   row's top plus its place in the row (pageview.h). */
+                row = (int)wp_line_walk_next(&walk, line, dos_walk_rows);
 
                 /* Indent and alignment are the layout's; the text row
                    sits below any whole rows of space before it. */
-                col = (int)dos_twips_to_col(line->x_twips);
+                col = (int)dos_twips_to_col(line->cell_x0 + line->x_twips);
+                if (line->cell_x1 != 0) {
+                    /* Whole cells: a column clear of the cell's left
+                       edge, where its rule goes, however the gap rounds. */
+                    const wp_table_row *tr = wp_document_trow_get(&g_doc, para->trow);
+                    int edge = (int)dos_twips_to_col(line->cell_x0 - (tr != NULL ? tr->gap : 0));
+                    if (col <= edge) col = edge + 1;
+                }
                 text_row = row + (int)dos_twips_to_row(line->text_top_twips);
                 if (text_row > bottom_row) {        /* spacing pushed it off the screen */
-                    row = bottom_row + 1;           /* and everything after it */
+                    walk.y = bottom_row + 1;        /* and everything after it */
                     break;
+                }
+                if (line->flags & WP_LINE_ROW_FIRST) {
+                    dos_draw_row(gc, wp_document_trow_get(&g_doc, para->trow), row,
+                                 (int)wp_table_row_extent(sec, pi, dos_walk_rows));
                 }
 
                 {   /* the paragraph's border and shading, under its text */
@@ -638,9 +695,11 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                     if (wp_line_border_slice(&g_doc, para, line, (wp_bool)(li == 0),
                                              (wp_bool)(li == layout->line_count - 1),
                                              layout->wrap_twips, &bs)) {
+                        bs.x0 += line->cell_x0;
+                        bs.x1 += line->cell_x0;
                         dos_draw_border(gc, &bs, row, text_row,
-                                        (int)dos_twips_to_col(pstyle != NULL ? pstyle->indent_left : 0),
-                                        (int)dos_twips_to_col(layout->wrap_twips -
+                                        (int)dos_twips_to_col(line->cell_x0 + (pstyle != NULL ? pstyle->indent_left : 0)),
+                                        (int)dos_twips_to_col(line->cell_x0 + layout->wrap_twips -
                                                               (pstyle != NULL ? pstyle->indent_right : 0)));
                     }
                 }
@@ -661,7 +720,6 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                         }
                     }
                     last_text_row = text_row;
-                    row += (int)dos_line_rows(line->height_twips);
                     continue;
                 }
 
@@ -760,7 +818,6 @@ static void paint_document_body(int top_row, int bottom_row, plat_gc *gc,
                 if (sel_here) invert_cells(text_row, sel_c0, sel_c1);
 
                 last_text_row = text_row;
-                row += (int)dos_line_rows(line->height_twips);
             }
 
             if (!cursor_found && cursor->section == si && cursor->paragraph == pi) {

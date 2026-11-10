@@ -420,6 +420,11 @@ void test_help_content_retrowp_help_parses_and_all_links_resolve(void);
 void test_layout_greedy_wrap_hand_computed_fixture(void);
 void test_layout_geometry_indent_and_alignment_place_the_line(void);
 void test_layout_geometry_border_box(void);
+void test_table_layout_places_cells(void);
+void test_table_rtf_round_trip(void);
+void test_table_pageprint_places_cells(void);
+void test_table_hit_test_finds_the_cell(void);
+void test_table_enter_and_backspace_keep_cells(void);
 void test_rtf_borders_round_trip(void);
 void test_layout_geometry_border_middle_and_double(void);
 void test_layout_geometry_later_lines_use_the_left_indent_only(void);
@@ -1072,6 +1077,11 @@ static const test_case g_cases[] = {
     { "layout_greedy_wrap_hand_computed_fixture", test_layout_greedy_wrap_hand_computed_fixture },
     { "layout_geometry_indent_and_alignment_place_the_line", test_layout_geometry_indent_and_alignment_place_the_line },
     { "layout_geometry_border_box", test_layout_geometry_border_box },
+    { "table_layout_places_cells", test_table_layout_places_cells },
+    { "table_rtf_round_trip", test_table_rtf_round_trip },
+    { "table_pageprint_places_cells", test_table_pageprint_places_cells },
+    { "table_hit_test_finds_the_cell", test_table_hit_test_finds_the_cell },
+    { "table_enter_and_backspace_keep_cells", test_table_enter_and_backspace_keep_cells },
     { "rtf_borders_round_trip", test_rtf_borders_round_trip },
     { "layout_geometry_border_middle_and_double", test_layout_geometry_border_middle_and_double },
     { "layout_geometry_later_lines_use_the_left_indent_only", test_layout_geometry_later_lines_use_the_left_indent_only },

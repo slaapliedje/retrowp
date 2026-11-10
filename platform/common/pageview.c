@@ -27,8 +27,10 @@ u32 wp_pageview_relayout(wp_document *doc, i32 window_twips)
             wp_paragraph *para = wp_section_paragraph_get(sec, pi);
             const wp_paragraph_layout *layout = (const wp_paragraph_layout *)para->layout;
 
-            if (layout != NULL && !para->layout_dirty && layout->wrap_twips == wrap) continue;
-            (void)wp_paragraph_relayout(doc, para, wrap);
+            i32 w = para->trow != 0 ? wp_paragraph_wrap_twips(doc, sec, pi, wrap) : wrap;
+
+            if (layout != NULL && !para->layout_dirty && layout->wrap_twips == w) continue;
+            (void)wp_paragraph_relayout(doc, para, w);
         }
     }
     return wp_document_mark_pages(doc);
@@ -65,4 +67,67 @@ void wp_pageview_draw_break(plat_gc *gc, i32 x, i32 y, i32 w)
         i32 dash = (w - at < 4) ? w - at : 4;
         (void)plat_fill_rect(gc, x + at, y, dash, 1, 0x40, 0x40, 0x40);
     }
+}
+
+void wp_line_walk_start(wp_line_walk *w, i32 y)
+{
+    w->y = y;
+    w->row_top = w->row_bottom = w->cell_y = y;
+    w->in_row = WP_FALSE;
+}
+
+i32 wp_line_walk_next(wp_line_walk *w, const wp_line *line, wp_line_walk_px_fn px)
+{
+    i32 top;
+
+    if (line->flags & WP_LINE_ROW_FIRST) {
+        if (w->in_row) w->y = w->row_bottom;
+        w->row_top = w->row_bottom = w->cell_y = w->y;
+        w->in_row = WP_TRUE;
+    }
+    if (w->in_row && line->cell_x1 != 0) {
+        if (line->row_dy_twips == 0) w->cell_y = w->row_top;   /* a cell's first line */
+        top = w->cell_y;
+        w->cell_y += px(line->height_twips);
+        if (w->cell_y > w->row_bottom) w->row_bottom = w->cell_y;
+        return top;
+    }
+    if (w->in_row) {
+        w->y = w->row_bottom;
+        w->in_row = WP_FALSE;
+    }
+    top = w->y;
+    w->y += px(line->height_twips);
+    return top;
+}
+
+i32 wp_line_walk_end(wp_line_walk *w)
+{
+    if (w->in_row) {
+        w->y = w->row_bottom;
+        w->in_row = WP_FALSE;
+    }
+    return w->y;
+}
+
+i32 wp_table_row_extent(const wp_section *sec, u32 para_index, wp_line_walk_px_fn px)
+{
+    i32 tallest = 0, cell = 0;
+    u32 pi;
+
+    for (pi = para_index; pi < sec->para_count && sec->paras[pi].trow != 0; pi++) {
+        const wp_paragraph *para = &sec->paras[pi];
+        const wp_paragraph_layout *l = (const wp_paragraph_layout *)para->layout;
+        u32 li;
+
+        if (l != NULL) {
+            for (li = 0; li < l->line_count; li++) cell += px(l->lines[li].height_twips);
+        }
+        if (para->tflags & WP_TCELL_END) {
+            if (cell > tallest) tallest = cell;
+            cell = 0;
+        }
+        if (para->tflags & WP_TROW_END) break;
+    }
+    return cell > tallest ? cell : tallest;
 }

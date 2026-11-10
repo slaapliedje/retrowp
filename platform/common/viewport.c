@@ -55,6 +55,16 @@ static wp_bool walk_next(line_walk *w)
 }
 
 /* Positions the walk on display line `index`; WP_FALSE past the end. */
+/* The walk standing on a given line (by section, paragraph, line). */
+static wp_bool walk_to_line(line_walk *w, wp_document *doc, u32 si, u32 pi, u32 li)
+{
+    walk_init(w, doc);
+    while (walk_next(w)) {
+        if (w->si == si && w->pi == pi && w->li == li) return WP_TRUE;
+    }
+    return WP_FALSE;
+}
+
 static wp_bool walk_to(line_walk *w, wp_document *doc, u32 index)
 {
     walk_init(w, doc);
@@ -76,12 +86,19 @@ static wp_bool line_contains_pos(const wp_line *line, u32 run, u32 offset)
     return WP_TRUE;
 }
 
+/* A line's share of the view's height. A table row counts once: its
+   height on its first line, nothing on its others, which sit beside or
+   below that one inside it (docs/document-model.md, "Tables"). */
 static i32 line_height(const wp_viewport *vp, const line_walk *w)
 {
-    i32 twips = w->layout->lines[w->li].height_twips;
+    const wp_line *ln = &w->layout->lines[w->li];
 
+    if (ln->cell_x1 != 0) {
+        if (!(ln->flags & WP_LINE_ROW_FIRST)) return 0;
+        return vp->line_px != NULL ? vp->line_px(ln->row_h_twips) : 1;
+    }
     if (vp->line_px == NULL) return 1;
-    return vp->line_px(twips);
+    return vp->line_px(ln->height_twips);
 }
 
 /* ------------------------------------------------------------------ */
@@ -311,21 +328,54 @@ wp_bool wp_viewport_hit_test(const wp_viewport *vp, wp_document *doc, i32 conten
     const wp_line *line;
     const wp_para_style *pstyle;
     u8 align;
-    i32 origin_px, x_twips, extra_twips;
+    i32 origin_px, x_twips, extra_twips, row_top = 0;
     u32 run = 0, offset = 0;
 
-    if (!wp_viewport_line_at_y(vp, doc, y_px, &si, &pi, &li, NULL)) return WP_FALSE;
+    if (!wp_viewport_line_at_y(vp, doc, y_px, &si, &pi, &li, &row_top)) return WP_FALSE;
     sec = wp_document_section_get(doc, si);
     para = wp_section_paragraph_get(sec, pi);
     layout = (wp_paragraph_layout *)para->layout;
     line = &layout->lines[li];
+    if (line->flags & WP_LINE_ROW_FIRST) {
+        /* In a table row: the cell nearest the click's x, then that
+           cell's line at the click's height. */
+        line_walk w;
+        i32 best_dx = 0x7FFFFFFF, cell_x0 = line->cell_x0, ry = y_px - row_top;
+        wp_bool first = WP_TRUE;
+
+        if (walk_to_line(&w, doc, si, pi, li)) {
+            do {
+                const wp_line *ln = &w.layout->lines[w.li];
+                i32 a = twips_to_px_x(ln->cell_x0), b = twips_to_px_x(ln->cell_x1);
+                i32 dx = x_px < a ? a - x_px : x_px > b ? x_px - b : 0;
+
+                if (ln->cell_x1 == 0 || (!first && (ln->flags & WP_LINE_ROW_FIRST))) break;
+                first = WP_FALSE;
+                if (dx < best_dx) { best_dx = dx; cell_x0 = ln->cell_x0; }
+            } while (walk_next(&w));
+        }
+        first = WP_TRUE;
+        if (walk_to_line(&w, doc, si, pi, li)) {
+            do {
+                const wp_line *ln = &w.layout->lines[w.li];
+                i32 dy = (ln->row_dy_twips == 0 || vp->line_px == NULL) ? 0 : vp->line_px(ln->row_dy_twips);
+
+                if (ln->cell_x1 == 0 || (!first && (ln->flags & WP_LINE_ROW_FIRST))) break;
+                first = WP_FALSE;
+                if (ln->cell_x0 == cell_x0 && (dy <= ry || dy == 0)) { pi = w.pi; li = w.li; }
+            } while (walk_next(&w));
+        }
+        para = wp_section_paragraph_get(sec, pi);
+        layout = (wp_paragraph_layout *)para->layout;
+        line = &layout->lines[li];
+    }
     pstyle = wp_document_pstyle_get(doc, para->style);
     align = (pstyle != NULL) ? pstyle->align : WP_ALIGN_LEFT;
 
     /* The line's own origin (indent and alignment, from the layout) --
        the same x every painter starts the line at. */
     (void)content_width_twips;
-    origin_px = twips_to_px_x(line->x_twips);
+    origin_px = twips_to_px_x(line->cell_x0 + line->x_twips);
     x_twips = (x_px > origin_px) ? px_to_twips_x(x_px - origin_px) : 0;
     extra_twips = wp_justify_space_extra_twips(doc, para, line, align,
                                                (wp_bool)(li == layout->line_count - 1),

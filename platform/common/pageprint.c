@@ -277,11 +277,14 @@ static void draw_line(wp_document *doc, const page_frame *fr, wp_paragraph *para
     }
 }
 
+static i32 same_twips(i32 twips) { return twips; }
+
 wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_out)
 {
     u32 si, pi, li;
     u32 cur_page = 0, pages = 0;
-    i32 y = 0;
+    i32 y = 0, left = 0;
+    wp_line_walk walk;
     page_frame fr;
     plat_font *font = NULL;
     wp_cstyle cached = 0;
@@ -315,20 +318,31 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
                     cur_page = line->page;
                     frame_for(&fr, dev, sec);
                     begin_page(doc, &fr, sec, pages);
-                    y = sec->margin_top;
+                    wp_line_walk_start(&walk, sec->margin_top);
+                }
+                /* Twips here; the device's conversion comes after. A table
+                   line sits at its row's top plus its offset, its cell's
+                   left edge in from the column's. */
+                y = wp_line_walk_next(&walk, line, same_twips);
+                left = sec->margin_left + line->cell_x0;
+                if (line->flags & WP_LINE_ROW_FIRST) {
+                    wp_border_draw_row(dev->gc, wp_document_trow_get(doc, para->trow), line->row_h_twips,
+                                       (wp_bool)(pi > 0 && sec->paras[pi - 1].trow != 0 && !line->page_start),
+                                       at_x(&fr, sec->margin_left), at_y(&fr, y),
+                                       dev->x_px, dev->y_px, -32000, 32000);
                 }
                 {   /* the paragraph's border and shading, under its text */
                     wp_border_slice bs;
                     if (wp_line_border_slice(doc, para, line, (wp_bool)(li == 0),
                                              (wp_bool)(li == layout->line_count - 1),
                                              layout->wrap_twips, &bs)) {
-                        wp_border_draw_slice(dev->gc, &bs, at_x(&fr, sec->margin_left), at_y(&fr, y),
+                        wp_border_draw_slice(dev->gc, &bs, at_x(&fr, left), at_y(&fr, y),
                                              dev->x_px, dev->y_px, -32000, 32000);
                     }
                 }
                 if (para->kind == (u8)WP_PARA_IMAGE) {
                     const wp_image_desc *img = wp_document_image_get(doc, para->image);
-                    i32 px = sec->margin_left + line->x_twips, py = y + line->text_top_twips;
+                    i32 px = left + line->x_twips, py = y + line->text_top_twips;
 
                     if (img == NULL ||
                         !draw_picture(doc, &fr, img, px, py, line->width_twips,
@@ -337,9 +351,8 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
                     }
                 } else {
                     draw_line(doc, &fr, para, line, (wp_bool)(li == layout->line_count - 1),
-                              sec->margin_left, y, &font, &cached, &have_font, &ascent);
+                              left, y, &font, &cached, &have_font, &ascent);
                 }
-                y += line->height_twips;
             }
         }
     }

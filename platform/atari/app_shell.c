@@ -1255,6 +1255,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     u32 si, pi, li;
     u32 flat = 0;   /* display-line index, the viewport's unit (viewport.h) */
     i32 y_px = area.g_y;
+    wp_line_walk walk;
     plat_font *font = NULL;
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
@@ -1264,6 +1265,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     wp_pos sel_from, sel_to;
     wp_bool have_sel;
 
+    wp_line_walk_start(&walk, area.g_y);
     if (!g_ctx.doc_loaded) {
         fill_white_strip(vdi, area.g_x, area.g_y, area.g_w, area.g_h);
         return;
@@ -1318,14 +1320,31 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                 /* Scrolling: the lines above the view are walked, not
                    drawn, and y does not advance for them. */
                 if (flat++ < g_ctx.view.top_line) continue;
-                if (y_px > area.g_y + area.g_h) break;
+                if (walk.y > area.g_y + area.g_h) break;
+                /* Where the line goes: the running y, or in a table its
+                   row's top plus its place in the row (pageview.h). */
+                y_px = wp_line_walk_next(&walk, line, atari_twips_to_px_y);
 
                 /* Erase this line's strip right before drawing it (see
                    this function's own comment). Full width, because the
                    text being replaced may have been longer than the text
-                   about to be drawn -- a delete is exactly that case. */
-                fill_white_strip(vdi, area.g_x, y_px, area.g_w,
-                                  atari_twips_to_px_y(line->height_twips));
+                   about to be drawn -- a delete is exactly that case. A
+                   table row is cleared once, whole, at its first line,
+                   and its cells' borders drawn there; its other lines
+                   would wipe the cells beside them. */
+                if (line->flags & WP_LINE_ROW_FIRST) {
+                    i32 row_px = wp_table_row_extent(sec, pi, atari_twips_to_px_y);
+                    fill_white_strip(vdi, area.g_x, y_px, area.g_w, row_px);
+                    wp_border_draw_row((plat_gc *)&gc, wp_document_trow_get(&g_doc, para->trow),
+                                       atari_px_to_twips_y(row_px),
+                                       (wp_bool)(pi > 0 && sec->paras[pi - 1].trow != 0 && flat > g_ctx.view.top_line + 1),
+                                       area.g_x, y_px,
+                                       atari_twips_to_px_x, atari_twips_to_px_y,
+                                       area.g_x, area.g_x + area.g_w);
+                } else if (line->cell_x1 == 0) {
+                    fill_white_strip(vdi, area.g_x, y_px, area.g_w,
+                                      atari_twips_to_px_y(line->height_twips));
+                }
                 if (line->page_start && line->page > 0) {
                     wp_pageview_draw_break((plat_gc *)&gc, area.g_x, y_px, area.g_w);
                 }
@@ -1334,7 +1353,8 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                     if (wp_line_border_slice(&g_doc, para, line, (wp_bool)(li == 0),
                                              (wp_bool)(li == layout->line_count - 1),
                                              layout->wrap_twips, &bs)) {
-                        wp_border_draw_slice((plat_gc *)&gc, &bs, area.g_x, y_px,
+                        wp_border_draw_slice((plat_gc *)&gc, &bs,
+                                             area.g_x + atari_twips_to_px_x(line->cell_x0), y_px,
                                              atari_twips_to_px_x, atari_twips_to_px_y,
                                              area.g_x, area.g_x + area.g_w);
                     }
@@ -1353,7 +1373,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                    places it identically; this used to re-derive the
                    alignment here against the full column, ignoring the
                    paragraph's indents. */
-                x_px += atari_twips_to_px_x(line->x_twips);
+                x_px += atari_twips_to_px_x(line->cell_x0 + line->x_twips);
                 line_origin_px = x_px;   /* the fragment walk below advances x_px past it */
                 text_y_px = y_px + atari_twips_to_px_y(line->text_top_twips);
                 text_h_px = atari_twips_to_px_y(line->text_height_twips);
@@ -1412,7 +1432,6 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                                            img->palette[0][0], img->palette[0][1], img->palette[0][2]);
                         }
                     }
-                    y_px += atari_twips_to_px_y(line->height_twips);
                     continue;
                 }
 
@@ -1553,7 +1572,6 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                     atari_invert_rect(vdi, hx0, text_y_px, hx1 - hx0, text_h_px);
                 }
 
-                y_px += atari_twips_to_px_y(line->height_twips);
             }
         }
     }
@@ -1561,6 +1579,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     /* Below the last line: where deleted lines used to be. Nothing in
        the loop above draws here, so without this a document that got
        shorter would keep showing its own ghost. */
+    y_px = wp_line_walk_end(&walk);
     fill_white_strip(vdi, area.g_x, y_px, area.g_w,
                       (area.g_y + area.g_h) - y_px);
 

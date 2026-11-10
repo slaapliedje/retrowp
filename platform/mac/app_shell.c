@@ -1119,6 +1119,7 @@ static void draw_document(WindowPtr w)
     mac_gc gc;
     Rect r;
     short y;
+    wp_line_walk walk;
     short doc_bottom;
     i32 bar_h_px;
     i32 content_width_px;
@@ -1204,11 +1205,12 @@ static void draw_document(WindowPtr w)
     g_ctx.view.view_h_px = (i32)doc_bottom - (i32)y;
     wp_viewport_follow_cursor(&g_ctx.view, &g_mac_doc, wp_keymap_cursor(&g_ctx));
 
-    for (si = 0; si < g_mac_doc.section_count && y <= doc_bottom; si++) {
+    wp_line_walk_start(&walk, (i32)y);
+    for (si = 0; si < g_mac_doc.section_count && walk.y <= doc_bottom; si++) {
         wp_section *sec = wp_document_section_get(&g_mac_doc, si);
         u32 pc = (sec != NULL) ? sec->para_count : 0;
 
-        for (pi = 0; pi < pc && y <= doc_bottom; pi++) {
+        for (pi = 0; pi < pc && walk.y <= doc_bottom; pi++) {
             wp_paragraph *para = wp_section_paragraph_get(sec, pi);
             wp_paragraph_layout *layout = (wp_paragraph_layout *)para->layout;
             const wp_para_style *pstyle = wp_document_pstyle_get(&g_mac_doc, para->style);
@@ -1231,7 +1233,7 @@ static void draw_document(WindowPtr w)
                 }
             }
 
-            for (li = 0; li < layout->line_count && y <= doc_bottom; li++) {
+            for (li = 0; li < layout->line_count && walk.y <= doc_bottom; li++) {
                 wp_line *line = &layout->lines[li];
                 i32 x_px = r.left + WP_DOC_LEFT_MARGIN_PX;
                 i32 line_origin_px;
@@ -1243,11 +1245,22 @@ static void draw_document(WindowPtr w)
 
                 /* Scrolled off the top: walked, not drawn, y stays put. */
                 if (flat++ < g_ctx.view.top_line) continue;
+                /* The running y, or in a table its row's top plus its
+                   place in the row (pageview.h); a row's cells and their
+                   borders are drawn at its first line. */
+                y = (short)wp_line_walk_next(&walk, line, mac_twips_to_px);
+                if (line->flags & WP_LINE_ROW_FIRST) {
+                    wp_border_draw_row((plat_gc *)&gc, wp_document_trow_get(&g_mac_doc, para->trow),
+                                       line->row_h_twips,
+                                       (wp_bool)(pi > 0 && sec->paras[pi - 1].trow != 0 && flat > g_ctx.view.top_line + 1),
+                                       r.left + WP_DOC_LEFT_MARGIN_PX, y,
+                                       mac_twips_to_px, mac_twips_to_px, r.left, r.right);
+                }
 
                 /* Indent and alignment are the layout's (wp_line.x_twips);
                    the text sits text_top_twips into the line's box, which
                    also holds the paragraph's spacing. */
-                x_px += mac_twips_to_px(line->x_twips);
+                x_px += mac_twips_to_px(line->cell_x0 + line->x_twips);
                 line_origin_px = x_px;   /* the fragment walk below advances x_px past it */
                 text_y = (short)(y + mac_twips_to_px(line->text_top_twips));
                 text_h_px = mac_twips_to_px(line->text_height_twips);
@@ -1259,7 +1272,8 @@ static void draw_document(WindowPtr w)
                     if (wp_line_border_slice(&g_mac_doc, para, line, (wp_bool)(li == 0),
                                              (wp_bool)(li == layout->line_count - 1),
                                              layout->wrap_twips, &bs)) {
-                        wp_border_draw_slice((plat_gc *)&gc, &bs, r.left + WP_DOC_LEFT_MARGIN_PX, y,
+                        wp_border_draw_slice((plat_gc *)&gc, &bs,
+                                             r.left + WP_DOC_LEFT_MARGIN_PX + mac_twips_to_px(line->cell_x0), y,
                                              mac_twips_to_px, mac_twips_to_px, r.left, r.right);
                     }
                 }
@@ -1316,7 +1330,6 @@ static void draw_document(WindowPtr w)
                                            img->palette[0][0], img->palette[0][1], img->palette[0][2]);
                         }
                     }
-                    y = (short)(y + mac_twips_to_px(line->height_twips));
                     continue;
                 }
 
@@ -1447,7 +1460,6 @@ static void draw_document(WindowPtr w)
                     }
                 }
 
-                y = (short)(y + mac_twips_to_px(line->height_twips));
             }
         }
     }

@@ -5,6 +5,7 @@
 #include "types.h"
 #include "docmodel.h"
 #include "platform.h"
+#include "layout.h"
 
 /* The page, as the screen shows it: what width text wraps at, where the
    pages break, and which page the caret is on. One implementation for
@@ -44,5 +45,35 @@ u32 wp_pageview_cursor_page(wp_document *doc, const wp_pos *cursor, u32 *page_co
    For the shells that draw in pixels; DOS shows the page in its status
    line instead. */
 void wp_pageview_draw_break(plat_gc *gc, i32 x, i32 y, i32 w);
+
+/* Where each display line goes down a page or screen, for a painter
+   walking lines in order (docs/document-model.md, "Tables"): a line
+   outside a table at the running y, which then moves past it; a table
+   line at its row's top plus its offset in the row, the running y
+   holding at the row's top until the row is done and then jumping to
+   its bottom. Pixels throughout, through the painter's own conversion,
+   and always as a sum of each line's converted height -- never a
+   converted total, which rounds differently: DOS's 300-twip line is a
+   row, but two of them, 600, round to three. A cell's lines stack from
+   the row's top; the row ends at its lowest line. */
+typedef i32 (*wp_line_walk_px_fn)(i32 twips);
+typedef struct {
+    i32     y;            /* where the next line outside a row starts */
+    i32     row_top, row_bottom;
+    i32     cell_y;       /* where the current cell's next line starts */
+    wp_bool in_row;
+} wp_line_walk;
+
+void wp_line_walk_start(wp_line_walk *w, i32 y);
+/* The line's top; moves past it. Call for every line drawn, in order. */
+i32  wp_line_walk_next(wp_line_walk *w, const wp_line *line, wp_line_walk_px_fn px);
+/* Where the lines end: past the last line, or a row it was in. */
+i32  wp_line_walk_end(wp_line_walk *w);
+
+/* A table row's height as the walker will find it: its tallest cell's
+   converted line heights, summed. `para_index` is the row's first
+   paragraph. For a painter clearing the row, or ruling its cells, at its
+   first line. */
+i32  wp_table_row_extent(const wp_section *sec, u32 para_index, wp_line_walk_px_fn px);
 
 #endif /* WP_PAGEVIEW_H */

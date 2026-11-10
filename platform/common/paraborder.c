@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#include <stddef.h>
 #include "paraborder.h"
 
 /* A rule's pixels: at least one, so a hairline never vanishes. */
@@ -45,4 +46,35 @@ void wp_border_draw_slice(plat_gc *gc, const wp_border_slice *s,
     if (s->sides & WP_BORDER_BOTTOM) draw_rules(gc, WP_TRUE, y1, -1, x0, x1, ty, ry, dbl);
     if (s->sides & WP_BORDER_LEFT)   draw_rules(gc, WP_FALSE, x0, 1, y0, y1, tx, rx, dbl);
     if (s->sides & WP_BORDER_RIGHT)  draw_rules(gc, WP_FALSE, x1, -1, y0, y1, tx, rx, dbl);
+}
+
+void wp_border_draw_row(plat_gc *gc, const wp_table_row *row, i32 row_h_twips, wp_bool after_row,
+                        i32 col_x_px, i32 row_top_px,
+                        wp_border_px_fn x_px, wp_border_px_fn y_px,
+                        i32 min_x_px, i32 max_x_px)
+{
+    wp_para_style ps;
+    u32 k;
+
+    if (row == NULL) return;
+    /* One rule's thickness, as a paragraph border of the row's kind. */
+    ps.border_kind = row->border_kind;
+    ps.border_width = row->border_width;
+    for (k = 0; k < row->cell_count && k < WP_MAX_CELLS; k++) {
+        wp_border_slice s;
+
+        if (row->cell_borders[k] == 0 && row->cell_shading[k] == 0) continue;
+        wp_table_cell_edges(row, k, &s.x0, &s.x1);
+        s.top = 0;
+        s.bottom = row_h_twips;
+        s.rule = row->border_width > 0 ? row->border_width : WP_BORDER_DEFAULT_WIDTH;
+        s.thickness = wp_border_thickness(&ps);
+        s.kind = row->border_kind;
+        s.sides = row->cell_borders[k];
+        if (k > 0 && (row->cell_borders[k - 1] & WP_BORDER_RIGHT)) s.sides = (u8)(s.sides & ~WP_BORDER_LEFT);
+        if (after_row) s.sides = (u8)(s.sides & ~WP_BORDER_TOP);
+        s.shading = row->cell_shading[k];
+        s._pad = 0;
+        wp_border_draw_slice(gc, &s, col_x_px, row_top_px, x_px, y_px, min_x_px, max_x_px);
+    }
 }
