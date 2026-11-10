@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "keymap.h"
+#include "table.h"
 #include "app_ctx.h"
 #include "actions.h"
 #include "pageview.h"
@@ -453,6 +454,32 @@ wp_keymap_outcome wp_keymap_feed_key(wp_app_ctx *ctx, wp_key_event ev, u8 raw_sh
         wp_viewport_page(&ctx->view, ctx->doc, wp_keymap_cursor(ctx),
                          (wp_bool)(ev.special == (u16)WP_KEY_PAGE_DOWN));
         return outcome;
+    }
+
+    /* Tab in a table moves between cells, in every scheme -- the one
+       thing a Tab means there in every word processor: the next cell
+       (a new row past the table's last), Shift+Tab the one before. Out
+       of a table it is the scheme's. */
+    if ((ev.special == (u16)WP_KEY_TAB || ev.codepoint == '\t') &&
+        (ev.mods & ~(u8)WP_MOD_SHIFT) == 0 && ctx->doc != NULL && ctx->journal != NULL) {
+        wp_pos *cur = wp_keymap_cursor(ctx);
+        const wp_section *sec = (cur->section < ctx->doc->section_count) ?
+                                &ctx->doc->sections[cur->section] : NULL;
+
+        if (sec != NULL && cur->paragraph < sec->para_count && sec->paras[cur->paragraph].trow != 0) {
+            wp_keymap_outcome outcome;
+            wp_bool back = (wp_bool)((ev.mods & (u8)WP_MOD_SHIFT) != 0);
+            wp_pos to;
+
+            memset(&outcome, 0, sizeof(outcome));
+            outcome.kind = (u8)WP_KEYMAP_RESULT_NONE;
+            if (wp_table_cell_move(ctx->doc, cur, back, &to)) {
+                *cur = to;
+            } else if (!back && wp_edit_table_insert_row(ctx->doc, ctx->journal, *cur, &to) == WP_OK) {
+                *cur = to;
+            }
+            return outcome;
+        }
     }
 
     switch ((wp_keymap_id)ctx->keymap_id) {

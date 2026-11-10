@@ -99,6 +99,10 @@ typedef enum {
        or top and bottom; single, double or thick -- and shading behind
        them. A box over several paragraphs is one box (docmodel.h). */
     WP_ACT_FORMAT_BORDERS,
+    /* Format > Table...: insert a table (columns, then rows), or insert
+       or delete a row or a column at the caret's cell (table.h). Tab and
+       Shift+Tab move between cells (keymap.c). */
+    WP_ACT_FORMAT_TABLE,
     WP_ACT_COUNT
 } wp_action_id;
 

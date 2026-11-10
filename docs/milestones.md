@@ -2146,9 +2146,20 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       the cell by x; Enter in a cell keeps both halves in it; Backspace
       at a cell's start joins nothing. Seen on the ST (screen and
       SpeedoGDOS print), Amiga and DOS; the Mac builds.
-      [ ] Stage 2: Tab and Shift+Tab between cells, Insert Table, rows
-      and columns. [ ] Stage 3: format_prn's grid -- until then a table
-      prints there as its cells one after another.
+      [x] Stage 2 (2026-11-09): Tab and Shift+Tab move between cells in
+      every scheme (keymap.c, ahead of the schemes; Shift reaches Tab on
+      every machine now, DOS through the BIOS's back-tab), Tab past the
+      last cell adds a row. Format > Table... (a ruler button, the Amiga
+      and Mac Format menus, Alt+T on DOS): insert a table, insert or
+      delete a row or a column (engine/src/table.c), each one undo step
+      over three new journaled pieces -- a paragraph's table fields
+      (WP_OP_SET_TABLE) and an empty paragraph put in or taken out
+      (WP_OP_INSERT_PARA, WP_OP_REMOVE_PARA). The ruler bar narrows its
+      gaps rather than drop a button where they would not fit (the ST).
+      Seen on DOS: a table inserted with Alt+T, typed across with Tab,
+      Shift+Tab back.
+      [ ] Stage 3: format_prn's grid -- until then a table prints there
+      as its cells one after another.
 - [ ] T16.3 Frames. A text box placed at a fixed spot on the page --
       a form's labelled fields, a sidebar -- with T16.1's borders. First
       cut: frames sit at their page position and the body text does not

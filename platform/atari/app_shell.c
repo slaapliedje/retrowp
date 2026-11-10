@@ -4052,7 +4052,10 @@ static wp_key_event atari_translate_key(short key, short kstate)
     switch (scan) {
     case 0x01: ev.special = (u16)WP_KEY_ESCAPE; goto done;
     case 0x1C: case 0x72: ev.special = (u16)WP_KEY_ENTER; goto done; /* main + numpad Enter */
-    case 0x0F: ev.special = (u16)WP_KEY_TAB; goto done;
+    case 0x0F:   /* Shift+Tab: the previous table cell (keymap.c) */
+        ev.special = (u16)WP_KEY_TAB;
+        if (shift) ev.mods = (u8)WP_MOD_SHIFT;
+        goto done;
     case 0x0E: ev.special = (u16)WP_KEY_BACKSPACE; goto done;
     case 0x53: ev.special = (u16)WP_KEY_DELETE; goto done;
     case 0x48: ev.special = (u16)(shift ? WP_KEY_PAGE_UP : WP_KEY_UP); goto done;
@@ -4568,6 +4571,7 @@ static wp_bool action_exempt_from_menu(wp_action_id id)
     case WP_ACT_PAGE_SETUP:
     case WP_ACT_SECTION_BREAK:
     case WP_ACT_FORMAT_BORDERS:
+    case WP_ACT_FORMAT_TABLE:
         return WP_TRUE;
     /* Ctrl+G only, by design -- see actions.c's own comment on why this
        one stays off the hand-built OBJECT tree. */

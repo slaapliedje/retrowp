@@ -299,7 +299,13 @@ static wp_key_event dos_translate_key(u8 ascii, u8 scan, u8 shift_status)
     switch (scan) {
     case 0x01: ev.special = (u16)WP_KEY_ESCAPE; goto done;
     case 0x1C: ev.special = (u16)WP_KEY_ENTER; goto done;
-    case 0x0F: ev.special = (u16)WP_KEY_TAB; goto done;
+    case 0x0F:   /* Shift+Tab: the previous table cell (keymap.c) */
+        ev.special = (u16)WP_KEY_TAB;
+        /* The BIOS's back-tab: Tab's scan code with no character (plain
+           Tab brings 9) -- more reliable than the shift state, which a
+           quick Shift may already have let go of by the time it is read. */
+        if (ascii == 0 || (shift_status & 0x03)) ev.mods = (u8)WP_MOD_SHIFT;
+        goto done;
     case 0x0E: ev.special = (u16)WP_KEY_BACKSPACE; goto done;
     case 0x53: ev.special = (u16)WP_KEY_DELETE; goto done;
     case 0x48: ev.special = (u16)WP_KEY_UP; goto done;
@@ -1461,8 +1467,9 @@ static wp_bool dos_dispatch_key(void)
        eighty columns. An Alt+letter reaches us as scan code alone, which
        no keymap here reads; R is not one of Emacs's meta keys (b, f, d,
        w, <, >, {, }, %), should Alt ever be wired to meta. */
-    if (!g_help_active && ascii == 0 && scan == 0x13 && (shift & 0x08)) {
-        const wp_action *act = wp_action_find(WP_ACT_FORMAT_BORDERS);
+    if (!g_help_active && ascii == 0 && (scan == 0x13 || scan == 0x14) && (shift & 0x08)) {
+        /* Alt+T, Table..., likewise. */
+        const wp_action *act = wp_action_find(scan == 0x13 ? WP_ACT_FORMAT_BORDERS : WP_ACT_FORMAT_TABLE);
         if (g_ctx.doc_loaded && act != NULL && act->handler != NULL) {
             (void)act->handler(&g_ctx);
             redraw_screen();

@@ -177,6 +177,12 @@ the mouse. Its buttons, left to right:
               on the Amiga and Mac. DOS, with no room for the
               button, sets them with Alt+R, and shows them as box
               characters with a blue background for shading)
+  Table (a table after the paragraph you are in -- 2, 3, 4 or 6
+              columns, 1, 2, 4 or 8 rows -- or, in a table, a row
+              or a column put in after yours or yours taken out.
+              Tab moves to the next cell, adding a row after the
+              last; Shift+Tab to the one before. Enter makes a new
+              paragraph in the same cell. On DOS: Alt+T)
 
 Font lists the typefaces this machine has: the GDOS fonts on
 the ST, the fonts in FONTS: on the Amiga, the installed fonts on

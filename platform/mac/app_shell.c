@@ -810,7 +810,10 @@ static void translate_mac_key(EventRecord *e, wp_key_event *out)
     switch (keyCode) {
     case 0x24: out->special = (u16)WP_KEY_ENTER;     return; /* Return */
     case 0x4C: out->special = (u16)WP_KEY_ENTER;     return; /* Enter (keypad) */
-    case 0x30: out->special = (u16)WP_KEY_TAB;       return;
+    case 0x30:   /* Shift+Tab: the previous table cell (keymap.c) */
+        out->special = (u16)WP_KEY_TAB;
+        if (e->modifiers & shiftKey) out->mods = (u8)WP_MOD_SHIFT;
+        return;
     case 0x33: out->special = (u16)WP_KEY_BACKSPACE; return;
     case 0x35: out->special = (u16)WP_KEY_ESCAPE;    return;
     case 0x7B: out->special = (u16)WP_KEY_LEFT;      return;

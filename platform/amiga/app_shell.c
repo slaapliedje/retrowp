@@ -860,7 +860,10 @@ static void translate_rawkey(struct IntuiMessage *imsg, wp_key_event *out)
 
     switch (code) {
     case 0x41: out->special = (u16)WP_KEY_BACKSPACE; goto done;
-    case 0x42: out->special = (u16)WP_KEY_TAB; goto done;
+    case 0x42:   /* Shift+Tab: the previous table cell (keymap.c) */
+        out->special = (u16)WP_KEY_TAB;
+        if (shift) out->mods = (u8)WP_MOD_SHIFT;
+        goto done;
     case 0x44: out->special = (u16)WP_KEY_ENTER; goto done;
     case 0x45: out->special = (u16)WP_KEY_ESCAPE; goto done;
     case 0x46: out->special = (u16)WP_KEY_DELETE; goto done;

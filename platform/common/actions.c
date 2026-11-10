@@ -9,6 +9,7 @@
 #include "format_prn.h"
 #include "config.h"
 #include "layout.h"
+#include "table.h"
 #include "offload.h"
 #include "keymap.h"
 #include "editing.h"
@@ -655,6 +656,45 @@ static wp_status act_format_borders(wp_app_ctx *ctx)
     }
     if (changed) wp_document_mark_modified(ctx->doc);
     return WP_OK;
+}
+
+/* ---- Tables (Format > Table...) -------------------------------------- */
+
+static wp_status act_format_table(wp_app_ctx *ctx)
+{
+    static const char *const what[] = { "Insert table", "Insert row", "Delete row",
+                                        "Insert column", "Delete column" };
+    static const char *const col_labels[] = { "2 columns", "3 columns", "4 columns", "6 columns" };
+    static const u32 col_n[] = { 2, 3, 4, 6 };
+    static const char *const row_labels[] = { "1 row", "2 rows", "4 rows", "8 rows" };
+    static const u32 row_n[] = { 1, 2, 4, 8 };
+    wp_pos *cur, out;
+    const wp_section *sec;
+    wp_bool in_table;
+    u32 pick = 0, cols = 1, rows = 1;
+    wp_status st = WP_OK;
+
+    if (!ctx->doc_loaded || ctx->journal == NULL) return WP_OK;
+    cur = wp_keymap_cursor(ctx);
+    sec = wp_document_section_get(ctx->doc, cur->section);
+    if (sec == NULL || cur->paragraph >= sec->para_count) return WP_OK;
+    in_table = (wp_bool)(sec->paras[cur->paragraph].trow != 0);
+    if (!choose_one(ctx, "Table", what, in_table ? 5u : 1u, 0, &pick)) return WP_OK;
+    out = *cur;
+    switch (pick) {
+    case 0:
+        if (!choose_one(ctx, "Columns", col_labels, 4, 1, &cols)) return WP_OK;
+        if (!choose_one(ctx, "Rows", row_labels, 4, 1, &rows)) return WP_OK;
+        st = wp_edit_table_insert(ctx->doc, ctx->journal, *cur, row_n[rows], col_n[cols],
+                                  wp_section_column_twips(sec), &out);
+        break;
+    case 1: st = wp_edit_table_insert_row(ctx->doc, ctx->journal, *cur, &out); break;
+    case 2: st = wp_edit_table_delete_row(ctx->doc, ctx->journal, *cur, &out); break;
+    case 3: st = wp_edit_table_insert_column(ctx->doc, ctx->journal, *cur, &out); break;
+    default: st = wp_edit_table_delete_column(ctx->doc, ctx->journal, *cur, &out); break;
+    }
+    if (st == WP_OK) *cur = out;
+    return st;
 }
 
 static void toggle_page_break(wp_para_style *ps, i32 unused)
@@ -1480,7 +1520,8 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_PAGE_SETUP,        WP_MENU_FILE,   "Page Setup...",  0,        0,    act_page_setup, NULL },
     { WP_ACT_SECTION_BREAK,     WP_MENU_FORMAT, "Section Break",  0,        0,    act_section_break, NULL },
     { WP_ACT_FILE_PRINT,        WP_MENU_FILE,   "Print...",       "Ctrl+P", 0x10, wp_action_file_print, NULL },
-    { WP_ACT_FORMAT_BORDERS,    WP_MENU_FORMAT, "Borders...",     0,        0,    act_format_borders, NULL }
+    { WP_ACT_FORMAT_BORDERS,    WP_MENU_FORMAT, "Borders...",     0,        0,    act_format_borders, NULL },
+    { WP_ACT_FORMAT_TABLE,      WP_MENU_FORMAT, "Table...",       0,        0,    act_format_table, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)
