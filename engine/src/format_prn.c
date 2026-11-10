@@ -34,6 +34,12 @@ typedef struct {
     u32     pending;         /* blank lines owed to spacing */
     i32     space_acc;       /* spacing in twips not yet a whole line */
 
+    /* The paragraph being printed's border, in the grid: its rules'
+       columns and the printer bytes they are drawn with. */
+    u8      bsides;          /* WP_BORDER_*; 0 = none */
+    u32     bl, br;          /* the left and right rules' columns */
+    u8      rv, rh, rtl, rtr, rbl, rbr;   /* vertical, horizontal, corners */
+
     /* Working lines, here rather than on the stack (the Amiga's is 4 KB).
        Each text byte has a style byte beside it (PRN_A_*). */
     u8 lb[PRN_MAX_COLS + 1], la[PRN_MAX_COLS + 1];  /* one laid-out line */
@@ -589,6 +595,77 @@ static u32 tab_col(const prn_state *s, const wp_para_style *ps, u32 col)
     return (col / step + 1u) * step;
 }
 
+/* ---- Borders ---------------------------------------------------------
+
+   A paragraph's border drawn in the grid, as a word processor drew one
+   on a dot-matrix printer: its left and right rules a column clear of
+   the text on every line, the top and bottom rules lines of their own.
+   Code page 437's box-drawing characters where the printer takes them
+   (plain and Epson on the ST and DOS; PCL's PC-8 set is the same), else
+   + - | (= for double, # for thick). Not printed: shading, and the side
+   rules on blank lines of spacing inside a box of several paragraphs. */
+static void border_begin(prn_state *s, const wp_para_style *ps)
+{
+    static const u8 box437[3][6] = {
+        { 0xB3, 0xC4, 0xDA, 0xBF, 0xC0, 0xD9 },   /* single */
+        { 0xBA, 0xCD, 0xC9, 0xBB, 0xC8, 0xBC },   /* double */
+        { 0xDB, 0xDB, 0xDB, 0xDB, 0xDB, 0xDB }    /* thick: full blocks */
+    };
+    static const u8 boxascii[3][6] = {
+        { '|', '-', '+', '+', '+', '+' },
+        { '|', '=', '+', '+', '+', '+' },
+        { '#', '#', '#', '#', '#', '#' }
+    };
+    const u8 *r;
+    u32 left, right, limit, gap;
+    u8 k;
+
+    s->bsides = ps != NULL ? ps->border_sides : 0;
+    if (s->bsides == 0) return;
+    k = ps->border_kind < 3 ? ps->border_kind : 0;
+    r = s->opt->codepage == 437 ? box437[k] : boxascii[k];
+    s->rv = r[0]; s->rh = r[1]; s->rtl = r[2]; s->rtr = r[3]; s->rbl = r[4]; s->rbr = r[5];
+    left = twips_to(ps->indent_left, s->cpi);
+    right = twips_to(ps->indent_right, s->cpi);
+    limit = s->cols > right ? s->cols - right : 1;
+    gap = twips_to(ps->border_space, s->cpi);
+    s->bl = left > gap ? left - gap - 1u : 0;
+    s->br = limit + gap;
+    if (s->br > PRN_MAX_COLS - 1u) s->br = PRN_MAX_COLS - 1u;
+}
+
+/* A line of its own across the box: the top rule or the bottom. */
+static void border_rule_line(prn_state *s, wp_bool top)
+{
+    u32 c;
+
+    memset(s->lb, ' ', s->bl);
+    memset(s->la, 0, s->br + 1u);
+    for (c = s->bl; c <= s->br; c++) s->lb[c] = s->rh;
+    if (s->bsides & WP_BORDER_LEFT) s->lb[s->bl] = top ? s->rtl : s->rbl;
+    if (s->bsides & WP_BORDER_RIGHT) s->lb[s->br] = top ? s->rtr : s->rbr;
+    emit_text_line(s, s->lb, s->la, s->br + 1u);
+}
+
+/* The side rules on a text line in lb[0..*len), which grows to reach
+   the right rule. */
+static void border_sides_on(prn_state *s, u32 *len)
+{
+    if (s->bsides & WP_BORDER_LEFT) {
+        if (s->bl < *len && s->lb[s->bl] != ' ') return;   /* no room left of the text */
+        if (s->bl >= *len) { memset(s->lb + *len, ' ', s->bl + 1u - *len); memset(s->la + *len, 0, s->bl + 1u - *len); *len = s->bl + 1u; }
+        s->lb[s->bl] = s->rv;
+    }
+    if (s->bsides & WP_BORDER_RIGHT) {
+        if (s->br >= *len) {
+            memset(s->lb + *len, ' ', s->br - *len);
+            memset(s->la + *len, 0, s->br + 1u - *len);
+            *len = s->br + 1u;
+        }
+        s->lb[s->br] = s->rv;
+    }
+}
+
 /* One line ready in lb[0..len): aligned, then sent. */
 static void finish_line(prn_state *s, const wp_para_style *ps, u32 start,
                         u32 len, u32 limit, wp_bool last, wp_bool has_tab)
@@ -607,6 +684,7 @@ static void finish_line(prn_state *s, const wp_para_style *ps, u32 start,
     } else if (!has_tab && !last && align == WP_ALIGN_JUSTIFY && len > start) {
         len = start + justify_line(s, start, len - start, limit - start);
     }
+    if (s->bsides & (WP_BORDER_LEFT | WP_BORDER_RIGHT)) border_sides_on(s, &len);
     emit_text_line(s, s->lb, s->la, len);
 }
 
@@ -642,7 +720,9 @@ static void print_text(prn_state *s, const wp_para_style *ps, const u8 *text,
     col = start;
 
     if (len == 0) {
-        emit_text_line(s, s->lb, s->la, 0);
+        u32 n = 0;
+        if (s->bsides & (WP_BORDER_LEFT | WP_BORDER_RIGHT)) border_sides_on(s, &n);
+        emit_text_line(s, s->lb, s->la, n);
         return;
     }
 
@@ -727,7 +807,11 @@ static void print_paragraph(prn_state *s, const wp_paragraph *para, u8 *buf, u8 
                              run->text.length, buf + n, abuf + n, a);
         }
     }
+    border_begin(s, ps);
+    if (s->bsides & WP_BORDER_TOP) border_rule_line(s, WP_TRUE);
     print_text(s, ps, buf, abuf, n);
+    if (s->bsides & WP_BORDER_BOTTOM) border_rule_line(s, WP_FALSE);
+    s->bsides = 0;
     if (ps != NULL) add_space(s, ps->space_after);
 }
 

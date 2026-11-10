@@ -98,6 +98,20 @@ laid out again with the printer's own metrics (retroplat's
 `atari_metrics_printer`), each line drawn where that layout puts it, the
 header and footer by the same `|` and `#` rules as below.
 
+## Borders
+
+A paragraph's border prints in the grid, as a word processor printed one
+on a dot-matrix printer: its left and right rules a column clear of the
+text on every line (`border_space` adds columns between), its top and
+bottom rules as lines of their own. Where the printer takes code page
+437 -- plain text and Epson on the ST and DOS, and PCL, whose PC-8 set
+is the same -- they are box-drawing characters (single, double, and full
+blocks for thick); elsewhere, the Amiga's Latin-1 and PostScript's
+Courier, `+ - |`, with `=` for double and `#` for thick. Shading is not
+printed, and the blank lines of spacing inside a box of several
+paragraphs carry no side rules. A rule with no room left of the text
+(an unindented paragraph) is left out rather than printed over it.
+
 ## Headers and footers
 
 A section's header prints on the middle line of the top margin and its

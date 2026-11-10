@@ -5,6 +5,7 @@
 #include "pageview.h"
 #include "layout.h"
 #include "strpool.h"
+#include "paraborder.h"
 
 static void mark_all_dirty(wp_document *doc)
 {
@@ -315,6 +316,15 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
                     frame_for(&fr, dev, sec);
                     begin_page(doc, &fr, sec, pages);
                     y = sec->margin_top;
+                }
+                {   /* the paragraph's border and shading, under its text */
+                    wp_border_slice bs;
+                    if (wp_line_border_slice(doc, para, line, (wp_bool)(li == 0),
+                                             (wp_bool)(li == layout->line_count - 1),
+                                             layout->wrap_twips, &bs)) {
+                        wp_border_draw_slice(dev->gc, &bs, at_x(&fr, sec->margin_left), at_y(&fr, y),
+                                             dev->x_px, dev->y_px, -32000, 32000);
+                    }
                 }
                 if (para->kind == (u8)WP_PARA_IMAGE) {
                     const wp_image_desc *img = wp_document_image_get(doc, para->image);

@@ -442,3 +442,32 @@ void test_format_prn_postscript_file(void)
     ASSERT_EQ_U32(pages, 1);
     wp_document_free(&doc);
 }
+
+/* A boxed paragraph on a 20-column page, indented two columns each side
+   with no spacing to the rules: the left rule in column 1, the right in
+   column 18 (the text column's end), the top and bottom rules lines of
+   their own. Code page 437 draws them in box-drawing characters; plain
+   ASCII in + - |. Lines end LF (crlf off). */
+void test_format_prn_border_box(void)
+{
+    wp_document doc;
+    prn_sink k;
+    u32 pages;
+    wp_para_style ps;
+
+    make_doc(&doc, "Alpha\n", 20, 10, 0, 0);
+    ps = base_style(&doc);
+    ps.indent_left = ps.indent_right = 288;
+    ps.border_sides = WP_BORDER_BOX;
+    set_para_style(&doc, 0, &ps);
+
+    print_doc(&doc, 437, &k, &pages);
+    assert_out(&k, " \xDA\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xBF\n"
+                   " \xB3" "Alpha           \xB3\n"
+                   " \xC0\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xC4\xD9\n\f");
+    print_doc(&doc, 0, &k, &pages);
+    assert_out(&k, " +----------------+\n"
+                   " |Alpha           |\n"
+                   " +----------------+\n\f");
+    wp_document_free(&doc);
+}
