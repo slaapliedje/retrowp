@@ -191,6 +191,13 @@ $(GENERATED)/keycards/index.html: host/tools/gen_keycard.py docs/keymaps.md plat
 	python3 host/tools/gen_keycard.py . $(GENERATED)/keycards
 
 .PHONY: help-guide
+# The bundled clipart (T16.5): clipart/*.WMF and CLIPART.TXT, drawn by
+# clipart/tools/make_clipart.py. The results are committed; run this
+# after changing a design.
+.PHONY: clipart
+clipart:
+	python3 clipart/tools/make_clipart.py
+
 help-guide: $(GENERATED)/retrowp.guide
 
 test: $(BIN)/host_tests $(BIN)/mock_gateway

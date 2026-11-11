@@ -2209,7 +2209,7 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       drawings as paths. The heading through the gateway on screen and
       paper: the host test drives the real gateway; the ST printed the
       tiger and the 747 through SpeedoGDOS.
-- [ ] T16.5 Clipart. Bitmap clipart opened directly on each machine, no
+- [x] T16.5 Clipart. Bitmap clipart opened directly on each machine, no
       gateway needed: GEM .IMG (ST), IFF ILBM (Amiga), MacPaint/PICT
       (Mac), PCX/BMP (DOS), converted to the model's indexed image. A
       small bundled set of our own chapter headings, borders and
@@ -2225,7 +2225,10 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       XIMG, an ILBM game screen, Calamus's BMP, cc65's PCX; an RTF of
       two shown on the Amiga. DOS keeps bitmaps on the gateway (its
       64 KB blocks; retroplat's mem_alloc now refuses more rather than
-      corrupting). Still to come: the bundled set and Insert Clipart.
+      corrupting). Stage 2 done the next day: 24 pieces of our own
+      (clipart/, drawn by clipart/tools/make_clipart.py, as metafiles
+      every machine reads) and Tools > Insert Clipart, category then
+      piece; a ruler bar star on the Atari, Alt+K on DOS.
 - [ ] T16.6 The worked example: an original character sheet (stat grid,
       skill table, boxed notes, ruled write-in lines, decorated title)
       kept as a fixture, opened, screenshotted and printed on every

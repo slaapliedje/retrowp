@@ -84,6 +84,12 @@ typedef struct wp_app_ctx {
        NULL means the link is whatever offload_available() says. */
     wp_bool (*ensure_offload)(void);
 
+    /* Where the bundled clipart lives (T16.5): a path prefix the
+       backend's file names go after -- "CLIPART\\" on the ST and DOS,
+       "PROGDIR:CLIPART/" on the Amiga, ":CLIPART:" on the Mac. NULL: no
+       clipart here. */
+    const char *clipart_dir;
+
     /* The machine's own printer, as a file to write -- the ST's "PRN:",
        the Amiga's "PRT:", DOS's "PRN" -- and the code page it reads
        (codepage.h; 0 is plain ASCII). NULL when there is none to print

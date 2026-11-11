@@ -103,6 +103,9 @@ typedef enum {
        or delete a row or a column at the caret's cell (table.h). Tab and
        Shift+Tab move between cells (keymap.c). */
     WP_ACT_FORMAT_TABLE,
+    /* T16.5: Tools > Insert Clipart -- the bundled set (clipart/CLIPART.TXT),
+       chosen by category and piece, inserted as a drawing. */
+    WP_ACT_TOOLS_INSERTCLIPART,
     WP_ACT_COUNT
 } wp_action_id;
 

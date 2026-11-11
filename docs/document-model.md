@@ -379,6 +379,21 @@ the backend's pixels-to-twips pair -- the same limits each backend's
 Insert Image asks the gateway for (the Mac asks for 16 colours here,
 since its picture painter dithers them).
 
+### The bundled clipart (T16.5)
+
+clipart/ holds RetroWP's own pieces -- rules, corners, frames,
+headings, flourishes, game symbols -- as small placeable metafiles,
+with CLIPART.TXT listing them ("Category|Title|FILE.WMF"). They are
+drawn by geometry in clipart/tools/make_clipart.py and converted by the
+gateway's SVG reader; the results are committed (`make clipart` makes
+them again, byte for byte the same). Tools > Insert Clipart
+(`WP_ACT_TOOLS_INSERTCLIPART`) reads the list from the backend's
+`clipart_dir` (app_ctx.h), asks for a category and then a piece --
+two choosers, since the Atari's takes nine choices -- and inserts the
+file through Insert Image's own path. The Atari reaches it by a ruler
+bar button (its menu tree is hand-built), DOS by Alt+K, the Amiga and
+the Mac from their Tools menus.
+
 ## Drawings (M16, T16.4)
 
 A drawing is scalable art -- a heading's flourish, a form's rules, a

@@ -454,6 +454,8 @@ void test_bitmapfile_bmp(void);
 void test_bitmapfile_macpaint(void);
 void test_bitmapfile_detect(void);
 void test_actions_insert_bitmap_file(void);
+void test_actions_insert_clipart(void);
+void test_drawing_thin_pen_keeps_a_line(void);
 void test_actions_insert_svg_through_gateway(void);
 void test_rtf_borders_round_trip(void);
 void test_layout_geometry_border_middle_and_double(void);
@@ -1142,6 +1144,8 @@ static const test_case g_cases[] = {
     { "bitmapfile_macpaint", test_bitmapfile_macpaint },
     { "bitmapfile_detect", test_bitmapfile_detect },
     { "actions_insert_bitmap_file", test_actions_insert_bitmap_file },
+    { "actions_insert_clipart", test_actions_insert_clipart },
+    { "drawing_thin_pen_keeps_a_line", test_drawing_thin_pen_keeps_a_line },
     { "actions_insert_svg_through_gateway", test_actions_insert_svg_through_gateway },
     { "rtf_borders_round_trip", test_rtf_borders_round_trip },
     { "layout_geometry_border_middle_and_double", test_layout_geometry_border_middle_and_double },

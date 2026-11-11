@@ -7,6 +7,14 @@ The full licence text accompanies this file as COPYING.
 This binary also contains, or is built from, the following:
 
 
+The CLIPART folder
+------------------
+RetroWP's own clipart (the .WMF files and CLIPART.TXT) is dedicated to
+the public domain -- CC0 1.0 where a dedication is not possible -- so a
+piece put in a document carries no conditions.  clipart/README.txt has
+the wording.
+
+
 retroplat — the platform seam
 -----------------------------
 LGPL-2.1-or-later.  Source: https://github.com/slaapliedje/retroplat

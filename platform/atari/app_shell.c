@@ -4615,6 +4615,7 @@ static wp_bool action_exempt_from_menu(wp_action_id id)
     case WP_ACT_SECTION_BREAK:
     case WP_ACT_FORMAT_BORDERS:
     case WP_ACT_FORMAT_TABLE:
+    case WP_ACT_TOOLS_INSERTCLIPART:   /* on the ruler bar too, the same way */
         return WP_TRUE;
     /* Ctrl+G only, by design -- see actions.c's own comment on why this
        one stays off the hand-built OBJECT tree. */
@@ -5216,6 +5217,7 @@ void app_shell_run(void)
            doesn't run until load_sample_document below). */
         wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_doc, &g_journal);
         g_ctx.ensure_offload = ensure_offload; /* ODT/PDF in the shared file flow */
+        g_ctx.clipart_dir = "CLIPART\\";   /* the bundled clipart, beside the program */
 #ifndef GEM4XE_APP_GEM_H
         /* GEMDOS's printer, the Centronics port: an Epson-style printer
            takes the PC character set, which the ST's own largely is.

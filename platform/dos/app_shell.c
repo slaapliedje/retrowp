@@ -1504,9 +1504,11 @@ static wp_bool dos_dispatch_key(void)
        eighty columns. An Alt+letter reaches us as scan code alone, which
        no keymap here reads; R is not one of Emacs's meta keys (b, f, d,
        w, <, >, {, }, %), should Alt ever be wired to meta. */
-    if (!g_help_active && ascii == 0 && (scan == 0x13 || scan == 0x14) && (shift & 0x08)) {
-        /* Alt+T, Table..., likewise. */
-        const wp_action *act = wp_action_find(scan == 0x13 ? WP_ACT_FORMAT_BORDERS : WP_ACT_FORMAT_TABLE);
+    if (!g_help_active && ascii == 0 && (scan == 0x13 || scan == 0x14 || scan == 0x25) && (shift & 0x08)) {
+        /* Alt+T, Table..., likewise; Alt+K, Insert Clipart (not an Emacs
+           meta key either). */
+        const wp_action *act = wp_action_find(scan == 0x13 ? WP_ACT_FORMAT_BORDERS :
+                                              scan == 0x14 ? WP_ACT_FORMAT_TABLE : WP_ACT_TOOLS_INSERTCLIPART);
         if (g_ctx.doc_loaded && act != NULL && act->handler != NULL) {
             (void)act->handler(&g_ctx);
             redraw_screen();
@@ -1660,6 +1662,7 @@ void app_shell_run(void)
         wp_config_load(WP_DOS_CONFIG_PATH, &cfg);
         wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_doc, &g_journal);
         g_ctx.ensure_offload = ensure_offload; /* ODT/PDF in the shared file flow */
+        g_ctx.clipart_dir = "CLIPART\\";   /* the bundled clipart, beside the program */
         /* DOS's printer device, LPT1 unless MODE says otherwise; a
            printer on a PC takes the PC's own character set. */
         g_ctx.printer_path = "PRN";

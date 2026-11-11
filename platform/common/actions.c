@@ -570,10 +570,11 @@ static void para_range(wp_app_ctx *ctx, wp_pos *from, wp_pos *to)
 static wp_bool choose_one(wp_app_ctx *ctx, const char *title, const char *const *labels,
                           u32 count, u32 dflt, u32 *out)
 {
-    const u8 *ptrs[5];
-    u32 lens[5], i;
+    const u8 *ptrs[9];
+    u32 lens[9], i;
     wp_bool cancelled = WP_TRUE;
 
+    if (count > 9) count = 9;             /* the most a backend's chooser takes */
     for (i = 0; i < count; i++) {
         ptrs[i] = (const u8 *)labels[i];
         lens[i] = (u32)strlen(labels[i]);
@@ -581,6 +582,78 @@ static wp_bool choose_one(wp_app_ctx *ctx, const char *title, const char *const 
     return (wp_bool)(plat_dialog_choice(ctx->window, (const u8 *)title, (u32)strlen(title),
                                         ptrs, lens, count, dflt, &cancelled, out) == WP_OK &&
                      !cancelled);
+}
+
+/* Tools > Insert Clipart (T16.5): the bundled set's index, one piece a
+   line -- "Category|Title|FILE.WMF" -- read from the backend's clipart
+   folder; a category chosen, then a piece in it, and that file inserted
+   as a drawing through Insert Image's own path. */
+#define WP_CLIPART_MAX     64
+#define WP_CLIPART_TEXT    6144u
+
+static wp_status act_insert_clipart(wp_app_ctx *ctx)
+{
+    const char *cat[WP_CLIPART_MAX], *title[WP_CLIPART_MAX], *file[WP_CLIPART_MAX];
+    const char *cats[9], *items[9];
+    u32 item_at[9];
+    char path[160];
+    char *text;
+    plat_file *f;
+    u32 got = 0, n = 0, ncat = 0, nitem = 0, i, c, k;
+    size_t dl;
+
+    if (!ctx->doc_loaded) return WP_OK;
+    if (ctx->clipart_dir == NULL) { wp_action_tell(ctx, "No clipart on this machine"); return WP_OK; }
+    dl = strlen(ctx->clipart_dir);
+    if (dl + 13 >= sizeof(path)) return WP_ERR;
+    memcpy(path, ctx->clipart_dir, dl);
+    memcpy(path + dl, "CLIPART.TXT", 12);
+    if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) {
+        wp_action_tell(ctx, "The CLIPART folder isn't beside RetroWP");
+        return WP_OK;
+    }
+    text = (char *)mem_alloc(WP_CLIPART_TEXT + 1u);
+    if (text == NULL) { plat_file_close(f); return WP_NOMEM; }
+    if (plat_file_read(f, (u8 *)text, WP_CLIPART_TEXT, &got) != WP_OK) got = 0;
+    plat_file_close(f);
+    text[got] = '\0';
+
+    /* Lines into their three fields, in place. */
+    {
+        char *p = text;
+        while (*p != '\0' && n < WP_CLIPART_MAX) {
+            char *line = p, *a, *b;
+            while (*p != '\0' && *p != '\n') p++;
+            if (*p == '\n') *p++ = '\0';
+            if (p > line && p[-1] == '\r') p[-1] = '\0';
+            for (a = line; *a && *a != '|'; a++) {}
+            if (*a != '|') continue;
+            *a++ = '\0';
+            for (b = a; *b && *b != '|'; b++) {}
+            if (*b != '|') continue;
+            *b++ = '\0';
+            { char *e = b; while (*e && *e != '\r') e++; *e = '\0'; }
+            if (line[0] == '\0' || a[0] == '\0' || b[0] == '\0') continue;
+            cat[n] = line; title[n] = a; file[n] = b; n++;
+        }
+    }
+    for (i = 0; i < n && ncat < 9; i++) {
+        wp_bool seen = WP_FALSE;
+        for (c = 0; c < ncat; c++) if (strcmp(cats[c], cat[i]) == 0) seen = WP_TRUE;
+        if (!seen) cats[ncat++] = cat[i];
+    }
+    if (ncat == 0) { mem_free(text); wp_action_tell(ctx, "CLIPART.TXT lists no clipart"); return WP_OK; }
+    if (!choose_one(ctx, "Insert Clipart", cats, ncat, 0, &c)) { mem_free(text); return WP_OK; }
+    for (i = 0; i < n && nitem < 9; i++) {
+        if (strcmp(cat[i], cats[c]) == 0) { items[nitem] = title[i]; item_at[nitem] = i; nitem++; }
+    }
+    if (!choose_one(ctx, cats[c], items, nitem, 0, &k)) { mem_free(text); return WP_OK; }
+    i = item_at[k];
+    if (dl + strlen(file[i]) + 1 > sizeof(path)) { mem_free(text); return WP_ERR; }
+    memcpy(path + dl, file[i], strlen(file[i]) + 1);
+    mem_free(text);
+    if (!wp_action_insert_picture_file(ctx, path, NULL)) wp_action_tell(ctx, "That clipart file couldn't be read");
+    return WP_OK;
 }
 
 /* The rules' standing-off from the text when a border is set here: 4 pt,
@@ -1698,7 +1771,8 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_SECTION_BREAK,     WP_MENU_FORMAT, "Section Break",  0,        0,    act_section_break, NULL },
     { WP_ACT_FILE_PRINT,        WP_MENU_FILE,   "Print...",       "Ctrl+P", 0x10, wp_action_file_print, NULL },
     { WP_ACT_FORMAT_BORDERS,    WP_MENU_FORMAT, "Borders...",     0,        0,    act_format_borders, NULL },
-    { WP_ACT_FORMAT_TABLE,      WP_MENU_FORMAT, "Table...",       0,        0,    act_format_table, NULL }
+    { WP_ACT_FORMAT_TABLE,      WP_MENU_FORMAT, "Table...",       0,        0,    act_format_table, NULL },
+    { WP_ACT_TOOLS_INSERTCLIPART, WP_MENU_TOOLS, "Insert Clipart...", 0,     0,    act_insert_clipart, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

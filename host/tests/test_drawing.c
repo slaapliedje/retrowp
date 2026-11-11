@@ -616,3 +616,26 @@ void test_drawing_postscript(void)
     wp_document_free(&doc);
     wp_drawing_builder_free(&a);
 }
+
+/* A pen 3 pixels across but 1 down (a 1000 x 500 drawing drawn 300 x 50):
+   its polygons would be a row thin, which a VDI's fill can leave out, so
+   the stroke carries a one-pixel centre line too -- never lost. */
+void test_drawing_thin_pen_keeps_a_line(void)
+{
+    wp_drawing_builder b;
+    static const i16 l[4] = { 100, 250, 900, 250 };
+    u32 i, lines = 0, fills = 0;
+
+    wp_drawing_builder_init(&b);
+    wp_drawing_pen(&b, 1, 10, 0, 0, 0);
+    wp_drawing_poly(&b, (u8)WP_DRAW_LINE, l, 2);
+    g_ncalls = 0;
+    ASSERT_TRUE(wp_drawing_render(b.bytes, b.length, 1000, 500, 0, 0, 300, 50, &g_sink) == WP_OK);
+    for (i = 0; i < g_ncalls; i++) {
+        if (g_calls[i].kind == 'L') { lines++; ASSERT_EQ_U32((u32)g_calls[i].width, 1); }
+        else fills++;
+    }
+    ASSERT_EQ_U32(lines, 1);
+    ASSERT_TRUE(fills >= 1);
+    wp_drawing_builder_free(&b);
+}

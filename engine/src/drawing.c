@@ -221,6 +221,10 @@ static void stroke(const wp_drawing_sink *s, const pen_state *ps, const i32 *xy,
         q[6] = ax + rdiv(dy * (rx - rx / 2), len);   q[7] = ay + rdiv(-dx * (ry - ry / 2), len);
         s->fill(s->user, q, 4, ps->pen_rgb);
     }
+    /* A pen a pixel or two thick one way makes polygons a row or a
+       column thin, which a VDI's polygon fill can leave out altogether:
+       the centre line too, a pixel wide, so the stroke is never lost. */
+    if ((rx <= 2 || ry <= 2) && s->line != NULL) s->line(s->user, xy, n, 1, ps->pen_rgb);
     if (rx >= 3 || ry >= 3) {
         i32 hx = rx / 2, hy = ry / 2;
         i32 kx = (hx * 106 + 128) / 256, ky = (hy * 106 + 128) / 256;   /* tan 22.5 */

@@ -1,0 +1,24 @@
+Rules|Double rule, diamond|RULEDIAM.WMF
+Rules|Beads|RULEBEAD.WMF
+Rules|Swelled rule|RULESWEL.WMF
+Rules|Wave|RULEWAVE.WMF
+Rules|Rope|RULEROPE.WMF
+Corners|Plain corner|CORNPLAN.WMF
+Corners|Scroll corner|CORNSCRL.WMF
+Corners|Bracket corner|CORNBRKT.WMF
+Corners|Knot corner|CORNKNOT.WMF
+Frames|Double frame|FRAMEDBL.WMF
+Frames|Notched frame|FRAMENOT.WMF
+Frames|Scalloped frame|FRAMESCL.WMF
+Headings|Ribbon banner|HEADRIBN.WMF
+Headings|Cartouche|HEADCART.WMF
+Headings|Plaque|HEADPLAQ.WMF
+Flourishes|Fleuron|FLEURON.WMF
+Flourishes|Section mark|SECTMARK.WMF
+Flourishes|S scroll|SSCROLL.WMF
+Game symbols|Twenty-sided die|DICED20.WMF
+Game symbols|Six-sided die|DICED6.WMF
+Game symbols|Crossed swords|SWORDS.WMF
+Game symbols|Shield|SHIELD.WMF
+Game symbols|Potion|POTION.WMF
+Game symbols|Scroll|PARCHMNT.WMF

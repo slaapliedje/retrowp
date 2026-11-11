@@ -1150,7 +1150,7 @@ void test_rulerbar_hit_test_finds_buttons_gaps_and_the_ruler(void)
     wp_rulerbar rb;
     wp_rulerbar_hit hit;
 
-    rb.x = 10; rb.y = 20; rb.w = 600;
+    rb.x = 10; rb.y = 20; rb.w = 700;   /* room for every button and its half-button gaps */
     rb.button_w = 20; rb.button_h = 18; rb.icon_rows = 16; rb.scale_h = 12;
     rb.origin_x = 16;
     rb.twips_to_x = half;
@@ -1413,8 +1413,8 @@ void test_rulerbar_panel_look_follows_the_colour_count(void)
     ASSERT_TRUE(draw_host_grey_fills(0x80) > 20);       /* every button's shadow */
     ASSERT_EQ_U32(draw_host_grey_fills(0xE0), 2);       /* the two pressed: Align Left, Single */
     /* One blit per icon, not a fill per run -- and every button: at 22
-       pixels on 640 the gaps narrow so all 28 fit (26 did before). */
-    ASSERT_EQ_U32(draw_host_mono_calls(), 28);
+       pixels on 640 the gaps close so all 29 fit (638 pixels). */
+    ASSERT_EQ_U32(draw_host_mono_calls(), 29);
     ASSERT_TRUE(wp_rulerbar_signature(&rb, &ctx) != sig2);   /* a repaint when it changes */
 
     ctx_teardown(&doc, &journal, &ctx);
@@ -2052,6 +2052,46 @@ void test_actions_insert_bitmap_file(void)
                 ASSERT_EQ_U32((u32)fread(pix, 1, 2, c), 2);   /* two rows, a byte each */
                 fclose(c);
             }
+        }
+    }
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* Tools > Insert Clipart (T16.5): the bundled set's index read from the
+   clipart folder; "Game symbols" (the sixth category) then "Six-sided
+   die" chosen, and DICED6.WMF comes in as a drawing an inch square, as
+   its file says. */
+void test_actions_insert_clipart(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_section *sec;
+    const wp_action *act = wp_action_find(WP_ACT_TOOLS_INSERTCLIPART);
+    u32 i, found = 0, at = 0;
+
+    ASSERT_TRUE(act != NULL && act->handler != NULL);
+    if (act == NULL || act->handler == NULL) return;
+    ctx_setup(&doc, &journal, &ctx, "Hello world");
+    ctx.clipart_dir = "clipart/";
+    window_host_next_choice(5);
+    window_host_next_choice(1);
+    ASSERT_TRUE(act->handler(&ctx) == WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "Game symbols");
+    sec = wp_document_section_get(&doc, 0);
+    for (i = 0; i < sec->para_count; i++) {
+        if (sec->paras[i].kind == (u8)WP_PARA_IMAGE) { found++; at = i; }
+    }
+    ASSERT_EQ_U32(found, 1);
+    if (found == 1) {
+        const wp_image_desc *d = wp_document_image_get(&doc, sec->paras[at].image);
+        ASSERT_TRUE(d != NULL && WP_IMAGE_IS_DRAWING(d));
+        if (d != NULL) {
+            ASSERT_EQ_U32((u32)d->display_width_twips, 1440);
+            ASSERT_EQ_U32((u32)d->display_height_twips, 1440);
+            ASSERT_EQ_U32(d->source_name.length, 10);
+            if (d->source_name.length == 10)
+                ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, d->source_name), "DICED6.WMF", 10);
         }
     }
     ctx_teardown(&doc, &journal, &ctx);

@@ -222,6 +222,13 @@ keeps the size its file gives, made smaller to fit the column;
 DOS shows it as [drawing]. Drawings are saved in the RTF as
 Windows metafiles, which Word and other word processors read.
 
+Insert Clipart (in the Tools menu; the star on the Atari's bar;
+Alt+K on DOS) offers RetroWP's own drawings -- rules, corners,
+frames, headings, flourishes, and dice, swords, a shield, a
+potion and a scroll for a game's character sheet. Choose a kind,
+then a piece; it goes in at the caret like any drawing. They are
+kept in the CLIPART folder beside RetroWP.
+
 Header and Footer ask in the status line. Type the line and
 press Enter (Esc leaves it as it was). A | splits it into parts:
 one part is centred, two go left and right, three left, centre

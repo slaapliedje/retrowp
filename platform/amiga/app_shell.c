@@ -2050,6 +2050,7 @@ void app_shell_run(void)
     wp_config_load(WP_AMIGA_CONFIG_PATH, &cfg);
     wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_amiga_doc, &g_amiga_journal);
     g_ctx.ensure_offload = ensure_offload; /* ODT/PDF in the shared file flow */
+    g_ctx.clipart_dir = "PROGDIR:CLIPART/";   /* the bundled clipart, beside the program */
     /* PRT:, through printer.device and the writer's Printer prefs, which
        take the Amiga's own ISO 8859-1. */
     g_ctx.printer_path = "PRT:";
