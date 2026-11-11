@@ -55,7 +55,7 @@ includes an application can catch that, because there the application's headers 
 on the path. Absent cross-toolchains skip, not fail.
 
 `host/tools/ci_charsheet.sh` (M16 T16.6) is the worked example's gate: it opens the
-character sheet fixture on the Atari, Amiga and DOS, checks the summary line each writes
+character sheet fixture on the Atari, Amiga, DOS and Mac, checks the summary line each writes
 into its CI marker, keeps screenshots in `build/charsheet/`, and prints it on the Atari.
 
 All five emulator gates run green as of 2026-10-28 (Atari 8 TOS images, Amiga 3

@@ -7,6 +7,10 @@
 #include <Fonts.h>
 #include <TextEdit.h>
 #include <Dialogs.h>
+#include <AppleEvents.h>
+#include <Gestalt.h>
+#include <Files.h>
+#include <Processes.h>
 
 #include "platform.h"
 #include "app_shell.h"
@@ -382,8 +386,7 @@ static void do_file_open(void)
     /* The whole flow -- the unsaved-changes question, a name from an ex
        command or Standard File, the format by content and name
        (WordStar, RTF, Markdown, plain text; ODT and PDF through the gateway), the swap, the remembered name -- is
-       shared (actions.c). No image sink here yet: RTF pictures are
-       dropped on this backend. */
+       shared (actions.c); a file's pictures go to the picture cache. */
     {   /* pictures in the file go to the picture cache (imgcache.h) */
         wp_image_sink sink;
         wp_image_cache_sink(&sink, mac_format_image_cache_path, &g_mac_image_cache_counter);
@@ -1606,6 +1609,150 @@ static void mac_click(Point where, wp_bool extend)
 #define WP_MAC_CI_TRIGGER  "Unix:RETROWP.CI"
 #define WP_MAC_CI_ALIVE    "Unix:RETROWP.ALV"
 
+/* -- Apple Events: the Finder's "open these documents" ---------------
+   A document dropped on RetroWP, or double-clicked once the Finder knows
+   its creator, arrives as kAEOpenDocuments with the files as FSSpecs;
+   the first is opened as File > Open opens one. The required suite's
+   others: open application (nothing to do), print (not yet: refused),
+   quit. Installed only where Apple Events exist (System 7, or 6 with the
+   extension); 'SIZE' says isHighLevelEventAware (platform/mac/retrowp.r),
+   without which none arrive. */
+
+/* An FSSpec as the "Volume:Folder:...:name" path plat_file_open takes:
+   the folders found by walking parents up to the volume's root. */
+static wp_bool fsspec_path(const FSSpec *fs, char *out, u32 cap)
+{
+    char tmp[512];
+    u32 at = sizeof(tmp) - 1, i;
+    long dir = fs->parID;
+
+    tmp[at] = '\0';
+    for (i = fs->name[0]; i > 0; i--) { if (at == 0) return WP_FALSE; tmp[--at] = (char)fs->name[i]; }
+    while (dir != 1) {   /* fsRtParID: the root's parent */
+        CInfoPBRec pb;
+        Str63 name;
+        memset(&pb, 0, sizeof(pb));
+        pb.dirInfo.ioNamePtr = name;
+        pb.dirInfo.ioVRefNum = fs->vRefNum;
+        pb.dirInfo.ioFDirIndex = -1;          /* this directory, by its ID */
+        pb.dirInfo.ioDrDirID = dir;
+        if (PBGetCatInfoSync(&pb) != noErr) return WP_FALSE;
+        if (at == 0) return WP_FALSE;
+        tmp[--at] = ':';
+        for (i = name[0]; i > 0; i--) { if (at == 0) return WP_FALSE; tmp[--at] = (char)name[i]; }
+        dir = pb.dirInfo.ioDrParID;
+    }
+    if (sizeof(tmp) - 1 - at >= cap) return WP_FALSE;
+    memcpy(out, tmp + at, sizeof(tmp) - at);
+    return WP_TRUE;
+}
+
+static pascal OSErr ae_open_app(const AppleEvent *e, AppleEvent *reply, long refcon)
+{
+    (void)e; (void)reply; (void)refcon;
+    return noErr;
+}
+
+static pascal OSErr ae_open_docs(const AppleEvent *e, AppleEvent *reply, long refcon)
+{
+    AEDescList docs;
+    long n = 0;
+    FSSpec fs;
+    AEKeyword kw;
+    DescType type;
+    Size got;
+    char path[256];
+    OSErr err;
+
+    (void)reply; (void)refcon;
+    err = AEGetParamDesc((AppleEvent *)e, keyDirectObject, typeAEList, &docs);
+    if (err != noErr) return err;
+    if (AECountItems(&docs, &n) == noErr && n > 0 &&
+        AEGetNthPtr(&docs, 1, typeFSS, &kw, &type, (Ptr)&fs, sizeof(fs), &got) == noErr &&
+        fsspec_path(&fs, path, (u32)sizeof(path))) {
+        wp_image_sink sink;
+        wp_image_cache_sink(&sink, mac_format_image_cache_path, &g_mac_image_cache_counter);
+        (void)wp_action_load_file(&g_ctx, path, &sink);
+        if (g_win != NULL) InvalRect(&g_win->portRect);
+    }
+    AEDisposeDesc(&docs);
+    return noErr;
+}
+
+static pascal OSErr ae_print_docs(const AppleEvent *e, AppleEvent *reply, long refcon)
+{
+    (void)e; (void)reply; (void)refcon;
+    return errAEEventNotHandled;
+}
+
+static pascal OSErr ae_quit(const AppleEvent *e, AppleEvent *reply, long refcon)
+{
+    (void)e; (void)reply; (void)refcon;
+    g_quit = WP_TRUE;
+    return noErr;
+}
+
+static wp_bool g_mac_have_ae = WP_FALSE;
+
+#ifndef gestaltAppleEventsPresent
+#define gestaltAppleEventsPresent 0   /* Gestalt.h's bit; Retro68's headers lack the name */
+#endif
+
+static void install_apple_events(void)
+{
+    long resp = 0;
+
+    if (Gestalt(gestaltAppleEventsAttr, &resp) != noErr || !(resp & (1L << gestaltAppleEventsPresent))) return;
+    AEInstallEventHandler(kCoreEventClass, kAEOpenApplication, NewAEEventHandlerUPP(ae_open_app), 0, false);
+    AEInstallEventHandler(kCoreEventClass, kAEOpenDocuments, NewAEEventHandlerUPP(ae_open_docs), 0, false);
+    AEInstallEventHandler(kCoreEventClass, kAEPrintDocuments, NewAEEventHandlerUPP(ae_print_docs), 0, false);
+    AEInstallEventHandler(kCoreEventClass, kAEQuitApplication, NewAEEventHandlerUPP(ae_quit), 0, false);
+    g_mac_have_ae = WP_TRUE;
+}
+
+/* The CI gate's document (host/tools/ci_charsheet.sh): an "open <path>"
+   line in the trigger file, sent to ourselves as a real kAEOpenDocuments
+   so the gate goes through the Finder's own path. */
+static void mac_ci_open_named_document(const char *trigger)
+{
+    plat_file *f;
+    char buf[160];
+    u32 got = 0, i;
+    unsigned char ppath[256];
+    FSSpec fs;
+    AEAddressDesc self;
+    AppleEvent ae, reply;
+    AEDescList list;
+    ProcessSerialNumber psn;
+
+    if (!g_mac_have_ae) return;
+    if (plat_file_open(trigger, PLAT_FILE_READ, &f) != WP_OK) return;
+    if (plat_file_read(f, (u8 *)buf, (u32)sizeof(buf) - 1, &got) != WP_OK) got = 0;
+    plat_file_close(f);
+    buf[got] = '\0';
+    if (got < 6 || memcmp(buf, "open ", 5) != 0) return;
+    for (i = 5; buf[i] != '\0' && buf[i] != '\r' && buf[i] != '\n'; i++) {}
+    buf[i] = '\0';
+    c_to_pstr(buf + 5, ppath);
+    if (FSMakeFSSpec(0, 0, ppath, &fs) != noErr) return;
+
+    psn.highLongOfPSN = 0;
+    psn.lowLongOfPSN = kCurrentProcess;
+    if (AECreateDesc(typeProcessSerialNumber, &psn, sizeof(psn), &self) != noErr) return;
+    if (AECreateAppleEvent(kCoreEventClass, kAEOpenDocuments, &self, kAutoGenerateReturnID,
+                           kAnyTransactionID, &ae) == noErr) {
+        if (AECreateList(NULL, 0, false, &list) == noErr) {
+            if (AEPutPtr(&list, 1, typeFSS, &fs, sizeof(fs)) == noErr &&
+                AEPutParamDesc(&ae, keyDirectObject, &list) == noErr) {
+                (void)AESend(&ae, &reply, kAENoReply, kAENormalPriority, kAEDefaultTimeout, NULL, NULL);
+            }
+            AEDisposeDesc(&list);
+        }
+        AEDisposeDesc(&ae);
+    }
+    AEDisposeDesc(&self);
+}
+
 static wp_bool mac_ci_mode(void)
 {
     plat_file *f;
@@ -1703,13 +1850,21 @@ void app_shell_run(void)
 
     /* Written after the menu bar is drawn and the window is open, so
        its existence really does mean "the app came up". */
+    install_apple_events();
     g_mac_ci_active = mac_ci_mode();
-    if (g_mac_ci_active) mac_ci_write_alive();
+    if (g_mac_ci_active) {
+        mac_ci_open_named_document(WP_MAC_CI_TRIGGER);
+        mac_ci_write_alive();
+    }
 
     g_quit = WP_FALSE;
     for (;;) {
         if (WaitNextEvent(everyEvent, &e, 15, NULL)) {
             switch (e.what) {
+            case kHighLevelEvent:              /* an Apple Event: the Finder's, or the gate's */
+                (void)AEProcessAppleEvent(&e);
+                if (g_mac_ci_active) mac_ci_write_alive();   /* what it opened, for the gate */
+                break;
             case keyDown:
             case autoKey:
                 if (e.modifiers & cmdKey) {

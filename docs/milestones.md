@@ -2240,11 +2240,12 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       write-in lines as a one-column table, a closing flourish).
       host/tests/test_charsheet.c checks what it holds, that it saves and
       reads back the same, prints on one page and to PostScript;
-      host/tools/ci_charsheet.sh opens it on the Atari, the Amiga and
-      DOS, checks each says it holds the same (a summary line in its CI
-      marker, platform/common/cisummary.c), keeps a screenshot of each in
-      build/charsheet/, and prints it on the Atari. The Mac is skipped:
-      it cannot open a document named at start-up yet. Printed by hand
+      host/tools/ci_charsheet.sh opens it on the Atari, the Amiga, DOS
+      and the Mac (through its new Apple Event handler -- docs/
+      mac-platform.md), checks each says it holds the same (a summary
+      line in its CI marker, platform/common/cisummary.c), keeps a
+      screenshot of each in build/charsheet/, and prints it on the
+      Atari. Printed by hand
       through SpeedoGDOS (FX80) and NVDI (PCL), matching the screen.
       Found and fixed on the way: RTF import gave a picture the default
       paragraph style (a centred banner went to the margin) and made an

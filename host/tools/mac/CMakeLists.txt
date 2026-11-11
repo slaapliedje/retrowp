@@ -109,6 +109,7 @@ target_include_directories(mac_smoke PRIVATE ${RETROWP_INCLUDES})
 # RETROWP: the real application shell (Phase 2 onward).
 add_application(RETROWP
     ${RETROWP_ROOT}/platform/mac/main.c
+    ${RETROWP_ROOT}/platform/mac/retrowp.r
     ${RETROWP_MAC_PLATFORM_SRC}
     ${RETROWP_COMMON_SRC}
     ${RETROWP_ENGINE_SRC}

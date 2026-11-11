@@ -1082,3 +1082,27 @@ HP-Color-LaserJet-MFP-M477fdn". The route, and what each part needed:
 
 A core change would remove the relay's pacing: decode WR12/13 to the
 divider and give the SCC model the real 8530's 3-byte receive FIFO.
+
+## Opening a document the Finder's way: Apple Events (M16, T16.6)
+
+RetroWP was not high-level-event aware -- Retro68's default 'SIZE'
+(Retro68APPL.r) says notHighLevelEventAware -- so no Apple Event ever
+reached it, and a document dropped on it was not opened.
+platform/mac/retrowp.r overrides the 'SIZE' (the same, but
+isHighLevelEventAware; Retro68 lets an application's own .r replace the
+default), and the shell installs the required suite where Gestalt says
+Apple Events exist: open application, open documents (the first FSSpec
+opened as File > Open opens one, its pictures into the picture cache),
+print documents (refused for now), quit. The FSSpec becomes the
+"Volume:Folder:name" path plat_file_open takes by walking its parent
+folders with PBGetCatInfo -- the Standard File path builder joins only
+the volume and the name, so it loses folders.
+
+Still to come: a 'BNDL'/'FREF' and a creator code, so the Finder knows
+RetroWP's documents and double-clicking one opens it.
+
+The character sheet gate (host/tools/ci_charsheet.sh) uses this path:
+in CI mode, a trigger file reading "open Unix:TEST.RTF" makes RetroWP
+send itself a kAEOpenDocuments for that file, which arrives as a
+kHighLevelEvent and goes through the same handler the Finder's would.
+The fixture's Startup Items launcher is unchanged.

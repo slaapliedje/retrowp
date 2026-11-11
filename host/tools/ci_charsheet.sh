@@ -13,8 +13,10 @@
 #   - The Atari prints it too, on PRN: (Hatari's --printer), and the
 #     printout must carry the sheet's headings. GDOS printing is checked
 #     by hand: SpeedoGDOS and NVDI are not this repository's to carry.
-#   - The Mac is skipped: its build cannot open a document named at
-#     start-up yet.
+#   - The Mac opens it the Finder's way: in CI mode RetroWP sends itself
+#     an "open documents" Apple Event for the file the trigger names
+#     (platform/mac/app_shell.c), through the same handler a document
+#     dropped on it takes.
 #
 # Prints "CHARSHEET CI: N passed, M failed"; exits non-zero on a failure.
 set -u
@@ -22,6 +24,8 @@ set -u
 cd "$(dirname "$0")/../.."
 . host/tools/atari_ci_lib.sh
 . host/tools/amiga_ci_lib.sh
+. host/tools/mac_ci_lib.sh
+MAC_RETRO68_TOOLCHAIN="${MAC_RETRO68_TOOLCHAIN:-$HOME/opt/Retro68-build/toolchain/m68k-apple-macos/cmake/retro68.toolchain.cmake}"
 
 EXPECT="${CHARSHEET_EXPECT:-doc paras=87 pictures=0 drawings=2 rows=16 frames=1}"   # overridable, to prove the gate can fail
 SHEET=host/tests/fixtures/CHARSHT.RTF
@@ -50,6 +54,20 @@ wait_summary() {
     return 1
 }
 
+# The summary line in $1, once it is the expected one or $2 more seconds
+# have passed: a backend may write its marker before the document is in
+# (the Mac's comes before the Finder's Apple Event is handled).
+settled_summary() {
+    _end=$(( $(date +%s) + $2 ))
+    while :; do
+        _line="$(grep '^doc paras=' "$1" 2>/dev/null | tail -1)"
+        [ "$_line" = "$EXPECT" ] && break
+        [ "$(date +%s)" -ge "$_end" ] && break
+        sleep 0.5
+    done
+    echo "$_line"
+}
+
 start_xvfb() {   # $1 display
     Xvfb "$1" -screen 0 1280x800x24 >/dev/null 2>&1 &
     XVFB_PID=$!
@@ -57,7 +75,9 @@ start_xvfb() {   # $1 display
     while [ ! -e "/tmp/.X${1#:}-lock" ] && [ $_w -lt 50 ]; do sleep 0.1; _w=$((_w + 1)); done
 }
 
-make atari atari-launch amiga-app dos >/dev/null || { echo "CHARSHEET CI: build failed"; exit 1; }
+make atari atari-launch amiga-app dos build/generated/help_retrowp.h >/dev/null || { echo "CHARSHEET CI: build failed"; exit 1; }
+cmake -S host/tools/mac -B build/mac -DCMAKE_TOOLCHAIN_FILE="$MAC_RETRO68_TOOLCHAIN" -G "Unix Makefiles" >/dev/null &&
+    cmake --build build/mac --target RETROWP_APPL >/dev/null || { echo "CHARSHEET CI: Mac build failed"; exit 1; }
 
 # ---- Atari ST (TOS 1.04, mono) -----------------------------------------
 run_st() {
@@ -78,8 +98,8 @@ run_st() {
         bad st "it never said what it opened"
     else
         sleep 4
+        _got="$(settled_summary "$_dir/c/RETROWP.ALV" 20)"
         DISPLAY="$_d" import -window root "$OUTDIR/st.png" 2>/dev/null
-        _got="$(grep '^doc paras=' "$_dir/c/RETROWP.ALV" | tail -1)"
         # Print: Ctrl+P; the gateway's HELLO times out on an empty line;
         # OK on the print dialog; the printout comes when it comes.
         _w="$(DISPLAY="$_d" xdotool search --sync --class hatari | head -1)"
@@ -136,8 +156,8 @@ run_amiga() {
         bad amiga "it never said what it opened"
     else
         sleep 10
+        _got="$(settled_summary "$_dir/wb/retrowp_ci_alive" 20)"
         DISPLAY="$_d" import -window root "$OUTDIR/amiga.png" 2>/dev/null
-        _got="$(grep '^doc paras=' "$_dir/wb/retrowp_ci_alive" | tail -1)"
         _ill="$(grep -c 'Illegal instruction' "$_dir/amiberry.log" 2>/dev/null || echo 0)"
         if [ "$_got" != "$EXPECT" ]; then bad amiga "opened \"$_got\""
         elif [ "$_ill" -gt 1 ]; then bad amiga "the machine crashed ($_ill illegal instructions)"
@@ -145,6 +165,48 @@ run_amiga() {
         else ok amiga; fi
     fi
     kill -9 $_ap 2>/dev/null; wait $_ap 2>/dev/null
+    kill $XVFB_PID 2>/dev/null; wait $XVFB_PID 2>/dev/null
+    rm -rf "$_dir"
+}
+
+# ---- Mac (BasiliskII, Performa ROM, System 7.5.3) ----------------------
+# The fixture's Startup Items launcher starts whatever is on the share as
+# CI_TARGET.APPL (host/tools/mac_ci_lib.sh); the trigger file names the
+# sheet, which RetroWP opens through its own Apple Event handler.
+run_mac() {
+    _rom="$MAC_FIXTURE/rom/PERFORMA.ROM"
+    if [ ! -f "$_rom" ] || [ ! -x "$MAC_BASILISK_BIN" ]; then echo "SKIP: mac (no ROM or BasiliskII here)"; return; fi
+    _dir="$(mktemp -d)"
+    _sh="$_dir/shared"
+    mkdir -p "$_sh/.finf" "$_sh/.rsrc"
+    cp "$MAC_FIXTURE/boot_template.img" "$_dir/boot.img"
+    cp build/mac/RETROWP.APPL "$_sh/CI_TARGET.APPL"
+    cp build/mac/.rsrc/RETROWP.APPL "$_sh/.rsrc/CI_TARGET.APPL"
+    cp build/mac/.finf/RETROWP.APPL "$_sh/.finf/CI_TARGET.APPL"
+    cp "$SHEET" "$_sh/TEST.RTF"
+    printf 'open Unix:TEST.RTF\n' > "$_sh/RETROWP.CI"
+    printf '%s\n' "disk $_dir/boot.img" "extfs $_sh" "screen win/512/384" "rom $_rom" \
+        "bootdrive 0" "bootdriver 0" "ramsize 33554432" "modelid 14" "cpu 4" "fpu true" \
+        "nocdrom true" "seriala /dev/retrowp-no-serial" "serialb /dev/retrowp-no-serial" \
+        "nosound true" "nogui true" "jit false" "keyboardtype 5" "idlewait true" > "$_dir/prefs"
+    _d=":$((300 + ($$ + 21) % 200))"
+    start_xvfb "$_d"
+    env HOME="$_dir" DISPLAY="$_d" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
+        "$MAC_BASILISK_BIN" --config "$_dir/prefs" >"$_dir/basilisk.log" 2>&1 &
+    _bp=$!
+    # The "not shut down properly" dialog, dismissed as it asks: Return.
+    sleep 8; DISPLAY="$_d" xdotool key Return 2>/dev/null; sleep 1; DISPLAY="$_d" xdotool key Return 2>/dev/null
+    if ! wait_summary "$_sh/RETROWP.ALV" 150; then
+        bad mac "it never said what it opened"
+    else
+        sleep 4
+        _got="$(settled_summary "$_sh/RETROWP.ALV" 20)"
+        DISPLAY="$_d" import -window root "$OUTDIR/mac.png" 2>/dev/null
+        if [ "$_got" != "$EXPECT" ]; then bad mac "opened \"$_got\""
+        elif ! not_flat "$OUTDIR/mac.png"; then bad mac "the screen is blank"
+        else ok mac; fi
+    fi
+    kill -9 $_bp 2>/dev/null; wait $_bp 2>/dev/null
     kill $XVFB_PID 2>/dev/null; wait $XVFB_PID 2>/dev/null
     rm -rf "$_dir"
 }
@@ -166,8 +228,8 @@ run_dos() {
         bad dos "it never said what it opened"
     else
         sleep 3
+        _got="$(settled_summary "$_dir/c/RETROWP.ALV" 20)"
         DISPLAY="$_d" import -window root "$OUTDIR/dos.png" 2>/dev/null
-        _got="$(grep '^doc paras=' "$_dir/c/RETROWP.ALV" | tail -1)"
         if [ "$_got" != "$EXPECT" ]; then bad dos "opened \"$_got\""
         elif ! not_flat "$OUTDIR/dos.png"; then bad dos "the screen is blank"
         else ok dos; fi
@@ -177,10 +239,12 @@ run_dos() {
     rm -rf "$_dir"
 }
 
-run_st
-run_amiga
-run_dos
-echo "SKIP: mac (it cannot open a document named at start-up yet)"
+# CHARSHEET_ONLY=st|amiga|dos|mac runs one machine (while working on it).
+only() { [ -z "${CHARSHEET_ONLY:-}" ] || [ "$CHARSHEET_ONLY" = "$1" ]; }
+only st && run_st
+only amiga && run_amiga
+only dos && run_dos
+only mac && run_mac
 
 echo "=================================="
 echo "CHARSHEET CI: $PASS passed, $FAIL failed"
