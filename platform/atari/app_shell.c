@@ -35,6 +35,8 @@
 #include "actions.h"
 #include "pageview.h"
 #include "pageprint.h"
+#include "drawpaint.h"
+#include "drawing.h"
 #include "paraborder.h"
 #include "rulerbar.h"
 #include "selspan.h"
@@ -1272,6 +1274,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
         return;
     }
 
+    memset(&gc, 0, sizeof(gc));   /* every field, now and later */
     gc.vdi = vdi;
     gc.window_handle = window_handle;
     gc.clip_on = 0;   /* set where a blit must keep to a redraw rectangle */
@@ -1405,7 +1408,11 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                 if (para->kind == (u8)WP_PARA_IMAGE) {
                     const wp_image_desc *img = wp_document_image_get(&g_doc, para->image);
 
-                    if (img != NULL && img->palette_count > 0) {
+                    if (img != NULL && WP_IMAGE_IS_DRAWING(img)) {
+                        /* A drawing, at this screen's own resolution. */
+                        (void)wp_paint_drawing((plat_gc *)&gc, &g_doc, img, x_px, text_y_px,
+                                               atari_twips_to_px_x(line->width_twips), text_h_px);
+                    } else if (img != NULL && img->palette_count > 0) {
                         i32 w_px = atari_twips_to_px_x(line->width_twips);
                         i32 h_px = text_h_px;   /* the picture, not its spacing */
                         wp_bool drew_real = WP_FALSE;
@@ -1853,6 +1860,10 @@ static wp_status atari_print_pages(wp_app_ctx *ctx, u32 *pages_out)
     dev.device_w_px = (i32)work_out[0] + 1;
     dev.device_h_px = (i32)work_out[1] + 1;
     dev.draw_mono = atari_gdos_takes_raster_copy() ? NULL : plat_mono_by_runs;
+    /* SpeedoGDOS's FX80 driver writes to address 0 on v_fillarea (under
+       Hatari, 2026-11-10 -- the November wide-line crash was likely the
+       same fill): polygons go to it a row at a time, as v_bar. */
+    gc.polys_by_spans = (short)!atari_gdos_takes_raster_copy();
     dev.end_page = gdos_end_page;
     dev.user = &h;
     st = wp_pageprint(ctx->doc, &dev, pages_out);
@@ -3732,6 +3743,7 @@ static void paint_rulerbar(short window_handle, VdiHdl vdi, GRECT work, const sh
 
     if (!g_ctx.doc_loaded || !atari_rulerbar(work, &rb)) return;
     if (!g_rulerbar_damaged && wp_rulerbar_signature(&rb, &g_ctx) == g_rulerbar_sig) return;
+    memset(&gc, 0, sizeof(gc));   /* every field, now and later */
     gc.vdi = vdi;
     gc.window_handle = window_handle;
     /* The icons are blits, which ignore vs_clip: they keep to the
@@ -3763,6 +3775,7 @@ static void paint_status_line(short window_handle, VdiHdl vdi, GRECT full_work, 
 
     if (!g_ctx.doc_loaded || bar_h_px <= 0 || bar_h_px > full_work.g_h) return;
 
+    memset(&gc, 0, sizeof(gc));   /* every field, now and later */
     gc.vdi = vdi;
     gc.window_handle = window_handle;
     gc.clip_on = 0;   /* set where a blit must keep to a redraw rectangle */
@@ -3812,6 +3825,7 @@ static void paint_help(short window_handle, VdiHdl vdi)
     short pxy[4];
 
     wind_get_grect(window_handle, WF_WORKXYWH, &work);
+    memset(&gc, 0, sizeof(gc));   /* every field, now and later */
     gc.vdi = vdi;
     gc.window_handle = window_handle;
     gc.clip_on = 0;   /* set where a blit must keep to a redraw rectangle */
@@ -4738,6 +4752,7 @@ static void paint_ruler_scale(short window_handle, VdiHdl vdi, GRECT work,
     wp_rulerbar_scale_rect(rb, &sy, &sh);
     if (plat_font_open((const u8 *)"", 0, WP_ATARI_STATUSLINE_SIZE_TWIPS, 0, &font) != WP_OK) return;
     plat_font_metrics_get(font, &fm);
+    memset(&gc, 0, sizeof(gc));   /* every field, now and later */
     gc.vdi = vdi;
     gc.window_handle = window_handle;
     gc.clip_on = 0;   /* set where a blit must keep to a redraw rectangle */

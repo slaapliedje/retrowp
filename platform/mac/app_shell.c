@@ -22,6 +22,8 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "pageview.h"
+#include "drawpaint.h"
+#include "drawing.h"
 #include "paraborder.h"
 #include "rulerbar.h"
 #include "selspan.h"
@@ -1302,7 +1304,11 @@ static void draw_document(WindowPtr w)
                 if (para->kind == (u8)WP_PARA_IMAGE) {
                     const wp_image_desc *img = wp_document_image_get(&g_mac_doc, para->image);
 
-                    if (img != NULL && img->palette_count > 0) {
+                    if (img != NULL && WP_IMAGE_IS_DRAWING(img)) {
+                        /* A drawing, at this screen's own resolution. */
+                        (void)wp_paint_drawing((plat_gc *)&gc, &g_mac_doc, img, x_px, text_y,
+                                               mac_twips_to_px(line->width_twips), text_h_px);
+                    } else if (img != NULL && img->palette_count > 0) {
                         i32 w_px = mac_twips_to_px(line->width_twips);
                         i32 h_px = text_h_px;   /* the picture, not its spacing */
                         wp_bool drew_real = WP_FALSE;

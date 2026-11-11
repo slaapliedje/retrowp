@@ -372,9 +372,25 @@ round-trips unchanged.
 `wp_drawing_render` flattens the list for a device: scaled to the box,
 curves into enough straight segments to look round at that size (from 8
 to 64 to an ellipse, by a sine table in 256ths of a turn -- no floating
-point on the targets), handed to a sink as polylines with a pen width in
-pixels and filled polygons with a colour. The platform layer needs only
-those two calls (stage 2).
+point on the targets), handed to a sink as one-pixel polylines and
+filled polygons. A wider pen is stroked into polygons here, in the
+engine, where both of the box's scales are known: the pen is an ellipse
+as many pixels across and down as they make it, so a stroke is as thick
+one way as the other on a screen whose pixels are not square (Amiga
+hires, ST Medium) -- each segment a quadrilateral, an octagon at every
+joint and end.
+
+Drawing it (stage 2): retroplat's `plat_fill_polygon` and
+`plat_draw_polyline` (platform.h, "Vector drawing"), and
+platform/common/drawpaint.c's `wp_paint_drawing`, which every screen
+painter and the page printer call for a drawing's picture paragraph --
+the page printer at the printer's own resolution. A mid grey fills in
+the device's pattern, as shading does, so a mono screen and a printer
+keep it. Backends: the ST fills with `v_fillarea` (by spans under
+SpeedoGDOS, whose FX80 driver crashes on it -- docs/atari-platform.md),
+the Mac with QuickDraw polygons, the Amiga by spans through `RectFill`
+(an area fill wants a screen-sized TmpRas in chip memory), Qt and win32
+natively; DOS shows "[drawing]", as it shows a picture's marker.
 
 RTF carries a drawing as a Windows metafile (docs/formats/rtf.md,
 "Drawings"). engine/src/format_wmf.c reads SetWindowOrg/Ext (the origin

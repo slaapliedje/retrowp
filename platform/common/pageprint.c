@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <stddef.h>
 #include <string.h>
+#include "drawpaint.h"
+#include "drawing.h"
 #include "pageprint.h"
 #include "pageview.h"
 #include "layout.h"
@@ -344,7 +346,13 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
                     const wp_image_desc *img = wp_document_image_get(doc, para->image);
                     i32 px = left + line->x_twips, py = y + line->text_top_twips;
 
-                    if (img == NULL ||
+                    /* A drawing at the printer's own resolution; a bitmap
+                       dithered to it; an outline where neither can be. */
+                    if (img != NULL && WP_IMAGE_IS_DRAWING(img)) {
+                        (void)wp_paint_drawing(dev->gc, doc, img, at_x(&fr, px), at_y(&fr, py),
+                                               at_x(&fr, px + line->width_twips) - at_x(&fr, px),
+                                               at_y(&fr, py + line->text_height_twips) - at_y(&fr, py));
+                    } else if (img == NULL ||
                         !draw_picture(doc, &fr, img, px, py, line->width_twips,
                                       line->text_height_twips)) {
                         draw_frame(&fr, px, py, line->width_twips, line->text_height_twips);

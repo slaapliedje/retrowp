@@ -142,11 +142,14 @@ typedef struct {
 static i32 tx(const xform *t, i32 v) { return t->x + (v * t->w) / t->ext_w; }
 static i32 ty(const xform *t, i32 v) { return t->y + (v * t->h) / t->ext_h; }
 
-/* The state the records change. */
+/* The state the records change. The pen's width in pixels across and
+   down: on a screen whose pixels are not square the two differ, and a
+   pen drawn a pixel count wide in both would draw horizontal strokes
+   fatter than vertical ones. */
 typedef struct {
     u8 pen_on, brush_on;
     u8 pen_rgb[3], brush_rgb[3];
-    i32 pen_px;
+    i32 pen_px, pen_py;
 } pen_state;
 
 /* Segments for a full ellipse of these radii in pixels: enough that
@@ -158,9 +161,68 @@ static i32 segments(i32 rx, i32 ry)
     return n;
 }
 
+static i32 isqrt(i32 v)
+{
+    i32 r = 0, bit = 1L << 30;
+
+    if (v <= 0) return 0;
+    while (bit > v) bit >>= 2;
+    while (bit != 0) {
+        if (v >= r + bit) { v -= r + bit; r = (r >> 1) + bit; }
+        else r >>= 1;
+        bit >>= 2;
+    }
+    return r;
+}
+
+/* a / b to the nearest, b > 0. */
+static i32 rdiv(i32 a, i32 b)
+{
+    return a >= 0 ? (a + b / 2) / b : -((-a + b / 2) / b);
+}
+
+/* A line: a pixel wide, as a line; wider, as polygons -- each segment
+   a quadrilateral, an octagon at every joint and end -- with the pen an
+   ellipse pen_px across and pen_py down, so it is round on paper
+   whatever shape the device's pixels are. */
 static void stroke(const wp_drawing_sink *s, const pen_state *ps, const i32 *xy, u16 n)
 {
-    if (ps->pen_on && n >= 2 && s->line != NULL) s->line(s->user, xy, n, ps->pen_px, ps->pen_rgb);
+    i32 q[16];
+    i32 rx = ps->pen_px, ry = ps->pen_py;
+    u16 i;
+
+    if (!ps->pen_on || n < 2) return;
+    if (rx <= 1 && ry <= 1) {
+        if (s->line != NULL) s->line(s->user, xy, n, 1, ps->pen_rgb);
+        return;
+    }
+    if (s->fill == NULL) return;
+    for (i = 0; i + 1 < n; i++) {
+        i32 ax = xy[i * 2], ay = xy[i * 2 + 1], bx = xy[i * 2 + 2], by = xy[i * 2 + 3];
+        /* The direction with y scaled so that the pen is a circle. */
+        i32 dx = bx - ax, dy = ((by - ay) * rx) / ry, len;
+
+        while (dx > 16000 || dx < -16000 || dy > 16000 || dy < -16000) { dx /= 2; dy /= 2; }
+        len = isqrt(dx * dx + dy * dy);
+        if (len == 0) continue;
+        q[0] = ax + rdiv(-dy * (rx / 2), len);       q[1] = ay + rdiv(dx * (ry / 2), len);
+        q[2] = bx + rdiv(-dy * (rx / 2), len);       q[3] = by + rdiv(dx * (ry / 2), len);
+        q[4] = bx + rdiv(dy * (rx - rx / 2), len);   q[5] = by + rdiv(-dx * (ry - ry / 2), len);
+        q[6] = ax + rdiv(dy * (rx - rx / 2), len);   q[7] = ay + rdiv(-dx * (ry - ry / 2), len);
+        s->fill(s->user, q, 4, ps->pen_rgb);
+    }
+    if (rx >= 3 || ry >= 3) {
+        i32 hx = rx / 2, hy = ry / 2;
+        i32 kx = (hx * 106 + 128) / 256, ky = (hy * 106 + 128) / 256;   /* tan 22.5 */
+        for (i = 0; i < n; i++) {
+            i32 x = xy[i * 2], y = xy[i * 2 + 1];
+            q[0] = x + hx;  q[1] = y - ky;   q[2] = x + hx;  q[3] = y + ky;
+            q[4] = x + kx;  q[5] = y + hy;   q[6] = x - kx;  q[7] = y + hy;
+            q[8] = x - hx;  q[9] = y + ky;   q[10] = x - hx; q[11] = y - ky;
+            q[12] = x - kx; q[13] = y - hy;  q[14] = x + kx; q[15] = y - hy;
+            s->fill(s->user, q, 8, ps->pen_rgb);
+        }
+    }
 }
 
 /* A closed outline: filled, then stroked round (back to its first point). */
@@ -218,7 +280,7 @@ wp_status wp_drawing_render(const u8 *ops, u32 len, i32 ext_w, i32 ext_h,
 
     if (ext_w <= 0 || ext_h <= 0 || w <= 0 || h <= 0) return WP_OK;
     t.ext_w = ext_w; t.ext_h = ext_h; t.x = x; t.y = y; t.w = w; t.h = h;
-    ps.pen_on = 1; ps.brush_on = 1; ps.pen_px = 1;
+    ps.pen_on = 1; ps.brush_on = 1; ps.pen_px = ps.pen_py = 1;
     ps.pen_rgb[0] = ps.pen_rgb[1] = ps.pen_rgb[2] = 0;
     ps.brush_rgb[0] = ps.brush_rgb[1] = ps.brush_rgb[2] = 255;
 
@@ -227,11 +289,14 @@ wp_status wp_drawing_render(const u8 *ops, u32 len, i32 ext_w, i32 ext_h,
         const u8 *p = ops + pos;
 
         if (op == WP_DRAW_PEN) {
-            i32 wd;
+            i32 units, wd;
             if (pos + 6u > len) return WP_BADFMT;
             ps.pen_on = p[0] != 0;
-            wd = ((i32)(((u16)p[1] << 8) | p[2]) * w + ext_w / 2) / ext_w;
+            units = (i32)(((u16)p[1] << 8) | p[2]);
+            wd = (units * w + ext_w / 2) / ext_w;
             ps.pen_px = wd < 1 ? 1 : wd;
+            wd = (units * h + ext_h / 2) / ext_h;
+            ps.pen_py = wd < 1 ? 1 : wd;
             ps.pen_rgb[0] = p[3]; ps.pen_rgb[1] = p[4]; ps.pen_rgb[2] = p[5];
             pos += 6u;
         } else if (op == WP_DRAW_BRUSH) {

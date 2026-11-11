@@ -2196,6 +2196,14 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       AC: host tests for the primitive list, scaling and WMF round-trip;
       an SVG heading inserted through the gateway, shown on ST, Amiga
       and Mac, printed through GDOS and PostScript.
+      Progress 2026-11-10: stage 1 (model, metafiles, RTF) and stage 2
+      (drawing on screens and paper) done -- retroplat's
+      plat_fill_polygon / plat_draw_polyline on every backend, wide
+      lines stroked as polygons in the engine; shown on the ST and Amiga,
+      "[drawing]" on DOS; printed through SpeedoGDOS (FX80, polygons by
+      spans: its v_fillarea crashes) and NVDI (PCL). The Mac builds but
+      is not yet seen. Still to come (stage 3): GEM metafiles read on
+      the ST, SVG/WMF through the gateway, PostScript printing.
 - [ ] T16.5 Clipart. Bitmap clipart opened directly on each machine, no
       gateway needed: GEM .IMG (ST), IFF ILBM (Amiga), MacPaint/PICT
       (Mac), PCX/BMP (DOS), converted to the model's indexed image. A

@@ -2624,3 +2624,39 @@ RetroWP programs (9600 here) and needs no pacing. What the runs found:
   the OSD. The card's default ST config boots a game VHD whose
   DESKTOP.INF has no floppy icon (Options > Install Disk Drive). Use
   medium resolution: in low, RetroWP warns and the layout is cramped.
+
+## SpeedoGDOS's FX80 driver and polygons (2026-11-10)
+
+Printing a drawing (T16.4) through SpeedoGDOS 5 and FX80.SYS under
+Hatari (TOS 1.04) bus-errored at once: `Bus Error writing at address $0,
+PC=$15b552`, opcode `$32C4` (`move.w d4,(a1)+` through a null `a1`). The
+PC lies above RetroWP's own text, data and bss -- in what GDOS loaded
+when the printer workstation opened, the driver. Bisected with
+one-primitive drawings: a single four-point `v_fillarea` crashes; a
+one-pixel `v_pline` prints. The November finding that `vsl_width 3`
+writes to address 0 is very likely the same fault: the driver draws wide
+lines through its own polygon fill. Not yet tried on a real machine or a
+second SpeedoGDOS driver, so whether it is the driver, SpeedoGDOS or
+Hatari stays open.
+
+What RetroWP does about it:
+
+- Wide lines never reach the VDI as wide lines on any machine: the
+  engine strokes them as polygons (drawing.c), and retroplat's ST
+  backend draws only one-pixel `v_pline`s.
+- Under SpeedoGDOS (no NVDI cookie -- the same test that picks runs over
+  a raster copy for pictures) the printer gc sets `polys_by_spans`, and
+  `plat_fill_polygon` fills a row at a time through `v_bar` instead of
+  `v_fillarea` (retroplat's `plat_polygon_by_spans`).
+- The same driver prints nothing for a one-row *patterned* `v_bar` (a
+  solid one prints, and tall patterned bars -- paragraph shading -- do
+  too): its patterned bars seem to stop a row short. On a
+  `polys_by_spans` gc a one-row shade goes two rows tall. A clip to the
+  row with the bar started on its 16-row boundary changed nothing.
+
+NVDI 5 (MagiC, PCL.SYS) fills polygons natively and prints a drawing
+cleanly at 300 dpi.
+
+The screen decoder's stripes (`spd/epson2png.py`) are its own: it plots
+the FX80's 144 rows an inch on a 1/216" grid, so every third row is
+empty in solid areas and text alike. They are not in the print.

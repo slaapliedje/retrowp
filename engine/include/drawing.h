@@ -63,8 +63,11 @@ wp_status wp_document_drawing_add(wp_document *doc, const u8 *ops, u32 len,
 
 /* Drawing it: the primitives flattened -- curves into enough straight
    segments to look round at the size drawn -- and handed to the sink in
-   device pixels. `line` gets an open polyline and its pen (width in
-   pixels, at least 1), `fill` a closed polygon and its brush colour. */
+   device pixels. `line` gets an open polyline a pixel wide; a wider pen
+   comes to `fill` as polygons, the pen an ellipse as many pixels across
+   and down as the box's two scales make it, so that a line is as thick
+   one way as the other on a screen whose pixels are not square. `fill`
+   gets a closed polygon and its colour. (`width` is always 1, for now.) */
 typedef struct {
     void *user;
     void (*line)(void *user, const i32 *xy, u16 n, i32 width, const u8 *rgb);

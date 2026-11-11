@@ -8,6 +8,7 @@
 #include "platform.h"
 #include "docmodel.h"
 #include "layout.h"
+#include "drawing.h"
 #include "editing.h"
 #include "format_txt.h"
 #include "format_ws.h"
@@ -475,6 +476,15 @@ static u32 dos_format_image_marker(u8 *buf, u32 cap, const wp_document *doc,
 {
     u32 len = 0;
 
+    if (WP_IMAGE_IS_DRAWING(img)) {   /* its extent is not a size in pixels */
+        len = dos_append_bytes(buf, len, cap, (const u8 *)"[drawing", 8);
+        if (img->source_name.length > 0) {
+            len = dos_append_bytes(buf, len, cap, (const u8 *)": ", 2);
+            len = dos_append_bytes(buf, len, cap, wp_strpool_get(&doc->strings, img->source_name),
+                                   img->source_name.length);
+        }
+        return dos_append_bytes(buf, len, cap, (const u8 *)"]", 1);
+    }
     len = dos_append_bytes(buf, len, cap, (const u8 *)"[image: ", 8);
     if (img->source_name.length > 0) {
         const u8 *name = wp_strpool_get(&doc->strings, img->source_name);

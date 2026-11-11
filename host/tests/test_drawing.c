@@ -1,10 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#include <stdio.h>
 #include <string.h>
 #include "test.h"
 #include "drawing.h"
 #include "format_wmf.h"
 #include "format_rtf.h"
 #include "layout.h"
+#include "pageprint.h"
+#include "draw_host.h"
 
 /* Drawings (docs/document-model.md, "Drawings"). */
 
@@ -43,9 +46,11 @@ static i32 iabs(i32 v) { return v < 0 ? -v : v; }
 /* ---- Rendering ------------------------------------------------------- */
 
 /* A rectangle in a 1000 x 500 drawing, drawn 200 x 100 at (10, 20): the
-   brush fills its four corners, then the pen -- 50 units, so 10 pixels
-   -- goes round them and back to the first. A line after a PEN that
-   turns the pen off draws nothing. */
+   brush fills its four corners, then the pen -- 50 units, 10 pixels --
+   goes round as four quadrilaterals and an octagon at each of its five
+   points (the last back at the first), red. The top edge's runs 5 each
+   side of y 20. A line after a PEN that turns the pen off draws
+   nothing. */
 void test_drawing_rect_and_pen(void)
 {
     wp_drawing_builder b;
@@ -62,17 +67,43 @@ void test_drawing_rect_and_pen(void)
 
     g_ncalls = 0;
     ASSERT_TRUE(wp_drawing_render(b.bytes, b.length, 1000, 500, 10, 20, 200, 100, &g_sink) == WP_OK);
-    ASSERT_EQ_U32(g_ncalls, 2);
+    ASSERT_EQ_U32(g_ncalls, 1 + 4 + 5);
     ASSERT_TRUE(g_calls[0].kind == 'F');
     ASSERT_EQ_U32(g_calls[0].n, 4);
     ASSERT_EQ_U32(g_calls[0].rgb[2], 255);
     ASSERT_EQ_U32((u32)g_calls[0].xy[0], 10);  ASSERT_EQ_U32((u32)g_calls[0].xy[1], 20);
     ASSERT_EQ_U32((u32)g_calls[0].xy[4], 210); ASSERT_EQ_U32((u32)g_calls[0].xy[5], 120);
-    ASSERT_TRUE(g_calls[1].kind == 'L');
-    ASSERT_EQ_U32(g_calls[1].n, 5);
-    ASSERT_EQ_U32((u32)g_calls[1].width, 10);
+    ASSERT_TRUE(g_calls[1].kind == 'F');
+    ASSERT_EQ_U32(g_calls[1].n, 4);
     ASSERT_EQ_U32(g_calls[1].rgb[0], 255);
-    ASSERT_EQ_U32((u32)g_calls[1].xy[8], 10);  ASSERT_EQ_U32((u32)g_calls[1].xy[9], 20);
+    ASSERT_EQ_U32((u32)g_calls[1].xy[1], 25);  ASSERT_EQ_U32((u32)g_calls[1].xy[5], 15);
+    ASSERT_EQ_U32(g_calls[5].n, 8);            /* the first octagon */
+    wp_drawing_builder_free(&b);
+}
+
+/* A pen 50 units wide in a 1000 x 500 drawing drawn 200 x 200: 10
+   pixels across but 20 down, as on a screen whose pixels are half as
+   tall as wide. A horizontal line's stroke is 20 pixels thick, a
+   vertical one's 10 -- the same thickness on the glass. */
+void test_drawing_pen_aspect(void)
+{
+    wp_drawing_builder b;
+    static const i16 h[4] = { 100, 250, 900, 250 };
+    static const i16 v[4] = { 500, 50, 500, 450 };
+
+    wp_drawing_builder_init(&b);
+    wp_drawing_pen(&b, 1, 50, 0, 0, 0);
+    wp_drawing_poly(&b, (u8)WP_DRAW_LINE, h, 2);
+    wp_drawing_poly(&b, (u8)WP_DRAW_LINE, v, 2);
+    g_ncalls = 0;
+    ASSERT_TRUE(wp_drawing_render(b.bytes, b.length, 1000, 500, 0, 0, 200, 200, &g_sink) == WP_OK);
+    ASSERT_EQ_U32(g_ncalls, 6);   /* each: a quadrilateral, two octagons */
+    /* The horizontal one, y 100: corners at 110 and 90. */
+    ASSERT_EQ_U32((u32)g_calls[0].xy[1], 110);
+    ASSERT_EQ_U32((u32)g_calls[0].xy[5], 90);
+    /* The vertical one, x 100: corners at 95 and 105. */
+    ASSERT_EQ_U32((u32)g_calls[3].xy[0], 95);
+    ASSERT_EQ_U32((u32)g_calls[3].xy[4], 105);
     wp_drawing_builder_free(&b);
 }
 
@@ -297,4 +328,95 @@ void test_drawing_rtf_round_trip(void)
     wp_document_free(&back);
     wp_document_free(&doc);
     wp_drawing_builder_free(&a);
+}
+
+/* ---- Printed --------------------------------------------------------- */
+
+static i32 px_same(i32 t) { return t; }
+static wp_status page_done(void *user) { (void)user; return WP_OK; }
+
+/* The drawing as the first paragraph, 1440 x 720 twips, printed with
+   pixels = twips and inch margins: everything inside its box at (1440,
+   1440). build_all's arc has its pen off and draws nothing; the rest
+   span 5..95 across (1512..2808) and 6..96 down (1483..2131). The pen
+   is 3 units of 100: 43 pixels across, 22 down (the box is stretched),
+   so the strokes -- polygons, every one -- reach 22 further out each
+   side and 11 up and down. */
+void test_drawing_pageprint(void)
+{
+    wp_drawing_builder a;
+    wp_document doc;
+    wp_image h;
+    wp_section *sec;
+    wp_page_device dev;
+    u32 pages = 0;
+    i32 x0, y0, x1, y1;
+    static const char src[] = "{\\rtf1\\ansi X\\par}";
+
+    build_all(&a);
+    ASSERT_TRUE(format_rtf_import((const u8 *)src, (u32)strlen(src), &doc) == WP_OK);
+    ASSERT_TRUE(wp_document_drawing_add(&doc, a.bytes, a.length, 100, 100, 1440, 720, NULL, &h) == WP_OK);
+    sec = wp_document_section_get(&doc, 0);
+    sec->paras[0].run_count = 0;
+    sec->paras[0].kind = (u8)WP_PARA_IMAGE;
+    sec->paras[0].image = h;
+    sec->paras[0].layout_dirty = WP_TRUE;
+
+    memset(&dev, 0, sizeof(dev));
+    dev.gc = (plat_gc *)&dev;
+    dev.x_px = px_same;
+    dev.y_px = px_same;
+    dev.end_page = page_done;
+    draw_host_reset_fills();
+    ASSERT_TRUE(wp_pageprint(&doc, &dev, &pages) == WP_OK);
+    ASSERT_EQ_U32(pages, 1);
+    ASSERT_EQ_U32(draw_host_polyline_calls(), 0);
+    ASSERT_TRUE(draw_host_vector_box(&x0, &y0, &x1, &y1));
+    ASSERT_EQ_U32((u32)x0, 1512 - 22);
+    ASSERT_EQ_U32((u32)y0, 1483 - 11);
+    ASSERT_EQ_U32((u32)x1, 2808 + 22);
+    ASSERT_EQ_U32((u32)y1, 2131 + 11);
+    wp_document_free(&doc);
+    wp_drawing_builder_free(&a);
+}
+
+/* ---- retroplat's helpers (src/polyfill.c) ---------------------------- */
+
+/* A diamond 100 rows tall: black, a span per row through plat_fill_rect;
+   a mid grey, a row each through plat_fill_shade at its darkness (37%);
+   near-white is not a grey but a colour, filled solid. */
+void test_polyfill_spans(void)
+{
+    static const i32 d[8] = { 50, 0, 100, 50, 50, 100, 0, 50 };
+
+    ASSERT_EQ_U32(plat_grey_percent(160, 160, 160), 37);
+    ASSERT_EQ_U32(plat_grey_percent(250, 250, 250), 0);
+    ASSERT_EQ_U32(plat_grey_percent(200, 100, 100), 0);
+    draw_host_reset_fills();
+    ASSERT_TRUE(plat_polygon_by_spans(NULL, d, 4, 0, 0, 0) == WP_OK);
+    ASSERT_EQ_U32(draw_host_grey_fills(0), 100);
+    ASSERT_EQ_U32(draw_host_shade_calls(), 0);
+    draw_host_reset_fills();
+    ASSERT_TRUE(plat_polygon_by_spans(NULL, d, 4, 160, 160, 160) == WP_OK);
+    ASSERT_EQ_U32(draw_host_shade_calls(), 100);
+    ASSERT_EQ_U32(draw_host_last_shade(), 37);
+    ASSERT_EQ_U32(draw_host_grey_fills(160), 0);
+}
+
+/* A line 4 pixels wide from (0, 10) to (100, 10): a quadrilateral 2 each
+   side, and an octagon of radius 2 at each end -- three polygons, inside
+   x -2..102, y 8..12. */
+void test_polyfill_wide_line(void)
+{
+    static const i32 l[4] = { 0, 10, 100, 10 };
+    i32 x0, y0, x1, y1;
+
+    draw_host_reset_fills();
+    ASSERT_TRUE(plat_polyline_by_polygons(NULL, l, 2, 4, 0, 0, 0) == WP_OK);
+    ASSERT_EQ_U32(draw_host_polygon_calls(), 3);
+    ASSERT_TRUE(draw_host_vector_box(&x0, &y0, &x1, &y1));
+    ASSERT_EQ_U32((u32)x0, (u32)-2);
+    ASSERT_EQ_U32((u32)y0, 8);
+    ASSERT_EQ_U32((u32)x1, 102);
+    ASSERT_EQ_U32((u32)y1, 12);
 }

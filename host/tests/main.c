@@ -438,6 +438,10 @@ void test_drawing_truncated(void);
 void test_drawing_wmf_round_trip(void);
 void test_drawing_wmf_foreign(void);
 void test_drawing_rtf_round_trip(void);
+void test_drawing_pageprint(void);
+void test_drawing_pen_aspect(void);
+void test_polyfill_spans(void);
+void test_polyfill_wide_line(void);
 void test_rtf_borders_round_trip(void);
 void test_layout_geometry_border_middle_and_double(void);
 void test_layout_geometry_later_lines_use_the_left_indent_only(void);
@@ -1109,6 +1113,10 @@ static const test_case g_cases[] = {
     { "drawing_wmf_round_trip", test_drawing_wmf_round_trip },
     { "drawing_wmf_foreign", test_drawing_wmf_foreign },
     { "drawing_rtf_round_trip", test_drawing_rtf_round_trip },
+    { "drawing_pageprint", test_drawing_pageprint },
+    { "drawing_pen_aspect", test_drawing_pen_aspect },
+    { "polyfill_spans", test_polyfill_spans },
+    { "polyfill_wide_line", test_polyfill_wide_line },
     { "rtf_borders_round_trip", test_rtf_borders_round_trip },
     { "layout_geometry_border_middle_and_double", test_layout_geometry_border_middle_and_double },
     { "layout_geometry_later_lines_use_the_left_indent_only", test_layout_geometry_later_lines_use_the_left_indent_only },
