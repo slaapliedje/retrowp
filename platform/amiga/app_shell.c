@@ -37,6 +37,7 @@
 #include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "cisummary.h"
 #include "imgcache.h"
 #include "pageview.h"
 #include "drawpaint.h"
@@ -1901,6 +1902,11 @@ static void amiga_ci_write_alive(void)
 
     if (plat_file_open(WP_AMIGA_CI_ALIVE, PLAT_FILE_WRITE, &f) != WP_OK) return;
     plat_file_write(f, (const u8 *)"alive\n", 6);
+    {   /* what the document holds, for the gates (cisummary.h) */
+        char sum[96];
+        u32 n = wp_ci_doc_summary(&g_amiga_doc, sum, (u32)sizeof(sum));
+        plat_file_write(f, (const u8 *)sum, n);
+    }
     plat_file_close(f);
 }
 

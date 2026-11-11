@@ -88,6 +88,7 @@ typedef struct {
     rtf_buf  pict_buf;
     wp_bool  pict_is_dib;
     wp_bool  pict_is_wmf;          /* \wmetafile: a drawing (drawing.h) */
+    wp_bool  after_pict;           /* a picture's paragraph is open: the next \par ends it */
     i32      pict_scale_x, pict_scale_y;   /* \picscalex, \picscaley: percent */
     wp_bool  pict_nibble_pending;
     u8       pict_nibble;
@@ -226,6 +227,7 @@ static void rtf_ensure_paragraph(rtf_parser *p)
     if (wp_section_paragraph_add(sec, &new_idx) != WP_OK) { p->error = WP_NOMEM; return; }
     p->para_idx = new_idx;
     p->para_pending = WP_FALSE;
+    p->after_pict = WP_FALSE;
     p->break_this = p->break_next;
     p->break_next = 0;
 }
@@ -347,6 +349,14 @@ static void rtf_end_paragraph(rtf_parser *p)
 
     rtf_flush_run(p);
     if (p->error != WP_OK) return;
+
+    /* The \par after a picture ends the picture's own paragraph, as
+       Word writes it ({\pict ...}\par) -- not a second, empty one, which
+       a round trip would then add another of each time. */
+    if (p->after_pict) {
+        p->after_pict = WP_FALSE;
+        return;
+    }
 
     rtf_ensure_paragraph(p); /* handles back-to-back \par (blank line) */
     if (p->error != WP_OK) return;
@@ -710,9 +720,12 @@ static void rtf_place_image(rtf_parser *p, wp_image handle)
     }
     para->kind = (u8)WP_PARA_IMAGE;
     para->image = handle;
-    para->style = p->doc->default_pstyle;
     para->layout_dirty = WP_TRUE;
+    /* The paragraph's own properties -- a centred picture is centred --
+       which the \pict group has from its paragraph. */
+    rtf_apply_pstyle_to_current_paragraph(p);
     p->para_pending = WP_TRUE;                 /* whatever follows gets its own */
+    p->after_pict = WP_TRUE;
 }
 
 static void rtf_pop(rtf_parser *p)

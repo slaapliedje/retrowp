@@ -456,6 +456,10 @@ void test_bitmapfile_detect(void);
 void test_actions_insert_bitmap_file(void);
 void test_actions_insert_clipart(void);
 void test_drawing_thin_pen_keeps_a_line(void);
+void test_drawing_rtf_keeps_alignment(void);
+void test_utf8_ascii_fallback(void);
+void test_charsheet_opens_whole(void);
+void test_charsheet_prints(void);
 void test_actions_insert_svg_through_gateway(void);
 void test_rtf_borders_round_trip(void);
 void test_layout_geometry_border_middle_and_double(void);
@@ -1146,6 +1150,10 @@ static const test_case g_cases[] = {
     { "actions_insert_bitmap_file", test_actions_insert_bitmap_file },
     { "actions_insert_clipart", test_actions_insert_clipart },
     { "drawing_thin_pen_keeps_a_line", test_drawing_thin_pen_keeps_a_line },
+    { "drawing_rtf_keeps_alignment", test_drawing_rtf_keeps_alignment },
+    { "utf8_ascii_fallback", test_utf8_ascii_fallback },
+    { "charsheet_opens_whole", test_charsheet_opens_whole },
+    { "charsheet_prints", test_charsheet_prints },
     { "actions_insert_svg_through_gateway", test_actions_insert_svg_through_gateway },
     { "rtf_borders_round_trip", test_rtf_borders_round_trip },
     { "layout_geometry_border_middle_and_double", test_layout_geometry_border_middle_and_double },

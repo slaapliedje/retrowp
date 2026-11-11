@@ -33,6 +33,7 @@
 #include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "cisummary.h"
 #include "pageview.h"
 #include "pageprint.h"
 #include "drawpaint.h"
@@ -5180,6 +5181,11 @@ static void atari_ci_write_alive(void)
     len = atari_ci_decimal(buf, (u32)sizeof(buf), g_atari_painted_frags);
     plat_file_write(f, (const u8 *)buf, len);
     plat_file_write(f, (const u8 *)"\n", 1);
+    {   /* what the document holds, for the gates (cisummary.h) */
+        char sum[96];
+        u32 n = wp_ci_doc_summary(&g_doc, sum, (u32)sizeof(sum));
+        plat_file_write(f, (const u8 *)sum, n);
+    }
     plat_file_close(f);
 }
 

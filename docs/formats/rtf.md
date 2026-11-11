@@ -278,6 +278,14 @@ the break made a variable unused, `-Werror` stopped the build, `make
 test` never ran the suite, and "no failures" was printed by a suite that
 had not executed. A sabotage that does not compile proves nothing.
 
+## A picture's paragraph
+
+A picture is its own paragraph and takes that paragraph's properties
+(`\qc` centres it) -- it used to be given the default style. The `\par`
+that follows a picture, as Word writes it (`{\pict ...}\par`), ends the
+picture's paragraph; it used to end a second, empty one, which every
+save and reopen then added another of.
+
 ## Drawings (`\pict\wmetafile8`)
 
 A drawing (docs/document-model.md, "Drawings") exports as a Windows

@@ -2229,10 +2229,33 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       (clipart/, drawn by clipart/tools/make_clipart.py, as metafiles
       every machine reads) and Tools > Insert Clipart, category then
       piece; a ruler bar star on the Atari, Alt+K on DOS.
-- [ ] T16.6 The worked example: an original character sheet (stat grid,
+- [x] T16.6 The worked example: an original character sheet (stat grid,
       skill table, boxed notes, ruled write-in lines, decorated title)
       kept as a fixture, opened, screenshotted and printed on every
       target as part of the gates -- the milestone's acceptance test.
+      Done 2026-11-11: host/tests/fixtures/CHARSHT.RTF (made by
+      make_charsheet.py: a clipart banner with the title set over it in
+      a frame, an identity table, attributes and skills side by side in
+      one table with a shaded head row, a boxed equipment section, ruled
+      write-in lines as a one-column table, a closing flourish).
+      host/tests/test_charsheet.c checks what it holds, that it saves and
+      reads back the same, prints on one page and to PostScript;
+      host/tools/ci_charsheet.sh opens it on the Atari, the Amiga and
+      DOS, checks each says it holds the same (a summary line in its CI
+      marker, platform/common/cisummary.c), keeps a screenshot of each in
+      build/charsheet/, and prints it on the Atari. The Mac is skipped:
+      it cannot open a document named at start-up yet. Printed by hand
+      through SpeedoGDOS (FX80) and NVDI (PCL), matching the screen.
+      Found and fixed on the way: RTF import gave a picture the default
+      paragraph style (a centred banner went to the margin) and made an
+      empty paragraph of the \par after it (one more on every round
+      trip); typographic quotes, dashes and accented letters printed as
+      "?" on machines whose sets lack them (retroplat's
+      utf8_ascii_fallback now gives the nearest plain character).
+      Still open: PostScript goes through format_prn's character grid
+      (Courier, frames in text order), so it does not match the screen
+      as GDOS does; the character printers draw a partly bordered table
+      cell as a full box.
 
 Artifact: a character sheet made in RetroWP, saved as RTF that Word
 opens, printed through GDOS, PostScript and PCL, matching the screen.

@@ -64,6 +64,7 @@ set(RETROWP_COMMON_SRC
     ${RETROWP_ROOT}/platform/common/paraborder.c
     ${RETROWP_ROOT}/platform/common/drawpaint.c
     ${RETROWP_ROOT}/platform/common/imgcache.c
+    ${RETROWP_ROOT}/platform/common/cisummary.c
     ${RETROWP_ROOT}/platform/common/rulerbar.c
     ${RETROWP_ROOT}/platform/common/prompt.c
     ${RETROWP_ROOT}/platform/common/selspan.c

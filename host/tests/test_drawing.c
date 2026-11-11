@@ -639,3 +639,48 @@ void test_drawing_thin_pen_keeps_a_line(void)
     ASSERT_TRUE(fills >= 1);
     wp_drawing_builder_free(&b);
 }
+
+/* A centred picture stays centred through RTF: the paragraph's own
+   properties, not the default's (the import used to give a picture the
+   default style, losing \qc). Laid out in 9360, its 1440-wide line
+   starts (9360 - 1440) / 2 in. */
+void test_drawing_rtf_keeps_alignment(void)
+{
+    wp_drawing_builder a;
+    wp_document doc, back;
+    wp_image h;
+    wp_section *sec;
+    wp_para_style ps;
+    wp_pstyle centred;
+    static u8 out[8192];
+    u32 len = 0, i;
+    static const char src[] = "{\\rtf1\\ansi Above\\par Below\\par}";
+
+    build_all(&a);
+    ASSERT_TRUE(format_rtf_import((const u8 *)src, (u32)strlen(src), &doc) == WP_OK);
+    ASSERT_TRUE(wp_document_drawing_add(&doc, a.bytes, a.length, 100, 100, 1440, 720, NULL, &h) == WP_OK);
+    memset(&ps, 0, sizeof(ps));
+    ps.align = (u8)WP_ALIGN_CENTER;
+    ASSERT_TRUE(wp_document_pstyle_find_or_add(&doc, &ps, &centred) == WP_OK);
+    sec = wp_document_section_get(&doc, 0);
+    sec->paras[1].run_count = 0;
+    sec->paras[1].kind = (u8)WP_PARA_IMAGE;
+    sec->paras[1].image = h;
+    sec->paras[1].style = centred;
+    ASSERT_TRUE(format_rtf_export(&doc, out, sizeof(out) - 1, &len) == WP_OK);
+    ASSERT_TRUE(format_rtf_import(out, len, &back) == WP_OK);
+    sec = wp_document_section_get(&back, 0);
+    for (i = 0; i < sec->para_count && sec->paras[i].kind != (u8)WP_PARA_IMAGE; i++) {}
+    ASSERT_TRUE(i < sec->para_count);
+    if (i < sec->para_count) {
+        const wp_para_style *got = wp_document_pstyle_get(&back, sec->paras[i].style);
+        wp_paragraph_layout *l;
+        ASSERT_TRUE(got != NULL && got->align == (u8)WP_ALIGN_CENTER);
+        ASSERT_TRUE(wp_paragraph_relayout(&back, &sec->paras[i], 9360) == WP_OK);
+        l = (wp_paragraph_layout *)sec->paras[i].layout;
+        ASSERT_EQ_U32((u32)l->lines[0].x_twips, 3960);
+    }
+    wp_document_free(&back);
+    wp_document_free(&doc);
+    wp_drawing_builder_free(&a);
+}

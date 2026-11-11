@@ -127,3 +127,21 @@ void test_utf8_validate_good_and_bad(void)
     ASSERT_TRUE(utf8_validate(bad, 3, &bad_offset) == WP_BADFMT);
     ASSERT_EQ_U32(bad_offset, 1);
 }
+
+/* The nearest plain character, for a machine whose set lacks one: a
+   right single quote is an apostrophe, an em dash a hyphen, e-acute an
+   e, a no-break space a space; a capital sharp s has none (0, and the
+   caller's '?'). */
+void test_utf8_ascii_fallback(void)
+{
+    ASSERT_EQ_U32(utf8_ascii_fallback(0x2019), '\'');
+    ASSERT_EQ_U32(utf8_ascii_fallback(0x201C), '"');
+    ASSERT_EQ_U32(utf8_ascii_fallback(0x2014), '-');
+    ASSERT_EQ_U32(utf8_ascii_fallback(0x2026), '.');
+    ASSERT_EQ_U32(utf8_ascii_fallback(0xE9), 'e');
+    ASSERT_EQ_U32(utf8_ascii_fallback(0xC7), 'C');
+    ASSERT_EQ_U32(utf8_ascii_fallback(0xA0), ' ');
+    ASSERT_EQ_U32(utf8_ascii_fallback(0xFF), 'y');
+    ASSERT_EQ_U32(utf8_ascii_fallback('A'), 'A');
+    ASSERT_EQ_U32(utf8_ascii_fallback(0x1E9E), 0);
+}

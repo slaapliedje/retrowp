@@ -365,6 +365,14 @@ atari: $(ATARI_BIN)/RETROWP.PRG
 
 atari-smoke: $(ATARI_BIN)/SMOKE.PRG
 
+# LAUNCH.PRG: starts RETROWP.PRG on C:\TEST.RTF, for a gate that opens a
+# document (host/tools/ci_charsheet.sh) -- Hatari's --auto takes no
+# arguments. Plain TOS calls only.
+.PHONY: atari-launch
+atari-launch: $(ATARI_BIN)/LAUNCH.PRG
+$(ATARI_BIN)/LAUNCH.PRG: host/tools/atari_launch.c | $(ATARI_BIN)
+	$(ATARICC) -O2 -o $@ $<
+
 # SERHW.PRG: the REAL-HARDWARE serial diagnostic. Same object set as
 # SERIALTST.PRG, but its source uses no Native Features at all -- see
 # host/tools/atari_serial_hw.c for why that distinction is load-bearing
