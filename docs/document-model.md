@@ -350,6 +350,35 @@ from the keyboard); there is no command to make a frame -- frames come
 from RTF; character printers print a frame's paragraphs where they fall
 in the text, at the full width.
 
+## Bitmaps read on the machine (M16, T16.5)
+
+Insert Image reads the common bitmap formats itself, with no gateway:
+engine/src/bitmapfile.c takes GEM .IMG (mono, and XIMG colour), IFF
+ILBM (ByteRun1, up to 8 planes, Extra-Half-Brite) and Deluxe Paint's PBM,
+MacPaint (raw or in MacBinary; known by its name or a PNTG MacBinary
+type, having no signature), PCX (1/2/4/8 bits, EGA planes, 24-bit) and
+BMP (1/4/8/24/32 bits, uncompressed). PICT, HAM, RLE BMP: not yet.
+
+No image is held whole -- the 1 MB ST rules that out. Each format reads
+a row at a time, twice: the first pass counts its colours (a direct-
+colour file's are put on a 6x6x6 cube), the second maps them to the most
+used, as many as the machine shows (the darkest and lightest kept
+whatever their counts -- line art's ink and paper), and shrinks the rows
+to the machine's largest picture, each output pixel the darkest of the
+block it stands for so that thin lines survive. The packed rows go out
+through an image sink into the picture cache, as RTF import's do.
+
+The cache is shared now: platform/common/imgcache.c gives every backend
+a sink (and, for saving, a source) over files it names itself, from the
+counter its Insert Image already used. The Amiga and the Mac open RTF
+with it and save through it, so their pictures survive a round trip,
+which they did not before; DOS saves through it but opens without one
+(docs/dos-platform.md). The shared hook, `wp_action_insert_picture_file`,
+takes a `wp_picture_target` -- the sink, the colours, the largest size,
+the backend's pixels-to-twips pair -- the same limits each backend's
+Insert Image asks the gateway for (the Mac asks for 16 colours here,
+since its picture painter dithers them).
+
 ## Drawings (M16, T16.4)
 
 A drawing is scalable art -- a heading's flourish, a form's rules, a
@@ -393,7 +422,7 @@ the Mac with QuickDraw polygons, the Amiga by spans through `RectFill`
 natively; DOS shows "[drawing]", as it shows a picture's marker.
 
 Getting drawings in (stage 3): Insert Image looks at the file first
-(`wp_action_insert_drawing_file`, platform/common/actions.c). A GEM
+(`wp_action_insert_picture_file`, platform/common/actions.c). A GEM
 metafile or a Windows metafile is read on the machine by
 engine/src/drawfile.c and inserted as a drawing at its own size (the
 file's page size, or a placeable header's units per inch; three inches

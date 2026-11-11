@@ -2217,6 +2217,15 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       which browses it.
       AC: each target opens its native format; the bundled set inserts
       and prints.
+      Progress 2026-11-10: stage 1 done -- the readers (engine/src/
+      bitmapfile.c: IMG/XIMG, ILBM/PBM, MacPaint, PCX, BMP, every
+      machine reads every format), Insert Image using them, a shared
+      picture cache (imgcache.c) that also lets the Amiga and Mac keep
+      an RTF's pictures. Tested on BLOWUP's and Calamus's IMGs, a CT60
+      XIMG, an ILBM game screen, Calamus's BMP, cc65's PCX; an RTF of
+      two shown on the Amiga. DOS keeps bitmaps on the gateway (its
+      64 KB blocks; retroplat's mem_alloc now refuses more rather than
+      corrupting). Still to come: the bundled set and Insert Clipart.
 - [ ] T16.6 The worked example: an original character sheet (stat grid,
       skill table, boxed notes, ruled write-in lines, decorated title)
       kept as a fixture, opened, screenshotted and printed on every

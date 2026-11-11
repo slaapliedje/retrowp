@@ -2882,11 +2882,21 @@ static void do_insert_image(void)
     fname[0] = '\0';
     if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
 
-    /* A drawing (GEM or Windows metafile) needs no gateway: read and
-       inserted here, vector (actions.h). Anything else is a picture. */
-    if (wp_action_insert_drawing_file(&g_ctx, fullpath)) {
-        relayout_document(g_content_width_twips);
-        return;
+    {   /* A drawing (GEM or Windows metafile), an SVG, or a bitmap this
+           machine reads itself (actions.h) needs no picture gateway. */
+        wp_image_sink psink;
+        wp_picture_target pt;
+        atari_image_sink_init(&psink);
+        pt.sink = &psink;
+        pt.colors = (u32)(atari_image_color_budget());
+        pt.max_w = (i32)WP_ATARI_IMAGE_TARGET_MAX_W;
+        pt.max_h = (i32)WP_ATARI_IMAGE_TARGET_MAX_H;
+        pt.px_to_twips_x = atari_px_to_twips_x;
+        pt.px_to_twips_y = atari_px_to_twips_y;
+        if (wp_action_insert_picture_file(&g_ctx, fullpath, &pt)) {
+            relayout_document(g_content_width_twips);
+            return;
+        }
     }
     if (!ensure_offload()) {
         form_alert(1, FA_ERROR "[No offload device available.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");

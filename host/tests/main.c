@@ -447,6 +447,13 @@ void test_drawfile_detect(void);
 void test_drawfile_gem_ndc(void);
 void test_actions_insert_drawing_file(void);
 void test_drawing_postscript(void);
+void test_bitmapfile_img(void);
+void test_bitmapfile_ilbm(void);
+void test_bitmapfile_pcx(void);
+void test_bitmapfile_bmp(void);
+void test_bitmapfile_macpaint(void);
+void test_bitmapfile_detect(void);
+void test_actions_insert_bitmap_file(void);
 void test_actions_insert_svg_through_gateway(void);
 void test_rtf_borders_round_trip(void);
 void test_layout_geometry_border_middle_and_double(void);
@@ -1128,6 +1135,13 @@ static const test_case g_cases[] = {
     { "drawfile_gem_ndc", test_drawfile_gem_ndc },
     { "actions_insert_drawing_file", test_actions_insert_drawing_file },
     { "drawing_postscript", test_drawing_postscript },
+    { "bitmapfile_img", test_bitmapfile_img },
+    { "bitmapfile_ilbm", test_bitmapfile_ilbm },
+    { "bitmapfile_pcx", test_bitmapfile_pcx },
+    { "bitmapfile_bmp", test_bitmapfile_bmp },
+    { "bitmapfile_macpaint", test_bitmapfile_macpaint },
+    { "bitmapfile_detect", test_bitmapfile_detect },
+    { "actions_insert_bitmap_file", test_actions_insert_bitmap_file },
     { "actions_insert_svg_through_gateway", test_actions_insert_svg_through_gateway },
     { "rtf_borders_round_trip", test_rtf_borders_round_trip },
     { "layout_geometry_border_middle_and_double", test_layout_geometry_border_middle_and_double },

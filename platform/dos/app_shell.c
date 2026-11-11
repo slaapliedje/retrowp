@@ -16,6 +16,7 @@
 #include "offload.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "imgcache.h"
 #include "pageview.h"
 #include "rulerbar.h"
 #include "selspan.h"
@@ -1069,6 +1070,11 @@ void app_shell_set_start_file(const char *path)
     g_start_file = path;
 }
 
+/* The picture cache's naming and counter, defined with Insert Image
+   below; saving reads pictures back through imgcache.h. */
+static void dos_format_image_cache_path(char *out, u32 counter);
+static u32 g_dos_image_cache_counter;
+
 static void do_file_open(void)
 {
     /* The whole flow -- the unsaved-changes question, a name from an ex
@@ -1076,12 +1082,19 @@ static void do_file_open(void)
        RTF, Markdown, plain text; ODT and PDF through the gateway), the
        swap, the remembered name -- is shared (actions.c). The title row
        shows the name (redraw_screen). */
+    /* No picture sink: this screen shows a picture as a one-line marker,
+       and a picture's bytes held while it is read can pass the 64 KB a
+       block may be here. A file's pictures are dropped, as always here. */
     (void)wp_action_file_open(&g_ctx, dos_pick_path, NULL);
 }
 
 static void do_file_save(wp_bool save_as)
 {
-    (void)wp_action_file_save(&g_ctx, save_as, dos_pick_path, NULL);
+    {   /* pictures read back from the cache, so the file keeps them */
+        wp_image_source src;
+        wp_image_cache_source(&src, &g_doc);
+        (void)wp_action_file_save(&g_ctx, save_as, dos_pick_path, &src);
+    }
 }
 
 static wp_bool g_dos_offload_init_attempted = WP_FALSE;
@@ -1168,9 +1181,10 @@ static void do_insert_image(void)
     if (!g_ctx.doc_loaded) return;
     if (!prompt_for_filename("Insert Image: ", path, (u32)sizeof(path))) return;
 
-    /* A drawing (GEM or Windows metafile) needs no gateway: read and
-       inserted here, vector (actions.h). Anything else is a picture. */
-    if (wp_action_insert_drawing_file(&g_ctx, path)) {
+    /* A drawing (GEM or Windows metafile) or an SVG needs no picture
+       gateway (actions.h). Bitmaps still go to the gateway here: a file
+       read whole can pass the 64 KB a block may be. */
+    if (wp_action_insert_picture_file(&g_ctx, path, NULL)) {
         relayout_document(g_content_width_twips);
         return;
     }

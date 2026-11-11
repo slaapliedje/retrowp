@@ -540,7 +540,7 @@ subpaths are one even-odd polygon, joined by seams that cancel, so
 holes stay holes.
 
 The client sends it from Insert Image when the file chosen is an SVG
-(platform/common/actions.c, `wp_action_insert_drawing_file`); a GEM or
+(platform/common/actions.c, `wp_action_insert_picture_file`); a GEM or
 Windows metafile is read on the machine without the gateway.
 
 ### Any other op

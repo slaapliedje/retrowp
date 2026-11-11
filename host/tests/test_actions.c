@@ -3,6 +3,7 @@
 #include "test.h"
 #include "drawing.h"
 #include "actions.h"
+#include "imgcache.h"
 #include "rulerbar.h"
 #include "format_txt.h"
 #include "offload.h"
@@ -1911,10 +1912,10 @@ void test_actions_insert_drawing_file(void)
     ctx_setup(&doc, &journal, &ctx, "Hello world");
     sec = wp_document_section_get(&doc, 0);
     before = sec->para_count;
-    ASSERT_TRUE(!wp_action_insert_drawing_file(&ctx, txt));
+    ASSERT_TRUE(!wp_action_insert_picture_file(&ctx, txt, NULL));
     ASSERT_EQ_U32(sec->para_count, before);
 
-    ASSERT_TRUE(wp_action_insert_drawing_file(&ctx, gem));
+    ASSERT_TRUE(wp_action_insert_picture_file(&ctx, gem, NULL));
     sec = wp_document_section_get(&doc, 0);
     ASSERT_TRUE(sec->para_count > before);
     for (i = 0; i < sec->para_count; i++) {
@@ -1964,7 +1965,7 @@ void test_actions_insert_svg_through_gateway(void)
     ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
 
     ctx_setup(&doc, &journal, &ctx, "Hello world");
-    ASSERT_TRUE(wp_action_insert_drawing_file(&ctx, svg_path));
+    ASSERT_TRUE(wp_action_insert_picture_file(&ctx, svg_path, NULL));
     sec = wp_document_section_get(&doc, 0);
     for (i = 0; i < sec->para_count; i++) {
         if (sec->paras[i].kind == (u8)WP_PARA_IMAGE) { found++; at = i; }
@@ -1983,4 +1984,75 @@ void test_actions_insert_svg_through_gateway(void)
     ctx_teardown(&doc, &journal, &ctx);
     offload_shutdown();
     gateway_stop(&gw);
+}
+
+/* Insert Image given a bitmap this machine reads (a 24-bit BMP, 2 x 2):
+   decoded here, its pixels in a cache file the backend names (the
+   shared sink, imgcache.h), the picture placed at its size in pixels by
+   the backend's own conversion -- 15 twips a pixel here, so 30 x 30. */
+static void cache_name(char *out, u32 counter)
+{
+    memcpy(out, "build/test_cache_", 17);
+    out[17] = (char)('0' + counter % 10u);
+    memcpy(out + 18, ".tmp", 5);
+}
+static i32 px15(i32 px) { return px * 15; }
+
+void test_actions_insert_bitmap_file(void)
+{
+    static const char bmp_path[] = "build/test_insert.bmp";
+    static u8 f[54 + 16];
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_image_sink sink;
+    wp_picture_target pt;
+    wp_section *sec;
+    u32 counter = 3, i, found = 0, at = 0;
+    FILE *out;
+
+    memset(f, 0, sizeof(f));
+    f[0] = 'B'; f[1] = 'M'; f[10] = 54; f[14] = 40;
+    f[18] = 2; f[22] = 2; f[26] = 1; f[28] = 24;
+    f[54 + 2] = 255; f[54 + 4] = 255;
+    f[62] = 255; f[65] = 255; f[66] = 255; f[67] = 255;
+    out = fopen(bmp_path, "wb"); ASSERT_TRUE(out != NULL); if (out == NULL) return;
+    fwrite(f, 1, sizeof(f), out); fclose(out);
+
+    wp_image_cache_sink(&sink, cache_name, &counter);
+    pt.sink = &sink; pt.colors = 16; pt.max_w = 320; pt.max_h = 200;
+    pt.px_to_twips_x = px15; pt.px_to_twips_y = px15;
+
+    ctx_setup(&doc, &journal, &ctx, "Hello world");
+    ASSERT_TRUE(!wp_action_insert_picture_file(&ctx, bmp_path, NULL));   /* no target: left for the gateway */
+    sec = wp_document_section_get(&doc, 0);
+    for (i = 0; i < sec->para_count; i++) ASSERT_TRUE(sec->paras[i].kind != (u8)WP_PARA_IMAGE);
+    ASSERT_TRUE(wp_action_insert_picture_file(&ctx, bmp_path, &pt));
+    sec = wp_document_section_get(&doc, 0);
+    for (i = 0; i < sec->para_count; i++) {
+        if (sec->paras[i].kind == (u8)WP_PARA_IMAGE) { found++; at = i; }
+    }
+    ASSERT_EQ_U32(found, 1);
+    ASSERT_EQ_U32(counter, 4);
+    if (found == 1) {
+        const wp_image_desc *d = wp_document_image_get(&doc, sec->paras[at].image);
+        ASSERT_TRUE(d != NULL && !WP_IMAGE_IS_DRAWING(d));
+        if (d != NULL) {
+            u8 pix[2];
+            FILE *c;
+            ASSERT_EQ_U32((u32)d->width_px, 2);
+            ASSERT_EQ_U32((u32)d->display_width_twips, 30);
+            ASSERT_EQ_U32((u32)d->display_height_twips, 30);
+            ASSERT_EQ_U32(d->blob_path.length, 22);
+            if (d->blob_path.length == 22)
+                ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, d->blob_path), "build/test_cache_3.tmp", 22);
+            c = fopen("build/test_cache_3.tmp", "rb");
+            ASSERT_TRUE(c != NULL);
+            if (c != NULL) {
+                ASSERT_EQ_U32((u32)fread(pix, 1, 2, c), 2);   /* two rows, a byte each */
+                fclose(c);
+            }
+        }
+    }
+    ctx_teardown(&doc, &journal, &ctx);
 }

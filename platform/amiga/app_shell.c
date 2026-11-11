@@ -37,6 +37,7 @@
 #include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "imgcache.h"
 #include "pageview.h"
 #include "drawpaint.h"
 #include "drawing.h"
@@ -385,6 +386,11 @@ static void amiga_show_document_name(void)
     if (g_win != NULL) set(g_win, MUIA_Window_Title, (IPTR)title);
 }
 
+/* The picture cache's naming and counter, defined with Insert Image
+   below; open and save use them through imgcache.h. */
+static void amiga_format_image_cache_path(char *out, u32 counter);
+static u32 g_amiga_image_cache_counter;
+
 static void do_file_open(void)
 {
     /* The whole flow -- the unsaved-changes question, a name from an ex
@@ -392,12 +398,20 @@ static void do_file_open(void)
        (WordStar, RTF, Markdown, plain text; ODT and PDF through the gateway), the swap, the remembered name -- is
        shared (actions.c). No image sink here yet: RTF pictures are
        dropped on this backend. */
-    (void)wp_action_file_open(&g_ctx, amiga_pick_path, NULL);
+    {   /* pictures in the file go to the picture cache (imgcache.h) */
+        wp_image_sink sink;
+        wp_image_cache_sink(&sink, amiga_format_image_cache_path, &g_amiga_image_cache_counter);
+        (void)wp_action_file_open(&g_ctx, amiga_pick_path, &sink);
+    }
 }
 
 static void do_file_save(wp_bool save_as)
 {
-    (void)wp_action_file_save(&g_ctx, save_as, amiga_pick_path, NULL);
+    {   /* pictures read back from the cache, so the file keeps them */
+        wp_image_source src;
+        wp_image_cache_source(&src, &g_amiga_doc);
+        (void)wp_action_file_save(&g_ctx, save_as, amiga_pick_path, &src);
+    }
 }
 
 /* M9 Phase 6: opens the real help pager at the named node (falling back
@@ -602,11 +616,21 @@ static void do_insert_image(void)
     if (!g_ctx.doc_loaded) return;
     if (!run_asl_file_requester(WP_FALSE, fullpath, (u32)sizeof(fullpath))) return;
 
-    /* A drawing (GEM or Windows metafile) needs no gateway: read and
-       inserted here, vector (actions.h). Anything else is a picture. */
-    if (wp_action_insert_drawing_file(&g_ctx, fullpath)) {
-        relayout_document(g_content_width_twips);
-        return;
+    {   /* A drawing (GEM or Windows metafile), an SVG, or a bitmap this
+           machine reads itself (actions.h) needs no picture gateway. */
+        wp_image_sink psink;
+        wp_picture_target pt;
+        wp_image_cache_sink(&psink, amiga_format_image_cache_path, &g_amiga_image_cache_counter);
+        pt.sink = &psink;
+        pt.colors = (u32)(amiga_screen_color_count());
+        pt.max_w = (i32)WP_AMIGA_IMAGE_TARGET_MAX_W;
+        pt.max_h = (i32)WP_AMIGA_IMAGE_TARGET_MAX_H;
+        pt.px_to_twips_x = amiga_px_to_twips_x;
+        pt.px_to_twips_y = amiga_px_to_twips_y;
+        if (wp_action_insert_picture_file(&g_ctx, fullpath, &pt)) {
+            relayout_document(g_content_width_twips);
+            return;
+        }
     }
     if (!ensure_offload()) {
         show_message("Insert Image", "No offload device available (tried " WP_AMIGA_OFFLOAD_ENDPOINT ").");
@@ -2038,7 +2062,9 @@ void app_shell_run(void)
     g_ctx.view.line_px = amiga_twips_to_px_y; /* the conversion editor_draw advances y with */
     load_sample_document();
     if (g_start_file != NULL && g_start_file[0] != '\0') {
-        (void)wp_action_load_file(&g_ctx, g_start_file, NULL);
+        wp_image_sink sink;   /* its pictures to the cache, as File > Open does */
+        wp_image_cache_sink(&sink, amiga_format_image_cache_path, &g_amiga_image_cache_counter);
+        (void)wp_action_load_file(&g_ctx, g_start_file, &sink);
     }
 
     /* M9 Phase 6: parsed ONCE at startup from the generated

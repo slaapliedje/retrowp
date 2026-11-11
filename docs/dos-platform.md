@@ -549,3 +549,23 @@ their doubles, and full blocks for thick (docs/layout.md). Shading is a
 blue background, since a grey one would hide the screen's light grey
 text. Alt+R opens Format > Borders, since its button does not fit the
 button bar's eighty columns.
+
+## One block is at most 64 KB, and now says so (T16.5)
+
+Open Watcom's `size_t` is 16 bits in every 16-bit model, the large one
+included: the heap is big, but one block is at most 64 KB. retroplat's
+`mem_alloc` cast its `u32` size to `size_t`, so a bigger request was cut
+to its low 16 bits and came back as a small block that the caller then
+overran -- opening a 119 KB RTF "worked", showed its heading and
+corrupted memory behind it. `mem_alloc`/`mem_realloc` now refuse
+anything over 65520 bytes (NULL, as a full heap would), and the same
+file is refused with "Not enough memory to open that file". A file is
+read whole to be opened, so DOS opens files of up to about 64 KB, as in
+practice it always could.
+
+For the same reason DOS keeps no picture sink: a file's pictures are
+dropped on opening (a picture's bytes are held while it is read), and
+Insert Image sends bitmaps to the gateway rather than reading them here.
+Drawings and SVG it takes like every other machine. Saving reads
+gateway pictures back from their cache files (imgcache.h), so they now
+survive a save.

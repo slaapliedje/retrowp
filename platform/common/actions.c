@@ -14,6 +14,7 @@
 #include "keymap.h"
 #include "editing.h"
 #include "drawfile.h"
+#include "bitmapfile.h"
 
 /* ------------------------------------------------------------------ */
 /* Portable handlers                                                    */
@@ -1349,7 +1350,7 @@ wp_status wp_action_write_file(wp_app_ctx *ctx, const char *native_path,
 #define WP_SVG_TIMEOUT_MS 60000uL
 
 /* A drawing file's bytes made a drawing at the caret (see
-   wp_action_insert_drawing_file); a message says why not where it can't. */
+   wp_action_insert_picture_file); a message says why not where it can't. */
 static void insert_drawing_bytes(wp_app_ctx *ctx, const u8 *bytes, u32 size, const char *name)
 {
     wp_drawing_builder b;
@@ -1408,14 +1409,47 @@ static wp_bool looks_like_svg(const char *name, const u8 *head, u32 n)
     return WP_FALSE;
 }
 
-wp_bool wp_action_insert_drawing_file(wp_app_ctx *ctx, const char *path)
+/* A bitmap read here: decoded and fitted to the machine, then placed at
+   its size in pixels, made to fit the column and the page. */
+static void insert_bitmap_bytes(wp_app_ctx *ctx, const u8 *bytes, u32 size, const char *name,
+                                const wp_picture_target *t)
+{
+    wp_image_desc desc;
+    wp_section *sec;
+    i32 w, h, col, room;
+    wp_status st;
+
+    st = bitmapfile_read(bytes, size, name, t->colors, t->max_w, t->max_h, t->sink, ctx->doc, &desc);
+    if (st != WP_OK) {
+        wp_action_tell(ctx, st == WP_NOMEM ? "Not enough memory for that picture" :
+                            st == WP_UNSUPPORTED ? "That kind of picture can't be read here"
+                                                 : "That picture couldn't be read");
+        return;
+    }
+    w = t->px_to_twips_x != NULL ? t->px_to_twips_x(desc.width_px) : desc.width_px * 15;
+    h = t->px_to_twips_y != NULL ? t->px_to_twips_y(desc.height_px) : desc.height_px * 15;
+    sec = wp_document_section_get(ctx->doc, wp_keymap_cursor(ctx)->section);
+    col = sec != NULL ? wp_section_column_twips(sec) : 9360;
+    room = sec != NULL ? sec->page_height - sec->margin_top - sec->margin_bottom : 12960;
+    if (w > col) { h = (h * (col / 16)) / (w / 16); w = col; }
+    if (h > room && room > 0) { w = (w * (room / 16)) / (h / 16); h = room; }
+    desc.display_width_twips = w > 16 ? w : 16;
+    desc.display_height_twips = h > 16 ? h : 16;
+    if ((name[0] != '\0' &&
+         wp_strpool_append(&ctx->doc->strings, (const u8 *)name, (u32)strlen(name), &desc.source_name) != WP_OK) ||
+        wp_edit_insert_image(ctx->doc, ctx->journal, *wp_keymap_cursor(ctx), &desc) != WP_OK) {
+        wp_action_tell(ctx, "Couldn't insert that picture");
+    }
+}
+
+wp_bool wp_action_insert_picture_file(wp_app_ctx *ctx, const char *path, const wp_picture_target *bitmaps)
 {
     plat_file *f;
     u8 head[256];
     u8 *bytes;
     u32 size = 0, got = 0;
     const char *name;
-    wp_bool svg;
+    wp_bool svg, bitmap;
 
     if (!ctx->doc_loaded || path == NULL) return WP_FALSE;
     name = path + strlen(path);
@@ -1423,7 +1457,9 @@ wp_bool wp_action_insert_drawing_file(wp_app_ctx *ctx, const char *path)
     if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) return WP_FALSE;
     if (plat_file_read(f, head, (u32)sizeof(head), &got) != WP_OK) got = 0;
     svg = (wp_bool)(!drawfile_detect(head, got) && looks_like_svg(name, head, got));
-    if (!svg && !drawfile_detect(head, got)) {
+    bitmap = (wp_bool)(!svg && !drawfile_detect(head, got) && bitmaps != NULL && bitmaps->sink != NULL &&
+                       bitmapfile_detect(head, got, name));
+    if (!svg && !bitmap && !drawfile_detect(head, got)) {
         plat_file_close(f);
         return WP_FALSE;                     /* a picture: the gateway's */
     }
@@ -1476,7 +1512,8 @@ wp_bool wp_action_insert_drawing_file(wp_app_ctx *ctx, const char *path)
         offload_response_free(&resp);
         return WP_TRUE;
     }
-    insert_drawing_bytes(ctx, bytes, size, name);
+    if (bitmap) insert_bitmap_bytes(ctx, bytes, size, name, bitmaps);
+    else insert_drawing_bytes(ctx, bytes, size, name);
     mem_free(bytes);
     return WP_TRUE;
 }

@@ -213,8 +213,11 @@ A drawing -- a GEM metafile (.GEM, from GEM Draw, Easy-Draw,
 Kandinsky and the like) or a Windows metafile (.WMF) -- is read
 here, with no gateway, and stays sharp at any size: on screen it
 is drawn for the screen, on paper for the printer. An SVG drawing
-goes to the gateway, which turns it into one. Other pictures go to
-the gateway to be fitted to this machine's colours. A drawing
+goes to the gateway, which turns it into one. A bitmap -- GEM
+.IMG, IFF ILBM or Deluxe Paint LBM, MacPaint, PCX or BMP -- is read
+here too and fitted to this machine's colours (on DOS it goes to
+the gateway); other pictures, such as PNG and JPEG, go to the
+gateway. A drawing
 keeps the size its file gives, made smaller to fit the column;
 DOS shows it as [drawing]. Drawings are saved in the RTF as
 Windows metafiles, which Word and other word processors read.

@@ -21,6 +21,7 @@
 #include "keymap.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "imgcache.h"
 #include "pageview.h"
 #include "drawpaint.h"
 #include "drawing.h"
@@ -370,6 +371,11 @@ static void mac_show_document_name(void)
     if (g_win != NULL) SetWTitle(g_win, ptitle);
 }
 
+/* The picture cache's naming and counter, defined with Insert Image
+   below; open and save use them through imgcache.h. */
+static void mac_format_image_cache_path(char *out, u32 counter);
+static u32 g_mac_image_cache_counter;
+
 static void do_file_open(void)
 {
     /* The whole flow -- the unsaved-changes question, a name from an ex
@@ -377,12 +383,20 @@ static void do_file_open(void)
        (WordStar, RTF, Markdown, plain text; ODT and PDF through the gateway), the swap, the remembered name -- is
        shared (actions.c). No image sink here yet: RTF pictures are
        dropped on this backend. */
-    (void)wp_action_file_open(&g_ctx, mac_pick_path, NULL);
+    {   /* pictures in the file go to the picture cache (imgcache.h) */
+        wp_image_sink sink;
+        wp_image_cache_sink(&sink, mac_format_image_cache_path, &g_mac_image_cache_counter);
+        (void)wp_action_file_open(&g_ctx, mac_pick_path, &sink);
+    }
 }
 
 static void do_file_save(wp_bool save_as)
 {
-    (void)wp_action_file_save(&g_ctx, save_as, mac_pick_path, NULL);
+    {   /* pictures read back from the cache, so the file keeps them */
+        wp_image_source src;
+        wp_image_cache_source(&src, &g_mac_doc);
+        (void)wp_action_file_save(&g_ctx, save_as, mac_pick_path, &src);
+    }
 }
 
 /* Phase 5: opens the real help pager at the named node (falling back to
@@ -455,11 +469,21 @@ static void do_insert_image(void)
     if (!g_ctx.doc_loaded) return;
     if (!run_sf_get_file(fullpath, (u32)sizeof(fullpath))) return;
 
-    /* A drawing (GEM or Windows metafile) needs no gateway: read and
-       inserted here, vector (actions.h). Anything else is a picture. */
-    if (wp_action_insert_drawing_file(&g_ctx, fullpath)) {
-        relayout_document(g_content_width_twips);
-        return;
+    {   /* A drawing (GEM or Windows metafile), an SVG, or a bitmap this
+           machine reads itself (actions.h) needs no picture gateway. */
+        wp_image_sink psink;
+        wp_picture_target pt;
+        wp_image_cache_sink(&psink, mac_format_image_cache_path, &g_mac_image_cache_counter);
+        pt.sink = &psink;
+        pt.colors = (u32)(16u);
+        pt.max_w = (i32)WP_MAC_IMAGE_TARGET_MAX_W;
+        pt.max_h = (i32)WP_MAC_IMAGE_TARGET_MAX_H;
+        pt.px_to_twips_x = mac_px_to_twips;
+        pt.px_to_twips_y = mac_px_to_twips;
+        if (wp_action_insert_picture_file(&g_ctx, fullpath, &pt)) {
+            relayout_document(g_content_width_twips);
+            return;
+        }
     }
     if (!ensure_offload()) return;
     if (offload_query(&caps) != WP_OK || !offload_caps_supports(&caps, OFFLOAD_IMAGE)) return;
