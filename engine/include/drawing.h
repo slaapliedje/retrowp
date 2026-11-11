@@ -81,6 +81,11 @@ typedef struct {
 wp_status wp_drawing_render(const u8 *ops, u32 len, i32 ext_w, i32 ext_h,
                             i32 x, i32 y, i32 w, i32 h, const wp_drawing_sink *sink);
 
+/* cos and sin, x 16384, of an angle in tenths of a degree (a VDI
+   angle) -- the renderer's own table, for readers that turn angles
+   into the radial points an ARC takes. */
+void wp_drawing_polar(i32 tenths, i32 *cos_out, i32 *sin_out);
+
 /* The same, from a picture's descriptor. */
 wp_status wp_drawing_render_image(const wp_document *doc, const wp_image_desc *desc,
                                   i32 x, i32 y, i32 w, i32 h, const wp_drawing_sink *sink);

@@ -442,6 +442,12 @@ void test_drawing_pageprint(void);
 void test_drawing_pen_aspect(void);
 void test_polyfill_spans(void);
 void test_polyfill_wide_line(void);
+void test_drawfile_gem(void);
+void test_drawfile_detect(void);
+void test_drawfile_gem_ndc(void);
+void test_actions_insert_drawing_file(void);
+void test_drawing_postscript(void);
+void test_actions_insert_svg_through_gateway(void);
 void test_rtf_borders_round_trip(void);
 void test_layout_geometry_border_middle_and_double(void);
 void test_layout_geometry_later_lines_use_the_left_indent_only(void);
@@ -1117,6 +1123,12 @@ static const test_case g_cases[] = {
     { "drawing_pen_aspect", test_drawing_pen_aspect },
     { "polyfill_spans", test_polyfill_spans },
     { "polyfill_wide_line", test_polyfill_wide_line },
+    { "drawfile_gem", test_drawfile_gem },
+    { "drawfile_detect", test_drawfile_detect },
+    { "drawfile_gem_ndc", test_drawfile_gem_ndc },
+    { "actions_insert_drawing_file", test_actions_insert_drawing_file },
+    { "drawing_postscript", test_drawing_postscript },
+    { "actions_insert_svg_through_gateway", test_actions_insert_svg_through_gateway },
     { "rtf_borders_round_trip", test_rtf_borders_round_trip },
     { "layout_geometry_border_middle_and_double", test_layout_geometry_border_middle_and_double },
     { "layout_geometry_later_lines_use_the_left_indent_only", test_layout_geometry_later_lines_use_the_left_indent_only },

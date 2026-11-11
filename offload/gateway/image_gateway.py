@@ -46,9 +46,10 @@ import sys
 
 from wire_protocol import (
     STATUS_OK, STATUS_UNSUPPORTED, STATUS_ERR,
-    OP_IMAGE,
+    OP_IMAGE, OP_DRAWING,
     parse_gateway_args, run_gateway_with_args,
 )
+from svg_drawing import svg_to_wmf
 
 try:
     from PIL import Image
@@ -154,9 +155,21 @@ def handle_image(payload, pillow_ok):
     return STATUS_OK, bytes(resp)
 
 
+def handle_drawing(payload):
+    """OFFLOAD_DRAWING (T16.4): SVG in, a placeable Windows metafile out
+    (svg_drawing.py). Needs nothing beyond the standard library, so it is
+    offered whether or not Pillow is."""
+    try:
+        return STATUS_OK, svg_to_wmf(payload)
+    except Exception:
+        return STATUS_ERR, b''
+
+
 def handle_request(op, payload, pillow_ok):
     if op == OP_IMAGE:
         return handle_image(payload, pillow_ok)
+    if op == OP_DRAWING:
+        return handle_drawing(payload)
     return STATUS_UNSUPPORTED, b''
 
 
@@ -174,7 +187,7 @@ def main():
         }),
     ])
     pillow_ok = _PILLOW_AVAILABLE and not args.force_pillow_unavailable
-    ops_supported = (1 << OP_IMAGE) if pillow_ok else 0
+    ops_supported = ((1 << OP_IMAGE) if pillow_ok else 0) | (1 << OP_DRAWING)
     return run_gateway_with_args(
         args, lambda op, payload: handle_request(op, payload, pillow_ok),
         ops_supported, 'image-gateway')

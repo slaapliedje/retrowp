@@ -34,9 +34,13 @@ typedef enum {
                                  the reply is one line for the writer.
                                  docs/formats/offload-protocol.md's
                                  OFFLOAD_PRINT section has the shape */
-    OFFLOAD_PRINT_OPTIONS    /* nothing -> the gateway printer's options,
+    OFFLOAD_PRINT_OPTIONS,   /* nothing -> the gateway printer's options,
                                  one tab-separated line each: key, label,
                                  default, name=label choices. Same section */
+    OFFLOAD_DRAWING          /* SVG bytes -> a placeable Windows metafile
+                                 that engine/src/drawfile.c reads as a
+                                 drawing (T16.4). docs/formats/offload-
+                                 protocol.md's OFFLOAD_DRAWING section */
 } offload_op;
 
 /* The format_id byte that leads an OFFLOAD_CONVERT_IMPORT/EXPORT payload

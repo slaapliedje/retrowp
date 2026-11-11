@@ -13,6 +13,7 @@
 #include "offload.h"
 #include "keymap.h"
 #include "editing.h"
+#include "drawfile.h"
 
 /* ------------------------------------------------------------------ */
 /* Portable handlers                                                    */
@@ -1341,6 +1342,145 @@ wp_status wp_action_write_file(wp_app_ctx *ctx, const char *native_path,
    this would be a new required primitive on all four backends. A single
    "OK" option is the honest way to say something with what already
    exists everywhere. */
+/* The largest drawing file read whole: tiger.gem, a big one, is 62 KB.
+   An SVG goes to the gateway in one request, so it must fit one. */
+#define WP_DRAWFILE_MAX 524288uL
+#define WP_SVG_MAX      65000uL
+#define WP_SVG_TIMEOUT_MS 60000uL
+
+/* A drawing file's bytes made a drawing at the caret (see
+   wp_action_insert_drawing_file); a message says why not where it can't. */
+static void insert_drawing_bytes(wp_app_ctx *ctx, const u8 *bytes, u32 size, const char *name)
+{
+    wp_drawing_builder b;
+    wp_drawfile_info info;
+    wp_image_desc desc;
+    wp_section *sec;
+    i32 w, h, col, room;
+    wp_status st;
+
+    wp_drawing_builder_init(&b);
+    st = drawfile_read(bytes, size, &b, &info);
+    if (st != WP_OK) {
+        wp_drawing_builder_free(&b);
+        wp_action_tell(ctx, st == WP_NOMEM ? "Not enough memory for that drawing"
+                                           : "Nothing in that file can be drawn");
+        return;
+    }
+
+    /* Its own size where the file says, else three inches across; made
+       to fit the column, and the page. */
+    w = info.width_twips;
+    h = info.height_twips;
+    if (w <= 0 || h <= 0) { w = 4320; h = (4320L * info.ext_h) / info.ext_w; }
+    sec = wp_document_section_get(ctx->doc, wp_keymap_cursor(ctx)->section);
+    col = sec != NULL ? wp_section_column_twips(sec) : 9360;
+    room = sec != NULL ? sec->page_height - sec->margin_top - sec->margin_bottom : 12960;
+    if (w > col) { h = (h * (col / 16)) / (w / 16); w = col; }
+    if (h > room && room > 0) { w = (w * (room / 16)) / (h / 16); h = room; }
+    if (w < 16) w = 16;
+    if (h < 16) h = 16;
+
+    memset(&desc, 0, sizeof(desc));
+    desc.width_px = info.ext_w;
+    desc.height_px = info.ext_h;
+    desc.display_width_twips = w;
+    desc.display_height_twips = h;
+    if (wp_strpool_append(&ctx->doc->strings, b.bytes, b.length, &desc.drawing) != WP_OK ||
+        (name[0] != '\0' &&
+         wp_strpool_append(&ctx->doc->strings, (const u8 *)name, (u32)strlen(name), &desc.source_name) != WP_OK) ||
+        wp_edit_insert_image(ctx->doc, ctx->journal, *wp_keymap_cursor(ctx), &desc) != WP_OK) {
+        wp_action_tell(ctx, "Couldn't insert that drawing");
+    }
+    wp_drawing_builder_free(&b);
+}
+
+/* An SVG: named so, or saying so near its start. */
+static wp_bool looks_like_svg(const char *name, const u8 *head, u32 n)
+{
+    u32 len = (u32)strlen(name), i;
+
+    if (len > 4 && name[len - 4] == '.' && (name[len - 3] | 0x20) == 's' &&
+        (name[len - 2] | 0x20) == 'v' && (name[len - 1] | 0x20) == 'g') return WP_TRUE;
+    for (i = 0; i + 4 <= n; i++) {
+        if (head[i] == '<' && head[i + 1] == 's' && head[i + 2] == 'v' && head[i + 3] == 'g') return WP_TRUE;
+    }
+    return WP_FALSE;
+}
+
+wp_bool wp_action_insert_drawing_file(wp_app_ctx *ctx, const char *path)
+{
+    plat_file *f;
+    u8 head[256];
+    u8 *bytes;
+    u32 size = 0, got = 0;
+    const char *name;
+    wp_bool svg;
+
+    if (!ctx->doc_loaded || path == NULL) return WP_FALSE;
+    name = path + strlen(path);
+    while (name > path && name[-1] != '\\' && name[-1] != '/' && name[-1] != ':') name--;
+    if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) return WP_FALSE;
+    if (plat_file_read(f, head, (u32)sizeof(head), &got) != WP_OK) got = 0;
+    svg = (wp_bool)(!drawfile_detect(head, got) && looks_like_svg(name, head, got));
+    if (!svg && !drawfile_detect(head, got)) {
+        plat_file_close(f);
+        return WP_FALSE;                     /* a picture: the gateway's */
+    }
+    if (plat_file_size(f, &size) != WP_OK || size > (svg ? WP_SVG_MAX : WP_DRAWFILE_MAX)) {
+        plat_file_close(f);
+        wp_action_tell(ctx, svg ? "That SVG is too large to send" : "That drawing is too large to read");
+        return WP_TRUE;
+    }
+    bytes = (u8 *)mem_alloc(size > got ? size : got);
+    if (bytes == NULL) {
+        plat_file_close(f);
+        wp_action_tell(ctx, "Not enough memory for that drawing");
+        return WP_TRUE;
+    }
+    memcpy(bytes, head, got);
+    if (size > got) {
+        u32 rest = 0;
+        if (plat_file_read(f, bytes + got, size - got, &rest) != WP_OK) rest = 0;
+        size = got + rest;
+    } else {
+        size = got;
+    }
+    plat_file_close(f);
+
+    if (svg) {
+        /* The gateway turns it into a Windows metafile (OFFLOAD_DRAWING),
+           which comes in here as a drawing file would. */
+        offload_capabilities caps;
+        offload_request req;
+        offload_response resp;
+        wp_bool up = ctx->ensure_offload != NULL ? ctx->ensure_offload() : offload_available();
+
+        if (!up || offload_query(&caps) != WP_OK || (caps.ops_supported & (1uL << OFFLOAD_DRAWING)) == 0) {
+            mem_free(bytes);
+            wp_action_tell(ctx, "An SVG needs a gateway that converts drawings");
+            return WP_TRUE;
+        }
+        req.op = OFFLOAD_DRAWING;
+        req.payload = bytes;
+        req.payload_len = size;
+        req.timeout_ms = WP_SVG_TIMEOUT_MS;
+        if (offload_submit(&req, &resp) != WP_OK || resp.status != OFFLOAD_OK) {
+            if (resp.status == OFFLOAD_OK) offload_response_free(&resp);
+            mem_free(bytes);
+            wp_action_tell(ctx, "The gateway couldn't convert that SVG");
+            return WP_TRUE;
+        }
+        mem_free(bytes);
+        insert_drawing_bytes(ctx, resp.result, resp.result_len, name);
+        offload_response_free(&resp);
+        return WP_TRUE;
+    }
+    insert_drawing_bytes(ctx, bytes, size, name);
+    mem_free(bytes);
+    return WP_TRUE;
+}
+
 void wp_action_tell(wp_app_ctx *ctx, const char *title)
 {
     const u8 *labels[1];

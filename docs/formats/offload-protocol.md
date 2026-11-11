@@ -523,6 +523,26 @@ form and the printer's defaults.
 A machine's own printer port is not this op: that printout is made on
 the machine, by `format_prn` (docs/formats/prn.md).
 
+### `OFFLOAD_DRAWING` (op 10, T16.4)
+
+Request: an SVG file's bytes, whole (at most 65000). Response: a
+**placeable Windows metafile** -- its header's units-per-inch keeps the
+drawing's size -- of `SetWindowOrg`/`SetWindowExt`, pens and brushes
+(`CreatePenIndirect`, `CreateBrushIndirect`, `SelectObject`,
+`DeleteObject`) and `Polygon`/`Polyline`, which the client reads with
+engine/src/drawfile.c as it would a .WMF from disk. The longer side is
+8000 units where the result fits 60000 bytes, else 4000, 2000 or 1000
+with coarser curves; `STATUS_ERR` for a file that is not SVG, has
+nothing drawable, or will not fit. Served by image_gateway.py through
+svg_drawing.py (standard library only, so offered whether or not Pillow
+is). What of SVG is read is in svg_drawing.py's docstring; a path's
+subpaths are one even-odd polygon, joined by seams that cancel, so
+holes stay holes.
+
+The client sends it from Insert Image when the file chosen is an SVG
+(platform/common/actions.c, `wp_action_insert_drawing_file`); a GEM or
+Windows metafile is read on the machine without the gateway.
+
 ### Any other op
 
 The mock gateway responds `RESPONSE` with `status = OFFLOAD_UNSUPPORTED`

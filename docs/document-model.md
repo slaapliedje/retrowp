@@ -392,6 +392,34 @@ the Mac with QuickDraw polygons, the Amiga by spans through `RectFill`
 (an area fill wants a screen-sized TmpRas in chip memory), Qt and win32
 natively; DOS shows "[drawing]", as it shows a picture's marker.
 
+Getting drawings in (stage 3): Insert Image looks at the file first
+(`wp_action_insert_drawing_file`, platform/common/actions.c). A GEM
+metafile or a Windows metafile is read on the machine by
+engine/src/drawfile.c and inserted as a drawing at its own size (the
+file's page size, or a placeable header's units per inch; three inches
+across where it says none), made to fit the column -- one undo step. An
+SVG goes to the gateway (OFFLOAD_DRAWING), which answers with a Windows
+metafile read the same way. Anything else is a picture, as before.
+
+The GEM reader (the Atari Compendium, Appendix C) plays back polylines,
+filled areas, the GDPs (bar, arc, pie, circle, ellipse, elliptical arc
+and pie, rounded boxes) and Beziers (v_bez, v_bez_fill: flattened, eight
+segments to a cubic, each subpath on its own), with line and fill
+colours from the VDI palette, vs_color (256 entries) and NVDI's RGB call
+(opcode 138: sub-ID 1 the fill, 2 the line); a fill pattern is a lighter
+shade of its colour, a perimeter a hairline. The coordinate system comes
+from the header (y measured down from its upper-right corner's y, either
+way round), the extents give the drawing's box. Files are little-endian
+(even an ST's); the header-length word says which. Text, markers and
+line styles are skipped. Tested against Kandinsky's samples (the tiger,
+a 747, Columbia), Papyrus's and BLOWUP's.
+
+PostScript printing draws a drawing as paths (docs/formats/prn.md).
+On a device of fewer than 16 colours -- mono, ST Medium, a printer,
+Workbench's four pens, the one-bit Mac -- every mid colour fills as a
+pattern by its brightness (retroplat's `plat_luma_percent`), else orange
+would print black; richer screens pattern only greys.
+
 RTF carries a drawing as a Windows metafile (docs/formats/rtf.md,
 "Drawings"). engine/src/format_wmf.c reads SetWindowOrg/Ext (the origin
 moved to 0, a negative extent flipping the axis), CreatePenIndirect,

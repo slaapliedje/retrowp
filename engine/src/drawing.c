@@ -119,6 +119,16 @@ static i32 isin(i32 a)
 
 static i32 icos(i32 a) { return isin(a + 64); }
 
+void wp_drawing_polar(i32 tenths, i32 *cos_out, i32 *sin_out)
+{
+    i32 a;
+    tenths %= 3600;
+    if (tenths < 0) tenths += 3600;
+    a = (tenths * 256 + 1800) / 3600;
+    *cos_out = icos(a);
+    *sin_out = isin(a);
+}
+
 /* The angle (256ths, counter-clockwise as it looks, y down) of the
    vector dx, dy: the table angle whose direction it lies closest to. */
 static i32 iangle(i32 dx, i32 dy)

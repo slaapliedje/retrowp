@@ -243,6 +243,15 @@ wp_status wp_action_write_file(struct wp_app_ctx *ctx, const char *native_path,
    Amiga shows it as a requester title. */
 void wp_action_tell(struct wp_app_ctx *ctx, const char *msg);
 
+/* Insert Image's first look at the file it was given: a drawing -- a GEM
+   or Windows metafile (drawfile.h) -- is read here and inserted at the
+   caret as a drawing, vector and without the gateway, at the size the
+   file gives (three inches across where it gives none) made to fit the
+   column and the page. WP_TRUE once it has been dealt with: inserted,
+   or a message has said why not. WP_FALSE for any other file, which the
+   shell sends on to the gateway as a picture, as before. */
+wp_bool wp_action_insert_drawing_file(struct wp_app_ctx *ctx, const char *path);
+
 /* ---- Files ------------------------------------------------------------
    The whole of File > Open / Save / Save As except the picker, which is
    the one genuinely native part. Every backend used to carry its own copy

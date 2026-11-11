@@ -5,6 +5,7 @@
 #include "codepage.h"
 #include "platform.h"
 #include "utf8.h"
+#include "drawing.h"
 
 /* The widest line this lays out: 25.5 inches at 10 cpi, past any paper
    a character printer feeds. A wider page is printed this wide. */
@@ -798,6 +799,81 @@ static void print_text(prn_state *s, const wp_para_style *ps, const u8 *text,
     add_space(s, extra);
 }
 
+/* ---- Drawings in PostScript ------------------------------------------
+
+   A drawing (drawing.h) goes to a PostScript printer as paths, at its
+   size, in whole lines of the grid on one page (the next, where this
+   one has no room): the renderer flattens it in tenths of a point, y
+   down from the box's top, and each polyline is stroked and each
+   polygon filled in its colour. The other printers print "[Picture]". */
+
+static void ps_rgb(prn_state *s, const u8 *rgb)
+{
+    u32 k;
+    for (k = 0; k < 3; k++) { put_num(s, (long)rgb[k]); put_str(s, " 255 div "); }
+    put_str(s, "setrgbcolor\n");
+}
+
+static void ps_path(prn_state *s, const i32 *xy, u16 n)
+{
+    u16 i;
+    put_str(s, "newpath ");
+    for (i = 0; i < n; i++) {
+        put_num(s, (long)xy[i * 2]); put_str(s, " ");
+        put_num(s, (long)xy[i * 2 + 1]); put_str(s, i == 0 ? " moveto\n" : " lineto\n");
+    }
+}
+
+static void ps_line(void *user, const i32 *xy, u16 n, i32 width, const u8 *rgb)
+{
+    prn_state *s = (prn_state *)user;
+    ps_rgb(s, rgb);
+    put_num(s, (long)width); put_str(s, " setlinewidth 1 setlinecap 1 setlinejoin\n");
+    ps_path(s, xy, n);
+    put_str(s, "stroke\n");
+}
+
+static void ps_fill(void *user, const i32 *xy, u16 n, const u8 *rgb)
+{
+    prn_state *s = (prn_state *)user;
+    ps_rgb(s, rgb);
+    ps_path(s, xy, n);
+    put_str(s, "closepath eofill\n");
+}
+
+static void ps_drawing(prn_state *s, const wp_para_style *ps, const wp_image_desc *d)
+{
+    long lh = 720L / (long)s->lpi;
+    long w = (long)d->display_width_twips / 2, h = (long)d->display_height_twips / 2;
+    long col = ((long)s->sec->page_width - s->sec->margin_left - s->sec->margin_right) / 2;
+    long x0 = (long)s->sec->margin_left / 2, ytop;
+    u32 lines = (u32)((d->display_height_twips + s->line_twips - 1) / s->line_twips), i;
+    wp_drawing_sink sink;
+
+    if (lines < 1) lines = 1;
+    if (lines > s->body) lines = s->body;
+    if (s->page_open && s->row > 0 && s->row + s->pending + lines > s->body) end_page(s);
+    if (!s->page_open) begin_page(s);
+    if (s->row > 0) {
+        while (s->pending > 0 && s->row < s->body) { drv_blank(s); s->row++; s->pending--; }
+    }
+    s->pending = 0;
+    if (ps != NULL) {
+        x0 += (long)ps->indent_left / 2;
+        if (ps->align == (u8)WP_ALIGN_CENTER) x0 += (col - w) / 2;
+        else if (ps->align == (u8)WP_ALIGN_RIGHT) x0 += col - w;
+    }
+    ytop = (long)s->sec->page_height / 2 - (long)s->prow * lh;
+    put_str(s, "gsave "); put_tenths(s, x0); put_str(s, " "); put_tenths(s, ytop);
+    put_str(s, " translate 0.1 -0.1 scale\n");
+    sink.user = s;
+    sink.line = ps_line;
+    sink.fill = ps_fill;
+    (void)wp_drawing_render_image(s->doc, d, 0, 0, (i32)w, (i32)h, &sink);
+    put_str(s, "grestore\n");
+    for (i = 0; i < lines; i++) { drv_blank(s); s->row++; }
+}
+
 static void print_paragraph(prn_state *s, const wp_paragraph *para, u8 *buf, u8 *abuf)
 {
     const wp_para_style *ps = wp_document_pstyle_get(s->doc, para->style);
@@ -809,6 +885,14 @@ static void print_paragraph(prn_state *s, const wp_paragraph *para, u8 *buf, u8 
     }
     if (ps != NULL && s->page_open && s->row > 0) add_space(s, ps->space_before);
 
+    if (para->kind == WP_PARA_IMAGE && s->opt->driver == WP_PRN_POSTSCRIPT && !s->capturing) {
+        const wp_image_desc *d = wp_document_image_get(s->doc, para->image);
+        if (d != NULL && WP_IMAGE_IS_DRAWING(d)) {
+            ps_drawing(s, ps, d);
+            if (ps != NULL) add_space(s, ps->space_after);
+            return;
+        }
+    }
     if (para->kind == WP_PARA_IMAGE) {
         static const u8 pic[] = "[Picture]";
         memcpy(buf, pic, sizeof(pic) - 1);

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "test.h"
+#include "drawing.h"
 #include "actions.h"
 #include "rulerbar.h"
 #include "format_txt.h"
@@ -1878,4 +1879,108 @@ void test_actions_format_borders(void)
     ASSERT_EQ_U32(ps->border_sides, 0);
     ASSERT_EQ_U32(ps->shading, 0);
     ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* Insert Image given a drawing file (actions.h): a GEM metafile with no
+   page size comes in as a drawing three inches square at the caret,
+   named after the file, as one undo step; a text file is left for the
+   gateway (WP_FALSE) with the document untouched. */
+void test_actions_insert_drawing_file(void)
+{
+    static const u16 w[] = {
+        0xFFFF, 14, 101, 0, 0, 0, 1000, 1000, 0, 0, 0, 0, 0, 0,
+        6, 2, 0, 0, 0, 0, 1000, 1000,
+        0xFFFF
+    };
+    static const char gem[] = "build/test_insert.gem";
+    static const char txt[] = "build/test_insert.txt";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_section *sec;
+    u8 bytes[64];
+    u32 i, n = (u32)(sizeof(w) / sizeof(w[0])), before, found = 0, at = 0;
+    FILE *f;
+
+    for (i = 0; i < n; i++) { bytes[i * 2] = (u8)(w[i] & 0xFF); bytes[i * 2 + 1] = (u8)(w[i] >> 8); }
+    f = fopen(gem, "wb"); ASSERT_TRUE(f != NULL); if (f == NULL) return;
+    fwrite(bytes, 1, n * 2u, f); fclose(f);
+    f = fopen(txt, "wb"); ASSERT_TRUE(f != NULL); if (f == NULL) return;
+    fputs("This is a letter, not a drawing, and it is long enough.\n", f); fclose(f);
+
+    ctx_setup(&doc, &journal, &ctx, "Hello world");
+    sec = wp_document_section_get(&doc, 0);
+    before = sec->para_count;
+    ASSERT_TRUE(!wp_action_insert_drawing_file(&ctx, txt));
+    ASSERT_EQ_U32(sec->para_count, before);
+
+    ASSERT_TRUE(wp_action_insert_drawing_file(&ctx, gem));
+    sec = wp_document_section_get(&doc, 0);
+    ASSERT_TRUE(sec->para_count > before);
+    for (i = 0; i < sec->para_count; i++) {
+        if (sec->paras[i].kind == (u8)WP_PARA_IMAGE) { found++; at = i; }
+    }
+    ASSERT_EQ_U32(found, 1);
+    if (found == 1) {
+        const wp_image_desc *d = wp_document_image_get(&doc, sec->paras[at].image);
+        ASSERT_TRUE(d != NULL && WP_IMAGE_IS_DRAWING(d));
+        if (d != NULL) {
+            ASSERT_EQ_U32((u32)d->display_width_twips, 4320);
+            ASSERT_EQ_U32((u32)d->display_height_twips, 4320);
+            ASSERT_EQ_U32(d->source_name.length, 15);
+            if (d->source_name.length == 15)
+                ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, d->source_name), "test_insert.gem", 15);
+        }
+    }
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    sec = wp_document_section_get(&doc, 0);
+    ASSERT_EQ_U32(sec->para_count, before);
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* Insert Image given an SVG: sent to the gateway (OFFLOAD_DRAWING,
+   image_gateway.py, standard library only), the metafile it answers
+   with inserted as a drawing -- 2 x 1 inches, as the SVG says. */
+void test_actions_insert_svg_through_gateway(void)
+{
+    static const char svg_path[] = "build/test_insert.svg";
+    static const char svg[] =
+        "<?xml version=\"1.0\"?>\n"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"2in\" height=\"1in\" viewBox=\"0 0 200 100\">\n"
+        "  <rect x=\"10\" y=\"10\" width=\"80\" height=\"80\" fill=\"#ff0000\"/>\n"
+        "  <circle cx=\"150\" cy=\"50\" r=\"40\" fill=\"none\" stroke=\"blue\" stroke-width=\"4\"/>\n"
+        "</svg>\n";
+    gateway_handle gw;
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_section *sec;
+    u32 i, found = 0, at = 0;
+    FILE *f;
+
+    f = fopen(svg_path, "wb"); ASSERT_TRUE(f != NULL); if (f == NULL) return;
+    fputs(svg, f); fclose(f);
+    ASSERT_TRUE(gateway_start_bin("offload/gateway/image_gateway.py", NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    ctx_setup(&doc, &journal, &ctx, "Hello world");
+    ASSERT_TRUE(wp_action_insert_drawing_file(&ctx, svg_path));
+    sec = wp_document_section_get(&doc, 0);
+    for (i = 0; i < sec->para_count; i++) {
+        if (sec->paras[i].kind == (u8)WP_PARA_IMAGE) { found++; at = i; }
+    }
+    ASSERT_EQ_U32(found, 1);
+    if (found == 1) {
+        const wp_image_desc *d = wp_document_image_get(&doc, sec->paras[at].image);
+        ASSERT_TRUE(d != NULL && WP_IMAGE_IS_DRAWING(d));
+        if (d != NULL) {
+            ASSERT_EQ_U32((u32)d->display_width_twips, 2880);
+            ASSERT_EQ_U32((u32)d->display_height_twips, 1440);
+            ASSERT_EQ_U32((u32)d->width_px, 8000);
+            ASSERT_EQ_U32((u32)d->height_px, 4000);
+        }
+    }
+    ctx_teardown(&doc, &journal, &ctx);
+    offload_shutdown();
+    gateway_stop(&gw);
 }

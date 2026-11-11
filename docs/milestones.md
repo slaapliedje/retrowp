@@ -2177,7 +2177,7 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       come (docs/document-model.md, "Frames"): wrap-around, clicks in a
       frame, a Format command to make one, the set height (\absh) in
       layout, frames placed on character printers.
-- [ ] T16.4 Vector drawings. Scalable art kept in the document as a list
+- [x] T16.4 Vector drawings. Scalable art kept in the document as a list
       of primitives in twips -- line, polyline, filled polygon,
       rectangle, rounded rectangle, ellipse, arc -- with a line width and
       a fill; drawn on screen and printed at the printer's own
@@ -2202,8 +2202,13 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       lines stroked as polygons in the engine; shown on the ST and Amiga,
       "[drawing]" on DOS; printed through SpeedoGDOS (FX80, polygons by
       spans: its v_fillarea crashes) and NVDI (PCL). The Mac builds but
-      is not yet seen. Still to come (stage 3): GEM metafiles read on
-      the ST, SVG/WMF through the gateway, PostScript printing.
+      is not yet seen. Stage 3 done the same day: Insert Image reads GEM
+      and Windows metafiles on every machine (engine/src/drawfile.c,
+      tested on Kandinsky's tiger, 747 and Columbia), sends SVG to the
+      gateway (OFFLOAD_DRAWING, svg_drawing.py), and PostScript prints
+      drawings as paths. The heading through the gateway on screen and
+      paper: the host test drives the real gateway; the ST printed the
+      tiger and the 747 through SpeedoGDOS.
 - [ ] T16.5 Clipart. Bitmap clipart opened directly on each machine, no
       gateway needed: GEM .IMG (ST), IFF ILBM (Amiga), MacPaint/PICT
       (Mac), PCX/BMP (DOS), converted to the model's indexed image. A

@@ -455,6 +455,12 @@ static void do_insert_image(void)
     if (!g_ctx.doc_loaded) return;
     if (!run_sf_get_file(fullpath, (u32)sizeof(fullpath))) return;
 
+    /* A drawing (GEM or Windows metafile) needs no gateway: read and
+       inserted here, vector (actions.h). Anything else is a picture. */
+    if (wp_action_insert_drawing_file(&g_ctx, fullpath)) {
+        relayout_document(g_content_width_twips);
+        return;
+    }
     if (!ensure_offload()) return;
     if (offload_query(&caps) != WP_OK || !offload_caps_supports(&caps, OFFLOAD_IMAGE)) return;
 

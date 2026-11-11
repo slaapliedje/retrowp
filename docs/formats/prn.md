@@ -127,6 +127,16 @@ spacing inside a cell is not printed, a cell longer than 64 lines is
 cut, and a cell's shading is not printed. The line buffers are taken
 only for a document with a table: 64 lines of 256 columns, twice.
 
+## Drawings
+
+PostScript prints a drawing (docs/document-model.md, "Drawings") as
+paths at its size: room for it in whole lines on one page (the next,
+where it does not fit), a `gsave` with the box's top-left made the
+origin in tenths of a point and y flipped, each polygon filled
+(`eofill`) and each line stroked in its colour, `grestore`. Centred and
+right-aligned drawings keep their place. The text printers print
+"[Picture]".
+
 ## Frames
 
 A frame (docs/document-model.md, "Frames") is not placed: its

@@ -602,6 +602,12 @@ static void do_insert_image(void)
     if (!g_ctx.doc_loaded) return;
     if (!run_asl_file_requester(WP_FALSE, fullpath, (u32)sizeof(fullpath))) return;
 
+    /* A drawing (GEM or Windows metafile) needs no gateway: read and
+       inserted here, vector (actions.h). Anything else is a picture. */
+    if (wp_action_insert_drawing_file(&g_ctx, fullpath)) {
+        relayout_document(g_content_width_twips);
+        return;
+    }
     if (!ensure_offload()) {
         show_message("Insert Image", "No offload device available (tried " WP_AMIGA_OFFLOAD_ENDPOINT ").");
         return;

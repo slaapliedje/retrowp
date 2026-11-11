@@ -4,6 +4,8 @@
 #include "test.h"
 #include "drawing.h"
 #include "format_wmf.h"
+#include "drawfile.h"
+#include "format_prn.h"
 #include "format_rtf.h"
 #include "layout.h"
 #include "pageprint.h"
@@ -383,8 +385,9 @@ void test_drawing_pageprint(void)
 /* ---- retroplat's helpers (src/polyfill.c) ---------------------------- */
 
 /* A diamond 100 rows tall: black, a span per row through plat_fill_rect;
-   a mid grey, a row each through plat_fill_shade at its darkness (37%);
-   near-white is not a grey but a colour, filled solid. */
+   shaded 37% (a mid grey's darkness), a row each through plat_fill_shade.
+   A colour is not a grey, but has a darkness by its brightness: orange
+   (200, 100, 40) is 52%, which a two-colour device shades it at. */
 void test_polyfill_spans(void)
 {
     static const i32 d[8] = { 50, 0, 100, 50, 50, 100, 0, 50 };
@@ -392,12 +395,14 @@ void test_polyfill_spans(void)
     ASSERT_EQ_U32(plat_grey_percent(160, 160, 160), 37);
     ASSERT_EQ_U32(plat_grey_percent(250, 250, 250), 0);
     ASSERT_EQ_U32(plat_grey_percent(200, 100, 100), 0);
+    ASSERT_EQ_U32(plat_luma_percent(200, 100, 40), 52);
+    ASSERT_EQ_U32(plat_luma_percent(250, 250, 250), 0);
     draw_host_reset_fills();
-    ASSERT_TRUE(plat_polygon_by_spans(NULL, d, 4, 0, 0, 0) == WP_OK);
+    ASSERT_TRUE(plat_polygon_by_spans(NULL, d, 4, 0, 0, 0, 0) == WP_OK);
     ASSERT_EQ_U32(draw_host_grey_fills(0), 100);
     ASSERT_EQ_U32(draw_host_shade_calls(), 0);
     draw_host_reset_fills();
-    ASSERT_TRUE(plat_polygon_by_spans(NULL, d, 4, 160, 160, 160) == WP_OK);
+    ASSERT_TRUE(plat_polygon_by_spans(NULL, d, 4, 160, 160, 160, plat_grey_percent(160, 160, 160)) == WP_OK);
     ASSERT_EQ_U32(draw_host_shade_calls(), 100);
     ASSERT_EQ_U32(draw_host_last_shade(), 37);
     ASSERT_EQ_U32(draw_host_grey_fills(160), 0);
@@ -419,4 +424,195 @@ void test_polyfill_wide_line(void)
     ASSERT_EQ_U32((u32)y0, 8);
     ASSERT_EQ_U32((u32)x1, 102);
     ASSERT_EQ_U32((u32)y1, 12);
+}
+
+/* ---- Drawing files (drawfile.h) -------------------------------------- */
+
+/* A GEM metafile, written by hand: a coordinate system 1000 units each
+   way, y down, on a page 254 mm (10 inches) square; extents 1000 x 500.
+   Records: NVDI's RGB for the fill (red), solid interior, perimeter off,
+   a circle radius 100 at (500, 250); a line (0, 0)-(1000, 500); a
+   Bezier fill of one cubic (0,500) (0,0) (1000,0) (1000,500). */
+static const u16 g_gem_words[] = {
+    0xFFFF, 24, 101, 2, 0, 0, 1000, 500, 2540, 2540, 0, 1000, 1000, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    138, 0, 4, 1, 1000, 0, 0, 0,
+    23, 0, 1, 0, 1,
+    104, 0, 1, 0, 0,
+    11, 3, 0, 4, 500, 250, 0, 0, 100, 0,
+    6, 2, 0, 0, 0, 0, 1000, 500,
+    9, 4, 2, 13, 0, 500, 0, 0, 1000, 0, 1000, 500, 0x0001, 0x0000,
+    0xFFFF
+};
+
+/* The words little-endian (the flag bytes, the 0x0001 word, become 01 00:
+   point 0 starts the cubic), or big-endian with the flag words kept in
+   file order. */
+static u32 make_gem(u8 *out, wp_bool le)
+{
+    u32 i, n = (u32)(sizeof(g_gem_words) / sizeof(g_gem_words[0]));
+    for (i = 0; i < n; i++) {
+        u16 v = g_gem_words[i];
+        wp_bool flagword = (wp_bool)(i == n - 3 || i == n - 2);
+        if (le || flagword) { out[i * 2] = (u8)(v & 0xFF); out[i * 2 + 1] = (u8)(v >> 8); }
+        else { out[i * 2] = (u8)(v >> 8); out[i * 2 + 1] = (u8)(v & 0xFF); }
+    }
+    return n * 2u;
+}
+
+static i32 bd16(const u8 *p) { return (i32)(i16)(((u16)p[0] << 8) | p[1]); }
+
+void test_drawfile_gem(void)
+{
+    static u8 file[256];
+    wp_drawing_builder b;
+    wp_drawfile_info info;
+    u32 len, pos;
+    int pass;
+
+    for (pass = 0; pass < 2; pass++) {
+        len = make_gem(file, (wp_bool)(pass == 0));
+        ASSERT_TRUE(drawfile_detect(file, len));
+        wp_drawing_builder_init(&b);
+        ASSERT_TRUE(drawfile_read(file, len, &b, &info) == WP_OK);
+        ASSERT_EQ_U32((u32)info.ext_w, 1000);
+        ASSERT_EQ_U32((u32)info.ext_h, 500);
+        ASSERT_EQ_U32((u32)info.width_twips, 14400);
+        ASSERT_EQ_U32((u32)info.height_twips, 7200);
+        /* BRUSH red; PEN off (perimeter); ELLIPSE (400,150)-(600,350) */
+        pos = 0;
+        ASSERT_TRUE(b.length > 60);
+        if (b.length <= 60) { wp_drawing_builder_free(&b); return; }
+        ASSERT_EQ_U32(b.bytes[pos], WP_DRAW_BRUSH);
+        ASSERT_EQ_U32(b.bytes[pos + 2], 255); ASSERT_EQ_U32(b.bytes[pos + 3], 0);
+        pos += 5;
+        ASSERT_EQ_U32(b.bytes[pos], WP_DRAW_PEN); ASSERT_EQ_U32(b.bytes[pos + 1], 0);
+        pos += 7;
+        ASSERT_EQ_U32(b.bytes[pos], WP_DRAW_ELLIPSE);
+        ASSERT_EQ_U32((u32)bd16(b.bytes + pos + 1), 400);
+        ASSERT_EQ_U32((u32)bd16(b.bytes + pos + 3), 150);
+        ASSERT_EQ_U32((u32)bd16(b.bytes + pos + 5), 600);
+        ASSERT_EQ_U32((u32)bd16(b.bytes + pos + 7), 350);
+        pos += 9;
+        /* PEN on, black hairline; LINE (0,0)-(1000,500) */
+        ASSERT_EQ_U32(b.bytes[pos], WP_DRAW_PEN); ASSERT_EQ_U32(b.bytes[pos + 1], 1);
+        pos += 7;
+        ASSERT_EQ_U32(b.bytes[pos], WP_DRAW_LINE);
+        ASSERT_EQ_U32((u32)bd16(b.bytes + pos + 7), 1000);
+        ASSERT_EQ_U32((u32)bd16(b.bytes + pos + 9), 500);
+        pos += 11;
+        /* PEN off again; the cubic as a POLYGON of 9, its middle (500,125) */
+        ASSERT_EQ_U32(b.bytes[pos], WP_DRAW_PEN); ASSERT_EQ_U32(b.bytes[pos + 1], 0);
+        pos += 7;
+        ASSERT_EQ_U32(b.bytes[pos], WP_DRAW_POLYGON);
+        ASSERT_EQ_U32((u32)bd16(b.bytes + pos + 1), 9);
+        ASSERT_EQ_U32((u32)bd16(b.bytes + pos + 3 + 4 * 4), 500);
+        ASSERT_EQ_U32((u32)bd16(b.bytes + pos + 5 + 4 * 4), 125);
+        ASSERT_EQ_U32(pos + 3 + 9 * 4, b.length);
+        wp_drawing_builder_free(&b);
+    }
+}
+
+/* Not a drawing: text, a too-short file, a bitmap's header. */
+void test_drawfile_detect(void)
+{
+    static const u8 txt[] = "Hello, this is plain text and not a drawing at all.";
+    static const u8 bmp[32] = { 'B', 'M' };
+    wp_drawing_builder b;
+    wp_drawfile_info info;
+
+    ASSERT_TRUE(!drawfile_detect(txt, (u32)sizeof(txt)));
+    ASSERT_TRUE(!drawfile_detect(bmp, (u32)sizeof(bmp)));
+    ASSERT_TRUE(!drawfile_detect((const u8 *)"\xFF\xFF", 2));
+    wp_drawing_builder_init(&b);
+    ASSERT_TRUE(drawfile_read(txt, (u32)sizeof(txt), &b, &info) == WP_UNSUPPORTED);
+    wp_drawing_builder_free(&b);
+}
+
+/* No coordinate system in the header: NDC, (0, 0) at the lower left and
+   y going up. Extents (0,0)-(1000,1000); a line from the lower left to
+   the upper right comes in from (0, 1000) to (1000, 0), y going down. */
+void test_drawfile_gem_ndc(void)
+{
+    static const u16 w[] = {
+        0xFFFF, 14, 101, 0, 0, 0, 1000, 1000, 0, 0, 0, 0, 0, 0,
+        6, 2, 0, 0, 0, 0, 1000, 1000,
+        0xFFFF
+    };
+    u8 file[64];
+    u32 i, n = (u32)(sizeof(w) / sizeof(w[0]));
+    wp_drawing_builder b;
+    wp_drawfile_info info;
+
+    for (i = 0; i < n; i++) { file[i * 2] = (u8)(w[i] & 0xFF); file[i * 2 + 1] = (u8)(w[i] >> 8); }
+    wp_drawing_builder_init(&b);
+    ASSERT_TRUE(drawfile_read(file, n * 2u, &b, &info) == WP_OK);
+    ASSERT_EQ_U32((u32)info.ext_h, 1000);
+    ASSERT_EQ_U32((u32)info.width_twips, 0);   /* no page size: the file does not say */
+    /* PEN, then LINE: n at +8, points from +10 */
+    ASSERT_TRUE(b.length == 7u + 3u + 8u);
+    if (b.length == 18u) {
+        ASSERT_EQ_U32(b.bytes[7], WP_DRAW_LINE);
+        ASSERT_EQ_U32((u32)bd16(b.bytes + 12), 1000);
+        ASSERT_EQ_U32((u32)bd16(b.bytes + 16), 0);
+    }
+    wp_drawing_builder_free(&b);
+}
+
+/* ---- PostScript ------------------------------------------------------ */
+
+typedef struct { char buf[131072]; u32 n; } psbuf;
+static wp_status ps_put(void *user, const u8 *bytes, u32 n)
+{
+    psbuf *p = (psbuf *)user;
+    if (p->n + n < sizeof(p->buf)) { memcpy(p->buf + p->n, bytes, n); p->n += n; }
+    return WP_OK;
+}
+
+/* A drawing printed to PostScript: its paths in a gsave, the box's left
+   edge at the inch margin (72 pt), flipped to tenths of a point down
+   from its top, then filled polygons and stroked lines in their colours;
+   the text after it follows it. Other drivers print "[Picture]". */
+void test_drawing_postscript(void)
+{
+    wp_drawing_builder a;
+    wp_document doc;
+    wp_image h;
+    wp_section *sec;
+    static psbuf out;
+    wp_prn_options opt;
+    u32 pages = 0;
+    static const char src[] = "{\\rtf1\\ansi Above\\par X\\par After\\par}";
+    char *g, *after;
+
+    build_all(&a);
+    ASSERT_TRUE(format_rtf_import((const u8 *)src, (u32)strlen(src), &doc) == WP_OK);
+    ASSERT_TRUE(wp_document_drawing_add(&doc, a.bytes, a.length, 100, 100, 1440, 720, NULL, &h) == WP_OK);
+    sec = wp_document_section_get(&doc, 0);
+    sec->paras[1].run_count = 0;
+    sec->paras[1].kind = (u8)WP_PARA_IMAGE;
+    sec->paras[1].image = h;
+
+    memset(&opt, 0, sizeof(opt));
+    opt.driver = WP_PRN_POSTSCRIPT;
+    out.n = 0;
+    ASSERT_TRUE(format_prn_export(&doc, &opt, ps_put, &out, &pages) == WP_OK);
+    out.buf[out.n] = '\0';
+    g = strstr(out.buf, "gsave 72.0 ");
+    ASSERT_TRUE(g != NULL);
+    ASSERT_TRUE(strstr(out.buf, "translate 0.1 -0.1 scale") != NULL);
+    ASSERT_TRUE(strstr(out.buf, "200 255 div 100 255 div 50 255 div setrgbcolor") != NULL);   /* the brush */
+    ASSERT_TRUE(strstr(out.buf, "closepath eofill") != NULL);
+    ASSERT_TRUE(strstr(out.buf, "grestore") != NULL);
+    ASSERT_TRUE(strstr(out.buf, "[Picture]") == NULL);
+    after = strstr(out.buf, "(After)");
+    ASSERT_TRUE(after != NULL && g != NULL && after > g);
+
+    opt.driver = WP_PRN_PLAIN;
+    out.n = 0;
+    ASSERT_TRUE(format_prn_export(&doc, &opt, ps_put, &out, &pages) == WP_OK);
+    out.buf[out.n] = '\0';
+    ASSERT_TRUE(strstr(out.buf, "[Picture]") != NULL);
+    wp_document_free(&doc);
+    wp_drawing_builder_free(&a);
 }

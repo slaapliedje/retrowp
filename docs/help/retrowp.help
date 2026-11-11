@@ -208,6 +208,17 @@ reach it), and frames cannot be made here yet. A dot-matrix
 printer in its own fonts prints a frame's text where it comes in
 the document.
 
+Insert Image (Ctrl+G) puts a picture or a drawing at the caret.
+A drawing -- a GEM metafile (.GEM, from GEM Draw, Easy-Draw,
+Kandinsky and the like) or a Windows metafile (.WMF) -- is read
+here, with no gateway, and stays sharp at any size: on screen it
+is drawn for the screen, on paper for the printer. An SVG drawing
+goes to the gateway, which turns it into one. Other pictures go to
+the gateway to be fitted to this machine's colours. A drawing
+keeps the size its file gives, made smaller to fit the column;
+DOS shows it as [drawing]. Drawings are saved in the RTF as
+Windows metafiles, which Word and other word processors read.
+
 Header and Footer ask in the status line. Type the line and
 press Enter (Esc leaves it as it was). A | splits it into parts:
 one part is centred, two go left and right, three left, centre

@@ -2882,6 +2882,12 @@ static void do_insert_image(void)
     fname[0] = '\0';
     if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
 
+    /* A drawing (GEM or Windows metafile) needs no gateway: read and
+       inserted here, vector (actions.h). Anything else is a picture. */
+    if (wp_action_insert_drawing_file(&g_ctx, fullpath)) {
+        relayout_document(g_content_width_twips);
+        return;
+    }
     if (!ensure_offload()) {
         form_alert(1, FA_ERROR "[No offload device available.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");
         return;
