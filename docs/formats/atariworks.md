@@ -1,8 +1,11 @@
 # Atari Works (`.STW`)
 
-**Status: not implemented.** This is the research record for an importer,
-written while the specimens were in front of me so the next person does
-not start from a blank page.
+**Status: mapped (2026-11-11); importer in progress (M17).** The map
+below was read off the 263-document corpus, and a research walker that
+follows it extracts every document's text word-for-word identical to its
+`.TXT` (256 of 262 scored; the rest are differences in the `.TXT`s
+themselves -- see "The map, scored"). The first-read notes after it are
+kept as the record of where this started.
 
 ## Why this format
 
@@ -39,7 +42,76 @@ as documented, so they test the parser against the model, not the model
 against reality." Here that gap can be closed from day one, and it should
 be: build the RTF/TXT comparison harness BEFORE the parser.
 
-## What is known about the format
+## The map
+
+All numbers are big-endian, as on the 68000 that wrote them. Offsets
+are into the file.
+
+| Offset | Content |
+| --- | --- |
+| 0 | `"10"` or `"11"` -- two versions, about half the corpus each |
+| 2..33 | words: window geometry (x, y, w, h) and similar; not needed to read |
+| 34..81 | six reals: paper width, paper height, left, right, top, bottom margin, inches. Version 11: IEEE doubles. Version 10: an IEEE single in the first four bytes of each eight, **four times** the inches |
+| 154 | the default face: 32-byte name, then id, size, flags, a double (tab interval?) |
+| 272 | the same again (a second default) |
+| 318 (0x13e) | the info block, words: 26, flags, 1, **pages**, **paragraphs** (one record each), **lines**, **objects**, ?, ... |
+| 368 (0x170) | the line table: one 16-byte entry per line (offset in its paragraph, width, height, ...): a layout cache, not needed to read |
+| then | the paragraph records, `records` of them |
+| then | a word (the line count: one past the last record's first line), the last record's carried tabs and fields |
+| then | `objects` objects |
+| then | the body |
+| then | the font table, to the end of the file |
+
+**Paragraph records**, one a paragraph, in order. Each starts with a
+word -- the paragraph's first line, as an index into the line table --
+then that record's tab
+stops (one word each), then its merge-field descriptors (54 bytes each),
+then 30 bytes: left indent, first-line indent, right edge, *the next
+record's tab count*, a format word, font id, size, three words, the
+paragraph's text length, *the next record's field count*, three words.
+The two counts for a record are carried in the record before it -- the
+first record has none -- which is why no record can be read on its own.
+Indents, the right edge (measured from the left margin) and tab stops
+are in 1/91.4 inch: 640 of them span seven inches, 15.75 twips each.
+The format word's high byte: low nibble the alignment (1 left, 2 right,
+4 centre, 8 justified), high nibble the line spacing.
+
+**Merge-field descriptors**: 8 bytes, the database file (14 bytes, e.g.
+`LABELS.STD`), the field (32 bytes). The body holds a 0x01 where each
+field goes, in the order the descriptors appear; Atari Works' own text
+export writes `LABELS.STD:Company` there.
+
+**Objects** are 176-byte headers: a word, a kind byte, a sequence
+byte, position and size, a 32-byte name (`BOX_LOGO.GEM`) and the
+original path (`D:\GEM\FUJ_LOGO\BOX_LOGO.GEM`). Kind 5 (0x85 with a
+flag set) is a GEM metafile and kind 6 a GEM IMG; both are followed by a
+32-bit length and that many bytes -- the whole metafile, but only the
+IMG's 16-byte header, its pixels left in the external file. Other kinds
+(1, 3: frames, boxes, rules) are the header alone.
+
+**The body** is text in the Atari character set: 0x0a ends a
+paragraph, 0x09 is a tab, 0x01 a merge field, and 0x00 begins an 8-byte
+style change -- 00, font id, size in points, GEM text effects (1 bold,
+8 underline; italic comes from an italic face), 00. It ends with a lone
+00 where the font table's first entry starts.
+
+**The font table**: 36-byte entries, 00, id, the face's name (Speedo
+names: `Humanist 521 Bold`, `Bitstream Charter`), NUL-padded with
+leftovers. Every id the document uses is named here, in all 265 files.
+
+## The map, scored
+
+The research walker (`host/tools/stw/`) scored against the `.TXT`s by
+words, since Atari Works' text export wraps lines at the screen:
+256 of 262 identical. Of the six: two label sheets differ only where the
+`.TXT` wraps inside a long run of fields; JPEG where it breaks a long
+underline; JAG_MEM3 by two words around a tab; JAG_FAQ and JOB_DESC's
+`.TXT`s are a different revision of the document. Page geometry matches
+the `.RTF`'s `\paperw`/`\marg*` in all 263 that have one; alignment
+matches the `.RTF`'s `\q*` (allowing for the walker's rough pairing of
+paragraphs). All 47 `Legal/STWorks` files walk clean.
+
+## What was first known about the format
 
 From a first read of `ADAR.STW` (52,320 bytes) — verified against its own
 `.TXT`, not assumed:

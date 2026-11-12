@@ -1011,6 +1011,44 @@ void test_actions_load_file_without_extension_goes_by_content(void)
     (void)remove(txt);
 }
 
+const u8 *test_stw_sample(u32 *len);
+
+/* Atari Works opens by content, and Save never writes over it: RetroWP
+   does not write .STW, so LETTER.STW saves as LETTER.RTF beside it. */
+void test_actions_load_file_opens_atari_works_and_saves_rtf_beside_it(void)
+{
+    static const char stw[] = "build/test_actions_aw.stw";
+    static const char rtf[] = "build/test_actions_aw.rtf";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[256];
+    u32 len;
+    const u8 *sample = test_stw_sample(&len);
+    FILE *f = fopen(stw, "wb");
+
+    ASSERT_TRUE(f != NULL);
+    if (f == NULL) return;
+    fwrite(sample, 1, len, f);
+    fclose(f);
+    (void)remove(rtf);
+
+    ctx_setup(&doc, &journal, &ctx, "Something else");
+    ASSERT_TRUE(wp_action_load_file(&ctx, stw, NULL) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "Caf\xc3\xa9\tna", 8) == 0);
+    ASSERT_EQ_STR(ctx.doc_path, rtf);
+    ASSERT_TRUE(ctx.doc_rtf);
+    ASSERT_TRUE(wp_action_save_file(&ctx, ctx.doc_path, NULL) == WP_OK);
+    read_whole_file(rtf, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "{\\rtf1", 6) == 0);
+    read_whole_file(stw, text, sizeof(text));
+    ASSERT_TRUE(text[0] == '1' && text[1] == '1');   /* the original, untouched */
+    ctx_teardown(&doc, &journal, &ctx);
+    (void)remove(stw);
+    (void)remove(rtf);
+}
+
 static wp_bool no_link(void) { return WP_FALSE; }
 static wp_bool printer_off(void) { return WP_FALSE; }
 

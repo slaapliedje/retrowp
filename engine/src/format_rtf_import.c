@@ -1431,7 +1431,10 @@ wp_status format_rtf_import_images(const u8 *bytes, u32 len, wp_document *doc,
     wp_section *sec;
     u32 para_idx;
 
-    if (len < 6 || bytes[0] != '{' || memcmp(bytes + 1, "\\rtf1", 5) != 0) return WP_BADFMT;
+    /* \rtf1, or \rtf0 -- what Atari Works and other early writers put,
+       the same language before Microsoft numbered it. */
+    if (len < 6 || bytes[0] != '{' || memcmp(bytes + 1, "\\rtf", 4) != 0 ||
+        (bytes[5] != '1' && bytes[5] != '0')) return WP_BADFMT;
 
     st = wp_document_init(doc);
     if (st != WP_OK) return st;

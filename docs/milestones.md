@@ -2263,6 +2263,50 @@ opens, printed through GDOS, PostScript and PCL, matching the screen.
 
 ---
 
+## M17 — Atari Works Documents
+Goal: open the word-processor documents of Atari Works (1992), the
+office suite Atari shipped for the ST, TT and Falcon and the usability
+bar this project set itself -- documents that exist today and could not
+be opened at all. Chosen with the user (2026-11-11). The specimen
+corpus (Atari's own legal department: 263 documents present as .STW,
+.RTF and .TXT, docs/formats/atariworks.md) is the measure: the
+importer is scored against it, not against a model of the format.
+
+- [x] T17.1 Map the format and read text, styles and page.
+      AC: the map in docs/formats/atariworks.md, read off the corpus
+      with a research walker (host/tools/stw/probe.py) before any C:
+      paragraph records one a paragraph (their tab and merge-field
+      counts carried in the record before), placed objects (GEM
+      metafiles and IMGs with a 32-bit length, boxes and frames
+      header-only), the body (Atari set, 8-byte style changes), the
+      font table; page reals as IEEE doubles (version 11) or singles of
+      four times the inches (version 10). engine/src/format_stw.c reads
+      text, runs (face, size, bold, underline, italic from the face's
+      name), paragraphs (alignment, indents, line spacing, tab stops
+      with their kinds) and the page; a merge field reads as
+      "LABELS.STD:Company". `make stw-score` runs RetroWP's own importer
+      over the corpus: **256 of 262 texts identical word for word** to
+      Atari Works' .TXT (the six: two .TXT wraps inside merge fields, a
+      wrapped underline, two words around a tab, two .TXTs of a
+      different revision); styles against Atari Works' .RTF over
+      354,049 characters: **alignment, underline and size 100%**, bold
+      96.5% and italic 99.0% (the RTF export names every face "System
+      Font", so a bold or italic *face* reads plain there). All 47
+      Legal/STWorks files walk clean. Open finds Atari Works by content
+      (its "10"/"11" is not distinctive alone; the whole structure must
+      walk); RetroWP does not write .STW, so LETTER.STW saves as
+      LETTER.RTF beside it, never over it. Found on the way: RetroWP's
+      RTF reader refused `{\rtf0` -- Atari Works' and other early
+      writers' -- and now takes it. The engine gained the Atari ST
+      character set (WP_CODEPAGE_ATARI_ST). Seen on the ST and the Mac.
+- [ ] T17.2 Pictures: the placed GEM metafiles (drawfile.c reads them
+      already) and IMGs, at their positions as frames.
+- [ ] T17.3 Headers and footers (not yet found in the map), and
+      whatever the info block's remaining words and the header's
+      second default face turn out to hold.
+
+---
+
 ## Cross-Cutting "Done" Checklist (apply to every task)
 - [ ] Builds on host (+ target backend or stub).
 - [ ] Platform-free logic unit-tested on host.

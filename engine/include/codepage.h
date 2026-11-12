@@ -13,6 +13,10 @@
    from Python's codecs (engine/src/codepage.c) -- 768 bytes a code page,
    constant data. */
 
+/* The Atari ST's own set has no Windows number; this one is private to
+   RetroWP (Atari Works' importer, docs/formats/atariworks.md). */
+#define WP_CODEPAGE_ATARI_ST 60000u
+
 /* WP_TRUE for the code pages above. */
 wp_bool wp_codepage_known(u16 codepage);
 

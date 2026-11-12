@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "psdev.h"
+#include "format_stw.h"
 #include "actions.h"
 #include "app_ctx.h"
 #include "format_txt.h"
@@ -2447,7 +2448,7 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
     u32 size = 0, read_len = 0;
     u8 *buf, *data;
     wp_bool via_gateway = wp_path_ends_with_ci(native_path, ".ODT");
-    wp_bool as_rtf = WP_FALSE;
+    wp_bool as_rtf = WP_FALSE, from_stw = WP_FALSE;
     wp_document fresh;
     wp_status st;
 
@@ -2493,6 +2494,11 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
         if (via_gateway) {
             buf[0] = (u8)OFFLOAD_FORMAT_ODT;
             st = convert_import(ctx, buf, read_len + 1, &fresh, sink);
+        } else if (format_stw_looks_like(data, read_len)) {
+            /* Atari Works, by content: its "10"/"11" opening is not
+               distinctive alone, so the whole structure must walk. */
+            st = format_stw_import(data, read_len, &fresh);
+            from_stw = WP_TRUE;
         } else if (format_ws_looks_like(data, read_len)) {
             st = format_ws_import(data, read_len, &fresh);
         } else if (wp_path_ends_with_ci(native_path, ".RTF") ||
@@ -2514,6 +2520,20 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
         return st;
     }
     wp_action_replace_document(ctx, &fresh);
+    if (from_stw) {
+        /* RetroWP does not write Atari Works, so Save must not write
+           over one: LETTER.STW saves as LETTER.RTF beside it, keeping
+           its formatting; a name with no extension asks. */
+        wp_action_remember_path(ctx, native_path);
+        if (wp_path_ends_with_ci(native_path, ".STW")) {
+            u32 n = (u32)strlen(ctx->doc_path);
+            memcpy(ctx->doc_path + n - 3, native_path[n - 3] == 's' ? "rtf" : "RTF", 3);
+        } else {
+            ctx->doc_path[0] = '\0';
+        }
+        ctx->doc_rtf = WP_TRUE;
+        return WP_OK;
+    }
     wp_action_remember_path(ctx, native_path);
     ctx->doc_rtf = as_rtf;
     return WP_OK;

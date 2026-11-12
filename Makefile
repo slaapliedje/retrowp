@@ -168,6 +168,18 @@ $(GENERATED)/help_retrowp.h: docs/help/retrowp.help $(BUILD)/gen_help_header | $
 # mem_alloc/mem_free) instead of just copying bytes, so it walks the
 # same node/line graph app_shell.c's own pager does rather than
 # re-deriving the format by hand. See the tool's own file comment.
+# Atari Works: RetroWP's importer scored against the specimen corpus
+# (docs/formats/atariworks.md); skips where the corpus is absent.
+$(BUILD)/stw2txt: host/tools/stw/stw2txt.c $(ENGINE_OBJ) $(TRANSPORT_OBJ) $(PLATFORM_OBJ) | $(BUILD)
+	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) $^ -o $@
+
+$(BUILD)/stw_vs_rtf: host/tools/stw/stw_vs_rtf.c $(ENGINE_OBJ) $(TRANSPORT_OBJ) $(PLATFORM_OBJ) | $(BUILD)
+	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) $^ -o $@
+
+.PHONY: stw-score
+stw-score: $(BUILD)/stw2txt $(BUILD)/stw_vs_rtf
+	python3 host/tools/stw/stw_score.py $(BUILD)/stw2txt $(BUILD)/stw_vs_rtf
+
 $(BUILD)/gen_help_guide: host/tools/gen_help_guide.c $(BUILD)/platform_common/help_doc.o $(BUILD)/engine/strpool.o $(BUILD)/platform/mem_host.o | $(BUILD)
 	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) $^ -o $@
 
