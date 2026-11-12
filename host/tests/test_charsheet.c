@@ -7,6 +7,7 @@
 #include "cisummary.h"
 #include "pageprint.h"
 #include "pageview.h"
+#include "psdev.h"
 
 /* The worked example (T16.6): host/tests/fixtures/CHARSHT.RTF, an
    original character sheet using everything M16 built. The gates open
@@ -94,5 +95,34 @@ void test_charsheet_prints(void)
     ASSERT_TRUE(strstr(g_ps.buf, "BACKGROUND") != NULL);
     for (p = g_ps.buf; (p = strstr(p, "translate 0.1 -0.1 scale")) != NULL; p++) drawings++;
     ASSERT_EQ_U32(drawings, 2);
+    wp_document_free(&doc);
+}
+
+/* PostScript that matches the screen (psdev.h): one page, the text set
+   word by word at the page printer's positions, the rules and the two
+   drawings as paths. Left in build/charsheet.ps for a look with gs. */
+void test_charsheet_postscript(void)
+{
+    wp_document doc;
+    u32 pages = 0, len = read_sheet();
+    FILE *f;
+
+    ASSERT_TRUE(format_rtf_import(g_cs, len, &doc) == WP_OK);
+    g_ps.n = 0;
+    ASSERT_TRUE(wp_ps_print(&doc, cs_put, &g_ps, 0, &pages) == WP_OK);
+    g_ps.buf[g_ps.n] = '\0';
+    ASSERT_EQ_U32(pages, 1);
+    ASSERT_TRUE(strncmp(g_ps.buf, "%!PS-Adobe-3.0", 14) == 0);
+    ASSERT_TRUE(strstr(g_ps.buf, "%%Page: 1 1") != NULL);
+    ASSERT_TRUE(strstr(g_ps.buf, "showpage") != NULL);
+    ASSERT_TRUE(strstr(g_ps.buf, "%%Pages: 1") != NULL);
+    ASSERT_TRUE(strstr(g_ps.buf, "(BACKGROUND)") != NULL);   /* a word, drawn where it was laid out */
+    ASSERT_TRUE(strstr(g_ps.buf, "eofill") != NULL);          /* the drawings */
+    ASSERT_TRUE(strstr(g_ps.buf, " R\n") != NULL || strstr(g_ps.buf, "R\n") != NULL);   /* rules */
+    f = fopen("build/charsheet.ps", "wb");
+    if (f != NULL) {
+        (void)fwrite(g_ps.buf, 1, g_ps.n, f);
+        fclose(f);
+    }
     wp_document_free(&doc);
 }

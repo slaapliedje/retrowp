@@ -2253,10 +2253,10 @@ of" those sheets, not copies -- the published sheets are copyrighted.
       trip); typographic quotes, dashes and accented letters printed as
       "?" on machines whose sets lack them (retroplat's
       utf8_ascii_fallback now gives the nearest plain character).
-      Still open: PostScript goes through format_prn's character grid
-      (Courier, frames in text order), so it does not match the screen
-      as GDOS does; the character printers draw a partly bordered table
-      cell as a full box.
+      Still open: the character printers draw a partly bordered table
+      cell as a full box. (PostScript went through format_prn's
+      character grid until 2026-11-11; it now draws the page printer's
+      page -- platform/common/psdev.c, docs/formats/prn.md.)
 
 Artifact: a character sheet made in RetroWP, saved as RTF that Word
 opens, printed through GDOS, PostScript and PCL, matching the screen.

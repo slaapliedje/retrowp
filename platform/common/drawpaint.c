@@ -1,16 +1,17 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <stddef.h>
+#include "devout.h"
 #include "drawpaint.h"
 #include "drawing.h"
 
 static void paint_line(void *user, const i32 *xy, u16 n, i32 width, const u8 *rgb)
 {
-    (void)plat_draw_polyline((plat_gc *)user, xy, n, width, rgb[0], rgb[1], rgb[2]);
+    (void)wp_dev_draw_polyline((plat_gc *)user, xy, n, width, rgb[0], rgb[1], rgb[2]);
 }
 
 static void paint_fill(void *user, const i32 *xy, u16 n, const u8 *rgb)
 {
-    (void)plat_fill_polygon((plat_gc *)user, xy, n, rgb[0], rgb[1], rgb[2]);
+    (void)wp_dev_fill_polygon((plat_gc *)user, xy, n, rgb[0], rgb[1], rgb[2]);
 }
 
 wp_bool wp_paint_drawing(plat_gc *gc, const wp_document *doc, const wp_image_desc *desc,

@@ -275,8 +275,11 @@ prints the document, on one of two printers:
   and footer. On the ST and DOS you choose what the printer
   understands -- Plain text, Epson, HP PCL or PostScript --
   and, for PCL and PostScript, two-sided printing; RetroWP
-  remembers it. Epson, PCL, PostScript and the Amiga print
-  bold, italic and underlined text; fonts are not printed.
+  remembers it. Epson, PCL and the Amiga print bold, italic
+  and underlined text; fonts are not printed. PostScript
+  prints each page the way it looks on the screen -- tables,
+  borders, shading, frames, drawings and pictures -- in Times,
+  Helvetica or Courier, whichever is nearest each font.
 
   On an ST with GDOS loaded (SpeedoGDOS or NVDI), "GDOS
   printer" heads that list: the printer ASSIGN.SYS gives

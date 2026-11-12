@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <stddef.h>
 #include <string.h>
+#include "devout.h"
 #include "drawpaint.h"
 #include "drawing.h"
 #include "pageprint.h"
@@ -99,7 +100,10 @@ static void draw_margin_text(wp_document *doc, const page_frame *fr, const wp_se
         if (n == 0) continue;
         (void)plat_measure_text(font, buf, n, &w);
         x = (where == 0) ? left : (where == 2) ? right - w : left + (right - left - w) / 2;
-        (void)plat_draw_text(fr->dev->gc, font, at_x(fr, x), at_y(fr, baseline), buf, n, 0, 0, 0);
+        (void)wp_dev_text(fr->dev->gc, font, doc, cs, at_x(fr, x), at_y(fr, baseline),
+                          at_x(fr, x + w) - at_x(fr, x),
+                          at_y(fr, baseline + fm.descent) - at_y(fr, baseline - fm.ascent),
+                          buf, n, 0, 0, 0);
     }
     plat_font_close(font);
 }
@@ -117,10 +121,10 @@ static void draw_frame(const page_frame *fr, i32 x, i32 y, i32 w, i32 h)
     i32 x1 = at_x(fr, x + w), y1 = at_y(fr, y + h);
     plat_gc *gc = fr->dev->gc;
 
-    (void)plat_fill_rect(gc, x0, y0, x1 - x0, 1, 0, 0, 0);
-    (void)plat_fill_rect(gc, x0, y1 - 1, x1 - x0, 1, 0, 0, 0);
-    (void)plat_fill_rect(gc, x0, y0, 1, y1 - y0, 0, 0, 0);
-    (void)plat_fill_rect(gc, x1 - 1, y0, 1, y1 - y0, 0, 0, 0);
+    (void)wp_dev_fill_rect(gc, x0, y0, x1 - x0, 1, 0, 0, 0);
+    (void)wp_dev_fill_rect(gc, x0, y1 - 1, x1 - x0, 1, 0, 0, 0);
+    (void)wp_dev_fill_rect(gc, x0, y0, 1, y1 - y0, 0, 0, 0);
+    (void)wp_dev_fill_rect(gc, x1 - 1, y0, 1, y1 - y0, 0, 0, 0);
 }
 
 /* Rows of a picture drawn at a time: a band's worth of bits is all a
@@ -210,7 +214,7 @@ static wp_bool draw_picture(wp_document *doc, const page_frame *fr, const wp_ima
         if (fr->dev->draw_mono != NULL) {
             (void)fr->dev->draw_mono(fr->dev->gc, x0, y0 + by, dw, rows, band, row_words, 0, 0, 0);
         } else {
-            (void)plat_draw_mono(fr->dev->gc, x0, y0 + by, dw, rows, band, row_words, 0, 0, 0);
+            (void)wp_dev_draw_mono(fr->dev->gc, x0, y0 + by, dw, rows, band, row_words, 0, 0, 0);
         }
     }
     mem_free(src_x);
@@ -224,7 +228,8 @@ static wp_bool draw_picture(wp_document *doc, const page_frame *fr, const wp_ima
    its baseline. */
 static void draw_line(wp_document *doc, const page_frame *fr, wp_paragraph *para,
                       const wp_line *line, wp_bool last_line, i32 left_twips, i32 top_twips,
-                      plat_font **font, wp_cstyle *cached, wp_bool *have_font, i32 *ascent)
+                      plat_font **font, wp_cstyle *cached, wp_bool *have_font, i32 *ascent,
+                      i32 *descent)
 {
     const wp_para_style *pstyle = wp_document_pstyle_get(doc, para->style);
     u8 align = (pstyle != NULL) ? pstyle->align : WP_ALIGN_LEFT;
@@ -260,6 +265,7 @@ static void draw_line(wp_document *doc, const page_frame *fr, wp_paragraph *para
             if (cs != NULL && wp_cstyle_font_open(doc, cs, font) == WP_OK) {
                 if (plat_font_metrics_get(*font, &fm) == WP_OK) {
                     *ascent = fm.ascent;
+                    *descent = fm.descent;
                     *cached = run->style;
                     *have_font = WP_TRUE;
                 } else {
@@ -271,8 +277,10 @@ static void draw_line(wp_document *doc, const page_frame *fr, wp_paragraph *para
         if (len == 0 || *font == NULL) continue;
         (void)plat_measure_text(*font, bytes + frag.byte_start, len, &w);
         if (!frag.is_space) {
-            (void)plat_draw_text(fr->dev->gc, *font, at_x(fr, x), at_y(fr, text_top + *ascent),
-                                 bytes + frag.byte_start, len, 0, 0, 0);
+            (void)wp_dev_text(fr->dev->gc, *font, doc, wp_document_cstyle_get(doc, run->style),
+                              at_x(fr, x), at_y(fr, text_top + *ascent), at_x(fr, x + w) - at_x(fr, x),
+                              at_y(fr, text_top + *ascent + *descent) - at_y(fr, text_top),
+                              bytes + frag.byte_start, len, 0, 0, 0);
         }
         x += w;
         if (frag.is_space) x += extra;
@@ -291,7 +299,7 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
     plat_font *font = NULL;
     wp_cstyle cached = 0;
     wp_bool have_font = WP_FALSE;
-    i32 ascent = 0;
+    i32 ascent = 0, descent = 0;
     wp_status st = WP_OK;
 
     if (pages_out != NULL) *pages_out = 0;
@@ -319,6 +327,10 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
                     pages++;
                     cur_page = line->page;
                     frame_for(&fr, dev, sec);
+                    if (dev->begin_page != NULL) {
+                        st = dev->begin_page(dev->user, sec, pages);
+                        if (st != WP_OK) break;
+                    }
                     begin_page(doc, &fr, sec, pages);
                     wp_line_walk_start(&walk, sec->margin_top);
                 }
@@ -359,7 +371,7 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
                     }
                 } else {
                     draw_line(doc, &fr, para, line, (wp_bool)(li == layout->line_count - 1),
-                              left, y, &font, &cached, &have_font, &ascent);
+                              left, y, &font, &cached, &have_font, &ascent, &descent);
                 }
             }
         }

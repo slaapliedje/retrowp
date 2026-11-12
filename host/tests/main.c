@@ -322,6 +322,7 @@ void test_config_printer_keys(void);
 void test_pageprint_pages(void);
 void test_pageprint_printable_area(void);
 void test_pageprint_picture(void);
+void test_pageprint_picture_postscript(void);
 void test_config_save_printer(void);
 void test_actions_file_open_asks_picks_and_a_new_document_forgets_the_name(void);
 void test_actions_paragraph_buttons_change_the_caret_paragraph(void);
@@ -460,6 +461,7 @@ void test_drawing_rtf_keeps_alignment(void);
 void test_utf8_ascii_fallback(void);
 void test_charsheet_opens_whole(void);
 void test_charsheet_prints(void);
+void test_charsheet_postscript(void);
 void test_actions_insert_svg_through_gateway(void);
 void test_rtf_borders_round_trip(void);
 void test_layout_geometry_border_middle_and_double(void);
@@ -1037,6 +1039,7 @@ static const test_case g_cases[] = {
     { "pageprint_pages", test_pageprint_pages },
     { "pageprint_printable_area", test_pageprint_printable_area },
     { "pageprint_picture", test_pageprint_picture },
+    { "pageprint_picture_postscript", test_pageprint_picture_postscript },
     { "config_save_printer", test_config_save_printer },
     { "actions_file_open_asks_picks_and_a_new_document_forgets_the_name", test_actions_file_open_asks_picks_and_a_new_document_forgets_the_name },
     { "actions_paragraph_buttons_change_the_caret_paragraph", test_actions_paragraph_buttons_change_the_caret_paragraph },
@@ -1154,6 +1157,7 @@ static const test_case g_cases[] = {
     { "utf8_ascii_fallback", test_utf8_ascii_fallback },
     { "charsheet_opens_whole", test_charsheet_opens_whole },
     { "charsheet_prints", test_charsheet_prints },
+    { "charsheet_postscript", test_charsheet_postscript },
     { "actions_insert_svg_through_gateway", test_actions_insert_svg_through_gateway },
     { "rtf_borders_round_trip", test_rtf_borders_round_trip },
     { "layout_geometry_border_middle_and_double", test_layout_geometry_border_middle_and_double },

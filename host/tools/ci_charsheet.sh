@@ -10,9 +10,11 @@
 #     drawings, every table row, the frame.
 #   - A screenshot of each is kept in build/charsheet/ (NAME.png), and
 #     must not be one flat colour.
-#   - The Atari prints it too, on PRN: (Hatari's --printer), and the
-#     printout must carry the sheet's headings. GDOS printing is checked
-#     by hand: SpeedoGDOS and NVDI are not this repository's to carry.
+#   - The Atari prints it too, in PostScript (platform/common/psdev.h),
+#     on PRN: (Hatari's --printer): one page, the sheet's words on it.
+#     With Ghostscript about, the page is kept as build/charsheet/
+#     st_printer.png beside the screenshot. GDOS printing is checked by
+#     hand: SpeedoGDOS and NVDI are not this repository's to carry.
 #   - The Mac opens it the Finder's way: in CI mode RetroWP sends itself
 #     an "open documents" Apple Event for the file the trigger names
 #     (platform/mac/app_shell.c), through the same handler a document
@@ -28,7 +30,7 @@ cd "$(dirname "$0")/../.."
 MAC_RETRO68_TOOLCHAIN="${MAC_RETRO68_TOOLCHAIN:-$HOME/opt/Retro68-build/toolchain/m68k-apple-macos/cmake/retro68.toolchain.cmake}"
 
 EXPECT="${CHARSHEET_EXPECT:-doc paras=87 pictures=0 drawings=2 rows=16 frames=1}"   # overridable, to prove the gate can fail
-SHEET=host/tests/fixtures/CHARSHT.RTF
+SHEET="${CHARSHEET_FILE:-host/tests/fixtures/CHARSHT.RTF}"   # another file: its screenshots, for looking at
 OUTDIR=build/charsheet
 mkdir -p "$OUTDIR"
 PASS=0
@@ -85,6 +87,7 @@ run_st() {
     mkdir -p "$_dir/c"
     cp bin/atari/RETROWP.PRG bin/atari/LAUNCH.PRG "$_dir/c/"
     cp "$SHEET" "$_dir/c/TEST.RTF"
+    printf 'printer = postscript\r\n' > "$_dir/c/RETROWP.CFG"
     echo ci > "$_dir/c/RETROWP.CI"
     _d=":$((300 + $$ % 200))"
     start_xvfb "$_d"
@@ -116,10 +119,13 @@ run_st() {
             if [ "$_s" -gt 0 ] && [ "$_s" = "$_prev" ]; then _same=$((_same + 1)); [ $_same -ge 3 ] && break; else _same=0; fi
             _prev=$_s
         done
-        cp "$_dir/printer.out" "$OUTDIR/st_printer.out" 2>/dev/null
+        cp "$_dir/printer.out" "$OUTDIR/st_printer.ps" 2>/dev/null
+        command -v gs >/dev/null 2>&1 && gs -q -dSAFER -dBATCH -dNOPAUSE -sDEVICE=pnggray -r100 \
+            -sOutputFile="$OUTDIR/st_printer.png" "$_dir/printer.out" >/dev/null 2>&1
         if [ "$_got" != "$EXPECT" ]; then bad st "opened \"$_got\""
         elif ! not_flat "$OUTDIR/st.png"; then bad st "the screen is blank"
-        elif ! grep -q "ATTRIBUTES AND SKILLS" "$_dir/printer.out" 2>/dev/null; then bad st "the printout lacks the sheet"
+        elif ! grep -q "^%%Pages: 1" "$_dir/printer.out" 2>/dev/null ||
+             ! grep -q "(BACKGROUND)" "$_dir/printer.out"; then bad st "the printout lacks the sheet"
         else ok st; fi
     fi
     kill -9 $_hp 2>/dev/null; wait $_hp 2>/dev/null

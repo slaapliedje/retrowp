@@ -458,7 +458,7 @@ way round), the extents give the drawing's box. Files are little-endian
 line styles are skipped. Tested against Kandinsky's samples (the tiger,
 a 747, Columbia), Papyrus's and BLOWUP's.
 
-PostScript printing draws a drawing as paths (docs/formats/prn.md).
+PostScript printing draws a drawing as paths (docs/formats/prn.md, "PostScript that matches the screen").
 On a device of fewer than 16 colours -- mono, ST Medium, a printer,
 Workbench's four pens, the one-bit Mac -- every mid colour fills as a
 pattern by its brightness (retroplat's `plat_luma_percent`), else orange

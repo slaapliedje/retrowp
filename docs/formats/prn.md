@@ -98,6 +98,37 @@ laid out again with the printer's own metrics (retroplat's
 `atari_metrics_printer`), each line drawn where that layout puts it, the
 header and footer by the same `|` and `#` rules as below.
 
+## PostScript that matches the screen
+
+Since 2026-11-11 File > Print's PostScript is not this format's grid
+either: `platform/common/psdev.c` hands the same page printer a device of
+its own (`devout.h`: the shared drawing -- page printer, borders and
+table rules, drawings -- goes to the platform, or for a bound gc to a
+table of operations), which writes PostScript where GDOS draws pixels.
+So the page is the screen's layout: its line breaks, tables, borders and
+shading (a real grey), frames, drawings as paths and pictures as
+dithered `imagemask` bands. Coordinates are tenths of a point from the
+paper's top left.
+
+Each word is set in the standard face its style names -- Times for a
+roman family or a Times/serif name, Courier for a modern one, else
+Helvetica; bold and italic -- at the size whose ascent-to-descent (about
+1.12 em) is the height of the font the layout used, and stretched or
+narrowed to the width this machine measured. Whatever the machine's own
+fonts, then, a word sits exactly where the screen put it; on a plain-TOS
+ST, whose system font is broad, the print is correspondingly airy.
+
+The prolog is language level 1: the faces re-encoded to Latin-1 (built
+from StandardEncoding where a printer lacks `ISOLatin1Encoding`), with
+curly quotes, dashes, the ellipsis, bullet, daggers, trademark, œ/Œ,
+per mille and the fi/fl ligatures in its empty 0x80-0x8F; the paper size
+and two-sided printing are asked of `setpagedevice` only where there is
+one. A character outside those takes `utf8_ascii_fallback`'s nearest
+plain one; Greek (which would want the Symbol face) prints "?".
+
+`format_prn`'s own PostScript driver (above) is kept: it is the grid
+form, for a caller that wants text in a fixed pitch.
+
 ## Borders
 
 A paragraph's border prints in the grid, as a word processor printed one

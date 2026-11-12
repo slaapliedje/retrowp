@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
+#include "psdev.h"
 #include "actions.h"
 #include "app_ctx.h"
 #include "format_txt.h"
@@ -2379,7 +2380,12 @@ static wp_status print_here(wp_app_ctx *ctx)
     opt.crlf = WP_TRUE;
     opt.driver = ctx->printer_driver;
     opt.sides = ctx->printer_sides;
-    st = format_prn_export(ctx->doc, &opt, write_printer, prn, &pages);
+    if (opt.driver == WP_PRN_POSTSCRIPT) {
+        /* PostScript draws the page as the screen lays it out (psdev.h). */
+        st = wp_ps_print(ctx->doc, write_printer, prn, opt.sides, &pages);
+    } else {
+        st = format_prn_export(ctx->doc, &opt, write_printer, prn, &pages);
+    }
     plat_file_close(prn);
     if (st == WP_NOMEM) {
         wp_action_tell(ctx, "Not enough memory to print");

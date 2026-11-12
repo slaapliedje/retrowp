@@ -6,6 +6,7 @@
 #include "format_txt.h"
 #include "strpool.h"
 #include "draw_host.h"
+#include "psdev.h"
 
 /* wp_pageprint against the host backend: device pixels are twips, and
    the host font is 12 pt = 240 twips ascent, 60 descent, 120 a
@@ -129,26 +130,25 @@ void test_pageprint_printable_area(void)
    pixels print the frame instead. */
 static i32 tenth(i32 twips) { return twips / 10; }
 
-void test_pageprint_picture(void)
+/* A one-picture document: a 2x2 picture, black over white columns,
+   shown 300 twips square, its pixels in the file at path. */
+static void make_picture_doc(wp_document *doc, const char *path)
 {
-    static const char path[] = "build/test_pageprint_pic.bin";
     static const u8 pixels[2] = { 0x01, 0x01 };   /* nibbles: black, white */
-    wp_document doc;
-    wp_page_device dev;
     wp_image_desc desc;
     wp_image handle;
     wp_section *sec;
     wp_paragraph *para;
     plat_file *f;
-    u32 si, pi, pages = 0;
+    u32 si, pi;
 
     ASSERT_TRUE(plat_file_open(path, PLAT_FILE_WRITE, &f) == WP_OK);
     ASSERT_TRUE(plat_file_write(f, pixels, 2) == WP_OK);
     plat_file_close(f);
 
-    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
-    ASSERT_TRUE(wp_document_section_add(&doc, &si) == WP_OK);
-    sec = wp_document_section_get(&doc, si);
+    ASSERT_TRUE(wp_document_init(doc) == WP_OK);
+    ASSERT_TRUE(wp_document_section_add(doc, &si) == WP_OK);
+    sec = wp_document_section_get(doc, si);
     ASSERT_TRUE(wp_section_paragraph_add(sec, &pi) == WP_OK);
     memset(&desc, 0, sizeof(desc));
     desc.width_px = 2;
@@ -157,14 +157,23 @@ void test_pageprint_picture(void)
     desc.display_height_twips = 300;
     desc.palette_count = 2;
     desc.palette[1][0] = desc.palette[1][1] = desc.palette[1][2] = 255;
-    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)path, (u32)strlen(path),
+    ASSERT_TRUE(wp_strpool_append(&doc->strings, (const u8 *)path, (u32)strlen(path),
                                   &desc.blob_path) == WP_OK);
-    ASSERT_TRUE(wp_document_image_add(&doc, &desc, &handle) == WP_OK);
+    ASSERT_TRUE(wp_document_image_add(doc, &desc, &handle) == WP_OK);
     para = wp_section_paragraph_get(sec, pi);
     para->kind = (u8)WP_PARA_IMAGE;
     para->image = handle;
-    para->style = doc.default_pstyle;
+    para->style = doc->default_pstyle;
+}
 
+void test_pageprint_picture(void)
+{
+    static const char path[] = "build/test_pageprint_pic.bin";
+    wp_document doc;
+    wp_page_device dev;
+    u32 pages = 0;
+
+    make_picture_doc(&doc, path);
     memset(&dev, 0, sizeof(dev));
     dev.gc = (plat_gc *)&dev;
     dev.x_px = tenth;
@@ -180,5 +189,48 @@ void test_pageprint_picture(void)
     ASSERT_TRUE(wp_pageprint(&doc, &dev, &pages) == WP_OK);
     ASSERT_EQ_U32(draw_host_mono_calls(), 0);
     ASSERT_EQ_U32(draw_host_grey_fills(0), 4);   /* the frame's four sides */
+    wp_document_free(&doc);
+}
+
+typedef struct { char buf[32768]; u32 n; } ps_sink;
+static ps_sink g_sink;
+static wp_status sink_put(void *user, const u8 *b, u32 n)
+{
+    ps_sink *o = (ps_sink *)user;
+    if (o->n + n < sizeof(o->buf)) { memcpy(o->buf + o->n, b, n); o->n += n; }
+    return WP_OK;
+}
+
+/* To PostScript (psdev.h) the same picture prints as imagemask bands of
+   its dithered pixels -- 300 twips is 150 tenths of a point, so five
+   bands of up to 32 rows -- and nothing reaches the platform: the page
+   is the device's own. Without its pixels, the frame as rectangles. */
+void test_pageprint_picture_postscript(void)
+{
+    static const char path[] = "build/test_pageprint_pic_ps.bin";
+    wp_document doc;
+    u32 pages = 0, bands = 0;
+    const char *p;
+
+    make_picture_doc(&doc, path);
+    draw_host_reset_fills();
+    g_sink.n = 0;
+    ASSERT_TRUE(wp_ps_print(&doc, sink_put, &g_sink, 0, &pages) == WP_OK);
+    g_sink.buf[g_sink.n] = '\0';
+    ASSERT_EQ_U32(pages, 1);
+    for (p = g_sink.buf; (p = strstr(p, "imagemask")) != NULL; p++) bands++;
+    ASSERT_EQ_U32(bands, 5);
+    ASSERT_TRUE(strstr(g_sink.buf, "150 32 true [150 0 0 32 0 0]") != NULL);
+    ASSERT_EQ_U32(draw_host_mono_calls(), 0);
+    ASSERT_EQ_U32(draw_host_grey_fills(0), 0);
+
+    (void)remove(path);
+    g_sink.n = 0;
+    ASSERT_TRUE(wp_ps_print(&doc, sink_put, &g_sink, 2, &pages) == WP_OK);
+    g_sink.buf[g_sink.n] = '\0';
+    ASSERT_TRUE(strstr(g_sink.buf, "imagemask") == NULL);
+    ASSERT_TRUE(strstr(g_sink.buf, "true DPX") != NULL);   /* two-sided, short edge */
+    ASSERT_TRUE(strstr(g_sink.buf, " R\n") != NULL);       /* the frame */
+    ASSERT_EQ_U32(draw_host_grey_fills(0), 0);
     wp_document_free(&doc);
 }

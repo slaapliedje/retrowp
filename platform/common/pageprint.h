@@ -50,6 +50,10 @@ typedef struct {
                            const u16 *rows, u32 row_words, u8 r, u8 g, u8 b);
     /* Prints the page drawn so far and starts a clean one. */
     wp_status (*end_page)(void *user);
+    /* Before anything is drawn on a page: its section (its paper) and
+       its number, from 1. May be NULL; a device writing a page language
+       (psdev.h) starts each page here. */
+    wp_status (*begin_page)(void *user, const wp_section *sec, u32 page_no);
     void *user;
 } wp_page_device;
 

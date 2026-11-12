@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <stddef.h>
+#include "devout.h"
 #include "paraborder.h"
 
 /* A rule's pixels: at least one, so a hairline never vanishes. */
@@ -21,8 +22,8 @@ static void draw_rules(plat_gc *gc, wp_bool horizontal, i32 at, i32 dir, i32 a, 
         i32 start = at + dir * (k * 2 * rule);
         i32 lo = dir > 0 ? start : start - depth;
 
-        if (horizontal) (void)plat_fill_rect(gc, a, lo, b - a, depth, 0, 0, 0);
-        else (void)plat_fill_rect(gc, lo, a, depth, b - a, 0, 0, 0);
+        if (horizontal) (void)wp_dev_fill_rect(gc, a, lo, b - a, depth, 0, 0, 0);
+        else (void)wp_dev_fill_rect(gc, lo, a, depth, b - a, 0, 0, 0);
     }
 }
 
@@ -41,7 +42,7 @@ void wp_border_draw_slice(plat_gc *gc, const wp_border_slice *s,
     if (x0 < min_x_px) x0 = min_x_px;
     if (x1 > max_x_px) x1 = max_x_px;
     if (x1 <= x0 || y1 <= y0) return;
-    if (s->shading > 0) (void)plat_fill_shade(gc, x0, y0, x1 - x0, y1 - y0, s->shading);
+    if (s->shading > 0) (void)wp_dev_fill_shade(gc, x0, y0, x1 - x0, y1 - y0, s->shading);
     if (s->sides & WP_BORDER_TOP)    draw_rules(gc, WP_TRUE, y0, 1, x0, x1, ty, ry, dbl);
     if (s->sides & WP_BORDER_BOTTOM) draw_rules(gc, WP_TRUE, y1, -1, x0, x1, ty, ry, dbl);
     if (s->sides & WP_BORDER_LEFT)   draw_rules(gc, WP_FALSE, x0, 1, y0, y1, tx, rx, dbl);
