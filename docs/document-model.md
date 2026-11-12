@@ -454,9 +454,28 @@ colours from the VDI palette, vs_color (256 entries) and NVDI's RGB call
 shade of its colour, a perimeter a hairline. The coordinate system comes
 from the header (y measured down from its upper-right corner's y, either
 way round), the extents give the drawing's box. Files are little-endian
-(even an ST's); the header-length word says which. Text, markers and
-line styles are skipped. Tested against Kandinsky's samples (the tiger,
-a 747, Columbia), Papyrus's and BLOWUP's.
+(even an ST's); the header-length word says which. Markers and line
+styles are skipped. Tested against Kandinsky's samples (the tiger, a
+747, Columbia), Papyrus's and BLOWUP's.
+
+Text in a drawing (M17, T17.4): a TEXT record (drawing.h) -- a point, a
+height as a font size, an angle, an alignment, bold/italic/underline, a
+family hint, a colour and the UTF-8 text. The GEM reader makes one of
+v_gtext, v_ftext (GDOS outline text) and v_justified, in vst_point's
+size (a point converted through the header's page), vst_rotation,
+vst_effects, vst_color and vst_alignment, the characters read in the
+Atari set; Atari Works' letterheads and headlines are such text. The
+Windows metafile reader makes one of TextOut and ExtTextOut in the font
+selected (CreateFontIndirect's height, escapement, weight, italic,
+underline and family), SetTextColor and SetTextAlign; the writer makes
+the same, so an RTF save keeps it. Drawn: the sink's `text`
+(drawpaint.c) gives the height as a font size by the picture's own
+scale and draws it through the platform's default face of that family
+-- level, or for a line turned a quarter each letter upright along it,
+since no target turns a glyph -- and the PostScript page writer turns
+it properly in Times, Helvetica or Courier. The character-grid printer
+(format_prn) leaves it out. On the one-bit Mac a light colour draws
+white (QuickDraw's srcBic), for white lettering on a dark bar.
 
 PostScript printing draws a drawing as paths (docs/formats/prn.md, "PostScript that matches the screen").
 On a device of fewer than 16 colours -- mono, ST Medium, a printer,

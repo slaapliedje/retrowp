@@ -103,9 +103,12 @@ whatever the machine's fonts do to the lines; where that paragraph
 began on an earlier page, from its own page's top margin instead.
 Kind 1 with a height of 4 or less is a rule; drawn shapes have seq 0,
 imported files seq 1 and a name. Many "pictures" in the corpus are
-lettering -- GEM text (`v_ftext`, rotated by `vst_rotation`) -- which
-drawfile.c does not draw yet, so a letterhead shows its bars but not
-its words.
+lettering -- GEM text (`v_ftext`, `v_justified`, rotated by
+`vst_rotation`) -- read since T17.4 as drawing text (docs/document-
+model.md, "Drawings"): AFFIDAVT's letterhead reads "DEVELOPMENT
+LICENSEE AFFIDAVIT", white on its black bar, OFFER's game list its
+titles and prices. The GEM font id (`vst_font`: Speedo ids such as
+5003) is not mapped to a face; dingbat check boxes show as letters.
 
 **The body** is text in the Atari character set: 0x0a ends a
 paragraph, 0x09 is a tab, 0x01 a merge field, and 0x00 begins an 8-byte

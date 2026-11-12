@@ -23,6 +23,11 @@ typedef struct {
     void (*polyline)(void *user, const i32 *xy, u16 n, i32 width, u8 r, u8 g, u8 b);
     void (*mono)(void *user, i32 x, i32 y, i32 w, i32 h, const u16 *rows, u32 row_words,
                  u8 r, u8 g, u8 b);
+    /* A drawing's text (drawing.h's TEXT): utf8 at x, y, height device
+       units tall, turned `angle` tenths of a degree, placed by `align`
+       (WP_DRAW_TEXT_*), in the style and family's standard face. */
+    void (*dtext)(void *user, i32 x, i32 y, i32 height, u16 angle, u8 align, u8 style,
+                  u8 family, u8 r, u8 g, u8 b, const u8 *utf8, u16 len);
 } wp_dev_ops;
 
 /* gc's drawing goes to ops from now on (NULL ops: back to the platform). */
@@ -40,5 +45,13 @@ wp_status wp_dev_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 
 wp_status wp_dev_draw_polyline(plat_gc *gc, const i32 *xy, u16 n, i32 width, u8 r, u8 g, u8 b);
 wp_status wp_dev_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, const u16 *rows, u32 row_words,
                            u8 r, u8 g, u8 b);
+
+/* A drawing's text, as the dtext op above; `size_twips` is its height
+   as a font size, for the platform's own fonts. The platform draws it
+   level, or for a turned line each letter upright along it -- no
+   target here can turn a glyph -- where a device of its own (PostScript)
+   turns the text itself. */
+wp_status wp_dev_draw_text(plat_gc *gc, i32 x, i32 y, i32 height, i32 size_twips, u16 angle,
+                           u8 align, u8 style, u8 family, const u8 *rgb, const u8 *utf8, u16 len);
 
 #endif /* WP_DEVOUT_H */

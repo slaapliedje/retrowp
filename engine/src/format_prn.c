@@ -869,6 +869,7 @@ static void ps_drawing(prn_state *s, const wp_para_style *ps, const wp_image_des
     sink.user = s;
     sink.line = ps_line;
     sink.fill = ps_fill;
+    sink.text = NULL;   /* the character grid prints no drawing text */
     (void)wp_drawing_render_image(s->doc, d, 0, 0, (i32)w, (i32)h, &sink);
     put_str(s, "grestore\n");
     for (i = 0; i < lines; i++) { drv_blank(s); s->row++; }

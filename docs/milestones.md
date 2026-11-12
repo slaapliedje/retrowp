@@ -2316,9 +2316,23 @@ importer is scored against it, not against a model of the format.
       read: IMG pixels (in a file of their own), and text inside a
       metafile -- many letterheads and headlines are GEM text, so they
       show bars without words (T17.4).
-- [ ] T17.4 Text in drawings: GEM metafile text (`v_gtext`, `v_ftext`,
-      with rotation), a TEXT primitive in the drawing model, and the
-      painters to draw it -- the letterheads and headlines above.
+- [x] T17.4 Text in drawings.
+      AC: a TEXT record in the drawing model (point, height, angle,
+      alignment, style, family, colour, UTF-8); read from GEM metafiles
+      (v_gtext, v_ftext, v_justified, with vst_point through the
+      header's page, vst_rotation, vst_effects, vst_color,
+      vst_alignment) and from Windows metafiles (TextOut, ExtTextOut,
+      in the font CreateFontIndirect made), written to WMF so RTF keeps
+      it; drawn by the platform's face at the picture's scale (a
+      quarter-turned line as upright letters along it) and by the
+      PostScript writer turned properly. AFFIDAVT's letterhead and
+      OFFER's game list read on the ST, the Mac and in PostScript.
+      Found on the way: the one-bit Mac drew every text colour black
+      (retroplat now draws a light one white, srcBic), and the WMF
+      reader gave a CreateFontIndirect too short to read no object slot,
+      which would have misnumbered every object after it. Tests: TEXT's
+      rendering, its WMF round trip, GEM text with every attribute; each
+      shown to fail with its reader broken.
 - [ ] T17.3 Headers and footers (not yet found in the map), and
       whatever the info block's remaining words and the header's
       second default face turn out to hold.

@@ -63,6 +63,19 @@ void wp_drawing_poly(wp_drawing_builder *b, u8 op, const i16 *xy, u16 n)
     for (i = 0; i < (u32)n * 2u; i++) put16(b, (u16)xy[i]);
 }
 
+void wp_drawing_text(wp_drawing_builder *b, i16 x, i16 y, i16 height, u16 angle, u8 align,
+                     u8 style, u8 family, u8 r, u8 g, u8 bl, const u8 *utf8, u16 len)
+{
+    u16 i;
+    if (!room(b, 17u + len)) return;
+    put8(b, (u8)WP_DRAW_TEXT);
+    put16(b, (u16)x); put16(b, (u16)y); put16(b, (u16)height); put16(b, angle);
+    put8(b, align); put8(b, style); put8(b, family);
+    put8(b, r); put8(b, g); put8(b, bl);
+    put16(b, len);
+    for (i = 0; i < len; i++) put8(b, utf8[i]);
+}
+
 static u32 shape_values(u8 op)
 {
     return op == WP_DRAW_RRECT ? 6u : op == WP_DRAW_ARC ? 8u : 4u;
@@ -381,6 +394,17 @@ wp_status wp_drawing_render(const u8 *ops, u32 len, i32 ext_w, i32 ext_h,
                 k = arc_points(curve, 0, cx, cy, rx, ry, a0, a1, steps);
                 stroke(sink, &ps, curve, k);
             }
+        } else if (op == WP_DRAW_TEXT) {
+            u16 n;
+            if (pos + 16u > len) return WP_BADFMT;
+            n = (u16)(((u16)p[14] << 8) | p[15]);
+            if (pos + 16u + n > len) return WP_BADFMT;
+            if (sink->text != NULL && n > 0) {
+                i32 ht = (rd16(p + 4) * h + ext_h / 2) / ext_h;
+                sink->text(sink->user, tx(&t, rd16(p)), ty(&t, rd16(p + 2)), ht < 0 ? -ht : ht,
+                           (u16)(((u16)p[6] << 8) | p[7]), p[8], p[9], p[10], p + 11, p + 16, n);
+            }
+            pos += 16u + n;
         } else {
             return WP_BADFMT;   /* an op this reader does not know: stop */
         }

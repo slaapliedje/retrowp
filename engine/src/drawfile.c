@@ -2,6 +2,8 @@
 #include <string.h>
 #include "drawfile.h"
 #include "format_wmf.h"
+#include "codepage.h"
+#include "utf8.h"
 #include "platform.h"
 
 /* ---- GEM metafiles ----------------------------------------------------
@@ -36,6 +38,13 @@ typedef struct {
     u8  pen_rgb[3];
     wp_bool brush_known, brush_on;
     u8  brush_rgb[3];
+    /* Text: its height in the drawing's units, turn (tenths of a degree),
+       GEM effects, colour, alignment (wp_drawing.h's TEXT bits); and a
+       point's size in the drawing's units, x 1000, where the header
+       gives the page (0 where it does not). */
+    i32 text_h, text_angle, text_effects, text_align;
+    u8  text_rgb[3];
+    i32 milli_units_per_pt;
 } gem_reader;
 
 static u16 gw(const gem_reader *g, u32 word)
@@ -207,6 +216,29 @@ static void pie(gem_reader *g, wp_drawing_builder *b, i32 cx, i32 cy, i32 rx, i3
 
 static i32 iabs(i32 v) { return v < 0 ? -v : v; }
 
+/* GEM text -- v_gtext, v_ftext, v_justified -- as a TEXT record: the
+   characters are INTIN words in the Atari set, from `first`. */
+static void gem_text(gem_reader *g, wp_drawing_builder *b, u32 pts, u32 ints, u32 first, u32 ni)
+{
+    u8 buf[256];
+    u16 n = 0;
+    u32 i;
+    u8 style = 0;
+
+    for (i = first; i < ni && n + 3u < sizeof(buf); i++) {
+        u32 cp = wp_codepage_decode(WP_CODEPAGE_ATARI_ST, (u8)(gw(g, ints + i) & 0xFFu));
+        if (cp < 0x20u || cp == 0xFFFDuL) continue;
+        n = (u16)(n + utf8_encode(cp, buf + n));
+    }
+    if (n == 0) return;
+    if (g->text_effects & 1) style |= 1;   /* bold */
+    if (g->text_effects & 4) style |= 2;   /* italic */
+    if (g->text_effects & 8) style |= 4;   /* underlined */
+    wp_drawing_text(b, gx(g, gs(g, pts)), gy(g, gs(g, pts + 1)),
+                    clamp16(g->text_h), (u16)(g->text_angle % 3600), (u8)g->text_align, style, 0,
+                    g->text_rgb[0], g->text_rgb[1], g->text_rgb[2], buf, n);
+}
+
 static void gem_gdp(gem_reader *g, wp_drawing_builder *b, u16 sub, u32 pts, u32 np, u32 ints, u32 ni)
 {
     i16 v[8];
@@ -323,6 +355,11 @@ static wp_status gem_read(const u8 *d, u32 len, wp_drawing_builder *b, wp_drawfi
     if (info->ext_h > 32767) info->ext_h = 32767;
     page_w = gs(g, 8);
     page_h = gs(g, 9);
+    /* A point is 2540/720 of a tenth of a millimetre; text starts 10 pt. */
+    g->milli_units_per_pt = page_h > 0 && span_y > 0 ? (i32)((2540L * 1000L / 720L) * span_y / page_h) : 0;
+    g->text_h = g->milli_units_per_pt > 0 ? (10 * g->milli_units_per_pt + 500) / 1000 : 10;
+    g->text_angle = g->text_effects = g->text_align = 0;
+    g->text_rgb[0] = g->text_rgb[1] = g->text_rgb[2] = 0;
     info->width_twips = info->height_twips = 0;
     if (page_w > 0 && page_h > 0 && span_x > 0 && span_y > 0) {   /* tenths of a millimetre */
         info->width_twips = ((info->ext_w * page_w) / span_x) * 1440L / 254L;
@@ -365,7 +402,41 @@ static wp_status gem_read(const u8 *d, u32 len, wp_drawing_builder *b, wp_drawfi
             }
             break;
         case 11:
-            gem_gdp(g, b, sub, pts, np, ints, ni);
+            if (sub == 10) {   /* v_justified: two words of spacing, then the text */
+                if (np >= 1) gem_text(g, b, pts, ints, 2, ni);
+            } else {
+                gem_gdp(g, b, sub, pts, np, ints, ni);
+            }
+            break;
+        case 8:    /* v_gtext */
+        case 241:  /* v_ftext: GDOS outline text, the same layout */
+            if (np >= 1) gem_text(g, b, pts, ints, 0, ni);
+            break;
+        case 12:   /* vst_height: the second word of the point */
+            if (np >= 1) g->text_h = iabs(gs(g, pts + 1)) * 5 / 4;   /* to the cell's top: a size */
+            break;
+        case 107:  /* vst_point */
+            if (ni >= 1 && g->milli_units_per_pt > 0) {
+                g->text_h = (iabs(gs(g, ints)) * g->milli_units_per_pt + 500) / 1000;
+            }
+            break;
+        case 13:   /* vst_rotation */
+            if (ni >= 1) g->text_angle = gs(g, ints) < 0 ? 0 : gs(g, ints);
+            break;
+        case 22:   /* vst_color */
+            if (ni >= 1) pal_rgb(g, gs(g, ints), g->text_rgb);
+            break;
+        case 106:  /* vst_effects */
+            if (ni >= 1) g->text_effects = gs(g, ints);
+            break;
+        case 39:   /* vst_alignment: across 0 left, 1 centre, 2 right;
+                      down 0 baseline, 1 half, 2 ascent, 5 top, 3 bottom, 4 descent */
+            if (ni >= 2) {
+                i32 h = gs(g, ints), v = gs(g, ints + 1);
+                g->text_align = (h == 1 ? WP_DRAW_TEXT_CENTER : h == 2 ? WP_DRAW_TEXT_RIGHT : 0) |
+                                (v == 1 || v == 2 || v == 5 ? WP_DRAW_TEXT_TOP :
+                                 v == 3 || v == 4 ? WP_DRAW_TEXT_BOTTOM : 0);
+            }
             break;
         case 14:   /* vs_color: index, red, green, blue in thousandths */
             if (ni >= 4 && gs(g, ints) >= 0 && gs(g, ints) < 256) {
@@ -403,7 +474,7 @@ static wp_status gem_read(const u8 *d, u32 len, wp_drawing_builder *b, wp_drawfi
             }
             break;
         default:
-            break;  /* text, markers, line styles, escapes: not drawn */
+            break;  /* markers, line styles, escapes: not drawn */
         }
     }
     mem_free(g);

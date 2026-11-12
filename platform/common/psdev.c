@@ -6,6 +6,7 @@
 #include "pageprint.h"
 #include "strpool.h"
 #include "utf8.h"
+#include "drawing.h"
 
 typedef struct {
     wp_ps_write_fn write;
@@ -100,6 +101,13 @@ static const char *const g_prolog[] = {
     " gsave x y translate 1 -1 scale fn findfont fs scalefont setfont"
     " s stringwidth pop dup 0 gt { w exch div } { pop 1 } ifelse 1 scale"
     " 0 0 moveto s show grestore end } bind def\n",
+    /* x y angle ha va (s) size /Face DT: a drawing's text, turned
+       angle degrees about x y, ha 0/0.5/1 of its width to the left of
+       x, its baseline va of its size below y */
+    "/DT { 8 dict begin /fn exch def /fs exch def /s exch def /va exch def /ha exch def"
+    " /a exch def /y exch def /x exch def gsave x y translate 1 -1 scale a rotate"
+    " fn findfont fs scalefont setfont s stringwidth pop ha mul neg va fs mul neg moveto s show"
+    " grestore end } bind def\n",
     "%%EndProlog\n",
     NULL
 };
@@ -277,7 +285,34 @@ static void ps_mono(void *user, i32 x, i32 y, i32 w, i32 h, const u16 *rows, u32
     puts_(o, ">} imagemask grestore\n");
 }
 
-static const wp_dev_ops g_ps_ops = { ps_text, ps_rect, ps_shade, ps_polygon, ps_polyline, ps_mono };
+/* A drawing's text: the face for its family and style, turned. */
+static void ps_dtext(void *user, i32 x, i32 y, i32 height, u16 angle, u8 align, u8 style,
+                     u8 family, u8 r, u8 g, u8 b, const u8 *utf8, u16 len)
+{
+    ps_out *o = (ps_out *)user;
+    u32 face = family == (u8)WP_FAMILY_ROMAN ? 0u : family == (u8)WP_FAMILY_MODERN ? 8u : 4u;
+    char fname[8];
+    u16 deg = (u16)((angle % 3600u) / 10u);
+
+    if (height <= 0 || len == 0) return;
+    if (style & WP_STYLE_BOLD) face += 1;
+    if (style & WP_STYLE_ITALIC) face += 2;
+    put_rgb(o, r, g, b);
+    putn(o, x); putn(o, y); putn(o, (i32)deg);
+    puts_(o, (align & WP_DRAW_TEXT_CENTER) ? "0.5 " : (align & WP_DRAW_TEXT_RIGHT) ? "1 " : "0 ");
+    puts_(o, (align & WP_DRAW_TEXT_TOP) ? "-0.75 " : (align & WP_DRAW_TEXT_BOTTOM) ? "0.22 " : "0 ");
+    put_pstring(o, utf8, len);
+    put(o, " ", 1);
+    putn(o, height);
+    fname[0] = '/'; fname[1] = 'F';
+    if (face >= 10) { fname[2] = '1'; fname[3] = (char)('0' + face - 10); fname[4] = '\0'; }
+    else { fname[2] = (char)('0' + face); fname[3] = '\0'; }
+    puts_(o, fname);
+    puts_(o, " DT\n");
+}
+
+static const wp_dev_ops g_ps_ops = { ps_text, ps_rect, ps_shade, ps_polygon, ps_polyline, ps_mono,
+                                     ps_dtext };
 
 static ps_out g_ps;
 static u32 g_page_no;

@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "format_wmf.h"
+#include "codepage.h"
+#include "utf8.h"
 #include "platform.h"
 
 /* Record functions (the low byte names the call, the high byte its
@@ -23,6 +25,11 @@
 #define WMF_ARC               0x0817u
 #define WMF_PIE               0x081Au
 #define WMF_CHORD             0x0830u
+#define WMF_CREATEFONTINDIRECT 0x02FBu
+#define WMF_SETTEXTCOLOR      0x0209u
+#define WMF_SETTEXTALIGN      0x012Eu
+#define WMF_TEXTOUT           0x0521u
+#define WMF_EXTTEXTOUT        0x0A32u
 
 #define WMF_PLACEABLE_KEY 0x9AC6CDD7uL
 
@@ -39,11 +46,13 @@ static u32 le32(const u8 *p)
    that makes one -- fonts, palettes, regions -- must take a slot here
    too, or the later SelectObject numbers would point at the wrong one. */
 #define WMF_SLOTS 64
-enum { SLOT_FREE = 0, SLOT_PEN, SLOT_BRUSH, SLOT_OTHER };
+enum { SLOT_FREE = 0, SLOT_PEN, SLOT_BRUSH, SLOT_FONT, SLOT_OTHER };
 typedef struct {
-    u8  kind, style;
-    u16 width;
+    u8  kind, style;        /* a font's style: wp_style_flags' bold, italic, underline */
+    u16 width;              /* a font's: its height */
     u8  rgb[3];
+    u8  family;             /* a font's wp_font_family */
+    u16 angle;              /* a font's escapement, tenths of a degree */
 } wmf_slot;
 
 typedef struct {
@@ -53,6 +62,9 @@ typedef struct {
     i16 run[2 * 128];       /* LineTo points waiting to go out as one line */
     u16 run_n;
     i32 cur_x, cur_y;
+    wmf_slot font;          /* the font selected */
+    u8  text_rgb[3];
+    u16 text_align;         /* SetTextAlign's TA_* */
 } wmf_reader;
 
 static i16 clamp16(i32 v) { return (i16)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }
@@ -75,6 +87,31 @@ static void take_slot(wmf_reader *r, const wmf_slot *s)
 
 /* A Windows COLORREF, low byte first: red, green, blue, flags. */
 static void colorref(const u8 *p, u8 *rgb) { rgb[0] = p[0]; rgb[1] = p[1]; rgb[2] = p[2]; }
+
+/* Text in the ANSI code page at x, y, as a TEXT record in the font
+   selected, its colour and alignment. */
+static void wmf_text(wmf_reader *r, wp_drawing_builder *b, i32 x, i32 y, const u8 *s, u32 n)
+{
+    u8 buf[256];
+    u16 k = 0;
+    u32 i;
+    u8 align = 0;
+
+    for (i = 0; i < n && k + 3u < sizeof(buf); i++) {
+        u32 cp = wp_codepage_decode(1252, s[i]);
+        if (cp < 0x20u || cp == 0xFFFDuL) continue;
+        k = (u16)(k + utf8_encode(cp, buf + k));
+    }
+    if (k == 0) return;
+    if ((r->text_align & 6u) == 6u) align |= WP_DRAW_TEXT_CENTER;
+    else if ((r->text_align & 6u) == 2u) align |= WP_DRAW_TEXT_RIGHT;
+    if ((r->text_align & 24u) == 24u) align |= 0;   /* TA_BASELINE */
+    else if ((r->text_align & 24u) == 8u) align |= WP_DRAW_TEXT_BOTTOM;
+    else align |= WP_DRAW_TEXT_TOP;   /* TA_TOP, the default */
+    wp_drawing_text(b, mx(r, x), my(r, y), (i16)(r->font.width > 0 ? r->font.width : 12),
+                    r->font.angle, align, r->font.style, r->font.family,
+                    r->text_rgb[0], r->text_rgb[1], r->text_rgb[2], buf, k);
+}
 
 wp_status wmf_to_drawing(const u8 *wmf, u32 len, wp_drawing_builder *b,
                          i32 *ext_w, i32 *ext_h)
@@ -173,7 +210,41 @@ wp_status wmf_to_drawing(const u8 *wmf, u32 len, wp_drawing_builder *b,
                 take_slot(&r, &s);
             }
             break;
-        case 0x02FBu:   /* CreateFontIndirect */
+        case WMF_CREATEFONTINDIRECT: {   /* LOGFONT: height, width, escapement, orientation, weight, ... */
+            wmf_slot s;   /* takes its slot even cut short, or later numbers would slip */
+            memset(&s, 0, sizeof(s));
+            s.kind = SLOT_FONT;
+            if (np >= 9) {
+                i32 h = sle16(p);
+                u8 pf = p[17];
+                s.width = (u16)(h < 0 ? -h : h);
+                s.angle = (u16)(sle16(p + 4) < 0 ? 0 : sle16(p + 4));
+                if (sle16(p + 8) >= 600) s.style |= 1;   /* bold */
+                if (p[10]) s.style |= 2;                 /* italic */
+                if (p[11]) s.style |= 4;                 /* underlined */
+                s.family = (u8)((pf >> 4) <= 5 ? (pf >> 4) : 0);   /* FF_ROMAN 1 .. FF_DECORATIVE 5 */
+            }
+            take_slot(&r, &s);
+            break;
+        }
+        case WMF_SETTEXTCOLOR:
+            if (np >= 2) colorref(p, r.text_rgb);
+            break;
+        case WMF_SETTEXTALIGN:
+            if (np >= 1) r.text_align = le16(p);
+            break;
+        case WMF_TEXTOUT:   /* count, the string (even), y, x */
+            if (np >= 1) {
+                u32 n = le16(p), sw = (n + 1u) / 2u;
+                if (np >= 1u + sw + 2u) wmf_text(&r, b, sle16(p + 2 + sw * 2 + 2), sle16(p + 2 + sw * 2), p + 2, n);
+            }
+            break;
+        case WMF_EXTTEXTOUT:   /* y, x, count, options, a rectangle where the options want one, the string */
+            if (np >= 4) {
+                u32 n = le16(p + 4), at = 8u + ((le16(p + 6) & 6u) ? 8u : 0u);
+                if (at + n <= np * 2u) wmf_text(&r, b, sle16(p + 2), sle16(p), p + at, n);
+            }
+            break;
         case 0x00F7u:   /* CreatePalette */
         case 0x06FFu:   /* CreateRegion */
         case 0x01F9u:   /* CreatePatternBrush */
@@ -189,6 +260,7 @@ wp_status wmf_to_drawing(const u8 *wmf, u32 len, wp_drawing_builder *b,
                 const wmf_slot *s = &r.slot[le16(p)];
                 if (s->kind == SLOT_PEN) wp_drawing_pen(b, s->style, s->width, s->rgb[0], s->rgb[1], s->rgb[2]);
                 else if (s->kind == SLOT_BRUSH) wp_drawing_brush(b, s->style, s->rgb[0], s->rgb[1], s->rgb[2]);
+                else if (s->kind == SLOT_FONT) r.font = *s;
             }
             break;
         case WMF_DELETEOBJECT:
@@ -398,6 +470,58 @@ static wp_status write_records(wmf_writer *w, const u8 *ops, u32 len, i32 ext_w,
             w16(w, (u16)bd16(p + 6)); w16(w, (u16)bd16(p + 4));
             w16(w, (u16)bd16(p + 2)); w16(w, (u16)bd16(p));
             pos += 16u;
+        } else if (op == WP_DRAW_TEXT) {
+            /* A font made, selected, used and let go; the text in the
+               ANSI code page, a character the page lacks as '?'. */
+            static const char *const faces[] = { "Arial", "Times New Roman", "Arial", "Courier New",
+                                                 "Script", "Arial" };
+            u16 n, i, k = 0;
+            u8 enc[256];
+            const char *face;
+            u32 fl, slot;
+            u16 align;
+            if (pos + 16u > len) return WP_BADFMT;
+            n = (u16)(((u16)p[14] << 8) | p[15]);
+            if (pos + 16u + n > len) return WP_BADFMT;
+            for (i = 0; i < n && k < sizeof(enc); ) {
+                u32 cp;
+                u32 step = utf8_decode(p + 16 + i, (u32)(n - i), &cp);
+                if (step == 0) step = 1;
+                if (!wp_codepage_encode(1252, cp, &enc[k])) enc[k] = '?';
+                k++;
+                i = (u16)(i + step);
+            }
+            face = faces[p[10] <= 5 ? p[10] : 0];
+            fl = (u32)strlen(face) + 1u;
+            slot = (u32)free_slot(w);
+            begin(w, WMF_CREATEFONTINDIRECT, 9u + (fl + 1u) / 2u);
+            w16(w, (u16)-bd16(p + 4)); w16(w, 0);                     /* height (a size), width */
+            w16(w, (u16)(((u16)p[6] << 8) | p[7])); w16(w, (u16)(((u16)p[6] << 8) | p[7]));
+            w16(w, (u16)((p[9] & 1u) ? 700u : 400u));                 /* weight */
+            w16(w, (u16)(((p[9] & 2u) ? 1u : 0u) | ((p[9] & 4u) ? 0x100u : 0u)));
+            w16(w, 0);                                               /* strike-out, ANSI */
+            w16(w, 0);                                               /* precision */
+            w16(w, (u16)((u16)(p[10] <= 5 ? p[10] : 0) << 12));     /* quality, family */
+            for (i = 0; i < (fl + 1u) / 2u; i++) {
+                u8 c0 = (u8)(2u * i < fl - 1u ? face[2u * i] : 0);
+                u8 c1 = (u8)(2u * i + 1u < fl - 1u ? face[2u * i + 1u] : 0);
+                w16(w, (u16)(c0 | ((u16)c1 << 8)));
+            }
+            begin(w, WMF_SELECTOBJECT, 1u); w16(w, (u16)slot);
+            begin(w, WMF_SETTEXTCOLOR, 2u);
+            w16(w, (u16)(p[11] | ((u16)p[12] << 8))); w16(w, p[13]);
+            align = (u16)(((p[8] & WP_DRAW_TEXT_CENTER) ? 6u : (p[8] & WP_DRAW_TEXT_RIGHT) ? 2u : 0u) |
+                          ((p[8] & WP_DRAW_TEXT_TOP) ? 0u : (p[8] & WP_DRAW_TEXT_BOTTOM) ? 8u : 24u));
+            begin(w, WMF_SETTEXTALIGN, 1u); w16(w, align);
+            begin(w, WMF_TEXTOUT, 1u + (k + 1u) / 2u + 2u);
+            w16(w, k);
+            for (i = 0; i < (k + 1u) / 2u; i++) {
+                w16(w, (u16)(enc[2u * i] | ((u16)(2u * i + 1u < k ? enc[2u * i + 1u] : 0) << 8)));
+            }
+            w16(w, (u16)bd16(p + 2)); w16(w, (u16)bd16(p));
+            begin(w, WMF_DELETEOBJECT, 1u); w16(w, (u16)slot);
+            w->used[slot] = WP_FALSE;
+            pos += 16u + n;
         } else {
             return WP_BADFMT;
         }

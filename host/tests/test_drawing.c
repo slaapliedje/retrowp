@@ -41,7 +41,28 @@ static void rec(int kind, const i32 *xy, u16 n, i32 width, const u8 *rgb)
 static void rec_line(void *u, const i32 *xy, u16 n, i32 width, const u8 *rgb) { (void)u; rec('L', xy, n, width, rgb); }
 static void rec_fill(void *u, const i32 *xy, u16 n, const u8 *rgb) { (void)u; rec('F', xy, n, 0, rgb); }
 
-static const wp_drawing_sink g_sink = { NULL, rec_line, rec_fill };
+/* The last TEXT handed over. */
+static struct {
+    i32 x, y, height;
+    u16 angle;
+    u8 align, style, family, rgb[3];
+    char text[64];
+    u32 count;
+} g_text;
+static void rec_text(void *u, i32 x, i32 y, i32 height, u16 angle, u8 align, u8 style, u8 family,
+                     const u8 *rgb, const u8 *utf8, u16 len)
+{
+    (void)u;
+    g_text.x = x; g_text.y = y; g_text.height = height; g_text.angle = angle;
+    g_text.align = align; g_text.style = style; g_text.family = family;
+    memcpy(g_text.rgb, rgb, 3);
+    if (len > 63) len = 63;
+    memcpy(g_text.text, utf8, len);
+    g_text.text[len] = '\0';
+    g_text.count++;
+}
+
+static const wp_drawing_sink g_sink = { NULL, rec_line, rec_fill, rec_text };
 
 static i32 iabs(i32 v) { return v < 0 ? -v : v; }
 
@@ -579,6 +600,99 @@ void test_drawfile_gem_line_high(void)
     ASSERT_TRUE(drawfile_read(file, n * 2u, &b, &info) == WP_OK);
     ASSERT_EQ_U32((u32)info.ext_w, 181);
     ASSERT_EQ_U32((u32)info.ext_h, 1);
+    wp_drawing_builder_free(&b);
+}
+
+/* ---- Text ------------------------------------------------------------ */
+
+/* A TEXT in a 1000 x 500 drawing drawn 200 x 100 at (10, 20): its point
+   and height scaled as the rest, the rest handed over as it was. */
+void test_drawing_text_renders(void)
+{
+    wp_drawing_builder b;
+    static const u8 hi[] = "Caf\xc3\xa9";
+
+    wp_drawing_builder_init(&b);
+    wp_drawing_text(&b, 500, 250, 100, 900, WP_DRAW_TEXT_CENTER, 1, 2, 10, 20, 30, hi, 5);
+    ASSERT_TRUE(b.error == WP_OK);
+    memset(&g_text, 0, sizeof(g_text));
+    ASSERT_TRUE(wp_drawing_render(b.bytes, b.length, 1000, 500, 10, 20, 200, 100, &g_sink) == WP_OK);
+    ASSERT_EQ_U32(g_text.count, 1);
+    ASSERT_EQ_U32((u32)g_text.x, 110);
+    ASSERT_EQ_U32((u32)g_text.y, 70);
+    ASSERT_EQ_U32((u32)g_text.height, 20);
+    ASSERT_EQ_U32(g_text.angle, 900);
+    ASSERT_EQ_U32(g_text.align, WP_DRAW_TEXT_CENTER);
+    ASSERT_EQ_U32(g_text.style, 1);
+    ASSERT_EQ_U32(g_text.family, 2);
+    ASSERT_EQ_U32(g_text.rgb[2], 30);
+    ASSERT_EQ_STR(g_text.text, "Caf\xc3\xa9");
+    /* Cut short: refused, nothing handed over. */
+    g_text.count = 0;
+    ASSERT_TRUE(wp_drawing_render(b.bytes, b.length - 1, 1000, 500, 10, 20, 200, 100, &g_sink) == WP_BADFMT);
+    ASSERT_EQ_U32(g_text.count, 0);
+    wp_drawing_builder_free(&b);
+}
+
+/* Through a Windows metafile and back -- a font made, selected and let
+   go round a TextOut -- the same TEXT record: what an RTF save keeps. */
+void test_drawing_text_wmf_round_trip(void)
+{
+    wp_drawing_builder a, back;
+    static membuf m;
+    i32 ew = 0, eh = 0;
+    static const u8 t[] = "Fax: 241 8844";
+
+    wp_drawing_builder_init(&a);
+    wp_drawing_text(&a, 40, 300, 120, 2700, WP_DRAW_TEXT_RIGHT | WP_DRAW_TEXT_TOP, 1 | 4, 1,
+                    200, 0, 0, t, (u16)(sizeof(t) - 1));
+    wp_drawing_text(&a, 5, 6, 48, 0, 0, 2, 3, 0, 0, 0, (const u8 *)"x", 1);
+    m.n = 0;
+    ASSERT_TRUE(drawing_to_wmf(a.bytes, a.length, 1000, 800, put_mem, &m, NULL) == WP_OK);
+    wp_drawing_builder_init(&back);
+    ASSERT_TRUE(wmf_to_drawing(m.buf, m.n, &back, &ew, &eh) == WP_OK);
+    ASSERT_EQ_U32(back.length, a.length);
+    if (back.length == a.length) ASSERT_MEM_EQ(back.bytes, a.bytes, a.length);
+    wp_drawing_builder_free(&back);
+    wp_drawing_builder_free(&a);
+}
+
+/* GEM text: vst_point in the page the header gives, vst_rotation,
+   vst_effects (bold, underlined), vst_color, vst_alignment (centred,
+   top), then v_gtext's characters in the Atari set. A 254 mm page of
+   2540 units: a millimetre is 10 units, 18 pt is 63.5 mm / 10 = 63. */
+void test_drawfile_gem_text(void)
+{
+    static const u16 w[] = {
+        0xFFFF, 14, 101, 2, 0, 0, 2540, 2540, 2540, 2540, 0, 0, 2540, 2540,
+        107, 0, 1, 0, 18,            /* vst_point 18 */
+        13, 0, 1, 0, 900,            /* vst_rotation 90 */
+        106, 0, 1, 0, 9,             /* vst_effects bold, underlined */
+        22, 0, 1, 0, 2,              /* vst_color red */
+        39, 0, 2, 0, 1, 5,           /* vst_alignment centre, top */
+        8, 1, 3, 0, 100, 2440, 'C', 'a', 0x82,   /* v_gtext at (100, 100 from the top): "Ca" e-acute */
+        0xFFFF
+    };
+    u8 file[128];
+    u32 i, n = (u32)(sizeof(w) / sizeof(w[0]));
+    wp_drawing_builder b;
+    wp_drawfile_info info;
+
+    for (i = 0; i < n; i++) { file[i * 2] = (u8)(w[i] & 0xFF); file[i * 2 + 1] = (u8)(w[i] >> 8); }
+    wp_drawing_builder_init(&b);
+    ASSERT_TRUE(drawfile_read(file, n * 2u, &b, &info) == WP_OK);
+    memset(&g_text, 0, sizeof(g_text));
+    ASSERT_TRUE(wp_drawing_render(b.bytes, b.length, info.ext_w, info.ext_h, 0, 0,
+                                  info.ext_w, info.ext_h, &g_sink) == WP_OK);
+    ASSERT_EQ_U32(g_text.count, 1);
+    ASSERT_EQ_STR(g_text.text, "Ca\xc3\xa9");
+    ASSERT_EQ_U32((u32)g_text.x, 100);
+    ASSERT_EQ_U32((u32)g_text.y, 100);
+    ASSERT_EQ_U32((u32)g_text.height, 63);
+    ASSERT_EQ_U32(g_text.angle, 900);
+    ASSERT_EQ_U32(g_text.style, 1 | 4);
+    ASSERT_EQ_U32(g_text.align, WP_DRAW_TEXT_CENTER | WP_DRAW_TEXT_TOP);
+    ASSERT_EQ_U32(g_text.rgb[0], 255);
     wp_drawing_builder_free(&b);
 }
 
