@@ -318,6 +318,7 @@ void test_actions_load_file_opens_atari_works_and_saves_rtf_beside_it(void);
 void test_actions_mail_merge(void);
 void test_actions_mail_merge_labels(void);
 void test_actions_mail_merge_printed(void);
+void test_actions_format_style_and_define(void);
 void test_actions_odt_and_pdf_go_through_the_gateway(void);
 void test_actions_file_print_routes(void);
 void test_actions_file_print_options(void);
@@ -470,6 +471,11 @@ void test_drawing_rtf_keeps_alignment(void);
 void test_utf8_ascii_fallback(void);
 void test_charsheet_opens_whole(void);
 void test_format_stw_reads_text_styles_and_page(void);
+void test_styles_builtin_and_apply(void);
+void test_styles_define_and_redefine(void);
+void test_styles_next_style_and_typing(void);
+void test_styles_rtf_round_trip(void);
+void test_styles_rtf_from_word(void);
 void test_merge_finds_fields(void);
 void test_merge_reads_csv(void);
 void test_merge_reads_tabs(void);
@@ -1055,6 +1061,7 @@ static const test_case g_cases[] = {
     { "actions_mail_merge", test_actions_mail_merge },
     { "actions_mail_merge_labels", test_actions_mail_merge_labels },
     { "actions_mail_merge_printed", test_actions_mail_merge_printed },
+    { "actions_format_style_and_define", test_actions_format_style_and_define },
     { "actions_odt_and_pdf_go_through_the_gateway", test_actions_odt_and_pdf_go_through_the_gateway },
     { "actions_file_print_routes", test_actions_file_print_routes },
     { "actions_file_print_options", test_actions_file_print_options },
@@ -1186,6 +1193,11 @@ static const test_case g_cases[] = {
     { "utf8_ascii_fallback", test_utf8_ascii_fallback },
     { "charsheet_opens_whole", test_charsheet_opens_whole },
     { "format_stw_reads_text_styles_and_page", test_format_stw_reads_text_styles_and_page },
+    { "styles_builtin_and_apply", test_styles_builtin_and_apply },
+    { "styles_define_and_redefine", test_styles_define_and_redefine },
+    { "styles_next_style_and_typing", test_styles_next_style_and_typing },
+    { "styles_rtf_round_trip", test_styles_rtf_round_trip },
+    { "styles_rtf_from_word", test_styles_rtf_from_word },
     { "merge_finds_fields", test_merge_finds_fields },
     { "merge_reads_csv", test_merge_reads_csv },
     { "merge_reads_tabs", test_merge_reads_tabs },

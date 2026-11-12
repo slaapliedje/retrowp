@@ -224,7 +224,10 @@
    same way; OF_LASTOB moves to the last. */
 #define WP_MENU_OBJ_FILE_MERGE           49
 #define WP_MENU_OBJ_TOOLS_INSERTFIELD    50
-#define WP_MENU_OBJ_COUNT        51
+/* Format > Style... and Define Style... (M19), appended the same way. */
+#define WP_MENU_OBJ_FORMAT_STYLE         51
+#define WP_MENU_OBJ_FORMAT_DEFINESTYLE   52
+#define WP_MENU_OBJ_COUNT        53
 
 extern WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 

@@ -169,15 +169,15 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, -1,                 -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 1, 18, 1 },
     { WP_MENU_OBJ_TOOLS_CHAT,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 2, 18, 1 },
     { WP_MENU_OBJ_TOOLS_INSERTFIELD,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 3, 18, 1 },
-    { WP_MENU_OBJ_HELP_BOX,      WP_MENU_OBJ_FORMAT_BOLD, WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, G_BOX, OF_NONE    , OS_NORMAL, OB_SPEC_ZERO, 25, 0, 16, 8 },
-    { WP_MENU_OBJ_FORMAT_ITALIC, -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  0, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_UNDERLINE, -1,                   -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_SIZE_UP, -1,                     -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_SIZE_DOWN, -1,                   -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  3, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_ALIGN_LEFT, -1,                  -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  4, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_ALIGN_CENTER, -1,                -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, -1,                 -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 16, 1 },
-    { WP_MENU_OBJ_FORMAT_BOX,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  7, 16, 1 },
+    { WP_MENU_OBJ_HELP_BOX,      WP_MENU_OBJ_FORMAT_BOLD, WP_MENU_OBJ_FORMAT_DEFINESTYLE, G_BOX, OF_NONE    , OS_NORMAL, OB_SPEC_ZERO, 25, 0, 18, 10 },
+    { WP_MENU_OBJ_FORMAT_ITALIC, -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 0, 18, 1 },
+    { WP_MENU_OBJ_FORMAT_UNDERLINE, -1,                   -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 1, 18, 1 },
+    { WP_MENU_OBJ_FORMAT_SIZE_UP, -1,                     -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 2, 18, 1 },
+    { WP_MENU_OBJ_FORMAT_SIZE_DOWN, -1,                   -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 3, 18, 1 },
+    { WP_MENU_OBJ_FORMAT_ALIGN_LEFT, -1,                  -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 4, 18, 1 },
+    { WP_MENU_OBJ_FORMAT_ALIGN_CENTER, -1,                -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 5, 18, 1 },
+    { WP_MENU_OBJ_FORMAT_ALIGN_RIGHT, -1,                 -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 6, 18, 1 },
+    { WP_MENU_OBJ_FORMAT_STYLE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 7, 18, 1 },
     /* Help's dropdown box and items. The TITLE is NOT here -- it sits up
        with the other titles at array index 8, and it has to: see
        WP_MENU_OBJ_HELP_TITLE's own comment for the index arithmetic the
@@ -216,7 +216,12 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     /* Tools > Insert Field... (M18), appended: last in the Tools chain,
        so its ob_next is the box (the box to five rows, eighteen
        columns). OF_LASTOB lives here now, on the final array entry. */
-    { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  4, 18, 1 }
+    { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  4, 18, 1 },
+    /* Format > Style... and Format > Define Style... (M19), appended:
+       after Align Right in the Format chain (y 8 and 9; the box to ten
+       rows, eighteen columns). OF_LASTOB lives on the last. */
+    { WP_MENU_OBJ_FORMAT_DEFINESTYLE, -1,                 -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  8, 18, 1 },
+    { WP_MENU_OBJ_FORMAT_BOX,    -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  9, 18, 1 }
 };
 
 /* T169: how many text fragments the paint loop has actually drawn since
@@ -239,6 +244,8 @@ static WP_AES_NEAR char g_text_print[] = "  Print...";
 static WP_AES_NEAR char g_text_quit[]  = "  Quit";
 static WP_AES_NEAR char g_text_merge[] = "  Mail Merge...";
 static WP_AES_NEAR char g_text_insert_field[] = "  Insert Field...";
+static WP_AES_NEAR char g_text_style[] = "  Style...";
+static WP_AES_NEAR char g_text_define_style[] = "  Define Style...";
 static WP_AES_NEAR char g_text_undo[]  = "  Undo";
 static WP_AES_NEAR char g_text_cut[]   = "  Cut";
 static WP_AES_NEAR char g_text_copy[]  = "  Copy";
@@ -362,6 +369,8 @@ void wp_menu_tree_init(short wcell, short hcell,
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_QUIT],  g_text_quit);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_MERGE], g_text_merge);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFIELD], g_text_insert_field);
+    OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_STYLE], g_text_style);
+    OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_DEFINESTYLE], g_text_define_style);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO],  g_text_undo);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_CUT],  g_text_cut);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_COPY],  g_text_copy);
@@ -531,7 +540,7 @@ static wp_bool child_chain_ok(short parent)
    the table nor the local-item list, i.e. drawn, highlightable, and
    silently inert. Bumping it remains the prompt to go wire the item up. */
 #define WP_ATARI_MENU_TITLES              6   /* Desk File Edit Tools Format Help */
-#define WP_ATARI_MENU_DISPATCHED_LEAVES  28   /* About + 7 File + 4 Edit + 5 Tools + 8 Format + 3 Help */
+#define WP_ATARI_MENU_DISPATCHED_LEAVES  30   /* About + 7 File + 4 Edit + 5 Tools + 10 Format + 3 Help */
 #define WP_ATARI_MENU_INERT_LEAVES        7   /* separator + 6 AES-reserved Desk slots */
 
 /* Defined next to the dispatch table it validates, far below -- this
@@ -816,7 +825,7 @@ wp_bool wp_menu_tree_selfcheck(void)
 
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_next != WP_MENU_OBJ_HELP_BOX) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_head != WP_MENU_OBJ_FORMAT_BOLD) TREE_FAIL();
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_tail != WP_MENU_OBJ_FORMAT_ALIGN_RIGHT) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_tail != WP_MENU_OBJ_FORMAT_DEFINESTYLE) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_type != G_BOX) TREE_FAIL();
     if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX].ob_flags & OF_HIDETREE) != 0) TREE_FAIL();
     if (!menu_box_placed_ok(WP_MENU_OBJ_FORMAT_TITLE, WP_MENU_OBJ_FORMAT_BOX)) TREE_FAIL();
@@ -835,7 +844,11 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_LEFT], g_text_align_left)) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_CENTER].ob_next != WP_MENU_OBJ_FORMAT_ALIGN_RIGHT) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_CENTER], g_text_align_center)) TREE_FAIL();
-    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_next != WP_MENU_OBJ_FORMAT_BOX) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT].ob_next != WP_MENU_OBJ_FORMAT_STYLE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_STYLE].ob_next != WP_MENU_OBJ_FORMAT_DEFINESTYLE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FORMAT_DEFINESTYLE].ob_next != WP_MENU_OBJ_FORMAT_BOX) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_STYLE], g_text_style)) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_DEFINESTYLE], g_text_define_style)) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_ALIGN_RIGHT], g_text_align_right)) TREE_FAIL();
     /* Align Right used to carry OF_LASTOB as the final array entry. The
        Help objects are now the final entries, so it must NOT -- the
@@ -875,7 +888,9 @@ wp_bool wp_menu_tree_selfcheck(void)
     if ((wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Print was appended */
     if ((wp_menu_tree[WP_MENU_OBJ_FILE_PRINT].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Mail Merge was appended */
     if ((wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFIELD].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFIELD].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Style was appended */
+    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_STYLE].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_DEFINESTYLE].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_type != G_STRING) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_head != -1) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFIELD].ob_type != G_STRING) TREE_FAIL();
@@ -4602,6 +4617,8 @@ static const wp_menu_action_pair g_menu_actions[] = {
     { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, WP_ACT_TOOLS_GRAMMARCHECK },
     { WP_MENU_OBJ_TOOLS_CHAT,         WP_ACT_TOOLS_CHAT },
     { WP_MENU_OBJ_TOOLS_INSERTFIELD,  WP_ACT_TOOLS_INSERTFIELD },
+    { WP_MENU_OBJ_FORMAT_STYLE,       WP_ACT_FORMAT_STYLE },
+    { WP_MENU_OBJ_FORMAT_DEFINESTYLE, WP_ACT_FORMAT_DEFINESTYLE },
     { WP_MENU_OBJ_FORMAT_BOLD,        WP_ACT_FORMAT_BOLD },
     { WP_MENU_OBJ_FORMAT_ITALIC,      WP_ACT_FORMAT_ITALIC },
     { WP_MENU_OBJ_FORMAT_UNDERLINE,   WP_ACT_FORMAT_UNDERLINE },

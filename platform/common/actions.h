@@ -111,6 +111,11 @@ typedef enum {
        new, unsaved document; Tools > Insert Field types a «Name». */
     WP_ACT_FILE_MERGE,
     WP_ACT_TOOLS_INSERTFIELD,
+    /* M19: Format > Style -- the selection's paragraphs put in a named
+       style (styles.h); Format > Define Style -- the caret paragraph's
+       look kept as one. */
+    WP_ACT_FORMAT_STYLE,
+    WP_ACT_FORMAT_DEFINESTYLE,
     WP_ACT_COUNT
 } wp_action_id;
 

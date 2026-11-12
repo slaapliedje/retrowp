@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "format_rtf.h"
+#include "styles.h"
 #include "platform.h"
 #include "utf8.h"
 #include "growth_internal.h"
@@ -23,6 +24,7 @@ typedef enum {
     RTF_DEST_FOOTER,     /* \footer/\footerr: its footer */
     RTF_DEST_FLDINST,    /* a field's instruction inside one of those: is it PAGE? */
     RTF_DEST_FONTTBL,    /* \fonttbl: each entry's name becomes a document font */
+    RTF_DEST_STYLESHEET, /* \stylesheet: each paragraph style's number and name */
     RTF_DEST_GENERATOR   /* \*\generator: which program wrote the file */
 } rtf_dest;
 
@@ -53,8 +55,12 @@ typedef struct {
     wp_frame_desc frame;   /* \posx \posy \absw \absh \phpg ... */
     u8  fidx;           /* \fN: its fmap entry + 1; 0 = the target default */
     u16 cp;             /* that font's \fcharset as a code page; 0 = the document's */
+    u16 style_num;      /* \sN: N + 1, the paragraph's named style; 0 none */
     rtf_dest dest;
 } rtf_state;
+
+/* Paragraph styles a \stylesheet can name; a document's own are few. */
+#define RTF_MAX_STYLES 64
 
 typedef struct {
     u8 *bytes;
@@ -136,6 +142,15 @@ typedef struct {
     u8  ft_family;
     u16 ft_cp;
     rtf_buf ft_name;
+    /* The stylesheet: each paragraph style's \sN and name, and the
+       document style it became (0 until a paragraph is found in it --
+       its formats are taken from the first one, since every writer
+       repeats a style's formatting on its paragraphs anyway). */
+    struct { i32 num; char name[48]; u16 id; } smap[RTF_MAX_STYLES];
+    u32 smap_count;
+    i32 ss_num;          /* the entry being read: its \sN, -1 for a character or other style */
+    char ss_name[48];
+    u32 ss_len;
     i32 deff;
     wp_bool ours;      /* \*\generator says RetroWP: its \f0 is the target default */
     char gen[16];
@@ -276,6 +291,50 @@ static void rtf_flush_run(rtf_parser *p)
     if (wp_paragraph_run_add(para, span, cstyle, &run_idx) != WP_OK) { p->error = WP_NOMEM; return; }
 }
 
+/* A \stylesheet entry read: kept where it is a paragraph style. */
+static void rtf_stylesheet_commit(rtf_parser *p)
+{
+    u32 a = 0, b = p->ss_len;
+    while (a < b && p->ss_name[a] == ' ') a++;
+    while (b > a && p->ss_name[b - 1] == ' ') b--;
+    if (p->ss_num >= 0 && b > a && p->smap_count < RTF_MAX_STYLES) {
+        u32 k = p->smap_count++;
+        p->smap[k].num = p->ss_num;
+        memcpy(p->smap[k].name, p->ss_name + a, b - a);
+        p->smap[k].name[b - a] = '\0';
+        p->smap[k].id = 0;
+    }
+    p->ss_len = 0;
+    p->ss_num = 0;   /* an entry with no \sN is \s0, Normal */
+}
+
+/* The document style a paragraph's \sN names, made from this
+   paragraph's formats where it is the first in it; 0 for none. */
+static u16 rtf_named_style(rtf_parser *p, u16 style_num, const wp_para_style *ps)
+{
+    u32 k;
+    for (k = 0; k < p->smap_count; k++) {
+        if (p->smap[k].num != (i32)style_num - 1) continue;
+        if (p->smap[k].id == 0) {
+            u32 len = (u32)strlen(p->smap[k].name);
+            u16 id = wp_style_find(p->doc, (const u8 *)p->smap[k].name, len);
+            if (id == 0) {
+                wp_section *sec = wp_document_section_get(p->doc, p->section_idx);
+                wp_paragraph *para = wp_section_paragraph_get(sec, p->para_idx);
+                const wp_char_style *cs = wp_document_cstyle_get(p->doc,
+                    (para != NULL && para->run_count > 0) ? wp_paragraph_run_get(para, 0)->style
+                                                          : p->doc->default_cstyle);
+                if (cs == NULL || wp_style_define(p->doc, (const u8 *)p->smap[k].name, len, ps, cs, &id) != WP_OK) {
+                    return 0;
+                }
+            }
+            p->smap[k].id = id;
+        }
+        return p->smap[k].id;
+    }
+    return 0;
+}
+
 static void rtf_apply_pstyle_to_current_paragraph(rtf_parser *p)
 {
     rtf_state *st = &p->stack[p->depth];
@@ -330,6 +389,9 @@ static void rtf_apply_pstyle_to_current_paragraph(rtf_parser *p)
     ps.tab_count = p->tab_count;
     memcpy(ps.tab_kind, p->tab_kind, sizeof(ps.tab_kind));
     memcpy(ps.tab_pos, p->tab_pos, sizeof(ps.tab_pos));
+
+    /* In a named style: the paragraph carries it (styles.h). */
+    if (st->style_num != 0) ps.style_id = rtf_named_style(p, st->style_num, &ps);
 
     /* Find-or-add, so a document of a thousand alike paragraphs has one
        style, not a thousand. */
@@ -481,6 +543,14 @@ static void rtf_emit_bytes(rtf_parser *p, const u8 *bytes, u32 n)
 
     if (st->dest == RTF_DEST_GENERATOR) {
         for (i = 0; i < n && p->gen_len + 1 < sizeof(p->gen); i++) p->gen[p->gen_len++] = (char)bytes[i];
+        return;
+    }
+
+    if (st->dest == RTF_DEST_STYLESHEET) {
+        for (i = 0; i < n; i++) {
+            if (bytes[i] == ';') { rtf_stylesheet_commit(p); continue; }
+            if (p->ss_len + 1 < sizeof(p->ss_name)) p->ss_name[p->ss_len++] = (char)bytes[i];
+        }
         return;
     }
 
@@ -773,6 +843,8 @@ static void rtf_pop(rtf_parser *p)
         }
         p->margin_buf.length = 0;
     }
+    /* So may a \stylesheet entry. */
+    if (p->stack[p->depth].dest == RTF_DEST_STYLESHEET && p->ss_len > 0) rtf_stylesheet_commit(p);
     /* A \fonttbl entry in its own group may omit its ';'. */
     if (p->stack[p->depth].dest == RTF_DEST_FONTTBL && p->ft_name.length > 0) rtf_fonttbl_commit(p);
     /* Leaving the table: the default font is in force from here on. */
@@ -836,6 +908,21 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         }
     }
     if (strcmp(name, "deff") == 0) { if (has_param) p->deff = param; return; }
+
+    if (st->dest == RTF_DEST_STYLESHEET) {
+        /* An entry's number and kind; its formats are not read (they come
+           from its first paragraph), its text is its name. */
+        if (strcmp(name, "s") == 0) { p->ss_num = has_param ? param : 0; return; }
+        if (strcmp(name, "cs") == 0 || strcmp(name, "ds") == 0 || strcmp(name, "ts") == 0) {
+            p->ss_num = -1;
+            return;
+        }
+        return;
+    }
+    if (strcmp(name, "s") == 0) {
+        st->style_num = (u16)(has_param && param >= 0 && param < 0xFFFE ? param + 1 : 1);
+        return;
+    }
 
     if (st->dest == RTF_DEST_FONTTBL) {
         if (strcmp(name, "f") == 0) {
@@ -924,8 +1011,13 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         p->ft_name.length = 0;
         return;
     }
+    if (strcmp(name, "stylesheet") == 0) {
+        st->dest = RTF_DEST_STYLESHEET;
+        p->ss_len = 0;
+        p->ss_num = 0;
+        return;
+    }
     if (strcmp(name, "info") == 0 ||
-        strcmp(name, "stylesheet") == 0 ||
         strcmp(name, "object") == 0 || strcmp(name, "footnote") == 0 ||
         strcmp(name, "headerl") == 0 ||
         strcmp(name, "headerf") == 0 || strcmp(name, "footerl") == 0 ||
@@ -971,6 +1063,7 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
     /* Paragraph formatting. */
     if (strcmp(name, "pard") == 0) {
         rtf_flush_run(p);
+        st->style_num = 0;
         st->align = WP_ALIGN_LEFT;
         st->indent_left = 0; st->indent_right = 0; st->indent_first = 0;
         st->space_before = 0; st->space_after = 0;

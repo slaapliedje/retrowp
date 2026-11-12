@@ -230,11 +230,22 @@ potion and a scroll for a game's character sheet. Choose a kind,
 then a piece; it goes in at the caret like any drawing. They are
 kept in the CLIPART folder beside RetroWP.
 
+Styles give paragraphs a look by name. Style (Format menu; Alt+S
+on DOS) puts the paragraphs you have selected, or the one the
+caret is in, in a style: Normal, Title, Heading 1, 2 or 3,
+Quotation, or one of the document's own. Define Style (Format;
+Alt+Y on DOS) keeps the caret paragraph's look -- its alignment,
+indents and spacing, and its first word's font, size and
+emphasis -- as a style you name; give an existing name and every
+paragraph in that style changes to match. Enter at the end of a
+title or heading starts a Normal paragraph. Styles are saved in
+the RTF, which Word reads as its own.
+
 Mail merge makes one letter, label or form for every line of a
-list. Put fields where the names go: Insert Field (Tools menu)
-asks for a name and types it as «Name» between guillemets --
-you can as well type them yourself. Then Mail Merge (File menu)
-asks for the list: a text file with the field names on its first
+list. Put fields where the names go: Insert Field (Tools menu;
+Alt+I on DOS) asks for a name and types it as «Name» between guillemets --
+you can as well type them yourself. Then Mail Merge (File menu;
+Alt+M on DOS) asks for the list: a text file with the field names on its first
 line and one record a line, separated by commas, semicolons or
 tabs -- what any spreadsheet saves as CSV. Choose Letters and
 RetroWP makes the document once for each record, each on a new

@@ -1505,11 +1505,19 @@ static wp_bool dos_dispatch_key(void)
        eighty columns. An Alt+letter reaches us as scan code alone, which
        no keymap here reads; R is not one of Emacs's meta keys (b, f, d,
        w, <, >, {, }, %), should Alt ever be wired to meta. */
-    if (!g_help_active && ascii == 0 && (scan == 0x13 || scan == 0x14 || scan == 0x25) && (shift & 0x08)) {
-        /* Alt+T, Table..., likewise; Alt+K, Insert Clipart (not an Emacs
-           meta key either). */
+    if (!g_help_active && ascii == 0 && (shift & 0x08) &&
+        (scan == 0x13 || scan == 0x14 || scan == 0x25 || scan == 0x32 || scan == 0x17 ||
+         scan == 0x1F || scan == 0x15)) {
+        /* Alt+T, Table..., likewise; Alt+K, Insert Clipart; Alt+M, Mail
+           Merge; Alt+I, Insert Field; Alt+S, Style; Alt+Y, Define Style
+           -- DOS has no menu bar, and none of these is an Emacs meta key
+           either. */
         const wp_action *act = wp_action_find(scan == 0x13 ? WP_ACT_FORMAT_BORDERS :
-                                              scan == 0x14 ? WP_ACT_FORMAT_TABLE : WP_ACT_TOOLS_INSERTCLIPART);
+                                              scan == 0x14 ? WP_ACT_FORMAT_TABLE :
+                                              scan == 0x32 ? WP_ACT_FILE_MERGE :
+                                              scan == 0x17 ? WP_ACT_TOOLS_INSERTFIELD :
+                                              scan == 0x1F ? WP_ACT_FORMAT_STYLE :
+                                              scan == 0x15 ? WP_ACT_FORMAT_DEFINESTYLE : WP_ACT_TOOLS_INSERTCLIPART);
         if (g_ctx.doc_loaded && act != NULL && act->handler != NULL) {
             (void)act->handler(&g_ctx);
             redraw_screen();

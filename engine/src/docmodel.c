@@ -127,7 +127,7 @@ wp_status wp_document_pstyle_find_or_add(wp_document *doc, const wp_para_style *
             existing->space_before == style->space_before &&
             existing->space_after == style->space_after &&
             existing->line_spacing == style->line_spacing &&
-            existing->style_name == style->style_name &&
+            existing->style_id == style->style_id &&
             existing->tab_count == style->tab_count &&
             existing->page_break_before == style->page_break_before &&
             existing->border_sides == style->border_sides &&
@@ -388,6 +388,9 @@ wp_status wp_document_init(wp_document *doc)
     doc->frame_count = 0;
     doc->frame_capacity = 0;
     doc->fonts = NULL;
+    doc->named = NULL;
+    doc->named_count = 0;
+    doc->named_capacity = 0;
     doc->font_count = 0;
     doc->font_capacity = 0;
     doc->sections = NULL;
@@ -473,5 +476,6 @@ void wp_document_free(wp_document *doc)
     mem_free(doc->trows);
     mem_free(doc->frames);
     mem_free(doc->fonts);
+    mem_free(doc->named);
     wp_strpool_free(&doc->strings);
 }

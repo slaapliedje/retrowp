@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "merge.h"
+#include "styles.h"
 #include "format_rtf.h"
 #include "utf8.h"
 #include "format_rtf_internal.h"
@@ -183,7 +184,23 @@ static void rtf_build_color_table(const wp_document *doc, rtf_color_table *ct)
             }
         }
     }
+    {
+        /* The stylesheet's character formats too: a style names its face
+           and colour even where no run is in it. */
+        u16 id;
+        for (id = 1; id < doc->named_count; id++) {
+            const wp_char_style *cs = wp_document_cstyle_get(doc, doc->named[id].chars);
+            if (cs == NULL) continue;
+            rtf_color_index(ct, cs->color_r, cs->color_g, cs->color_b);
+            if (cs->font != 0 && cs->font < 256u) {
+                ct->font_used[cs->font >> 3] = (u8)(ct->font_used[cs->font >> 3] | (1u << (cs->font & 7u)));
+            }
+        }
+    }
 }
+
+static void rtf_emit_para_props(rtf_writer *w, const wp_para_style *ps);
+static void rtf_emit_char_props(rtf_writer *w, const wp_char_style *cs, const rtf_color_table *ct);
 
 static void rtf_emit_header(rtf_writer *w, const wp_document *doc, const rtf_color_table *ct)
 {
@@ -219,6 +236,26 @@ static void rtf_emit_header(rtf_writer *w, const wp_document *doc, const rtf_col
             rtf_write_str(w, "\\green"); rtf_write_i32(w, (i32)ct->rgb[i][1]);
             rtf_write_str(w, "\\blue");  rtf_write_i32(w, (i32)ct->rgb[i][2]);
             rtf_write_str(w, ";");
+        }
+        rtf_write_str(w, "}");
+    }
+    if (doc->named_count > 1) {
+        /* The stylesheet (styles.h): \\sN for each style, its formats and
+           its name; \\s0 Normal too where the document has no Normal of
+           its own, as readers expect a \\s0. */
+        u16 id;
+        rtf_write_str(w, "{\\stylesheet");
+        if (wp_style_find(doc, (const u8 *)"Normal", 6) == 0) rtf_write_str(w, "{\\s0 Normal;}");
+        for (id = 1; id < doc->named_count; id++) {
+            u32 len;
+            const u8 *nm = wp_style_name(doc, id, &len);
+            if (nm == NULL) continue;
+            rtf_write_str(w, "{\\s"); rtf_write_i32(w, (i32)id);
+            rtf_emit_para_props(w, wp_document_pstyle_get(doc, doc->named[id].para));
+            rtf_emit_char_props(w, wp_document_cstyle_get(doc, doc->named[id].chars), ct);
+            rtf_write_str(w, " ");
+            rtf_write_text(w, nm, len);
+            rtf_write_str(w, ";}");
         }
         rtf_write_str(w, "}");
     }
@@ -460,28 +497,10 @@ static void rtf_emit_image(rtf_writer *w, const wp_document *doc,
     rtf_write_str(w, "}");
 }
 
-static void rtf_emit_row_shape(rtf_writer *w, const wp_table_row *row);
-
-static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_paragraph *para,
-                                const rtf_color_table *ct, const wp_image_source *src)
+/* A paragraph format's words -- alignment, indents, spacing, borders,
+   shading, line spacing, tabs -- for a paragraph or a stylesheet entry. */
+static void rtf_emit_para_props(rtf_writer *w, const wp_para_style *ps)
 {
-    const wp_para_style *ps = wp_document_pstyle_get(doc, para->style);
-    u16 ri;
-
-    rtf_write_str(w, "\\pard");
-    if (para->trow != 0) rtf_write_str(w, "\\intbl");
-    {
-        const wp_frame_desc *fr = wp_document_frame_get(doc, para->frame);
-        if (fr != NULL && para->trow == 0) {
-            rtf_write_str(w, fr->xref == WP_FRAME_X_PAGE ? "\\phpg" : "\\phmrg");
-            rtf_write_str(w, fr->yref == WP_FRAME_Y_PAGE ? "\\pvpg" :
-                             fr->yref == WP_FRAME_Y_MARGIN ? "\\pvmrg" : "\\pvpara");
-            rtf_write_str(w, "\\posx"); rtf_write_i32(w, fr->x);
-            rtf_write_str(w, "\\posy"); rtf_write_i32(w, fr->y);
-            if (fr->w > 0) { rtf_write_str(w, "\\absw"); rtf_write_i32(w, fr->w); }
-            if (fr->h != 0) { rtf_write_str(w, "\\absh"); rtf_write_i32(w, fr->h); }
-        }
-    }
     if (ps != NULL) {
         if (ps->align == WP_ALIGN_RIGHT)  rtf_write_str(w, "\\qr");
         if (ps->align == WP_ALIGN_CENTER) rtf_write_str(w, "\\qc");
@@ -525,6 +544,47 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
             }
         }
     }
+}
+
+/* A character format's words, for a stylesheet entry (a run writes its
+   own, in rtf_emit_run). */
+static void rtf_emit_char_props(rtf_writer *w, const wp_char_style *cs, const rtf_color_table *ct)
+{
+    u32 color_idx;
+    if (cs == NULL) return;
+    if (cs->font != 0) { rtf_write_str(w, "\\f"); rtf_write_i32(w, (i32)cs->font); }
+    if (cs->flags & WP_STYLE_BOLD)      rtf_write_str(w, "\\b");
+    if (cs->flags & WP_STYLE_ITALIC)    rtf_write_str(w, "\\i");
+    if (cs->flags & WP_STYLE_UNDERLINE) rtf_write_str(w, "\\ul");
+    rtf_write_str(w, "\\fs"); rtf_write_i32(w, cs->size_twips / 10);
+    color_idx = rtf_color_lookup(ct, cs->color_r, cs->color_g, cs->color_b);
+    if (color_idx != 0) { rtf_write_str(w, "\\cf"); rtf_write_i32(w, (i32)color_idx); }
+}
+
+static void rtf_emit_row_shape(rtf_writer *w, const wp_table_row *row);
+
+static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_paragraph *para,
+                                const rtf_color_table *ct, const wp_image_source *src)
+{
+    const wp_para_style *ps = wp_document_pstyle_get(doc, para->style);
+    u16 ri;
+
+    rtf_write_str(w, "\\pard");
+    if (para->trow != 0) rtf_write_str(w, "\\intbl");
+    {
+        const wp_frame_desc *fr = wp_document_frame_get(doc, para->frame);
+        if (fr != NULL && para->trow == 0) {
+            rtf_write_str(w, fr->xref == WP_FRAME_X_PAGE ? "\\phpg" : "\\phmrg");
+            rtf_write_str(w, fr->yref == WP_FRAME_Y_PAGE ? "\\pvpg" :
+                             fr->yref == WP_FRAME_Y_MARGIN ? "\\pvmrg" : "\\pvpara");
+            rtf_write_str(w, "\\posx"); rtf_write_i32(w, fr->x);
+            rtf_write_str(w, "\\posy"); rtf_write_i32(w, fr->y);
+            if (fr->w > 0) { rtf_write_str(w, "\\absw"); rtf_write_i32(w, fr->w); }
+            if (fr->h != 0) { rtf_write_str(w, "\\absh"); rtf_write_i32(w, fr->h); }
+        }
+    }
+    if (ps != NULL && ps->style_id != 0) { rtf_write_str(w, "\\s"); rtf_write_i32(w, (i32)ps->style_id); }
+    rtf_emit_para_props(w, ps);
 
     if (para->kind == (u8)WP_PARA_IMAGE) {
         /* An image paragraph has no runs at all, so the loop below would

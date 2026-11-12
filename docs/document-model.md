@@ -494,6 +494,34 @@ are filled over), Rectangle, RoundRect, Ellipse and Arc; Pie and Chord
 are drawn as their arc. Text, bitmaps, clipping and the rest are
 skipped. It writes the same records back.
 
+## Styles (M19)
+
+A named paragraph style is a stylesheet entry (`doc->named`,
+`wp_named_style`: a name, a paragraph format, a character format); a
+paragraph is in style N when its paragraph format's `style_id` is N
+(engine/include/styles.h). So a styled paragraph's own format still
+says everything layout needs -- nothing looks a style up to draw --
+and formatting it directly (centring a heading) keeps it in its style.
+`wp_style_apply` sets a paragraph's format and every run's character
+format from the style; `wp_style_define` adds a style or gives an
+existing one new formats, every paragraph in it restyled.
+
+RetroWP's own styles (Normal, Title, Heading 1-3, Quotation, as offsets
+from the document's default) live in code and come into a document
+the first time one is used, so a document that uses none has no
+stylesheet and saves exactly as before. Enter at the end of a Title or
+Heading starts a Normal paragraph (`wp_style_next_pstyle`, in the
+split); text typed into an empty paragraph takes its style's character
+format (`wp_style_text_cstyle`).
+
+RTF: `{\stylesheet{\s0 Normal;}{\sN formats name;}...}` and `\sN` on each
+styled paragraph; read back by name, each style's formats taken from
+its first paragraph (every writer repeats a style's formatting on its
+paragraphs); character, section and table styles (\cs \ds \ts) are not
+paragraph styles and are passed over. Format > Style (eight to a page,
+"More..."), Format > Define Style (the status line, the current
+style's name offered); on DOS, Alt+S and Alt+Y.
+
 ## Mail merge (M18)
 
 A merge field is text, «Name» in guillemets: no new run kind, no new

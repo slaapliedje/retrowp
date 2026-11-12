@@ -3,6 +3,7 @@
 #include "psdev.h"
 #include "format_stw.h"
 #include "merge.h"
+#include "styles.h"
 #include "actions.h"
 #include "app_ctx.h"
 #include "format_txt.h"
@@ -236,7 +237,8 @@ static const wp_char_style *style_before(wp_app_ctx *ctx, wp_pos pos)
         run = wp_paragraph_run_get(para, (u16)ri);
         if (run != NULL) return wp_document_cstyle_get(ctx->doc, run->style);
     }
-    return wp_document_cstyle_get(ctx->doc, ctx->doc->default_cstyle);
+    return wp_document_cstyle_get(ctx->doc, para != NULL ? wp_style_text_cstyle(ctx->doc, para)
+                                                         : ctx->doc->default_cstyle);
 }
 
 static void sync_input_style(wp_app_ctx *ctx)
@@ -1730,6 +1732,124 @@ static void print_copy_end(wp_app_ctx *ctx)
 
 static void tell_printed(wp_app_ctx *ctx, u32 pages);
 
+/* ---- Named styles (M19; styles.h) ------------------------------------ */
+
+#define STYLE_PICK_MAX 64
+
+/* Every style to offer: RetroWP's own, then the document's others. */
+static u32 style_choices(wp_app_ctx *ctx, char names[][48], u32 cap)
+{
+    u32 n = 0, b;
+    u16 id;
+    for (b = 0; b < wp_style_builtin_count() && n < cap; b++) {
+        strcpy(names[n++], wp_style_builtin_name(b));
+    }
+    for (id = 1; id < ctx->doc->named_count && n < cap; id++) {
+        u32 len, k, dup = 0;
+        const u8 *nm = wp_style_name(ctx->doc, id, &len);
+        if (nm == NULL || len == 0) continue;
+        if (len > 47) len = 47;
+        for (k = 0; k < wp_style_builtin_count(); k++) {
+            const char *bn = wp_style_builtin_name(k);
+            if (strlen(bn) == len && wp_style_find(ctx->doc, (const u8 *)bn, len) == id) dup = 1;
+        }
+        if (dup) continue;
+        memcpy(names[n], nm, len);
+        names[n][len] = '\0';
+        n++;
+    }
+    return n;
+}
+
+/* Format > Style: a style chosen -- eight to a page and "More..." where
+   there are more -- and the paragraphs the selection touches (else the
+   caret's) put in it. */
+static wp_status act_format_style(wp_app_ctx *ctx)
+{
+    static char names[STYLE_PICK_MAX][48];
+    const char *labels[9];
+    u32 count, first = 0, picked = 0, shown, i;
+    u16 id;
+    wp_pos from, to;
+    u32 si;
+
+    if (!ctx->doc_loaded) return WP_OK;
+    count = style_choices(ctx, names, STYLE_PICK_MAX);
+    for (;;) {
+        wp_bool more = (wp_bool)(count - first > 9);
+        shown = more ? 8 : count - first;
+        for (i = 0; i < shown; i++) labels[i] = names[first + i];
+        if (more) labels[shown] = "More...";
+        if (!choose_one(ctx, "Style", labels, shown + (more ? 1u : 0u), 0, &picked)) return WP_OK;
+        if (more && picked == shown) { first += 8; continue; }
+        break;
+    }
+    if (wp_style_ensure(ctx->doc, (const u8 *)names[first + picked], (u32)strlen(names[first + picked]), &id) != WP_OK) {
+        wp_action_tell(ctx, "Couldn't make that style");
+        return WP_ERR;
+    }
+    para_range(ctx, &from, &to);
+    for (si = from.section; si <= to.section && si < ctx->doc->section_count; si++) {
+        wp_section *sec = wp_document_section_get(ctx->doc, si);
+        u32 pi = (si == from.section) ? from.paragraph : 0;
+        u32 last = (si == to.section) ? to.paragraph : (sec->para_count > 0 ? sec->para_count - 1 : 0);
+        for (; pi <= last && pi < sec->para_count; pi++) (void)wp_style_apply(ctx->doc, si, pi, id);
+    }
+    wp_document_mark_modified(ctx->doc);
+    return WP_OK;
+}
+
+static void define_style_done(wp_app_ctx *ctx, const u8 *text, u32 len)
+{
+    wp_pos *cur = wp_keymap_cursor(ctx);
+    wp_section *sec;
+    wp_paragraph *para;
+    const wp_para_style *ps;
+    const wp_char_style *cs;
+    wp_para_style p;
+    u16 id;
+
+    if (cur->section >= ctx->doc->section_count) return;
+    sec = wp_document_section_get(ctx->doc, cur->section);
+    if (cur->paragraph >= sec->para_count) return;
+    para = wp_section_paragraph_get(sec, cur->paragraph);
+    ps = wp_document_pstyle_get(ctx->doc, para->style);
+    cs = wp_document_cstyle_get(ctx->doc, para->run_count > 0 ? wp_paragraph_run_get(para, 0)->style
+                                                              : ctx->doc->default_cstyle);
+    if (ps == NULL || cs == NULL) return;
+    p = *ps;
+    p.style_id = 0;
+    if (wp_style_define(ctx->doc, text, len, &p, cs, &id) != WP_OK) {
+        wp_action_tell(ctx, "Couldn't define that style");
+        return;
+    }
+    (void)wp_style_apply(ctx->doc, cur->section, cur->paragraph, id);   /* the caret's, if it was not already */
+    wp_document_mark_modified(ctx->doc);
+}
+
+/* Format > Define Style: the caret paragraph's look -- its paragraph
+   format and its first run's character format -- as the style named in
+   the status line (its own style's name offered); every paragraph in a
+   style redefined so takes the new look. */
+static wp_status act_define_style(wp_app_ctx *ctx)
+{
+    wp_pos *cur;
+    const u8 *name = NULL;
+    u32 len = 0;
+
+    if (!ctx->doc_loaded) return WP_OK;
+    cur = wp_keymap_cursor(ctx);
+    if (cur->section < ctx->doc->section_count) {
+        wp_section *sec = wp_document_section_get(ctx->doc, cur->section);
+        if (cur->paragraph < sec->para_count) {
+            const wp_para_style *ps = wp_document_pstyle_get(ctx->doc, wp_section_paragraph_get(sec, cur->paragraph)->style);
+            if (ps != NULL && ps->style_id != 0) name = wp_style_name(ctx->doc, ps->style_id, &len);
+        }
+    }
+    wp_prompt_begin(ctx, "Style name (this paragraph's look):", name, len, define_style_done);
+    return WP_OK;
+}
+
 /* ---- Mail merge (M18; merge.h) --------------------------------------- */
 
 static void field_done(wp_app_ctx *ctx, const u8 *text, u32 len)
@@ -2012,7 +2132,9 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_FORMAT_TABLE,      WP_MENU_FORMAT, "Table...",       0,        0,    act_format_table, NULL },
     { WP_ACT_TOOLS_INSERTCLIPART, WP_MENU_TOOLS, "Insert Clipart...", 0,     0,    act_insert_clipart, NULL },
     { WP_ACT_FILE_MERGE,        WP_MENU_FILE,   "Mail Merge...",  0,        0,    act_file_merge, NULL },
-    { WP_ACT_TOOLS_INSERTFIELD, WP_MENU_TOOLS,  "Insert Field...", 0,       0,    act_insert_field, NULL }
+    { WP_ACT_TOOLS_INSERTFIELD, WP_MENU_TOOLS,  "Insert Field...", 0,       0,    act_insert_field, NULL },
+    { WP_ACT_FORMAT_STYLE,      WP_MENU_FORMAT, "Style...",       0,        0,    act_format_style, NULL },
+    { WP_ACT_FORMAT_DEFINESTYLE, WP_MENU_FORMAT, "Define Style...", 0,      0,    act_define_style, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

@@ -2404,7 +2404,36 @@ merge picked because Atari Works documents already carry merge fields).
       exercised on the host: the GDOS path (it needs the ST's
       workstation), which takes the same loop.
 
-M18 done: letters, labels and long lists, from any CSV.
+M18 done: letters, labels and long lists, from any CSV. (Found in M19:
+DOS has no menu bar, so Mail Merge and Insert Field were unreachable
+there until Alt+M and Alt+I.)
+
+---
+
+## M19 — Paragraph Styles, Footnotes, Columns
+Goal: the word-processing fundamentals still missing, worked through in
+order (the user, 2026-11-12: "paragraph styles, then just work through
+the list").
+
+- [x] T19.1 Named paragraph styles.
+      AC: a stylesheet in the document (name, paragraph format,
+      character format); a paragraph is in a style by its format's
+      style_id (the unused style_name field, repurposed), so layout is
+      untouched and direct formatting keeps the style. RetroWP's own six
+      (Normal, Title, Heading 1-3, Quotation) come in on first use, so
+      an unstyled document saves byte for byte as before. Format > Style
+      and Format > Define Style (redefining restyles every paragraph in
+      it); Enter at the end of a heading gives Normal; an empty styled
+      paragraph types in its style. RTF writes \stylesheet and \sN and
+      reads Word's (\cs character styles passed over). The ST's Format
+      menu gained both items (appended, self-check and leaf count
+      updated); DOS reaches them by Alt+S and Alt+Y, and -- found doing
+      this -- Mail Merge and Insert Field by Alt+M and Alt+I, which DOS
+      had lacked. Tests: built-ins, define and redefine, next style and
+      typing, RTF both ways and Word's stylesheet, the actions; next
+      style and \sN import shown to fail when broken.
+- [ ] T19.2 Footnotes.
+- [ ] T19.3 Columns.
 
 ---
 

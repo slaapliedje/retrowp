@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "editing.h"
+#include "styles.h"
 #include "edit_internal.h"
 #include "layout.h"
 #include "platform.h"
@@ -59,8 +60,9 @@ wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos 
     para = &sec->paras[pos.paragraph];
 
     if (para->run_count == 0) {
-        /* empty paragraph: no context to inherit from */
-        style = doc->default_cstyle;
+        /* empty paragraph: nothing to follow but its named style, if it
+           has one (styles.h), else the document's default */
+        style = wp_style_text_cstyle(doc, para);
         insert_index = 0;
     } else if (pos.offset == 0 && pos.run == 0) {
         /* very start of a non-empty paragraph: inherit the first run's style */
@@ -290,6 +292,17 @@ wp_status wp_document_split_paragraph_raw(wp_document *doc, wp_pos pos, wp_pos *
     }
 
     moved_count = (u16)(para->run_count - split_run);
+    if (moved_count == 0) {
+        /* Enter at the end: after a Title or a Heading the new paragraph
+           is Normal (styles.h), as a writer expects. */
+        wp_pstyle next;
+        if (wp_style_next_pstyle(doc, para, &next) == WP_OK) {
+            sec = &doc->sections[pos.section];   /* the stylesheet may have grown, not the paragraphs */
+            new_para = &sec->paras[new_idx];
+            para = &sec->paras[pos.paragraph];
+            if (next != para->style) new_para->style = next;
+        }
+    }
     for (i = 0; i < moved_count; i++) {
         u16 dummy;
         st = wp_paragraph_run_add(new_para, para->runs[split_run + i].text,

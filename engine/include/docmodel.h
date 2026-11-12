@@ -46,6 +46,14 @@ typedef struct {
     u8      _pad[3];
 } wp_font_desc;
 
+/* A named paragraph style (M19; styles.h): its name, the paragraph
+   format and the character format a paragraph in it takes. */
+typedef struct {
+    wp_span name;      /* UTF-8, in the document's pool */
+    u16     para;      /* a wp_pstyle; its style_id is this entry's index */
+    u16     chars;     /* a wp_cstyle */
+} wp_named_style;
+
 typedef struct {
     wp_font font;      /* 0 = the target's default face */
     u16    _pad0;
@@ -112,7 +120,8 @@ typedef struct {
     u8  _pad2[2];
     i32 border_width;   /* one rule's thickness in twips; 0 = WP_BORDER_DEFAULT_WIDTH */
     i32 border_space;   /* twips between the text and the rule (\brspN) */
-    wp_str style_name;  /* named style ("Heading 1"), optional */
+    u16 style_id;       /* the named style it is in (styles.h): 1.. into doc->named; 0 none */
+    u8  _pad3[2];
     u8  tab_kind[WP_MAX_TABS];  /* wp_tab_kind */
     i32 tab_pos[WP_MAX_TABS];   /* twips from the column's left edge */
 } wp_para_style;
@@ -286,6 +295,12 @@ typedef struct {
                                  0 the reserved "target default" sentinel */
     u16            font_count;
     u16            font_capacity;
+
+    wp_named_style *named;   /* the stylesheet (M19, styles.h); append-only,
+                                 entry 0 reserved: a paragraph format's style_id
+                                 0 is "no named style" */
+    u16             named_count;
+    u16             named_capacity;
 
     wp_section *sections;
     u32         section_count;

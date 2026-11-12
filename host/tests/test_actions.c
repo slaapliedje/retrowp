@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "test.h"
+#include "styles.h"
 #include "format_prn.h"
 #include "drawing.h"
 #include "actions.h"
@@ -2313,4 +2314,39 @@ void test_actions_mail_merge_printed(void)
     ctx_teardown(&doc, &journal, &ctx);
     (void)remove(prn);
     (void)remove("build/test_actions_merge.csv");
+}
+
+/* Format > Style: Heading 1 picked (the third of RetroWP's own), the
+   caret's paragraph put in it. Format > Define Style: "Note" typed in
+   the status line, the caret paragraph's look kept as it and the
+   paragraph in it. */
+void test_actions_format_style_and_define(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    const wp_para_style *ps;
+    u32 len, i;
+    const u8 *nm;
+    const char *typed = "Note";
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Chapter\nText\n");
+    window_host_next_choice(2);
+    ASSERT_TRUE(wp_action_find(WP_ACT_FORMAT_STYLE)->handler(&ctx) == WP_OK);
+    ps = wp_document_pstyle_get(&doc, doc.sections[0].paras[0].style);
+    nm = wp_style_name(&doc, ps->style_id, &len);
+    ASSERT_TRUE(nm != NULL && len == 9 && memcmp(nm, "Heading 1", 9) == 0);
+    ASSERT_TRUE(wp_document_is_modified(&doc));
+
+    wp_keymap_cursor(&ctx)->paragraph = 1;
+    wp_keymap_cursor(&ctx)->run = 0;
+    wp_keymap_cursor(&ctx)->offset = 0;
+    ASSERT_TRUE(wp_action_find(WP_ACT_FORMAT_DEFINESTYLE)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(ctx.prompt.active);
+    for (i = 0; typed[i] != '\0'; i++) (void)wp_keymap_feed_key(&ctx, key_char((u8)typed[i]), 0);
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
+    ps = wp_document_pstyle_get(&doc, doc.sections[0].paras[1].style);
+    nm = wp_style_name(&doc, ps->style_id, &len);
+    ASSERT_TRUE(nm != NULL && len == 4 && memcmp(nm, "Note", 4) == 0);
+    ctx_teardown(&doc, &journal, &ctx);
 }
