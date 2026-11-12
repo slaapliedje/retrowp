@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
+#include "merge.h"
 #include "format_rtf.h"
 #include "utf8.h"
 #include "format_rtf_internal.h"
@@ -259,7 +260,28 @@ static void rtf_emit_run(rtf_writer *w, const wp_document *doc, const wp_run *ru
     if (color_idx != 0) { rtf_write_str(w, "\\cf"); rtf_write_i32(w, (i32)color_idx); }
 
     rtf_write_str(w, " ");
-    rtf_write_text(w, wp_strpool_get(&doc->strings, run->text), run->text.length);
+    {
+        /* A merge field «Name» (merge.h) goes as a real MERGEFIELD, its
+           shown result the «Name» itself -- as Word writes one, so Word
+           merges with it and every reader without fields still shows
+           the name. A name with a space is quoted. */
+        const u8 *t = wp_strpool_get(&doc->strings, run->text);
+        u32 pos = 0, start, end, na, nl, k;
+        while (t != NULL && wp_merge_next_field(t, run->text.length, pos, &start, &end, &na, &nl)) {
+            wp_bool spaced = WP_FALSE;
+            for (k = 0; k < nl; k++) if (t[na + k] == ' ') spaced = WP_TRUE;
+            rtf_write_text(w, t + pos, start - pos);
+            rtf_write_str(w, "{\\field{\\*\\fldinst MERGEFIELD ");
+            if (spaced) rtf_write_str(w, "\"");
+            rtf_write_text(w, t + na, nl);
+            if (spaced) rtf_write_str(w, "\"");
+            rtf_write_str(w, " }{\\fldrslt ");
+            rtf_write_text(w, t + start, end - start);
+            rtf_write_str(w, "}}");
+            pos = end;
+        }
+        if (t != NULL) rtf_write_text(w, t + pos, run->text.length - pos);
+    }
     rtf_write_str(w, "}");
 }
 

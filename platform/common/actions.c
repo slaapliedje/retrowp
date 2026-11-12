@@ -2,6 +2,7 @@
 #include <string.h>
 #include "psdev.h"
 #include "format_stw.h"
+#include "merge.h"
 #include "actions.h"
 #include "app_ctx.h"
 #include "format_txt.h"
@@ -1703,6 +1704,120 @@ wp_status wp_action_dictate(wp_app_ctx *ctx)
     return st;
 }
 
+/* ---- Mail merge (M18; merge.h) --------------------------------------- */
+
+static void field_done(wp_app_ctx *ctx, const u8 *text, u32 len)
+{
+    u8 buf[WP_MERGE_NAME_MAX + 4];
+    u32 i, n = 0;
+    wp_pos *cursor = wp_keymap_cursor(ctx), after;
+
+    while (len > 0 && text[0] == ' ') { text++; len--; }
+    while (len > 0 && text[len - 1] == ' ') len--;
+    if (len == 0) return;
+    if (len > WP_MERGE_NAME_MAX) len = WP_MERGE_NAME_MAX;
+    buf[n++] = 0xC2; buf[n++] = 0xAB;   /* « */
+    for (i = 0; i < len; i++) if (text[i] != '\n' && text[i] != '\r') buf[n++] = text[i];
+    buf[n++] = 0xC2; buf[n++] = 0xBB;   /* » */
+    if (wp_edit_insert_text(ctx->doc, ctx->journal, *cursor, buf, n, &after) == WP_OK) *cursor = after;
+}
+
+/* Tools > Insert Field: a name asked for, typed as «Name» -- a field is
+   text, so it can as well be typed or edited by hand. */
+static wp_status act_insert_field(wp_app_ctx *ctx)
+{
+    if (!ctx->doc_loaded) return WP_OK;
+    wp_prompt_begin(ctx, "Field name:", NULL, 0, field_done);
+    return WP_OK;
+}
+
+static wp_bool has_field(wp_document *doc)
+{
+    u32 si, pi, s, e, na, nl;
+    u16 ri;
+    for (si = 0; si < doc->section_count; si++) {
+        wp_section *sec = wp_document_section_get(doc, si);
+        for (pi = 0; pi < sec->para_count; pi++) {
+            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            for (ri = 0; ri < para->run_count; ri++) {
+                wp_run *run = wp_paragraph_run_get(para, ri);
+                const u8 *t = wp_strpool_get(&doc->strings, run->text);
+                if (t != NULL && wp_merge_next_field(t, run->text.length, 0, &s, &e, &na, &nl)) return WP_TRUE;
+            }
+        }
+    }
+    return WP_FALSE;
+}
+
+/* File > Mail Merge: the data file chosen, read and merged; the result
+   replaces the template on screen as a new document with no file, so
+   Save asks for a name and the template on disk is never written over. */
+static wp_status act_file_merge(wp_app_ctx *ctx)
+{
+    char path[WP_APP_PATH_MAX];
+    plat_file *f;
+    u32 size = 0, got = 0, copies = 0;
+    u8 *buf;
+    wp_merge_data data;
+    wp_document merged;
+    wp_status st;
+
+    if (!ctx->doc_loaded) return WP_OK;
+    if (!has_field(ctx->doc)) {
+        wp_action_tell(ctx, "No fields to fill: Tools > Insert Field adds one");
+        return WP_OK;
+    }
+    if (!wp_action_confirm_discard(ctx)) return WP_OK;
+    if (ctx->pick_path == NULL || !ctx->pick_path(ctx, WP_FALSE, path, (u32)sizeof(path))) return WP_OK;
+    if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) {
+        wp_action_tell(ctx, "Couldn't open that file");
+        return WP_ERR;
+    }
+    if (plat_file_size(f, &size) != WP_OK || (buf = (u8 *)mem_alloc(size + 1u)) == NULL) {
+        plat_file_close(f);
+        wp_action_tell(ctx, "Not enough memory to read that file");
+        return WP_NOMEM;
+    }
+    st = plat_file_read(f, buf, size, &got);
+    plat_file_close(f);
+    if (st == WP_OK) st = wp_merge_data_read(buf, got, &data);
+    mem_free(buf);
+    if (st != WP_OK) {
+        wp_action_tell(ctx, st == WP_NOMEM ? "Not enough memory to read that file"
+                                           : "That file has no field names on its first line");
+        return st;
+    }
+    if (data.records == 0) {
+        wp_merge_data_free(&data);
+        wp_action_tell(ctx, "That file has field names but no records");
+        return WP_OK;
+    }
+    /* Merged in place -- every picture, style and frame shared -- then
+       handed over as a fresh document: its undo history is the
+       template's no longer. */
+    merged = *ctx->doc;
+    st = wp_merge_document(&merged, &data, &copies);
+    wp_merge_data_free(&data);
+    wp_undo_journal_free(ctx->journal);
+    ctx->doc_loaded = WP_FALSE;
+    wp_action_replace_document(ctx, &merged);
+    wp_document_mark_modified(ctx->doc);
+    if (st != WP_OK) {
+        wp_action_tell(ctx, "Not enough memory to merge every record");
+        return st;
+    }
+    {
+        char msg[48] = "Merged ";
+        char digits[12];
+        u32 pos = 7, n = 0, v = copies;
+        do { digits[n++] = (char)('0' + v % 10u); v /= 10u; } while (v > 0 && n < 11);
+        while (n > 0) msg[pos++] = digits[--n];
+        strcpy(msg + pos, copies == 1 ? " record" : " records");
+        wp_action_tell(ctx, msg);
+    }
+    return WP_OK;
+}
+
 const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_FILE_NEW,        WP_MENU_FILE,   "New",            "Ctrl+N", 0x0E, act_file_new, NULL },
     { WP_ACT_FILE_OPEN,         WP_MENU_FILE,   "Open",           "Ctrl+O", 0x0F, NULL, NULL },
@@ -1775,7 +1890,9 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_FILE_PRINT,        WP_MENU_FILE,   "Print...",       "Ctrl+P", 0x10, wp_action_file_print, NULL },
     { WP_ACT_FORMAT_BORDERS,    WP_MENU_FORMAT, "Borders...",     0,        0,    act_format_borders, NULL },
     { WP_ACT_FORMAT_TABLE,      WP_MENU_FORMAT, "Table...",       0,        0,    act_format_table, NULL },
-    { WP_ACT_TOOLS_INSERTCLIPART, WP_MENU_TOOLS, "Insert Clipart...", 0,     0,    act_insert_clipart, NULL }
+    { WP_ACT_TOOLS_INSERTCLIPART, WP_MENU_TOOLS, "Insert Clipart...", 0,     0,    act_insert_clipart, NULL },
+    { WP_ACT_FILE_MERGE,        WP_MENU_FILE,   "Mail Merge...",  0,        0,    act_file_merge, NULL },
+    { WP_ACT_TOOLS_INSERTFIELD, WP_MENU_TOOLS,  "Insert Field...", 0,       0,    act_insert_field, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

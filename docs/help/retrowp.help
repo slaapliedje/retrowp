@@ -230,6 +230,19 @@ potion and a scroll for a game's character sheet. Choose a kind,
 then a piece; it goes in at the caret like any drawing. They are
 kept in the CLIPART folder beside RetroWP.
 
+Mail merge makes one letter, label or form for every line of a
+list. Put fields where the names go: Insert Field (Tools menu)
+asks for a name and types it as «Name» between guillemets --
+you can as well type them yourself. Then Mail Merge (File menu)
+asks for the list: a text file with the field names on its first
+line and one record a line, separated by commas, semicolons or
+tabs -- what any spreadsheet saves as CSV. RetroWP makes the
+document once for each record, each on a new page, and shows the
+result as a new document: Save asks for a name, so the original
+is kept. A field the list has no column for stays as it is.
+Atari Works documents keep their fields; RTF saves them as Word
+merge fields.
+
 Header and Footer ask in the status line. Type the line and
 press Enter (Esc leaves it as it was). A | splits it into parts:
 one part is centred, two go left and right, three left, centre

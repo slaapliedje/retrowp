@@ -13,8 +13,9 @@
  * Read: the text (Atari character set to UTF-8), paragraphs, each run's
  * face, size, bold and underline (italic from an italic face's name),
  * each paragraph's alignment, indents, line spacing and tab stops, and
- * the page's paper and margins. A merge field reads as its name,
- * "LABELS.STD:Company", as Atari Works' own text export writes it.
+ * the page's paper and margins. A merge field reads as RetroWP's own,
+ * «Company» (merge.h); the database it named (LABELS.STD) is not kept --
+ * File > Mail Merge asks for the data.
  * Placed objects become pictures in frames: a GEM metafile through
  * drawfile.c, a box, rule or shape Atari Works drew itself as a drawing;
  * each follows the paragraph that ends above it, so it stays beside its

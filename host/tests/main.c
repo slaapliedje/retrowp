@@ -315,6 +315,7 @@ void test_actions_save_goes_to_the_remembered_name_without_asking(void);
 void test_actions_load_file_reads_text_and_rtf_and_keeps_the_name(void);
 void test_actions_load_file_without_extension_goes_by_content(void);
 void test_actions_load_file_opens_atari_works_and_saves_rtf_beside_it(void);
+void test_actions_mail_merge(void);
 void test_actions_odt_and_pdf_go_through_the_gateway(void);
 void test_actions_file_print_routes(void);
 void test_actions_file_print_options(void);
@@ -467,6 +468,11 @@ void test_drawing_rtf_keeps_alignment(void);
 void test_utf8_ascii_fallback(void);
 void test_charsheet_opens_whole(void);
 void test_format_stw_reads_text_styles_and_page(void);
+void test_merge_finds_fields(void);
+void test_merge_reads_csv(void);
+void test_merge_reads_tabs(void);
+void test_merge_document(void);
+void test_merge_fields_in_rtf(void);
 void test_format_stw_reads_version_10_page(void);
 void test_format_stw_refuses_what_is_not(void);
 void test_charsheet_prints(void);
@@ -1041,6 +1047,7 @@ static const test_case g_cases[] = {
     { "actions_load_file_reads_text_and_rtf_and_keeps_the_name", test_actions_load_file_reads_text_and_rtf_and_keeps_the_name },
     { "actions_load_file_without_extension_goes_by_content", test_actions_load_file_without_extension_goes_by_content },
     { "actions_load_file_opens_atari_works_and_saves_rtf_beside_it", test_actions_load_file_opens_atari_works_and_saves_rtf_beside_it },
+    { "actions_mail_merge", test_actions_mail_merge },
     { "actions_odt_and_pdf_go_through_the_gateway", test_actions_odt_and_pdf_go_through_the_gateway },
     { "actions_file_print_routes", test_actions_file_print_routes },
     { "actions_file_print_options", test_actions_file_print_options },
@@ -1172,6 +1179,11 @@ static const test_case g_cases[] = {
     { "utf8_ascii_fallback", test_utf8_ascii_fallback },
     { "charsheet_opens_whole", test_charsheet_opens_whole },
     { "format_stw_reads_text_styles_and_page", test_format_stw_reads_text_styles_and_page },
+    { "merge_finds_fields", test_merge_finds_fields },
+    { "merge_reads_csv", test_merge_reads_csv },
+    { "merge_reads_tabs", test_merge_reads_tabs },
+    { "merge_document", test_merge_document },
+    { "merge_fields_in_rtf", test_merge_fields_in_rtf },
     { "format_stw_reads_version_10_page", test_format_stw_reads_version_10_page },
     { "format_stw_refuses_what_is_not", test_format_stw_refuses_what_is_not },
     { "charsheet_prints", test_charsheet_prints },

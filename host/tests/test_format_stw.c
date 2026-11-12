@@ -178,7 +178,7 @@ void test_format_stw_reads_text_styles_and_page(void)
        export writes it; then "!" in the face whose name says bold
        italic, underlined. */
     run_text(&doc, 2, 0, t, sizeof(t));
-    ASSERT_EQ_STR(t, "Dear LABELS.STD:Company");
+    ASSERT_EQ_STR(t, "Dear \xc2\xab" "Company\xc2\xbb");
     cs = run_style(&doc, 2, 1);
     ASSERT_TRUE(cs != NULL && cs->flags == (WP_STYLE_BOLD | WP_STYLE_ITALIC | WP_STYLE_UNDERLINE));
     ps = wp_document_pstyle_get(&doc, para_at(&doc, 2)->style);

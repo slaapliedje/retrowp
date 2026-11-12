@@ -220,7 +220,11 @@
 #define WP_MENU_OBJ_FILE_SAVE_AS         47
 /* File > Print..., appended the same way; OF_LASTOB moves here. */
 #define WP_MENU_OBJ_FILE_PRINT           48
-#define WP_MENU_OBJ_COUNT        49
+/* File > Mail Merge... and Tools > Insert Field... (M18), appended the
+   same way; OF_LASTOB moves to the last. */
+#define WP_MENU_OBJ_FILE_MERGE           49
+#define WP_MENU_OBJ_TOOLS_INSERTFIELD    50
+#define WP_MENU_OBJ_COUNT        51
 
 extern WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 

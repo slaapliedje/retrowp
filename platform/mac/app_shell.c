@@ -1819,6 +1819,7 @@ void app_shell_run(void)
     wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_mac_doc, &g_mac_journal);
     g_ctx.ensure_offload = ensure_offload; /* ODT/PDF in the shared file flow */
     g_ctx.clipart_dir = ":CLIPART:";   /* the bundled clipart, beside the program */
+    g_ctx.pick_path = mac_pick_path;   /* Mail Merge asks for its data file so */
     g_ctx.view.line_px = mac_twips_to_px; /* the conversion draw_document advances y with */
     load_sample_document();
 

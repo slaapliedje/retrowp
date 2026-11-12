@@ -13,6 +13,10 @@ TOOL = sys.argv[1] if len(sys.argv) > 1 else 'build/stw2txt'
 STYLE = sys.argv[2] if len(sys.argv) > 2 else None   # build/stw_vs_rtf
 
 def words(b): return re.findall(rb'\S+', b)
+# Merge fields: Atari Works' export writes LABELS.STD:Company, RetroWP
+# «Company» (in the Atari set, 0xAE and 0xAF) -- the same field.
+def ours(b): return words(b.replace(b'\xae', b'').replace(b'\xaf', b''))
+def theirs(b): return words(re.sub(rb'[A-Za-z0-9_]+\.STD:', b'', b))
 
 if not os.path.isdir(CORPUS):
     print('stw-score: no corpus at %s (set STW_CORPUS); skipped' % CORPUS)
@@ -26,7 +30,11 @@ for fn in sorted(os.listdir(CORPUS + '/STW')):
     run = subprocess.run([TOOL, CORPUS + '/STW/' + fn], capture_output=True)
     if run.returncode != 0:
         res['does not open'] += 1; misses.append((0.0, base)); continue
-    a, b = words(run.stdout), words(open(tp, 'rb').read())
+    txt = open(tp, 'rb').read()
+    if re.search(rb'\.STD:', txt):   # a merge document: compare fields by name
+        a, b = ours(run.stdout), theirs(txt)
+    else:
+        a, b = words(run.stdout), words(txt)
     if a == b:
         res['identical'] += 1
     else:

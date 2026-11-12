@@ -1049,6 +1049,50 @@ void test_actions_load_file_opens_atari_works_and_saves_rtf_beside_it(void)
     (void)remove(rtf);
 }
 
+static wp_bool pick_merge_data(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
+{
+    (void)ctx; (void)save;
+    if (cap < 32) return WP_FALSE;
+    strcpy(out, "build/test_actions_merge.csv");
+    return WP_TRUE;
+}
+
+/* File > Mail Merge: the data file the machine's picker names, the
+   document a copy a record with its fields filled -- now a new document
+   with no file, so Save will ask rather than write over the template;
+   and a document with no field is told so, the picker never shown. */
+void test_actions_mail_merge(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[256];
+    FILE *f = fopen("build/test_actions_merge.csv", "wb");
+
+    ASSERT_TRUE(f != NULL);
+    if (f == NULL) return;
+    fputs("Name;Town\nAnn;Bath\nBob;Leeds\n", f);
+    fclose(f);
+
+    ctx_setup_imported(&doc, &journal, &ctx, "To \xc2\xabName\xc2\xbb of \xc2\xabTown\xc2\xbb\n");
+    strcpy(ctx.doc_path, "build/template.rtf");
+    ctx.pick_path = pick_merge_data;
+    ASSERT_TRUE(wp_action_find(WP_ACT_FILE_MERGE)->handler(&ctx) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "To Ann of Bath\nTo Bob of Leeds\n");
+    ASSERT_EQ_STR(ctx.doc_path, "");
+    ASSERT_TRUE(wp_document_is_modified(&doc));
+    ctx_teardown(&doc, &journal, &ctx);
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Nothing to fill\n");
+    ctx.pick_path = NULL;   /* would crash if it were reached */
+    ASSERT_TRUE(wp_action_find(WP_ACT_FILE_MERGE)->handler(&ctx) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Nothing to fill\n");
+    ctx_teardown(&doc, &journal, &ctx);
+    (void)remove("build/test_actions_merge.csv");
+}
+
 static wp_bool no_link(void) { return WP_FALSE; }
 static wp_bool printer_off(void) { return WP_FALSE; }
 

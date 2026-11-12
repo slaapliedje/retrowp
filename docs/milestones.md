@@ -2351,6 +2351,36 @@ lettering inside them, and its header and footer.
 
 ---
 
+## M18 — Mail Merge
+Goal: letters, labels and forms filled from a list -- what Atari Works'
+word processor did with its database, and the first of the
+word-processing fundamentals still missing (styles, footnotes, columns
+to follow). Chosen 2026-11-12 (the user's "continue" after M17; mail
+merge picked because Atari Works documents already carry merge fields).
+
+- [x] T18.1 Fields and the merge.
+      AC: a field is text, «Name» (merge.h); Tools > Insert Field types
+      one; RTF writes Word's MERGEFIELD and reads it back as the same
+      text; Atari Works' fields import as «Company» (stw-score
+      normalises the .TXT's LABELS.STD:Company to compare: still 256 of
+      262). The data is a CSV/semicolon/tab text file (quotes, line
+      breaks in quotes, CRLF, a byte-order mark; UTF-8 or the machine's
+      own set); File > Mail Merge merges in place -- the template's
+      sections once a record, a new page each, everything else shared --
+      and hands the result over as a new unsaved document. Every machine
+      asks through its own picker (`wp_app_ctx.pick_path`); the ST's GEM
+      menu gained File > Mail Merge... and Tools > Insert Field... (two
+      objects appended, its self-check extended). The host backend
+      gained plat_native_to_utf8 (Latin-1), which it lacked. Tests: the
+      field finder, CSV and tab data, the merge, RTF fields, the action
+      end to end; case-insensitive names shown to fail when broken.
+- [ ] T18.2 Labels: several records to a page (a grid of frames or a
+      table), and printing a merge straight to the printer without
+      building the whole merged document first (a 1 MB ST and a long
+      list).
+
+---
+
 ## Cross-Cutting "Done" Checklist (apply to every task)
 - [ ] Builds on host (+ target backend or stub).
 - [ ] Platform-free logic unit-tested on host.

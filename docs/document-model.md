@@ -494,6 +494,36 @@ are filled over), Rectangle, RoundRect, Ellipse and Arc; Pie and Chord
 are drawn as their arc. Text, bitmaps, clipping and the rest are
 skipped. It writes the same records back.
 
+## Mail merge (M18)
+
+A merge field is text, «Name» in guillemets: no new run kind, no new
+paragraph kind, so it edits, copies, undoes and wraps as text does, and
+every target can show and type it (« and » are in the Atari set, Mac
+Roman and Latin-1). engine/include/merge.h: `wp_merge_next_field` finds
+them (a name is 1..64 bytes on one line); RTF writes each as Word's
+`{\field{\*\fldinst MERGEFIELD Name}{\fldrslt «Name»}}` (a name with a
+space quoted) and reads Word's back as its shown result, the same text;
+Atari Works' fields import as «Company» (the database file they named is
+not kept).
+
+The data (`wp_merge_data_read`) is a text file: field names on the
+first line, a record a line, split by tabs, semicolons or commas --
+whichever the first line has most -- a cell in double quotes where it
+holds one of those or a line break ("" a quote inside); CR, LF or CRLF;
+a byte-order mark skipped, blank lines skipped, a short row's missing
+cells empty. UTF-8 as it is, anything else the machine's own set
+(plat_native_to_utf8). Names match ignoring ASCII case and the spaces
+round them.
+
+`wp_merge_document` merges in place: the template's sections repeated
+once a record (a section starts a page), records 2.. appended first and
+record 1 filled into the template last, so every picture, style, frame
+and table row is shared, never copied. A field with no column stays.
+File > Mail Merge (actions.c) asks for the data through the machine's
+own file picker (`wp_app_ctx.pick_path`) and hands the result over as a
+new, unsaved document with no file -- Save asks, and the template on
+disk is never written over. Tools > Insert Field types «Name».
+
 ## Images (M15)
 
 An image is a **paragraph-level, fixed-size, non-flowing block** -- not

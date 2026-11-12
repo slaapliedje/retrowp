@@ -605,12 +605,15 @@ wp_status format_stw_import(const u8 *bytes, u32 len, wp_document *doc)
             p++;
             continue;
         }
-        if (b == 0x01 && c.field_next < m.fields_seen) {   /* a merge field: its name */
+        if (b == 0x01 && c.field_next < m.fields_seen) {   /* a merge field: «Name» (merge.h) */
             const u8 *f = bytes + m.field_at[c.field_next++];
             u32 n;
-            for (n = 0; n < 14 && f[8 + n] != 0; n++) stw_put(&c, f[8 + n]);
-            stw_put(&c, ':');
-            for (n = 0; n < 32 && f[22 + n] != 0; n++) stw_put(&c, f[22 + n]);
+            stw_put(&c, 0xABu);
+            for (n = 0; n < 32 && f[22 + n] != 0; n++) {
+                u32 cp = wp_codepage_decode(WP_CODEPAGE_ATARI_ST, f[22 + n]);
+                stw_put(&c, cp == 0xFFFDuL ? (u32)'?' : cp);
+            }
+            stw_put(&c, 0xBBu);
             p++;
             continue;
         }

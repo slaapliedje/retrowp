@@ -106,6 +106,11 @@ typedef enum {
     /* T16.5: Tools > Insert Clipart -- the bundled set (clipart/CLIPART.TXT),
        chosen by category and piece, inserted as a drawing. */
     WP_ACT_TOOLS_INSERTCLIPART,
+    /* M18: File > Mail Merge -- a data file chosen, the document made one
+       copy a record with its «fields» filled (merge.h), handed over as a
+       new, unsaved document; Tools > Insert Field types a «Name». */
+    WP_ACT_FILE_MERGE,
+    WP_ACT_TOOLS_INSERTFIELD,
     WP_ACT_COUNT
 } wp_action_id;
 

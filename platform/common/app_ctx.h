@@ -94,6 +94,10 @@ typedef struct wp_app_ctx {
        clipart here. */
     const char *clipart_dir;
 
+    /* The machine's own file picker (the one Open uses), for actions
+       that must ask for a file -- Mail Merge's data. NULL: none. */
+    wp_bool (*pick_path)(struct wp_app_ctx *ctx, wp_bool save, char *out, u32 cap);
+
     /* The machine's own printer, as a file to write -- the ST's "PRN:",
        the Amiga's "PRT:", DOS's "PRN" -- and the code page it reads
        (codepage.h; 0 is plain ASCII). NULL when there is none to print
