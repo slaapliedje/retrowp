@@ -390,13 +390,16 @@ color is a *palette index* on the ST (16-color low-res palette), not RGB.
 exercises (black text on a white page) and explicitly not a nearest-color
 search over the full palette. Revisit when color text is a real feature.
 
-**Charset conversion is ASCII-only.** `plat_utf8_to_native`/
-`plat_native_to_utf8` pass ASCII (0x00-0x7F) through unchanged and replace
-every other codepoint (regardless of its UTF-8 byte length -- correctly
-decoded via `utf8_decode`, not treated byte-by-byte) with a single `'?'`,
-counted in `unmapped_count`. Correct and sufficient for this milestone's
-ASCII sample document; a real Atari ST high-ASCII mapping table is a
-deliberate, documented gap, not a silent one.
+**Charset conversion** (was ASCII-only until 2026-11-11).
+`plat_utf8_to_native`/`plat_native_to_utf8` map the Atari set's upper half
+both ways (retroplat's `g_atari_hi`: the accented Latin letters, Greek,
+the maths symbols, the ligatures; the Latin-1 half checked against
+EmuTOS's own latin1-to-atarist table, read as a specification). The
+Hebrew block 0xC2-0xDC and a few symbols are left unmapped. A character
+the set lacks -- curly quotes, dashes, the ellipsis -- takes
+`utf8_ascii_fallback`'s nearest plain one; only one with none becomes
+`'?'`, counted in `unmapped_count`. Seen on screen: "Café, naïve,
+Straße, Ångström, 25 °C ± 2, µm, π, £, ¿, «», œuvre".
 
 **The sample document.** `app_shell.c` hardcodes and imports one paragraph
 at startup (no Open dialog yet -- that's T4.3), lays it out against the

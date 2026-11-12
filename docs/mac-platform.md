@@ -439,11 +439,10 @@ real GUI shell in Phase 2).
   now, pulled forward from Phase 2 because the clipboard and file seams
   need them to link (same reasoning `draw_amiga.c` gives for the
   identical pull-forward). Unlike Amiga's ISO-8859-1 (a genuine 1:1
-  identity map for 0x80-0xFF), Mac OS Roman has no simple arithmetic
-  relationship to Unicode -- a real mapping table is Phase 2/3 work, not
-  assumed here. Follows Atari's own precedent instead: ASCII passes
-  through unchanged, everything else becomes `'?'`, counted in
-  `*unmapped_count` -- a documented gap, not a silent one.
+  identity map for 0x80-0xFF), Mac OS Roman has its own ordering:
+  retroplat's `g_macroman_hi` maps it both ways (since 2026-11-11; ASCII
+  only before, everything else '?'). A character it lacks takes
+  `utf8_ascii_fallback`'s nearest plain one.
 
 **Verified on-target, not just cross-compiled**:
 `wp_mac_file_clipboard_selfcheck()` (mirrors
