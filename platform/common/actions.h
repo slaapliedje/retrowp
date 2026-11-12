@@ -371,4 +371,9 @@ const char *wp_action_document_name(const struct wp_app_ctx *ctx);
    ".RTF") matches "notes.rtf" and "NOTES.RTF" alike. */
 wp_bool wp_path_ends_with_ci(const char *path, const char *suffix);
 
+/* Whether the path's last component (after the last ':', '/' or '\\')
+   has a '.' extension. A Mac's file names usually have none, and then
+   the format goes by content on Open and by the document on Save. */
+wp_bool wp_path_has_extension(const char *path);
+
 #endif /* WP_ACTIONS_H */

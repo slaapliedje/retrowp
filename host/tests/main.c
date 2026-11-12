@@ -313,6 +313,7 @@ void test_actions_cut_in_visual_line_takes_whole_paragraphs(void);
 void test_actions_save_file_picks_the_format_by_extension_and_remembers(void);
 void test_actions_save_goes_to_the_remembered_name_without_asking(void);
 void test_actions_load_file_reads_text_and_rtf_and_keeps_the_name(void);
+void test_actions_load_file_without_extension_goes_by_content(void);
 void test_actions_odt_and_pdf_go_through_the_gateway(void);
 void test_actions_file_print_routes(void);
 void test_actions_file_print_options(void);
@@ -1030,6 +1031,7 @@ static const test_case g_cases[] = {
     { "actions_save_file_picks_the_format_by_extension_and_remembers", test_actions_save_file_picks_the_format_by_extension_and_remembers },
     { "actions_save_goes_to_the_remembered_name_without_asking", test_actions_save_goes_to_the_remembered_name_without_asking },
     { "actions_load_file_reads_text_and_rtf_and_keeps_the_name", test_actions_load_file_reads_text_and_rtf_and_keeps_the_name },
+    { "actions_load_file_without_extension_goes_by_content", test_actions_load_file_without_extension_goes_by_content },
     { "actions_odt_and_pdf_go_through_the_gateway", test_actions_odt_and_pdf_go_through_the_gateway },
     { "actions_file_print_routes", test_actions_file_print_routes },
     { "actions_file_print_options", test_actions_file_print_options },

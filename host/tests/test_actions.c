@@ -953,6 +953,64 @@ void test_actions_load_file_reads_text_and_rtf_and_keeps_the_name(void)
     ctx_teardown(&doc, &journal, &ctx);
 }
 
+/* A name with no extension -- a Mac's usual -- is RTF on Open when it
+   opens with "{\\rtf", and Save keeps the format the document came in;
+   a named file still goes by its name either way. */
+void test_actions_load_file_without_extension_goes_by_content(void)
+{
+    static const char rtf[] = "build/test_actions_noext.rtf";
+    static const char bare[] = "build/test_actions_noext";
+    static const char txt[] = "build/test_actions_noext.txt";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[512];
+    FILE *f;
+
+    ASSERT_TRUE(wp_path_has_extension("notes.rtf"));
+    ASSERT_TRUE(wp_path_has_extension("C:\\DOCS\\NOTES.RTF"));
+    ASSERT_TRUE(!wp_path_has_extension("Macintosh HD:Letters:Sheet"));
+    ASSERT_TRUE(!wp_path_has_extension("Work:v1.2/Sheet"));   /* a dot in a folder's name */
+    ASSERT_TRUE(!wp_path_has_extension(".profile"));
+    ASSERT_TRUE(!wp_path_has_extension("Sheet."));
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Alpha\nBeta\n");
+    ASSERT_TRUE(wp_action_save_file(&ctx, rtf, NULL) == WP_OK);
+    ctx_teardown(&doc, &journal, &ctx);
+    read_whole_file(rtf, text, sizeof(text));
+    f = fopen(bare, "wb");
+    ASSERT_TRUE(f != NULL);
+    if (f != NULL) { fputs(text, f); fclose(f); }
+    f = fopen(txt, "wb");
+    ASSERT_TRUE(f != NULL);
+    if (f != NULL) { fputs(text, f); fclose(f); }
+
+    ctx_setup(&doc, &journal, &ctx, "Something else");
+    ASSERT_TRUE(wp_action_load_file(&ctx, bare, NULL) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Alpha\nBeta\n");
+    ASSERT_TRUE(ctx.doc_rtf);
+
+    /* Saved back under its own name: still RTF. */
+    ASSERT_TRUE(wp_action_save_file(&ctx, bare, NULL) == WP_OK);
+    read_whole_file(bare, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "{\\rtf", 5) == 0);
+
+    /* A .txt is text whatever it opens with, and a bare name saved from
+       it is text too. */
+    ASSERT_TRUE(wp_action_load_file(&ctx, txt, NULL) == WP_OK);
+    ASSERT_TRUE(!ctx.doc_rtf);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "{\\rtf", 5) == 0);
+    ASSERT_TRUE(wp_action_save_file(&ctx, bare, NULL) == WP_OK);
+    ASSERT_TRUE(!ctx.doc_rtf);
+
+    ctx_teardown(&doc, &journal, &ctx);
+    (void)remove(rtf);
+    (void)remove(bare);
+    (void)remove(txt);
+}
+
 static wp_bool no_link(void) { return WP_FALSE; }
 static wp_bool printer_off(void) { return WP_FALSE; }
 

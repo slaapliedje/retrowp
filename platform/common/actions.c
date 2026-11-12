@@ -189,6 +189,7 @@ void wp_action_replace_document(wp_app_ctx *ctx, wp_document *fresh)
        over the file the previous document came from. */
     wp_viewport_reset(&ctx->view);
     ctx->doc_path[0] = '\0';
+    ctx->doc_rtf = WP_FALSE;
 
     def_cs = wp_document_cstyle_get(ctx->doc, ctx->doc->default_cstyle);
     if (def_cs != NULL) {
@@ -1814,6 +1815,17 @@ const wp_action *wp_action_find_by_shortcut(u8 ascii)
 
 /* ---- Files (see actions.h) ------------------------------------------ */
 
+wp_bool wp_path_has_extension(const char *path)
+{
+    const char *p, *dot = NULL;
+
+    for (p = path; *p != '\0'; p++) {
+        if (*p == ':' || *p == '/' || *p == '\\') dot = NULL;
+        else if (*p == '.') dot = p;
+    }
+    return (wp_bool)(dot != NULL && dot != path && dot[1] != '\0');
+}
+
 wp_bool wp_path_ends_with_ci(const char *path, const char *suffix)
 {
     u32 plen = (u32)strlen(path);
@@ -2435,6 +2447,7 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
     u32 size = 0, read_len = 0;
     u8 *buf, *data;
     wp_bool via_gateway = wp_path_ends_with_ci(native_path, ".ODT");
+    wp_bool as_rtf = WP_FALSE;
     wp_document fresh;
     wp_status st;
 
@@ -2474,16 +2487,20 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
            rest is by name: RTF's "{\rtf" opening is as good as a magic
            number, but a writer who names a plain-text file .rtf wants
            it read as RTF and told what is wrong, not silently shown as
-           text; Markdown and ODT have no opening at all. See
-           docs/formats/. */
+           text; Markdown and ODT have no opening at all. A name with no
+           extension at all -- a Mac's usual -- goes by that opening.
+           See docs/formats/. */
         if (via_gateway) {
             buf[0] = (u8)OFFLOAD_FORMAT_ODT;
             st = convert_import(ctx, buf, read_len + 1, &fresh, sink);
         } else if (format_ws_looks_like(data, read_len)) {
             st = format_ws_import(data, read_len, &fresh);
-        } else if (wp_path_ends_with_ci(native_path, ".RTF")) {
+        } else if (wp_path_ends_with_ci(native_path, ".RTF") ||
+                   (!wp_path_has_extension(native_path) && read_len >= 5 &&
+                    memcmp(data, "{\\rtf", 5) == 0)) {
             st = (sink != NULL) ? format_rtf_import_images(data, read_len, &fresh, sink)
                                 : format_rtf_import(data, read_len, &fresh);
+            as_rtf = WP_TRUE;
         } else if (wp_path_ends_with_ci(native_path, ".MD")) {
             st = format_md_import(data, read_len, &fresh);
         } else {
@@ -2498,12 +2515,15 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
     }
     wp_action_replace_document(ctx, &fresh);
     wp_action_remember_path(ctx, native_path);
+    ctx->doc_rtf = as_rtf;
     return WP_OK;
 }
 
 wp_status wp_action_save_file(wp_app_ctx *ctx, const char *native_path, wp_image_source *img_src)
 {
-    wp_bool as_rtf = wp_path_ends_with_ci(native_path, ".RTF");
+    /* RTF by name; a name with no extension keeps the document's format. */
+    wp_bool as_rtf = (wp_bool)(wp_path_ends_with_ci(native_path, ".RTF") ||
+                               (!wp_path_has_extension(native_path) && ctx->doc_rtf));
     wp_bool as_md = wp_path_ends_with_ci(native_path, ".MD");
     u32 needed = 0;
     u8 *buf;
@@ -2548,7 +2568,10 @@ wp_status wp_action_save_file(wp_app_ctx *ctx, const char *native_path, wp_image
     }
     mem_free(buf);
 
-    if (st == WP_OK) wp_action_remember_path(ctx, native_path);
+    if (st == WP_OK) {
+        wp_action_remember_path(ctx, native_path);
+        ctx->doc_rtf = as_rtf;
+    }
     return st;
 }
 

@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+"""RetroWP's Finder icons, drawn here and written as Rez source.
+
+platform/mac/icons.r is this script's output (`python3
+platform/mac/tools/make_icons.py > platform/mac/icons.r`): an 'ICN#' and
+an 'ics#' for the application (a page with a pen across it) and for its
+documents (a page with a turned corner and lines of text). Each is a
+bitmap and its mask, one bit a pixel, rows most significant bit first.
+With --png DIR it also writes enlarged previews to look at.
+"""
+import sys
+
+
+def blank(n):
+    return [[0] * n for _ in range(n)]
+
+
+def page(img, x0, y0, x1, y1, ear, fill_mask=None):
+    """A page outline with its top-right corner turned down by `ear`."""
+    for y in range(y0, y1 + 1):
+        for x in range(x0, x1 + 1):
+            inside_ear = x > x1 - ear and y < y0 + ear and (x - (x1 - ear)) > (y - y0)
+            if inside_ear:
+                continue
+            edge = x in (x0, x1) or y in (y0, y1)
+            if fill_mask is not None:
+                fill_mask[y][x] = 1
+            if edge:
+                img[y][x] = 1
+    for i in range(ear + 1):       # the fold: the diagonal and the ear's two sides
+        img[y0 + i][x1 - ear + i] = 1
+        img[y0 + i][x1 - ear] = 1
+        img[y0 + ear][x1 - ear + i] = 1
+
+
+def lines(img, x0, x1, ys, short_last=True):
+    for k, y in enumerate(ys):
+        end = x1 - (x1 - x0) // 3 if (short_last and k == len(ys) - 1) else x1
+        for x in range(x0, end + 1):
+            img[y][x] = 1
+
+
+def pen(img, mask, x0, y0, x1, y1, hw, tip):
+    """A pen from its point (x0,y0) to (x1,y1): a body `hw` either side of
+    the line, outlined, its first `tip` pixels solid and narrowing to the
+    point; filled in the mask."""
+    import math
+    dx, dy = x1 - x0, y1 - y0
+    length = math.hypot(dx, dy)
+    ux, uy = dx / length, dy / length
+    size = len(img)
+    body, solid = set(), set()
+    for y in range(size):
+        for x in range(size):
+            px, py = x + 0.5 - (x0 + 0.5), y + 0.5 - (y0 + 0.5)
+            t = px * ux + py * uy               # along the pen
+            d = abs(px * uy - py * ux)          # across it
+            if t < -0.5 or t > length + 0.5:
+                continue
+            half = hw * min(1.0, (t + 0.5) / tip) if t < tip else hw
+            if d <= half + 0.35:
+                body.add((x, y))
+                if t < tip * 0.6:
+                    solid.add((x, y))
+    for (x, y) in body:
+        mask[y][x] = 1
+        border = any((x + a, y + b) not in body for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+        img[y][x] = 1 if (border or (x, y) in solid) else 0
+
+
+def doc_icon(n):
+    img, mask = blank(n), blank(n)
+    if n == 32:
+        page(img, 4, 1, 27, 30, 7, mask)
+        lines(img, 8, 23, [11, 14, 17, 20, 23, 26])
+    else:
+        page(img, 2, 0, 13, 15, 4, mask)
+        lines(img, 4, 11, [6, 9, 12])
+    return img, mask
+
+
+def app_icon(n):
+    img, mask = blank(n), blank(n)
+    if n == 32:
+        page(img, 2, 2, 22, 29, 6, mask)
+        lines(img, 5, 18, [12, 15, 18, 21, 24])
+        pen(img, mask, 12, 26, 28, 5, 2.6, 6)
+    else:
+        page(img, 1, 1, 11, 15, 3, mask)
+        lines(img, 3, 9, [6, 9, 12])
+        pen(img, mask, 6, 14, 15, 2, 1.4, 3)
+    return img, mask
+
+
+def hexrows(img):
+    out = []
+    for row in img:
+        v = 0
+        for b in row:
+            v = (v << 1) | b
+        out.append('%0*X' % (len(row) // 4, v))
+    return out
+
+
+def rez(kind, rid, name, pair):
+    img, mask = pair
+    def block(rows):
+        per = 4 if len(rows) == 32 else 8
+        chunks = [''.join(rows[i:i + per]) for i in range(0, len(rows), per)]
+        return '\n'.join('\t\t$"%s"' % c for c in chunks)
+    return ("resource '%s' (%d, \"%s\") {\n\t{\n%s,\n%s\n\t}\n};\n"
+            % (kind, rid, name, block(hexrows(img)), block(hexrows(mask))))
+
+
+def png(path, img, mask, scale=8):
+    import struct, zlib
+    n = len(img)
+    raw = b''
+    for y in range(n * scale):
+        row = b'\x00'
+        for x in range(n * scale):
+            a, m = img[y // scale][x // scale], mask[y // scale][x // scale]
+            row += bytes([0 if a else (255 if m else 180)])
+        raw += row
+    def chunk(t, d):
+        return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    data = (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', n * scale, n * scale, 8, 0, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
+    open(path, 'wb').write(data)
+
+
+def main():
+    icons = [('app', 128, app_icon), ('doc', 129, doc_icon)]
+    if len(sys.argv) == 3 and sys.argv[1] == '--png':
+        for name, _, fn in icons:
+            for n in (32, 16):
+                img, mask = fn(n)
+                png('%s/%s%d.png' % (sys.argv[2], name, n), img, mask)
+        return
+    print('/* SPDX-License-Identifier: GPL-2.0-or-later */')
+    print('/* Generated by platform/mac/tools/make_icons.py -- edit that, not this. */')
+    print('#include "Finder.r"\n')
+    for name, rid, fn in icons:
+        title = 'RetroWP' if name == 'app' else 'RetroWP document'
+        print(rez('ICN#', rid, title, fn(32)))
+        print(rez('ics#', rid, title, fn(16)))
+
+
+main()

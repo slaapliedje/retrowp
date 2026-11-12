@@ -77,6 +77,10 @@ typedef struct wp_app_ctx {
                                        without asking; Save As and Open
                                        replace it. Kept by actions.c's file
                                        flow, read by wp_action_document_name. */
+    wp_bool doc_rtf;                /* the document was last read or written as
+                                       RTF: what Save writes to a name with no
+                                       extension (a Mac's usual), as a .RTF
+                                       name always is */
 
     /* The backend's lazy-once offload bring-up (each has its own endpoint
        string and its own ensure_offload()), for the shared code that

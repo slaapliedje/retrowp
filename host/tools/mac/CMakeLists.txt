@@ -117,5 +117,11 @@ add_application(RETROWP
     ${RETROWP_COMMON_SRC}
     ${RETROWP_ENGINE_SRC}
     ${RETROWP_TRANSPORT_SRC} ${RETROWP_SERVICES_SRC}
+    CREATOR RWP1
 )
 target_include_directories(RETROWP PRIVATE ${RETROWP_INCLUDES})
+# The Finder reads the bundle (retrowp.r: its icons and the documents it
+# owns) only with hasBundle set, which Rez cannot write.
+add_custom_command(TARGET RETROWP_APPL POST_BUILD
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/set_bundle_bit.py RETROWP
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
