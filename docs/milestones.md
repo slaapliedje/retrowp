@@ -2333,9 +2333,21 @@ importer is scored against it, not against a model of the format.
       which would have misnumbered every object after it. Tests: TEXT's
       rendering, its WMF round trip, GEM text with every attribute; each
       shown to fail with its reader broken.
-- [ ] T17.3 Headers and footers (not yet found in the map), and
-      whatever the info block's remaining words and the header's
-      second default face turn out to hold.
+- [x] T17.3 Headers and footers.
+      AC: they were what the map had taken for two default faces: the
+      header's 72 bytes of text at 0x52 and its face at 0x9a, the
+      footer's at 0xc8 and 0x110 -- present exactly where the .RTF has
+      \header or \footer, in all 263. Their #C and #R (centre and
+      right parts) and #P (the page number) become RetroWP's '|' parts
+      and '#'; #D, the date, has no counterpart and is left out. JAG_LICS
+      prints "Jaguar Licensees List ... Page 1 of 10" and its
+      "Confidential" footer. (The info block's remaining words are still
+      unread; nothing in the corpus has needed them.)
+
+M17 done: every Atari Works word-processor document in the corpus
+opens, its text identical to Atari Works' own export in 256 of 262 (the
+rest differences in the exports), its styles, page, pictures, the
+lettering inside them, and its header and footer.
 
 ---
 

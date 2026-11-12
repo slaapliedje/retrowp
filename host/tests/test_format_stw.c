@@ -60,7 +60,8 @@ static void build_v11(void)
     puts_("11");
     putz(0x22 - 2);
     for (i = 0; i < 6; i++) for (k = 0; k < 8; k++) put8(reals[i][k]);
-    putz(0x13E - g_n);
+    put_name("Price List#RPage #P", 0xC8 - 0x52);     /* the header, then its face */
+    put_name("#C- #p -#R#D", 0x13E - 0xC8);           /* the footer, then its face */
     put16(26); put16(0x0802); put16(1); put16(1);
     put16(3);    /* paragraphs */
     put16(3);    /* lines */
@@ -138,6 +139,12 @@ void test_format_stw_reads_text_styles_and_page(void)
     ASSERT_EQ_U32((u32)sec->margin_left, 1440);
     ASSERT_EQ_U32((u32)sec->margin_top, 1080);
     ASSERT_EQ_U32((u32)sec->margin_bottom, 720);
+    /* Header and footer in RetroWP's own form: parts between '|', the
+       page number '#'; the date has nothing to stand for and goes. */
+    ASSERT_TRUE(sec->header.length == 17 &&
+                memcmp(wp_strpool_get(&doc.strings, sec->header), "Price List|Page #", 17) == 0);
+    ASSERT_TRUE(sec->footer.length == 7 &&
+                memcmp(wp_strpool_get(&doc.strings, sec->footer), "|- # -|", 7) == 0);
 
     /* The Atari set's e-acute and i-diaeresis, as UTF-8; justified. */
     run_text(&doc, 0, 0, t, sizeof(t));

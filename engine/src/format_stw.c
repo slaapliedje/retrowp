@@ -4,6 +4,7 @@
 #include "codepage.h"
 #include "drawfile.h"
 #include "utf8.h"
+#include "strpool.h"
 #include "platform.h"
 
 /* Atari Works .STW. docs/formats/atariworks.md is the map; this file
@@ -448,6 +449,51 @@ static wp_status stw_place_objects(stw_ctx *c, const stw_anchor *a, u32 para, wp
     return WP_OK;
 }
 
+/* A header or footer (72 bytes at `at`, NUL-ended) as RetroWP writes
+   one: Atari Works' #C and #R start its centre and right parts, #P (or
+   #p) is the page number; RetroWP's parts go between '|', its page
+   number is '#'. #D (the date) and #L have nothing to stand for here
+   and are left out. */
+static wp_status stw_margin_text(wp_document *doc, const u8 *t, wp_span *out)
+{
+    u8 part[3][96];
+    u32 n[3], cur = 0, i, k, len = 0;
+    u8 buf[300];
+
+    n[0] = n[1] = n[2] = 0;
+    for (i = 0; i < 72 && t[i] != 0; i++) {
+        u8 ch = t[i];
+        if (ch == '#' && i + 1 < 72 && t[i + 1] != 0) {
+            u8 code = t[++i];
+            if (code == 'C' || code == 'c') { cur = 1; continue; }
+            if (code == 'R' || code == 'r') { cur = 2; continue; }
+            if (code == 'P' || code == 'p') { if (n[cur] < 93) part[cur][n[cur]++] = '#'; continue; }
+            continue;   /* #D, #L and the rest */
+        }
+        if (ch == '|') ch = '/';   /* RetroWP's part mark */
+        {
+            u32 cp = wp_codepage_decode(WP_CODEPAGE_ATARI_ST, ch);
+            if (cp == 0xFFFDuL || cp < 0x20u) continue;
+            if (n[cur] + 3 < 93) n[cur] += utf8_encode(cp, part[cur] + n[cur]);
+        }
+    }
+    if (n[0] + n[1] + n[2] == 0) return WP_OK;
+    /* One part alone is centred, two left and right, three all three. */
+    if (n[1] == 0 && n[2] == 0) {
+        memcpy(buf, part[0], n[0]); len = n[0];
+    } else if (n[1] == 0) {
+        memcpy(buf, part[0], n[0]); len = n[0];
+        buf[len++] = '|';
+        memcpy(buf + len, part[2], n[2]); len += n[2];
+    } else {
+        for (k = 0; k < 3; k++) {
+            if (k > 0) buf[len++] = '|';
+            memcpy(buf + len, part[k], n[k]); len += n[k];
+        }
+    }
+    return wp_strpool_append(&doc->strings, buf, len, out);
+}
+
 wp_status format_stw_import(const u8 *bytes, u32 len, wp_document *doc)
 {
     stw_map m;
@@ -497,6 +543,12 @@ wp_status format_stw_import(const u8 *bytes, u32 len, wp_document *doc)
             c.sec->margin_bottom = v[5];
         }
     }
+
+    /* The header (after the page's reals) and the footer (after the
+       header's face), each 72 bytes. */
+    st = stw_margin_text(doc, bytes + 0x52, &c.sec->header);
+    if (st == WP_OK) st = stw_margin_text(doc, bytes + 0xC8, &c.sec->footer);
+    if (st != WP_OK) { mem_free(c.scratch); wp_document_free(doc); return st; }
 
     /* The body, a paragraph at a time, each in its own record's style
        (a record's first word is its first line's index in the line

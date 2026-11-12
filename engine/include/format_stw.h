@@ -18,8 +18,9 @@
  * Placed objects become pictures in frames: a GEM metafile through
  * drawfile.c, a box, rule or shape Atari Works drew itself as a drawing;
  * each follows the paragraph that ends above it, so it stays beside its
- * text. Not read: an IMG (its pixels are in a file of its own), text
- * inside a metafile (drawfile.c draws none), headers and footers. */
+ * text. The header and footer read as RetroWP's own (parts between
+ * '|', '#' the page number). Not read: an IMG (its pixels are in a file
+ * of its own), and the date field a header or footer may hold. */
 
 /* Parses `bytes` into a fresh document (initialised here, exactly like
    format_txt_import -- the caller owns it and must wp_document_free it).

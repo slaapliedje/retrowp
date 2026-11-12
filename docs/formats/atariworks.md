@@ -52,8 +52,10 @@ are into the file.
 | 0 | `"10"` or `"11"` -- two versions, about half the corpus each |
 | 2..33 | words: window geometry (x, y, w, h) and similar; not needed to read |
 | 34..81 | six reals: paper width, paper height, left, right, top, bottom margin, inches. Version 11: IEEE doubles. Version 10: an IEEE single in the first four bytes of each eight, **four times** the inches |
-| 154 | the default face: 32-byte name, then id, size, flags, a double (tab interval?) |
-| 272 | the same again (a second default) |
+| 82 (0x52) | the header's text, 72 bytes, NUL-ended |
+| 154 (0x9a) | the header's face: 32-byte name, then id, size, flags, a double |
+| 200 (0xc8) | the footer's text, 72 bytes |
+| 272 (0x110) | the footer's face, as the header's |
 | 318 (0x13e) | the info block, words: 26, flags, 1, **pages**, **paragraphs** (one record each), **lines**, **objects**, ?, ... |
 | 368 (0x170) | the line table: one 16-byte entry per line (offset in its paragraph, width, height, ...): a layout cache, not needed to read |
 | then | the paragraph records, `records` of them |
@@ -61,6 +63,14 @@ are into the file.
 | then | `objects` objects |
 | then | the body |
 | then | the font table, to the end of the file |
+
+**Header and footer** text marks its fields with `#`: `#C` and `#R`
+start its centre and right parts (before them, the left), `#P` or `#p`
+is the page number, `#D` the date, `#L` something Atari Works' own RTF
+export writes as nothing. Present exactly where the `.RTF` has a
+`\header` or `\footer`, in all 263. RetroWP's own form is the same idea
+-- parts between `|`, `#` the page number -- so they map straight
+across; the date has no counterpart yet and is left out.
 
 **Paragraph records**, one a paragraph, in order. Each starts with a
 word -- the paragraph's first line, as an index into the line table --
