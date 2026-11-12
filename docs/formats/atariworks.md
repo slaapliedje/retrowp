@@ -89,6 +89,24 @@ flag set) is a GEM metafile and kind 6 a GEM IMG; both are followed by a
 IMG's 16-byte header, its pixels left in the external file. Other kinds
 (1, 3: frames, boxes, rules) are the header alone.
 
+**Where an object goes.** Its header's words 2..6 are x (signed, from
+the left margin), y (32 bits, signed), width and height, all in the
+same 1/91.4 inch. y runs down the whole document in the line table's
+own measure: the line table gives every line's height (word 5), and a
+line whose flag word (word 1) has bit 0 starts a page -- the count of
+those is the info block's page count, and the heights add up to its
+word 12, in all 265 files. Pictures copied onto each page of a letter
+land within a few units of the same place on each, measured so.
+RetroWP places an object after the last paragraph to end above it, in
+a frame that far below it (`WP_FRAME_Y_PARA`), so it stays by its text
+whatever the machine's fonts do to the lines; where that paragraph
+began on an earlier page, from its own page's top margin instead.
+Kind 1 with a height of 4 or less is a rule; drawn shapes have seq 0,
+imported files seq 1 and a name. Many "pictures" in the corpus are
+lettering -- GEM text (`v_ftext`, rotated by `vst_rotation`) -- which
+drawfile.c does not draw yet, so a letterhead shows its bars but not
+its words.
+
 **The body** is text in the Atari character set: 0x0a ends a
 paragraph, 0x09 is a tab, 0x01 a merge field, and 0x00 begins an 8-byte
 style change -- 00, font id, size in points, GEM text effects (1 bold,

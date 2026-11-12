@@ -15,8 +15,11 @@
  * each paragraph's alignment, indents, line spacing and tab stops, and
  * the page's paper and margins. A merge field reads as its name,
  * "LABELS.STD:Company", as Atari Works' own text export writes it.
- * Not yet: the pictures and frames (GEM metafiles and IMGs placed on
- * the page) and headers and footers. */
+ * Placed objects become pictures in frames: a GEM metafile through
+ * drawfile.c, a box, rule or shape Atari Works drew itself as a drawing;
+ * each follows the paragraph that ends above it, so it stays beside its
+ * text. Not read: an IMG (its pixels are in a file of its own), text
+ * inside a metafile (drawfile.c draws none), headers and footers. */
 
 /* Parses `bytes` into a fresh document (initialised here, exactly like
    format_txt_import -- the caller owns it and must wp_document_free it).

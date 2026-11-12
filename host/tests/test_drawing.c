@@ -559,6 +559,29 @@ void test_drawfile_gem_ndc(void)
     wp_drawing_builder_free(&b);
 }
 
+/* A coordinate system one line high -- (0, 0) to (181, 0), no extents --
+   is a rule, as Atari Works draws its signature lines: read as a
+   drawing one unit tall, not refused for having no height. */
+void test_drawfile_gem_line_high(void)
+{
+    static const u16 w[] = {
+        0xFFFF, 14, 101, 2, 0, 0, 0, 0, 504, 2, 0, 0, 181, 0,
+        6, 2, 0, 0, 0, 0, 181, 0,
+        0xFFFF
+    };
+    u8 file[64];
+    u32 i, n = (u32)(sizeof(w) / sizeof(w[0]));
+    wp_drawing_builder b;
+    wp_drawfile_info info;
+
+    for (i = 0; i < n; i++) { file[i * 2] = (u8)(w[i] & 0xFF); file[i * 2 + 1] = (u8)(w[i] >> 8); }
+    wp_drawing_builder_init(&b);
+    ASSERT_TRUE(drawfile_read(file, n * 2u, &b, &info) == WP_OK);
+    ASSERT_EQ_U32((u32)info.ext_w, 181);
+    ASSERT_EQ_U32((u32)info.ext_h, 1);
+    wp_drawing_builder_free(&b);
+}
+
 /* ---- PostScript ------------------------------------------------------ */
 
 typedef struct { char buf[131072]; u32 n; } psbuf;

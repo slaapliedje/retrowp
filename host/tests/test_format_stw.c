@@ -3,6 +3,7 @@
 #include "test.h"
 #include "format_stw.h"
 #include "strpool.h"
+#include "drawing.h"
 
 /* Atari Works .STW (docs/formats/atariworks.md), against documents built
    here byte by byte from the map -- the specimen corpus is Atari's and
@@ -40,7 +41,8 @@ static void record(u16 line, const u16 *tabs, u32 nt, const char *field, u16 lef
 /* Version 11: an 8.5 x 11 page, margins 1, 1, 0.75, 0.5 inch; three
    paragraphs (justified with a centre tab; centred, bold by its
    record, with a merge field; left, with an underlined word); a GEM
-   picture and a box between the records and the body; two fonts. */
+   picture the metafile reader refuses (too short) and a rule between
+   the records and the body; two fonts. */
 static void build_v11(void)
 {
     static const u8 d8_5[8] = { 0x40, 0x21, 0, 0, 0, 0, 0, 0 };
@@ -64,7 +66,9 @@ static void build_v11(void)
     put16(3);    /* lines */
     put16(2);    /* objects */
     putz(0x170 - g_n);
-    putz(3 * 16);   /* the line table */
+    for (i = 0; i < 3; i++) {   /* the line table: 19 units a line, a page at the first */
+        put16(0); put16(i == 0 ? 1 : 0); putz(6); put16(19); put16(4); put16(0);
+    }
     record(0, NULL, 0, NULL, 0, 0, 0, 1, 0x1800, 0x14AA, 12, 0, 20, 0);
     record(1, tab_c, 1, NULL, 0, 0, 0, 0, 0x1400, 0x14AA, 14, 1, 10, 1);
     record(2, NULL, 0, "Company", 32, 64, 549, 0, 0x2100, 0x14AA, 12, 0, 12, 0);
@@ -73,8 +77,10 @@ static void build_v11(void)
     put16(0); put8(5); put8(0); putz(176 - 4);
     put32(6);
     put16(0xFFFF); put16(0x1800); put16(0xFFFF);
-    /* a box: the header alone */
-    put16(0); put8(3); put8(1); putz(176 - 4);
+    /* a rule (kind 1, 2 units tall): x 10, y 24 -- 5 units below the
+       first paragraph's line -- 100 wide; the header alone */
+    put16(0); put8(1); put8(1); put16(10); put16(0); put16(24); put16(100); put16(2);
+    putz(176 - 14);
     /* the body */
     puts_("Caf"); put8(0x82); puts_("\tna"); put8(0x8B); puts_("ve x"); put8(0x0A);
     puts_("Dear "); put8(0x01);
@@ -126,7 +132,7 @@ void test_format_stw_reads_text_styles_and_page(void)
     ASSERT_TRUE(format_stw_looks_like(g_f, g_n));
     ASSERT_TRUE(format_stw_import(g_f, g_n, &doc) == WP_OK);
     sec = wp_document_section_get(&doc, 0);
-    ASSERT_EQ_U32(sec->para_count, 3);
+    ASSERT_EQ_U32(sec->para_count, 4);   /* the rule's picture paragraph after the first */
     ASSERT_EQ_U32((u32)sec->page_width, 12240);
     ASSERT_EQ_U32((u32)sec->page_height, 15840);
     ASSERT_EQ_U32((u32)sec->margin_left, 1440);
@@ -140,20 +146,40 @@ void test_format_stw_reads_text_styles_and_page(void)
     ASSERT_EQ_U32(ps->align, WP_ALIGN_JUSTIFY);
     ASSERT_EQ_U32(ps->tab_count, 0);
 
+    /* The rule: a drawing in a frame after the first paragraph, 5 units
+       (79 twips) below it, 10 (158) from the margin, 100 (1575) wide. */
+    {
+        const wp_paragraph *pic = para_at(&doc, 1);
+        const wp_frame_desc *fr = wp_document_frame_get(&doc, pic->frame);
+        const wp_image_desc *img = wp_document_image_get(&doc, pic->image);
+        ASSERT_EQ_U32(pic->kind, WP_PARA_IMAGE);
+        ASSERT_TRUE(fr != NULL && img != NULL);
+        if (fr != NULL) {
+            ASSERT_EQ_U32(fr->yref, WP_FRAME_Y_PARA);
+            ASSERT_EQ_U32((u32)fr->y, 79);
+            ASSERT_EQ_U32((u32)fr->x, 158);
+            ASSERT_EQ_U32((u32)fr->w, 1575);
+        }
+        if (img != NULL) {
+            ASSERT_TRUE(WP_IMAGE_IS_DRAWING(img));
+            ASSERT_EQ_U32((u32)img->display_width_twips, 1575);
+        }
+    }
+
     /* Centred, its tab carried from the record before; bold by its
        record's effects, 14 pt; the merge field as Atari Works' text
        export writes it; then "!" in the face whose name says bold
        italic, underlined. */
-    run_text(&doc, 1, 0, t, sizeof(t));
+    run_text(&doc, 2, 0, t, sizeof(t));
     ASSERT_EQ_STR(t, "Dear LABELS.STD:Company");
-    cs = run_style(&doc, 1, 1);
+    cs = run_style(&doc, 2, 1);
     ASSERT_TRUE(cs != NULL && cs->flags == (WP_STYLE_BOLD | WP_STYLE_ITALIC | WP_STYLE_UNDERLINE));
-    ps = wp_document_pstyle_get(&doc, para_at(&doc, 1)->style);
+    ps = wp_document_pstyle_get(&doc, para_at(&doc, 2)->style);
     ASSERT_EQ_U32(ps->align, WP_ALIGN_CENTER);
     ASSERT_EQ_U32(ps->tab_count, 1);
     ASSERT_EQ_U32((u32)ps->tab_pos[0], 5040);
     ASSERT_EQ_U32(ps->tab_kind[0], WP_TAB_CENTER);
-    cs = run_style(&doc, 1, 0);
+    cs = run_style(&doc, 2, 0);
     ASSERT_TRUE(cs != NULL && cs->flags == WP_STYLE_BOLD);
     ASSERT_EQ_U32((u32)cs->size_twips, 280);
     fd = wp_document_font_get(&doc, cs->font);
@@ -161,20 +187,20 @@ void test_format_stw_reads_text_styles_and_page(void)
 
     /* Left, one and a half spaced, indented; "this" underlined, and the
        paragraph back in its record's style, not the one before. */
-    ps = wp_document_pstyle_get(&doc, para_at(&doc, 2)->style);
+    ps = wp_document_pstyle_get(&doc, para_at(&doc, 3)->style);
     ASSERT_EQ_U32(ps->align, WP_ALIGN_LEFT);
     ASSERT_EQ_U32((u32)ps->line_spacing, 360);
     ASSERT_EQ_U32((u32)ps->indent_left, 504);
     ASSERT_EQ_U32((u32)ps->indent_first, 504);
-    run_text(&doc, 2, 0, t, sizeof(t));
+    run_text(&doc, 3, 0, t, sizeof(t));
     ASSERT_EQ_STR(t, "see ");
-    cs = run_style(&doc, 2, 0);
+    cs = run_style(&doc, 3, 0);
     ASSERT_TRUE(cs != NULL && cs->flags == 0);
-    run_text(&doc, 2, 1, t, sizeof(t));
+    run_text(&doc, 3, 1, t, sizeof(t));
     ASSERT_EQ_STR(t, "this");
-    cs = run_style(&doc, 2, 1);
+    cs = run_style(&doc, 3, 1);
     ASSERT_TRUE(cs != NULL && cs->flags == WP_STYLE_UNDERLINE);
-    run_text(&doc, 2, 2, t, sizeof(t));
+    run_text(&doc, 3, 2, t, sizeof(t));
     ASSERT_EQ_STR(t, " now");
     wp_document_free(&doc);
 }

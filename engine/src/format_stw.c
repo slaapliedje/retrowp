@@ -2,6 +2,7 @@
 #include <string.h>
 #include "format_stw.h"
 #include "codepage.h"
+#include "drawfile.h"
 #include "utf8.h"
 #include "platform.h"
 
@@ -19,6 +20,7 @@
 #define STW_FONT_ENTRY  36u      /* 00, id, name */
 #define STW_STYLE       8u       /* 00, font, size, effects, 00 */
 #define STW_MAX_FIELDS  64u
+#define STW_MAX_OBJECTS 64u
 
 static u16 rd16(const u8 *p) { return (u16)(((u16)p[0] << 8) | p[1]); }
 static u32 rd32(const u8 *p)
@@ -28,6 +30,7 @@ static u32 rd32(const u8 *p)
 
 /* 1/91.4 inch -- 640 span seven inches -- to twips (15.75 each). */
 static i32 units_twips(u32 v) { return (i32)((v * 63u + 2u) / 4u); }
+static i32 sunits_twips(i32 v) { return v < 0 ? -units_twips((u32)-v) : units_twips((u32)v); }
 
 /* An IEEE real as twips: sign, an exponent, and the mantissa's top 20
    bits with the leading 1, times 1440, without floating point. Version
@@ -63,6 +66,8 @@ typedef struct {
     u32 end;         /* the lone 00 after it, where the font table starts */
     u16 fields_seen; /* merge-field descriptors, in order */
     u32 field_at[STW_MAX_FIELDS];
+    u16 objects_seen;  /* placed objects, their headers */
+    u32 object_at[STW_MAX_OBJECTS];
 } stw_map;
 
 /* The walk from the records to the body; WP_FALSE where the file is cut
@@ -76,6 +81,7 @@ static wp_bool stw_walk(stw_map *m)
     m->lines = rd16(m->b + STW_INFO + 10);
     m->objects = rd16(m->b + STW_INFO + 12);
     m->fields_seen = 0;
+    m->objects_seen = 0;
     p = STW_LINES + 16u * m->lines;
     m->rec_at = p;
     for (r = 0; r <= m->records; r++) {
@@ -98,6 +104,7 @@ static wp_bool stw_walk(stw_map *m)
         u8 kind;
         if (p + STW_OBJECT > m->len) return WP_FALSE;
         kind = (u8)(m->b[p + 2] & 0x7Fu);
+        if (m->objects_seen < STW_MAX_OBJECTS) m->object_at[m->objects_seen++] = p;
         if (kind == 5 || kind == 6) {   /* a GEM metafile or IMG: a length, then it */
             u32 n;
             if (p + STW_OBJECT + 4 > m->len) return WP_FALSE;
@@ -283,12 +290,171 @@ static wp_status stw_record_pstyle(stw_ctx *c, const u8 *tabs, u32 nt, const u8 
     return wp_document_pstyle_find_or_add(c->doc, &ps, out);
 }
 
+/* ---- placed objects -------------------------------------------- */
+
+/* A box, rule or shape Atari Works drew itself, as a drawing w by h
+   units: kind 1 a rectangle (a filled bar when 4 units or less either
+   way -- a rule), kind 3 an ellipse; outlined in black. */
+static void stw_shape(wp_drawing_builder *b, u8 kind, i16 w, i16 h)
+{
+    i16 v[4];
+
+    v[0] = 0; v[1] = 0; v[2] = w; v[3] = h;
+    if (kind == 1 && (w <= 4 || h <= 4)) {
+        wp_drawing_pen(b, 0, 1, 0, 0, 0);
+        wp_drawing_brush(b, 1, 0, 0, 0);
+        wp_drawing_shape(b, WP_DRAW_RECT, v);
+        return;
+    }
+    wp_drawing_pen(b, 1, 1, 0, 0, 0);
+    wp_drawing_brush(b, 0, 255, 255, 255);
+    wp_drawing_shape(b, kind == 3 ? WP_DRAW_ELLIPSE : WP_DRAW_RECT, v);
+}
+
+/* Object `k` as a picture paragraph in a frame, x from the left margin
+   and y from its page's top margin. A GEM metafile is played back by
+   drawfile.c; an IMG's pixels are in a file of its own and are not
+   read (nothing is added for it), nor is anything the reader refuses. */
+static wp_status stw_emit_object(stw_ctx *c, u32 k, i32 dy, u8 yref)
+{
+    const u8 *o = c->m->b + c->m->object_at[k];
+    u8 kind = (u8)(o[2] & 0x7Fu);
+    i32 x = (i32)(i16)rd16(o + 4);
+    i32 w = (i32)rd16(o + 10), h = (i32)rd16(o + 12);
+    wp_drawing_builder b;
+    wp_drawfile_info info;
+    wp_frame_desc fd;
+    wp_frame frame;
+    wp_image image;
+    wp_paragraph *para;
+    u32 idx;
+    i32 ext_w = w > 0 ? w : 1, ext_h = h > 0 ? h : 1;
+    wp_status st;
+
+    if (kind == 6) return WP_OK;
+    wp_drawing_builder_init(&b);
+    if (kind == 5) {
+        if (drawfile_read(o + STW_OBJECT + 4, rd32(o + STW_OBJECT), &b, &info) != WP_OK) {
+            wp_drawing_builder_free(&b);
+            return WP_OK;
+        }
+        ext_w = info.ext_w;
+        ext_h = info.ext_h;
+    } else {
+        stw_shape(&b, kind, (i16)ext_w, (i16)ext_h);
+    }
+    st = b.error;
+    if (st == WP_OK) {
+        st = wp_document_drawing_add(c->doc, b.bytes, b.length, ext_w, ext_h,
+                                     units_twips((u32)(w > 0 ? w : 1)), units_twips((u32)(h > 0 ? h : 1)),
+                                     (const char *)(o[16] != 0 ? o + 16 : NULL), &image);
+    }
+    wp_drawing_builder_free(&b);
+    if (st != WP_OK) return st;
+    memset(&fd, 0, sizeof(fd));
+    fd.x = sunits_twips(x);
+    fd.y = sunits_twips(dy);
+    fd.w = units_twips((u32)(w > 0 ? w : 1));
+    fd.xref = (u8)WP_FRAME_X_MARGIN;
+    fd.yref = yref;
+    st = wp_document_frame_find_or_add(c->doc, &fd, &frame);
+    if (st == WP_OK) st = wp_section_paragraph_add(c->sec, &idx);
+    if (st != WP_OK) return st;
+    para = wp_section_paragraph_get(c->sec, idx);
+    wp_paragraph_pstyle_set(para, c->doc->default_pstyle);
+    para->kind = (u8)WP_PARA_IMAGE;
+    para->image = image;
+    para->frame = frame;
+    return WP_OK;
+}
+
+/* Where each object goes. y is units down the whole document in the
+   line table's own measure (each line its height; a page starts at a
+   line whose flag word has bit 0). An object follows the last paragraph
+   to end above it, its frame that far below -- so it stays beside its
+   text whatever this machine's fonts make of the lines. Where that
+   paragraph began on an earlier page, it is placed from its page's top
+   margin instead, after the first paragraph to start on that page (a
+   frame belongs to the page of the paragraph it follows). */
+typedef struct {
+    u32 after;   /* the paragraph it follows */
+    i32 dy;      /* units below that paragraph, or below the top margin */
+    u8 yref;     /* WP_FRAME_Y_PARA or WP_FRAME_Y_MARGIN */
+} stw_anchor;
+
+static wp_status stw_anchor_objects(const stw_map *m, stw_anchor *out)
+{
+    u32 *top = (u32 *)mem_alloc((m->lines + 1u) * sizeof(u32));
+    u16 *first = (u16 *)mem_alloc((m->records + 1u) * sizeof(u16));
+    u32 i, k, p, nt = 0, nf = 0;
+
+    if (top == NULL || first == NULL) {
+        if (top != NULL) mem_free(top);
+        if (first != NULL) mem_free(first);
+        return WP_NOMEM;
+    }
+    top[0] = 0;
+    for (i = 0; i < m->lines; i++) top[i + 1] = top[i] + rd16(m->b + STW_LINES + 16u * i + 10);
+    p = m->rec_at;
+    for (k = 0; k < m->records; k++) {   /* each paragraph's first line */
+        const u8 *fx = m->b + p + 2u + 2u * nt + STW_FIELD * nf;
+        u16 ln = rd16(m->b + p);
+        first[k] = (u16)(ln < m->lines ? ln : m->lines);
+        nt = rd16(fx + 6);
+        nf = rd16(fx + 22);
+        p = (u32)(fx - m->b) + STW_REC_FIXED;
+    }
+    first[m->records] = (u16)m->lines;
+    for (i = 0; i < m->objects_seen; i++) {
+        i32 y = (i32)rd32(m->b + m->object_at[i] + 6);
+        u32 page_line = 0, last = 0xFFFFFFFFuL;
+        for (k = 0; k < m->lines; k++) {   /* its page's first line */
+            if ((rd16(m->b + STW_LINES + 16u * k + 2) & 1u) != 0) {
+                if ((i32)top[k] > y) break;
+                page_line = k;
+            }
+        }
+        for (k = 0; k < m->records; k++) {   /* the last paragraph to end above it */
+            if ((i32)top[first[k + 1]] > y) break;
+            last = k;
+        }
+        if (last != 0xFFFFFFFFuL && first[last] >= page_line) {
+            out[i].after = last;
+            out[i].dy = y - (i32)top[first[last + 1]];
+            out[i].yref = (u8)WP_FRAME_Y_PARA;
+        } else {
+            for (k = 0; k + 1 < m->records && first[k] < page_line; k++) {}
+            out[i].after = k;
+            out[i].dy = y - (i32)top[page_line];
+            out[i].yref = (u8)WP_FRAME_Y_MARGIN;
+        }
+    }
+    mem_free(top);
+    mem_free(first);
+    return WP_OK;
+}
+
+/* The objects that follow paragraph `para`, each as a framed picture. */
+static wp_status stw_place_objects(stw_ctx *c, const stw_anchor *a, u32 para, wp_bool rest)
+{
+    u32 k;
+    wp_status st;
+
+    for (k = 0; k < c->m->objects_seen; k++) {
+        if (a[k].after != para && !(rest && a[k].after > para)) continue;
+        st = stw_emit_object(c, k, a[k].dy, a[k].yref);
+        if (st != WP_OK) return st;
+    }
+    return WP_OK;
+}
+
 wp_status format_stw_import(const u8 *bytes, u32 len, wp_document *doc)
 {
     stw_map m;
     stw_ctx c;
     wp_status st;
     u32 sec_idx, p, r, para_no = 0, next_rec_para, rec_p, nt = 0, nf = 0;
+    stw_anchor anchors[STW_MAX_OBJECTS];
     wp_bool single, at_para_start = WP_TRUE;
     wp_pstyle cur_ps;
 
@@ -310,6 +476,8 @@ wp_status format_stw_import(const u8 *bytes, u32 len, wp_document *doc)
     c.size = c.base_size = 12;
     c.effects = c.base_effects = 0;
     c.field_next = 0;
+    st = stw_anchor_objects(&m, anchors);
+    if (st != WP_OK) { wp_document_free(doc); return st; }
     /* A run is never longer than the body, and each byte is at most a
        three-byte character -- or a merge field's name, 48 at most. */
     c.scratch = (u8 *)mem_alloc((m.end - m.body) * 3u + STW_MAX_FIELDS * 48u + 4u);
@@ -379,6 +547,7 @@ wp_status format_stw_import(const u8 *bytes, u32 len, wp_document *doc)
             st = stw_flush(&c, cur_ps);
             if (st == WP_OK) st = stw_open_para(&c, cur_ps);
             c.para = NULL;
+            if (st == WP_OK) st = stw_place_objects(&c, anchors, para_no, WP_FALSE);
             para_no++;
             at_para_start = WP_TRUE;
             p++;
@@ -400,6 +569,8 @@ wp_status format_stw_import(const u8 *bytes, u32 len, wp_document *doc)
         p++;
     }
     if (st == WP_OK) st = stw_flush(&c, cur_ps);
+    c.para = NULL;
+    if (st == WP_OK) st = stw_place_objects(&c, anchors, para_no, WP_TRUE);   /* any left */
     mem_free(c.scratch);
     if (st != WP_OK) {
         wp_document_free(doc);

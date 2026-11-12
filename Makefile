@@ -170,7 +170,7 @@ $(GENERATED)/help_retrowp.h: docs/help/retrowp.help $(BUILD)/gen_help_header | $
 # re-deriving the format by hand. See the tool's own file comment.
 # Atari Works: RetroWP's importer scored against the specimen corpus
 # (docs/formats/atariworks.md); skips where the corpus is absent.
-$(BUILD)/stw2txt: host/tools/stw/stw2txt.c $(ENGINE_OBJ) $(TRANSPORT_OBJ) $(PLATFORM_OBJ) | $(BUILD)
+$(BUILD)/stw2txt: host/tools/stw/stw2txt.c $(ENGINE_OBJ) $(TRANSPORT_OBJ) $(PLATFORM_OBJ) $(PLATFORM_COMMON_OBJ) $(SERVICES_OBJ) | $(BUILD)
 	$(CC) $(RELAXED_CFLAGS) $(INCLUDES) $^ -o $@
 
 $(BUILD)/stw_vs_rtf: host/tools/stw/stw_vs_rtf.c $(ENGINE_OBJ) $(TRANSPORT_OBJ) $(PLATFORM_OBJ) | $(BUILD)

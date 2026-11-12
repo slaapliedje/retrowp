@@ -2299,8 +2299,26 @@ importer is scored against it, not against a model of the format.
       RTF reader refused `{\rtf0` -- Atari Works' and other early
       writers' -- and now takes it. The engine gained the Atari ST
       character set (WP_CODEPAGE_ATARI_ST). Seen on the ST and the Mac.
-- [ ] T17.2 Pictures: the placed GEM metafiles (drawfile.c reads them
-      already) and IMGs, at their positions as frames.
+- [x] T17.2 Pictures: the placed objects, at their places, as frames.
+      AC: an object's header gives x, y (32 bits, down the whole
+      document), width and height; y is in the line table's measure,
+      whose page marks (bit 0 of a line's flags) number the pages and
+      whose heights total the info block's word 12 in all 265 files.
+      Each object follows the last paragraph to end above it, in a
+      paragraph-relative frame that far below (from its page's top
+      margin where that paragraph began a page earlier), so pictures
+      stay by their text on every machine. GEM metafiles go through
+      drawfile.c; boxes, rules and shapes Atari Works drew become
+      drawings. Found on the way: drawfile.c refused a metafile whose
+      coordinate system is one line high -- Atari Works' signature
+      lines -- and now reads it as a rule. Seen through the PostScript
+      page writer (`stw2txt --ps`) and on the ST and the Mac. Not
+      read: IMG pixels (in a file of their own), and text inside a
+      metafile -- many letterheads and headlines are GEM text, so they
+      show bars without words (T17.4).
+- [ ] T17.4 Text in drawings: GEM metafile text (`v_gtext`, `v_ftext`,
+      with rotation), a TEXT primitive in the drawing model, and the
+      painters to draw it -- the letterheads and headlines above.
 - [ ] T17.3 Headers and footers (not yet found in the map), and
       whatever the info block's remaining words and the header's
       second default face turn out to hold.

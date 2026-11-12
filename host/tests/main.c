@@ -448,6 +448,7 @@ void test_polyfill_wide_line(void);
 void test_drawfile_gem(void);
 void test_drawfile_detect(void);
 void test_drawfile_gem_ndc(void);
+void test_drawfile_gem_line_high(void);
 void test_actions_insert_drawing_file(void);
 void test_drawing_postscript(void);
 void test_bitmapfile_img(void);
@@ -1149,6 +1150,7 @@ static const test_case g_cases[] = {
     { "drawfile_gem", test_drawfile_gem },
     { "drawfile_detect", test_drawfile_detect },
     { "drawfile_gem_ndc", test_drawfile_gem_ndc },
+    { "drawfile_gem_line_high", test_drawfile_gem_line_high },
     { "actions_insert_drawing_file", test_actions_insert_drawing_file },
     { "drawing_postscript", test_drawing_postscript },
     { "bitmapfile_img", test_bitmapfile_img },

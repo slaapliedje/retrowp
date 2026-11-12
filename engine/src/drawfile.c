@@ -311,6 +311,10 @@ static wp_status gem_read(const u8 *d, u32 len, wp_drawing_builder *b, wp_drawfi
     if (x0 > x1) { i32 t = x0; x0 = x1; x1 = t; }
     if (y0 > y1) { i32 t = y0; y0 = y1; y1 = t; }
     if (x1 <= x0 || y1 <= y0) { x0 = 0; x1 = span_x; y0 = 0; y1 = span_y; }
+    /* A coordinate system no taller (or wider) than a line is a rule --
+       Atari Works draws its signature lines so -- one unit across. */
+    if (x1 <= x0) x1 = x0 + 1;
+    if (y1 <= y0) y1 = y0 + 1;
     g->ox = x0;
     g->oy = y0;
     info->ext_w = x1 - x0;

@@ -3,13 +3,23 @@
    (engine/src/format_stw.c) and plain-text exporter, written back in the
    Atari character set -- so it compares byte for byte with the .TXT
    Atari Works itself exported. host/tools/stw/stw_score.py runs it over
-   the specimen corpus (docs/formats/atariworks.md). */
+   the specimen corpus (docs/formats/atariworks.md). With --ps, the
+   document's pages as PostScript instead (platform/common/psdev.c),
+   to look at with Ghostscript: where its pictures landed. */
 #include <stdio.h>
 #include <stdlib.h>
 #include "format_stw.h"
 #include "format_txt.h"
 #include "codepage.h"
 #include "utf8.h"
+#include "psdev.h"
+
+static wp_status put_ps(void *user, const u8 *b, u32 n)
+{
+    (void)user;
+    fwrite(b, 1, n, stdout);
+    return WP_OK;
+}
 
 int main(int argc, char **argv)
 {
@@ -19,8 +29,10 @@ int main(int argc, char **argv)
     u32 need = 0, i, cp, k;
     wp_document doc;
 
-    if (argc != 2 || (f = fopen(argv[1], "rb")) == NULL) {
-        fprintf(stderr, "usage: stw2txt FILE.STW\n");
+    int ps = argc == 3 && argv[1][0] == '-';   /* --ps: the pages, as PostScript */
+
+    if ((argc != 2 && !ps) || (f = fopen(argv[argc - 1], "rb")) == NULL) {
+        fprintf(stderr, "usage: stw2txt [--ps] FILE.STW\n");
         return 2;
     }
     fseek(f, 0, SEEK_END);
@@ -30,8 +42,12 @@ int main(int argc, char **argv)
     if (buf == NULL || fread(buf, 1, (size_t)n, f) != (size_t)n) return 2;
     fclose(f);
     if (format_stw_import(buf, (u32)n, &doc) != WP_OK) {
-        fprintf(stderr, "stw2txt: %s does not open\n", argv[1]);
+        fprintf(stderr, "stw2txt: %s does not open\n", argv[argc - 1]);
         return 1;
+    }
+    if (ps) {
+        u32 pages = 0;
+        return wp_ps_print(&doc, put_ps, NULL, 0, &pages) == WP_OK ? 0 : 1;
     }
     format_txt_export(&doc, NULL, 0, &need);
     out = (u8 *)malloc(need + 1);
