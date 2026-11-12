@@ -192,6 +192,8 @@ typedef struct {
     u8  border_kind;                 /* wp_border_kind, every cell's */
     u8  _pad[2];
     i32 border_width;                /* one rule, twips; 0 = WP_BORDER_DEFAULT_WIDTH */
+    i32 height;                      /* \trrhN: 0 as tall as its text, > 0 at least, < 0 exactly -N
+                                        (a sheet of labels' fixed pitch) */
 } wp_table_row;
 
 /* A text box at a fixed place on the page (RTF \posx \posy \absw
@@ -483,6 +485,9 @@ wp_status wp_paragraph_run_add(wp_paragraph *para, wp_span text, wp_cstyle style
 
 wp_section   *wp_document_section_get(wp_document *doc, u32 index);
 wp_paragraph *wp_section_paragraph_get(wp_section *section, u32 index);
+/* Paragraphs first..first+count-1 let go (their runs and layouts), the
+   rest moved up. No undo: for building a document, not editing one. */
+void wp_section_paragraphs_drop(wp_section *section, u32 first, u32 count);
 wp_run       *wp_paragraph_run_get(wp_paragraph *para, u16 index);
 
 void wp_paragraph_pstyle_set(wp_paragraph *para, wp_pstyle style);

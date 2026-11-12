@@ -2374,10 +2374,23 @@ merge picked because Atari Works documents already carry merge fields).
       gained plat_native_to_utf8 (Latin-1), which it lacked. Tests: the
       field finder, CSV and tab data, the merge, RTF fields, the action
       end to end; case-insensitive names shown to fail when broken.
-- [ ] T18.2 Labels: several records to a page (a grid of frames or a
-      table), and printing a merge straight to the printer without
-      building the whole merged document first (a 1 MB ST and a long
-      list).
+- [x] T18.2 Labels.
+      AC: File > Mail Merge asks Letters or Labels; for labels "across x
+      down" (3x8 offered) in the status line. The label is the first
+      section's paragraphs; the result a table of them, each row
+      exactly the text height over `down` -- a new row height,
+      `wp_table_row.height` / RTF `\trrh` (at least, or exactly) --
+      each label the column over `across`, the last row filled out.
+      Found on the way: the line walker every painter and the printer
+      share, and `wp_table_row_extent`, sized a row by its cells' text
+      only, so a row's height reached the layout but not the page; both
+      take it now. Seen through the PostScript writer: five records two
+      across, a label's pitch apart. Tests: the table's shape, the
+      layout, the walk and the extent at the pitch (shown to fail with
+      the walker unfixed), \trrh through RTF, the action end to end.
+- [ ] T18.3 Merging straight to the printer, a record at a time, so a
+      long list prints on a 1 MB ST without the whole merged document
+      in memory.
 
 ---
 

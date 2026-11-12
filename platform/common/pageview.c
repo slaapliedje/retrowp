@@ -91,7 +91,11 @@ i32 wp_line_walk_next(wp_line_walk *w, const wp_line *line, wp_line_walk_px_fn p
     }
     if (line->flags & WP_LINE_ROW_FIRST) {
         if (w->in_row) w->y = w->row_bottom;
-        w->row_top = w->row_bottom = w->cell_y = w->y;
+        w->row_top = w->cell_y = w->y;
+        /* The row is at least its height (a row given one, \trrh, may be
+           taller than its text -- a sheet of labels); its cells' text
+           can only push the bottom further. */
+        w->row_bottom = w->y + px(line->row_h_twips);
         w->in_row = WP_TRUE;
         w->page_top = w->y - px(line->page_y_twips);
     }
@@ -140,7 +144,17 @@ i32 wp_table_row_extent(const wp_section *sec, u32 para_index, wp_line_walk_px_f
         }
         if (para->tflags & WP_TROW_END) break;
     }
-    return cell > tallest ? cell : tallest;
+    if (cell > tallest) tallest = cell;
+    {
+        /* A row given a height is at least that tall (its first line
+           carries the row's height, wp_document_mark_pages). */
+        const wp_paragraph_layout *l = (const wp_paragraph_layout *)sec->paras[para_index].layout;
+        if (para_index < sec->para_count && l != NULL && l->line_count > 0) {
+            i32 h = px(l->lines[0].row_h_twips);
+            if (h > tallest) tallest = h;
+        }
+    }
+    return tallest;
 }
 
 void wp_line_walk_start_view(wp_line_walk *w, i32 y, wp_document *doc, u32 top_line,

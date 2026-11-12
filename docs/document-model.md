@@ -524,6 +524,17 @@ own file picker (`wp_app_ctx.pick_path`) and hands the result over as a
 new, unsaved document with no file -- Save asks, and the template on
 disk is never written over. Tools > Insert Field types «Name».
 
+Labels (`wp_merge_labels`): the first section's paragraphs are one
+label; the section becomes a table, `across` labels a row, every label
+the column's width over `across` and every row exactly the text
+height over `down` (`wp_table_row.height`, RTF's `\trrh`: positive at
+least, negative exactly), a record a label, the last row filled out
+with empty labels; the page's margins are the sheet's. A row's height
+is applied where rows are laid out (paginate.c), walked
+(`wp_line_walk_next`) and measured (`wp_table_row_extent`), so screens,
+the page printer and PostScript keep the pitch. File > Mail Merge asks
+Letters or Labels, and for labels "across x down" in the status line.
+
 ## Images (M15)
 
 An image is a **paragraph-level, fixed-size, non-flowing block** -- not

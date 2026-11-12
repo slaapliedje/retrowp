@@ -1749,10 +1749,12 @@ static wp_bool has_field(wp_document *doc)
     return WP_FALSE;
 }
 
-/* File > Mail Merge: the data file chosen, read and merged; the result
-   replaces the template on screen as a new document with no file, so
-   Save asks for a name and the template on disk is never written over. */
-static wp_status act_file_merge(wp_app_ctx *ctx)
+/* The data file chosen, read and merged -- as letters, a copy of the
+   document a record, or as labels, `across` by `down` to a page; the
+   result replaces the template on screen as a new document with no
+   file, so Save asks for a name and the template on disk is never
+   written over. */
+static wp_status merge_with(wp_app_ctx *ctx, wp_bool labels, u32 across, u32 down)
 {
     char path[WP_APP_PATH_MAX];
     plat_file *f;
@@ -1762,12 +1764,6 @@ static wp_status act_file_merge(wp_app_ctx *ctx)
     wp_document merged;
     wp_status st;
 
-    if (!ctx->doc_loaded) return WP_OK;
-    if (!has_field(ctx->doc)) {
-        wp_action_tell(ctx, "No fields to fill: Tools > Insert Field adds one");
-        return WP_OK;
-    }
-    if (!wp_action_confirm_discard(ctx)) return WP_OK;
     if (ctx->pick_path == NULL || !ctx->pick_path(ctx, WP_FALSE, path, (u32)sizeof(path))) return WP_OK;
     if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) {
         wp_action_tell(ctx, "Couldn't open that file");
@@ -1796,8 +1792,14 @@ static wp_status act_file_merge(wp_app_ctx *ctx)
        handed over as a fresh document: its undo history is the
        template's no longer. */
     merged = *ctx->doc;
-    st = wp_merge_document(&merged, &data, &copies);
+    st = labels ? wp_merge_labels(&merged, &data, across, down, &copies)
+                : wp_merge_document(&merged, &data, &copies);
     wp_merge_data_free(&data);
+    if (st == WP_UNSUPPORTED || st == WP_RANGE) {   /* refused before anything changed */
+        wp_action_tell(ctx, st == WP_RANGE ? "Labels: 1 to 16 across, 1 to 60 down"
+                                           : "A label can't hold a table or a frame");
+        return WP_OK;
+    }
     wp_undo_journal_free(ctx->journal);
     ctx->doc_loaded = WP_FALSE;
     wp_action_replace_document(ctx, &merged);
@@ -1815,6 +1817,49 @@ static wp_status act_file_merge(wp_app_ctx *ctx)
         strcpy(msg + pos, copies == 1 ? " record" : " records");
         wp_action_tell(ctx, msg);
     }
+    return WP_OK;
+}
+
+/* "3x8" (or "3 x 8", "3*8", "3,8"): labels across and down. */
+static void labels_done(wp_app_ctx *ctx, const u8 *text, u32 len)
+{
+    u32 i = 0, a = 0, d = 0;
+
+    while (i < len && text[i] == ' ') i++;
+    while (i < len && text[i] >= '0' && text[i] <= '9' && a < 1000) a = a * 10u + (u32)(text[i++] - '0');
+    while (i < len && (text[i] == ' ' || text[i] == 'x' || text[i] == 'X' || text[i] == '*' || text[i] == ',')) i++;
+    while (i < len && text[i] >= '0' && text[i] <= '9' && d < 1000) d = d * 10u + (u32)(text[i++] - '0');
+    if (a < 1 || a > WP_MAX_CELLS || d < 1 || d > 60) {
+        wp_action_tell(ctx, "Labels: across x down, such as 3x8 (1 to 16 across, 1 to 60 down)");
+        return;
+    }
+    (void)merge_with(ctx, WP_TRUE, a, d);
+}
+
+/* File > Mail Merge: letters (a copy a record, a page each) or labels
+   (a grid of them to a page, the page's margins the sheet's). */
+static wp_status act_file_merge(wp_app_ctx *ctx)
+{
+    static const char *const kinds[] = { "Letters (one to a page)", "Labels (several to a page)" };
+    const u8 *ptrs[2];
+    u32 lens[2], picked = 0;
+    wp_bool cancelled = WP_TRUE;
+
+    if (!ctx->doc_loaded) return WP_OK;
+    if (!has_field(ctx->doc)) {
+        wp_action_tell(ctx, "No fields to fill: Tools > Insert Field adds one");
+        return WP_OK;
+    }
+    if (!wp_action_confirm_discard(ctx)) return WP_OK;
+    ptrs[0] = (const u8 *)kinds[0]; lens[0] = (u32)strlen(kinds[0]);
+    ptrs[1] = (const u8 *)kinds[1]; lens[1] = (u32)strlen(kinds[1]);
+    if (plat_dialog_choice(ctx->window, (const u8 *)"Mail Merge", 10, ptrs, lens, 2, 0,
+                           &cancelled, &picked) != WP_OK || cancelled) {
+        return WP_OK;
+    }
+    if (picked == 0) return merge_with(ctx, WP_FALSE, 0, 0);
+    wp_prompt_begin(ctx, "Labels across x down (the page's margins are the sheet's):",
+                    (const u8 *)"3x8", 3, labels_done);
     return WP_OK;
 }
 

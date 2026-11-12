@@ -264,6 +264,73 @@ static wp_status copy_para(wp_document *doc, u32 from, u32 pi, u32 to, const wp_
     return WP_OK;
 }
 
+wp_status wp_merge_labels(wp_document *doc, const wp_merge_data *d, u32 across, u32 down,
+                          u32 *copies_out)
+{
+    wp_section *sec;
+    wp_table_row row;
+    wp_trow handle;
+    u32 tmpl, pi, rec, col = 0, k;
+    i32 column, text_h;
+    wp_status st;
+
+    if (copies_out != NULL) *copies_out = 0;
+    if (doc == NULL || d == NULL || d->records == 0 || doc->section_count == 0) return WP_ERR;
+    if (across < 1 || across > WP_MAX_CELLS || down < 1 || down > 60) return WP_RANGE;
+    sec = wp_document_section_get(doc, 0);
+    tmpl = sec->para_count;
+    if (tmpl == 0) return WP_ERR;
+    for (pi = 0; pi < tmpl; pi++) {
+        const wp_paragraph *p = wp_section_paragraph_get(sec, pi);
+        if (p->trow != 0 || p->frame != 0) return WP_UNSUPPORTED;
+    }
+    column = sec->page_width - sec->margin_left - sec->margin_right;
+    text_h = sec->page_height - sec->margin_top - sec->margin_bottom;
+    memset(&row, 0, sizeof(row));
+    row.gap = 115;   /* a twelfth of an inch in from each label's edge */
+    row.cell_count = (u8)across;
+    for (k = 0; k < across; k++) row.cell_right[k] = (i32)(((u32)column * (k + 1u)) / across);
+    row.height = -(text_h / (i32)down);
+    st = wp_document_trow_find_or_add(doc, &row, &handle);
+    if (st != WP_OK) return st;
+
+    /* Every label after the template, then the template let go. */
+    for (rec = 0; rec < d->records && st == WP_OK; rec++) {
+        for (pi = 0; pi < tmpl && st == WP_OK; pi++) {
+            st = copy_para(doc, 0, pi, 0, d, rec);
+            if (st == WP_OK) {
+                wp_section *s0 = wp_document_section_get(doc, 0);
+                wp_paragraph *np = wp_section_paragraph_get(s0, s0->para_count - 1);
+                np->trow = handle;
+                np->tflags = 0;
+                if (pi == tmpl - 1) {
+                    np->tflags = WP_TCELL_END;
+                    if (col == across - 1) np->tflags |= WP_TROW_END;
+                }
+            }
+        }
+        if (st == WP_OK) {
+            col = (col + 1u) % across;
+            if (copies_out != NULL) *copies_out = rec + 1u;
+        }
+    }
+    while (st == WP_OK && col != 0) {   /* the last row filled out */
+        u32 idx;
+        wp_section *s0 = wp_document_section_get(doc, 0);
+        st = wp_section_paragraph_add(s0, &idx);
+        if (st == WP_OK) {
+            wp_paragraph *np = wp_section_paragraph_get(s0, idx);
+            wp_paragraph_pstyle_set(np, doc->default_pstyle);
+            np->trow = handle;
+            np->tflags = (u8)(WP_TCELL_END | (col == across - 1 ? WP_TROW_END : 0));
+            col = (col + 1u) % across;
+        }
+    }
+    if (st != WP_OK) return st;
+    wp_section_paragraphs_drop(wp_document_section_get(doc, 0), 0, tmpl);
+    return WP_OK;
+}
+
 wp_status wp_merge_document(wp_document *doc, const wp_merge_data *d, u32 *copies_out)
 {
     u32 sections, rec, s, pi;

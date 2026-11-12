@@ -2236,3 +2236,30 @@ void test_actions_insert_clipart(void)
     }
     ctx_teardown(&doc, &journal, &ctx);
 }
+
+/* Mail Merge as labels: the choice, then the grid in the status line
+   (its "3x8" taken as offered), then the data -- a table of labels. */
+void test_actions_mail_merge_labels(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    FILE *f = fopen("build/test_actions_merge.csv", "wb");
+
+    ASSERT_TRUE(f != NULL);
+    if (f == NULL) return;
+    fputs("Name\nAnn\nBob\nCy\nDee\n", f);
+    fclose(f);
+    ctx_setup_imported(&doc, &journal, &ctx, "\xc2\xabName\xc2\xbb\n");
+    ctx.pick_path = pick_merge_data;
+    window_host_next_choice(1);   /* Labels */
+    ASSERT_TRUE(wp_action_find(WP_ACT_FILE_MERGE)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(ctx.prompt.active);
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
+    ASSERT_TRUE(!ctx.prompt.active);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 6);   /* four labels, two empty to fill the row of three */
+    ASSERT_TRUE(doc.sections[0].paras[0].trow != 0);
+    ASSERT_EQ_STR(ctx.doc_path, "");
+    ctx_teardown(&doc, &journal, &ctx);
+    (void)remove("build/test_actions_merge.csv");
+}

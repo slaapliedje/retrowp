@@ -316,6 +316,7 @@ void test_actions_load_file_reads_text_and_rtf_and_keeps_the_name(void);
 void test_actions_load_file_without_extension_goes_by_content(void);
 void test_actions_load_file_opens_atari_works_and_saves_rtf_beside_it(void);
 void test_actions_mail_merge(void);
+void test_actions_mail_merge_labels(void);
 void test_actions_odt_and_pdf_go_through_the_gateway(void);
 void test_actions_file_print_routes(void);
 void test_actions_file_print_options(void);
@@ -473,6 +474,8 @@ void test_merge_reads_csv(void);
 void test_merge_reads_tabs(void);
 void test_merge_document(void);
 void test_merge_fields_in_rtf(void);
+void test_merge_labels(void);
+void test_merge_row_height_in_rtf(void);
 void test_format_stw_reads_version_10_page(void);
 void test_format_stw_refuses_what_is_not(void);
 void test_charsheet_prints(void);
@@ -1048,6 +1051,7 @@ static const test_case g_cases[] = {
     { "actions_load_file_without_extension_goes_by_content", test_actions_load_file_without_extension_goes_by_content },
     { "actions_load_file_opens_atari_works_and_saves_rtf_beside_it", test_actions_load_file_opens_atari_works_and_saves_rtf_beside_it },
     { "actions_mail_merge", test_actions_mail_merge },
+    { "actions_mail_merge_labels", test_actions_mail_merge_labels },
     { "actions_odt_and_pdf_go_through_the_gateway", test_actions_odt_and_pdf_go_through_the_gateway },
     { "actions_file_print_routes", test_actions_file_print_routes },
     { "actions_file_print_options", test_actions_file_print_options },
@@ -1184,6 +1188,8 @@ static const test_case g_cases[] = {
     { "merge_reads_tabs", test_merge_reads_tabs },
     { "merge_document", test_merge_document },
     { "merge_fields_in_rtf", test_merge_fields_in_rtf },
+    { "merge_labels", test_merge_labels },
+    { "merge_row_height_in_rtf", test_merge_row_height_in_rtf },
     { "format_stw_reads_version_10_page", test_format_stw_reads_version_10_page },
     { "format_stw_refuses_what_is_not", test_format_stw_refuses_what_is_not },
     { "charsheet_prints", test_charsheet_prints },

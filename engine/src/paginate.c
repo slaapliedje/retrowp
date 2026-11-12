@@ -284,6 +284,10 @@ static void place_table_lines(wp_document *doc, wp_section *sec)
             if (cell_h[kk] > row_h) row_h = cell_h[kk];
             if (sec->paras[j].tflags & WP_TCELL_END) k++;
         }
+        /* A row given a height (\trrh): at least it, or exactly it -- a
+           sheet of labels keeps its pitch whatever each label holds. */
+        if (row->height > 0 && row_h < row->height) row_h = row->height;
+        else if (row->height < 0) row_h = -row->height;
         /* Each cell's last line goes back up to the row's top, the row's
            last line down to its bottom. */
         k = 0;

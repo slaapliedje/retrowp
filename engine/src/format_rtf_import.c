@@ -1028,6 +1028,7 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
     }
     if (strcmp(name, "trleft") == 0) { p->trow.left = has_param ? param : 0; return; }
     if (strcmp(name, "trgaph") == 0) { p->trow.gap = (has_param && param > 0) ? param : 0; return; }
+    if (strcmp(name, "trrh") == 0) { p->trow.height = has_param ? param : 0; return; }
     if (strcmp(name, "clbrdrt") == 0) { p->border_on_cell = 1; p->cell_borders_pending |= WP_BORDER_TOP; return; }
     if (strcmp(name, "clbrdrb") == 0) { p->border_on_cell = 1; p->cell_borders_pending |= WP_BORDER_BOTTOM; return; }
     if (strcmp(name, "clbrdrl") == 0) { p->border_on_cell = 1; p->cell_borders_pending |= WP_BORDER_LEFT; return; }

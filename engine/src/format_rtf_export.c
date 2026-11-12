@@ -552,6 +552,7 @@ static void rtf_emit_row_shape(rtf_writer *w, const wp_table_row *row)
     if (row == NULL) return;
     rtf_write_str(w, "\\trowd\\trgaph"); rtf_write_i32(w, row->gap);
     rtf_write_str(w, "\\trleft"); rtf_write_i32(w, row->left);
+    if (row->height != 0) { rtf_write_str(w, "\\trrh"); rtf_write_i32(w, row->height); }
     for (k = 0; k < row->cell_count && k < WP_MAX_CELLS; k++) {
         for (b = 0; b < 4; b++) {
             if (!(row->cell_borders[k] & (1u << b))) continue;

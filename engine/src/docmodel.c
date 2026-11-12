@@ -437,6 +437,21 @@ void wp_document_mark_modified(wp_document *doc)
     if (doc != NULL) doc->modified = 1;
 }
 
+void wp_section_paragraphs_drop(wp_section *section, u32 first, u32 count)
+{
+    u32 j;
+
+    if (section == NULL || first >= section->para_count) return;
+    if (count > section->para_count - first) count = section->para_count - first;
+    for (j = first; j < first + count; j++) {
+        wp_paragraph_layout_free(&section->paras[j]);
+        mem_free(section->paras[j].runs);
+    }
+    memmove(&section->paras[first], &section->paras[first + count],
+            (size_t)(section->para_count - first - count) * sizeof(wp_paragraph));
+    section->para_count -= count;
+}
+
 void wp_document_free(wp_document *doc)
 {
     u32 i;

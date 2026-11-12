@@ -51,4 +51,14 @@ i32 wp_merge_data_column(const wp_merge_data *d, const u8 *name, u32 len);
    made -- and the status says so. */
 wp_status wp_merge_document(wp_document *doc, const wp_merge_data *d, u32 *copies_out);
 
+/* Labels: the first section's paragraphs are one label; the section
+   becomes a table of `across` labels a row, each row exactly the text
+   height over `down` tall and each label the column over `across` wide
+   (the page's margins are the sheet's), a record a label, the last row
+   filled out with empty labels. WP_UNSUPPORTED when the label holds a
+   table or a frame of its own, WP_RANGE for across outside 1..16 or
+   down outside 1..60. *copies_out as above. */
+wp_status wp_merge_labels(wp_document *doc, const wp_merge_data *d, u32 across, u32 down,
+                          u32 *copies_out);
+
 #endif /* WP_MERGE_H */

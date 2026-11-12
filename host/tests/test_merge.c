@@ -4,6 +4,8 @@
 #include "merge.h"
 #include "format_txt.h"
 #include "format_rtf.h"
+#include "layout.h"
+#include "pageview.h"
 #include "strpool.h"
 
 /* Mail merge (merge.h). */
@@ -117,6 +119,118 @@ void test_merge_fields_in_rtf(void)
     ASSERT_TRUE(format_txt_export(&back, (u8 *)out, sizeof(out) - 1, &n) == WP_OK);
     out[n] = '\0';
     ASSERT_EQ_STR(out, tmpl);
+    wp_document_free(&back);
+    wp_document_free(&doc);
+}
+
+static i32 same_px(i32 t) { return t; }
+
+/* Labels: five records, two across and three down on a 6 x 9 inch
+   column (an 8.5 x 11 page, margins 1.25 and 1) -- a table of three rows,
+   each label 4320 twips wide and exactly 4320 tall, the last row
+   filled out with an empty label; each row laid out at that pitch. */
+void test_merge_labels(void)
+{
+    static const char tmpl[] = "\xc2\xabName\xc2\xbb\n\xc2\xabTown\xc2\xbb\n";
+    static const char csv[] = "Name,Town\nAnn,Bath\nBob,Leeds\nCy,York\nDee,Ely\nEd,Hull\n";
+    wp_document doc;
+    wp_merge_data d;
+    wp_section *sec;
+    const wp_table_row *row;
+    u32 copies = 0, pi;
+    wp_paragraph *p;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)tmpl, (u32)strlen(tmpl), &doc) == WP_OK);
+    sec = wp_document_section_get(&doc, 0);
+    sec->page_width = 12240; sec->page_height = 15840;
+    sec->margin_left = sec->margin_right = 1800;
+    sec->margin_top = sec->margin_bottom = 1440;
+    ASSERT_TRUE(wp_merge_data_read((const u8 *)csv, (u32)strlen(csv), &d) == WP_OK);
+    ASSERT_TRUE(wp_merge_labels(&doc, &d, 2, 3, &copies) == WP_OK);
+    ASSERT_EQ_U32(copies, 5);
+    sec = wp_document_section_get(&doc, 0);
+    ASSERT_EQ_U32(sec->para_count, 5 * 2 + 1);   /* five labels of two lines, one empty */
+    p = wp_section_paragraph_get(sec, 0);
+    row = wp_document_trow_get(&doc, p->trow);
+    ASSERT_TRUE(row != NULL);
+    if (row != NULL) {
+        ASSERT_EQ_U32(row->cell_count, 2);
+        ASSERT_EQ_U32((u32)row->cell_right[0], 4320);
+        ASSERT_EQ_U32((u32)row->cell_right[1], 8640);
+        ASSERT_EQ_U32((u32)-row->height, 4320);
+    }
+    /* Ann's label: two paragraphs, the second ends the cell; Bob's ends
+       the row; the empty last label ends the third. */
+    ASSERT_EQ_U32(wp_section_paragraph_get(sec, 0)->tflags, 0);
+    ASSERT_EQ_U32(wp_section_paragraph_get(sec, 1)->tflags, WP_TCELL_END);
+    ASSERT_EQ_U32(wp_section_paragraph_get(sec, 3)->tflags, WP_TCELL_END | WP_TROW_END);
+    ASSERT_EQ_U32(wp_section_paragraph_get(sec, 10)->tflags, WP_TCELL_END | WP_TROW_END);
+    {
+        wp_run *r = wp_paragraph_run_get(wp_section_paragraph_get(sec, 8), 0);
+        ASSERT_TRUE(r != NULL && r->text.length == 2 && memcmp(wp_strpool_get(&doc.strings, r->text), "Ed", 2) == 0);
+    }
+    /* Laid out: every row exactly the label's height. */
+    for (pi = 0; pi < sec->para_count; pi++) wp_section_paragraph_get(sec, pi)->layout_dirty = WP_TRUE;
+    (void)wp_pageview_relayout(&doc, 12240);
+    for (pi = 0; pi < sec->para_count; pi += 4) {
+        const wp_paragraph_layout *l = (const wp_paragraph_layout *)wp_section_paragraph_get(sec, pi)->layout;
+        ASSERT_TRUE(l != NULL && l->line_count > 0 && l->lines[0].row_h_twips == 4320);
+    }
+    /* Walked as every painter and the printer walk it: the second row
+       starts a label's height below the first, whatever its text. */
+    {
+        wp_line_walk w;
+        i32 cy_top = -1;
+        wp_line_walk_start(&w, 0);
+        for (pi = 0; pi < sec->para_count; pi++) {
+            const wp_paragraph_layout *l = (const wp_paragraph_layout *)wp_section_paragraph_get(sec, pi)->layout;
+            u32 li;
+            for (li = 0; l != NULL && li < l->line_count; li++) {
+                i32 top = wp_line_walk_next(&w, &l->lines[li], same_px);
+                if (pi == 4 && li == 0) cy_top = top;
+            }
+        }
+        ASSERT_EQ_U32((u32)cy_top, 4320);
+        ASSERT_EQ_U32((u32)wp_table_row_extent(sec, 0, same_px), 4320);
+    }
+    wp_merge_data_free(&d);
+    wp_document_free(&doc);
+
+    /* A label holding a table is refused, nothing changed; so are 17 across. */
+    ASSERT_TRUE(format_txt_import((const u8 *)tmpl, (u32)strlen(tmpl), &doc) == WP_OK);
+    ASSERT_TRUE(wp_merge_data_read((const u8 *)csv, (u32)strlen(csv), &d) == WP_OK);
+    ASSERT_TRUE(wp_merge_labels(&doc, &d, 17, 3, &copies) == WP_RANGE);
+    wp_section_paragraph_get(wp_document_section_get(&doc, 0), 0)->trow = 1;
+    ASSERT_TRUE(wp_merge_labels(&doc, &d, 2, 3, &copies) == WP_UNSUPPORTED);
+    ASSERT_EQ_U32(wp_document_section_get(&doc, 0)->para_count, 2);
+    wp_merge_data_free(&d);
+    wp_document_free(&doc);
+}
+
+/* A row's height goes to RTF as \trrh and comes back. */
+void test_merge_row_height_in_rtf(void)
+{
+    static const char tmpl[] = "\xc2\xabName\xc2\xbb\n";
+    static const char csv[] = "Name\nAnn\n";
+    static u8 rtf[8192];
+    wp_document doc, back;
+    wp_merge_data d;
+    u32 copies, n = 0;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)tmpl, (u32)strlen(tmpl), &doc) == WP_OK);
+    ASSERT_TRUE(wp_merge_data_read((const u8 *)csv, (u32)strlen(csv), &d) == WP_OK);
+    ASSERT_TRUE(wp_merge_labels(&doc, &d, 3, 10, &copies) == WP_OK);
+    ASSERT_TRUE(format_rtf_export(&doc, rtf, sizeof(rtf) - 1, &n) == WP_OK);
+    rtf[n] = '\0';
+    ASSERT_TRUE(strstr((const char *)rtf, "\\trrh-") != NULL);
+    ASSERT_TRUE(format_rtf_import(rtf, n, &back) == WP_OK);
+    {
+        const wp_paragraph *p = wp_section_paragraph_get(wp_document_section_get(&back, 0), 0);
+        const wp_table_row *row = wp_document_trow_get(&back, p->trow);
+        const wp_table_row *orig = wp_document_trow_get(&doc, wp_section_paragraph_get(wp_document_section_get(&doc, 0), 0)->trow);
+        ASSERT_TRUE(row != NULL && orig != NULL && row->height == orig->height && row->height < 0);
+    }
+    wp_merge_data_free(&d);
     wp_document_free(&back);
     wp_document_free(&doc);
 }
