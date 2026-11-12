@@ -317,12 +317,15 @@ static const wp_dev_ops g_ps_ops = { ps_text, ps_rect, ps_shade, ps_polygon, ps_
 static ps_out g_ps;
 static u32 g_page_no;
 
+static u32 g_ps_pages;   /* the job's pages before this document: a page's number in it */
+
 static wp_status ps_begin_page(void *user, const wp_section *sec, u32 page_no)
 {
     ps_out *o = (ps_out *)user;
 
     g_page_no = page_no;
-    puts_(o, "%%Page: "); putn(o, (i32)page_no); putn(o, (i32)page_no); puts_(o, "\n");
+    puts_(o, "%%Page: "); putn(o, (i32)(g_ps_pages + page_no)); putn(o, (i32)(g_ps_pages + page_no));
+    puts_(o, "\n");
     if (sec->page_width != o->sent_w || sec->page_height != o->sent_h) {
         putn(o, sec->page_width / 20); putn(o, sec->page_height / 20);
         puts_(o, "PSZ\n");
@@ -348,25 +351,28 @@ static wp_status ps_end_page(void *user)
 
 static i32 tenths(i32 twips) { return twips / 2; }
 
-wp_status wp_ps_print(wp_document *doc, wp_ps_write_fn write, void *user, u8 sides, u32 *pages_out)
+wp_status wp_ps_begin(wp_ps_write_fn write, void *user, u8 sides)
 {
-    static int dummy_gc;   /* the gc this device is bound to: only its address matters */
-    wp_page_device dev;
-    u32 pages = 0;
-    wp_status st;
+    u32 k;
 
-    if (pages_out != NULL) *pages_out = 0;
     memset(&g_ps, 0, sizeof(g_ps));
     g_ps.write = write;
     g_ps.user = user;
     g_ps.st = WP_OK;
     g_ps.rgb = 0x1000000L;
-    {
-        u32 k;
-        for (k = 0; g_prolog[k] != NULL; k++) puts_(&g_ps, g_prolog[k]);
-    }
+    g_ps_pages = 0;
+    for (k = 0; g_prolog[k] != NULL; k++) puts_(&g_ps, g_prolog[k]);
     if (sides == 1) puts_(&g_ps, "false DPX\n");
     else if (sides == 2) puts_(&g_ps, "true DPX\n");
+    return g_ps.st;
+}
+
+wp_status wp_ps_document(wp_document *doc, u32 *pages_out)
+{
+    static int dummy_gc;   /* the gc this device is bound to: only its address matters */
+    wp_page_device dev;
+    u32 pages = 0;
+    wp_status st;
 
     memset(&dev, 0, sizeof(dev));
     dev.gc = (plat_gc *)&dummy_gc;
@@ -379,10 +385,27 @@ wp_status wp_ps_print(wp_document *doc, wp_ps_write_fn write, void *user, u8 sid
     st = wp_pageprint(doc, &dev, &pages);
     if (st == WP_OK && g_ps.page_open) st = ps_end_page(&g_ps);
     wp_dev_bind(NULL, NULL, NULL);
-    puts_(&g_ps, "%%Trailer\n%%Pages: ");
-    putn(&g_ps, (i32)pages);
-    puts_(&g_ps, "\n%%EOF\n");
-    if (st == WP_OK) st = g_ps.st;
+    g_ps_pages += pages;
     if (pages_out != NULL) *pages_out = pages;
-    return st;
+    return st == WP_OK ? g_ps.st : st;
+}
+
+wp_status wp_ps_end(u32 *pages_out)
+{
+    puts_(&g_ps, "%%Trailer\n%%Pages: ");
+    putn(&g_ps, (i32)g_ps_pages);
+    puts_(&g_ps, "\n%%EOF\n");
+    if (pages_out != NULL) *pages_out = g_ps_pages;
+    return g_ps.st;
+}
+
+wp_status wp_ps_print(wp_document *doc, wp_ps_write_fn write, void *user, u8 sides, u32 *pages_out)
+{
+    wp_status st, end;
+
+    if (pages_out != NULL) *pages_out = 0;
+    st = wp_ps_begin(write, user, sides);
+    if (st == WP_OK) st = wp_ps_document(doc, NULL);
+    end = wp_ps_end(pages_out);
+    return st == WP_OK ? end : st;
 }

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "test.h"
+#include "format_prn.h"
 #include "drawing.h"
 #include "actions.h"
 #include "imgcache.h"
@@ -2261,5 +2262,55 @@ void test_actions_mail_merge_labels(void)
     ASSERT_TRUE(doc.sections[0].paras[0].trow != 0);
     ASSERT_EQ_STR(ctx.doc_path, "");
     ctx_teardown(&doc, &journal, &ctx);
+    (void)remove("build/test_actions_merge.csv");
+}
+
+/* Mail Merge straight to the printer: every record printed in turn on
+   this machine's printer -- a character printer one after another down
+   the port, PostScript as one job -- and the document on screen still
+   the template afterwards, its string pool wound back. */
+void test_actions_mail_merge_printed(void)
+{
+    static const char prn[] = "build/test_actions_merge.prn";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[16384];
+    u32 pool;
+    FILE *f = fopen("build/test_actions_merge.csv", "wb");
+
+    ASSERT_TRUE(f != NULL);
+    if (f == NULL) return;
+    fputs("Name\nAnn\nBob\n", f);
+    fclose(f);
+    ctx_setup_imported(&doc, &journal, &ctx, "To \xc2\xabName\xc2\xbb\n");
+    ctx.pick_path = pick_merge_data;
+    ctx.ensure_offload = no_link;
+    ctx.printer_path = prn;
+    pool = doc.strings.length;
+
+    (void)remove(prn);
+    window_host_next_choice(2);   /* Letters, printed one at a time */
+    ASSERT_TRUE(wp_action_find(WP_ACT_FILE_MERGE)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "Printed 2 pages");
+    read_whole_file(prn, text, sizeof(text));
+    ASSERT_TRUE(strstr(text, "To Ann\r\n") != NULL);
+    ASSERT_TRUE(strstr(text, "To Bob\r\n") != NULL);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "To \xc2\xabName\xc2\xbb\n");
+    ASSERT_EQ_U32(doc.strings.length, pool);
+
+    (void)remove(prn);
+    ctx.printer_driver = WP_PRN_POSTSCRIPT;
+    window_host_next_choice(2);
+    ASSERT_TRUE(wp_action_find(WP_ACT_FILE_MERGE)->handler(&ctx) == WP_OK);
+    read_whole_file(prn, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "%!PS-Adobe-3.0", 14) == 0);
+    ASSERT_TRUE(strstr(text + 1, "%!PS") == NULL);          /* one job */
+    ASSERT_TRUE(strstr(text, "%%Page: 2 2") != NULL);
+    ASSERT_TRUE(strstr(text, "%%Pages: 2") != NULL);
+    ASSERT_TRUE(strstr(text, "(Ann)") != NULL && strstr(text, "(Bob)") != NULL);
+    ctx_teardown(&doc, &journal, &ctx);
+    (void)remove(prn);
     (void)remove("build/test_actions_merge.csv");
 }

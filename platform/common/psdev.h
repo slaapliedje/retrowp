@@ -23,4 +23,11 @@ typedef wp_status (*wp_ps_write_fn)(void *user, const u8 *bytes, u32 len);
 wp_status wp_ps_print(wp_document *doc, wp_ps_write_fn write, void *user, u8 sides,
                       u32 *pages_out);
 
+/* The same in parts, for several documents in one job -- a mail merge
+   printed a record at a time: begin (the prolog), a document's pages
+   for each, end (the trailer, *pages_out the job's pages). */
+wp_status wp_ps_begin(wp_ps_write_fn write, void *user, u8 sides);
+wp_status wp_ps_document(wp_document *doc, u32 *pages_out);
+wp_status wp_ps_end(u32 *pages_out);
+
 #endif /* WP_PSDEV_H */

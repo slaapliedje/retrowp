@@ -387,3 +387,72 @@ wp_status wp_merge_document(wp_document *doc, const wp_merge_data *d, u32 *copie
     if (st == WP_OK && copies_out != NULL) *copies_out = d->records;
     return st;
 }
+
+/* ---- a record at a time ---------------------------------------------- */
+
+static u32 count_runs(wp_document *doc)
+{
+    u32 si, pi, n = 0;
+    for (si = 0; si < doc->section_count; si++) {
+        wp_section *sec = wp_document_section_get(doc, si);
+        for (pi = 0; pi < sec->para_count; pi++) n += wp_section_paragraph_get(sec, pi)->run_count;
+    }
+    return n;
+}
+
+wp_status wp_merge_apply(wp_document *doc, const wp_merge_data *d, u32 record, wp_merge_mark *mark)
+{
+    u32 si, pi, k = 0;
+    u16 ri;
+    wp_status st = WP_OK;
+
+    mark->saved = NULL;
+    mark->count = 0;
+    mark->pool_length = doc->strings.length;
+    if (record >= d->records) return WP_RANGE;
+    mark->count = count_runs(doc);
+    if (mark->count > 0) {
+        mark->saved = (wp_span *)mem_alloc(mark->count * (u32)sizeof(wp_span));
+        if (mark->saved == NULL) { mark->count = 0; return WP_NOMEM; }
+    }
+    for (si = 0; si < doc->section_count && st == WP_OK; si++) {
+        wp_section *sec = wp_document_section_get(doc, si);
+        for (pi = 0; pi < sec->para_count && st == WP_OK; pi++) {
+            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            for (ri = 0; ri < para->run_count && st == WP_OK; ri++) {
+                wp_span text;
+                wp_bool changed;
+                mark->saved[k] = wp_paragraph_run_get(para, ri)->text;
+                st = fill(doc, d, record, mark->saved[k], &text, &changed);
+                k++;
+                sec = wp_document_section_get(doc, si);
+                para = wp_section_paragraph_get(sec, pi);
+                if (st == WP_OK && changed) wp_paragraph_run_get(para, ri)->text = text;
+            }
+            para->layout_dirty = WP_TRUE;
+        }
+    }
+    mark->count = k;   /* on a failure, what was saved is what restore puts back */
+    return st;
+}
+
+void wp_merge_restore(wp_document *doc, wp_merge_mark *mark)
+{
+    u32 si, pi, k = 0;
+    u16 ri;
+
+    for (si = 0; si < doc->section_count; si++) {
+        wp_section *sec = wp_document_section_get(doc, si);
+        for (pi = 0; pi < sec->para_count; pi++) {
+            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            for (ri = 0; ri < para->run_count && k < mark->count; ri++) {
+                wp_paragraph_run_get(para, ri)->text = mark->saved[k++];
+            }
+            para->layout_dirty = WP_TRUE;
+        }
+    }
+    wp_strpool_truncate(&doc->strings, mark->pool_length);
+    if (mark->saved != NULL) mem_free(mark->saved);
+    mark->saved = NULL;
+    mark->count = 0;
+}

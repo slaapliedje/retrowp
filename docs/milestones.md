@@ -2388,9 +2388,23 @@ merge picked because Atari Works documents already carry merge fields).
       across, a label's pitch apart. Tests: the table's shape, the
       layout, the walk and the extent at the pitch (shown to fail with
       the walker unfixed), \trrh through RTF, the action end to end.
-- [ ] T18.3 Merging straight to the printer, a record at a time, so a
-      long list prints on a 1 MB ST without the whole merged document
-      in memory.
+- [x] T18.3 Merging straight to the printer, a record at a time.
+      AC: Mail Merge's third choice, "Letters, printed one at a time":
+      the data read, then File > Print's own choices once and a copy a
+      record -- the record filled into the document and taken out again
+      (`wp_merge_apply` / `wp_merge_restore`, the string pool wound back
+      by the new `wp_strpool_truncate`), so neither the merged document
+      nor the pool grows with the list. A character printer takes the
+      copies one after another down the open port; PostScript one job
+      (the writer split into begin / document / end, pages numbered
+      through the job); GDOS and the gateway a job a copy. Tests: apply
+      and restore (the pool's length exactly as before -- shown to fail
+      without the rewind), the action to a character printer and to
+      PostScript (one job, two pages, the template on screen after). Not
+      exercised on the host: the GDOS path (it needs the ST's
+      workstation), which takes the same loop.
+
+M18 done: letters, labels and long lists, from any CSV.
 
 ---
 

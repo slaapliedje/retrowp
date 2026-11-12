@@ -535,6 +535,17 @@ is applied where rows are laid out (paginate.c), walked
 the page printer and PostScript keep the pitch. File > Mail Merge asks
 Letters or Labels, and for labels "across x down" in the status line.
 
+Printed a record at a time ("Letters, printed one at a time"):
+`wp_merge_apply` fills one record into the document itself, keeping
+each run's own text, and `wp_merge_restore` puts it back and winds the
+string pool back (`wp_strpool_truncate`) -- a long list never has the
+whole merged document in memory, nor grows the pool. actions.c sets a
+merge-print state and runs File > Print as ever (its choices once);
+each print path then makes a copy a record: a character printer one
+after another down the open port, PostScript as one job (psdev.h's
+`wp_ps_begin` / `wp_ps_document` / `wp_ps_end`, pages numbered through
+the job), GDOS and the gateway a job a copy.
+
 ## Images (M15)
 
 An image is a **paragraph-level, fixed-size, non-flowing block** -- not

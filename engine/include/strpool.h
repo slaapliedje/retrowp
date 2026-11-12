@@ -46,4 +46,10 @@ wp_status wp_strpool_append(wp_strpool *pool, const u8 *bytes, u32 len,
    hold it across a mutation. */
 const u8 *wp_strpool_get(const wp_strpool *pool, wp_span span);
 
+/* Winds the pool back to `length`, a pool->length saved earlier: every
+   span issued since is gone. For text made and dropped again -- a mail
+   merge printing a record at a time -- never for anything a document
+   still points at. */
+void      wp_strpool_truncate(wp_strpool *pool, u32 length);
+
 #endif /* WP_STRPOOL_H */

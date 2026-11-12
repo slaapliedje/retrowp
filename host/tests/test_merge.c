@@ -234,3 +234,34 @@ void test_merge_row_height_in_rtf(void)
     wp_document_free(&back);
     wp_document_free(&doc);
 }
+
+/* A record at a time: applied, the document is that record's; restored,
+   it is the template again, its pool wound back to where it was -- so a
+   long list prints without growing memory. */
+void test_merge_apply_and_restore(void)
+{
+    static const char tmpl[] = "Dear \xc2\xabName\xc2\xbb, from \xc2\xabTown\xc2\xbb.\n";
+    static const char csv[] = "Name,Town\nAnn,Bath\nBob,Leeds\n";
+    wp_document doc;
+    wp_merge_data d;
+    wp_merge_mark m;
+    char out[128];
+    u32 n = 0, pool;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)tmpl, (u32)strlen(tmpl), &doc) == WP_OK);
+    ASSERT_TRUE(wp_merge_data_read((const u8 *)csv, (u32)strlen(csv), &d) == WP_OK);
+    pool = doc.strings.length;
+    ASSERT_TRUE(wp_merge_apply(&doc, &d, 1, &m) == WP_OK);
+    ASSERT_TRUE(format_txt_export(&doc, (u8 *)out, sizeof(out) - 1, &n) == WP_OK);
+    out[n] = '\0';
+    ASSERT_EQ_STR(out, "Dear Bob, from Leeds.\n");
+    wp_merge_restore(&doc, &m);
+    ASSERT_EQ_U32(doc.strings.length, pool);
+    ASSERT_TRUE(format_txt_export(&doc, (u8 *)out, sizeof(out) - 1, &n) == WP_OK);
+    out[n] = '\0';
+    ASSERT_EQ_STR(out, tmpl);
+    ASSERT_TRUE(wp_merge_apply(&doc, &d, 2, &m) == WP_RANGE);   /* no third record */
+    wp_merge_restore(&doc, &m);
+    wp_merge_data_free(&d);
+    wp_document_free(&doc);
+}

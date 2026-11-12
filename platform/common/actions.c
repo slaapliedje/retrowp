@@ -1704,6 +1704,32 @@ wp_status wp_action_dictate(wp_app_ctx *ctx)
     return st;
 }
 
+/* A mail merge printed a record at a time (File > Mail Merge, "Letters,
+   printed"): while set, each print path makes `records` copies, filling
+   record i into the document before copy i and putting it back after
+   (merge.h's apply and restore) -- the whole merged document is never
+   in memory. NULL: an ordinary print, one copy, the document as it is. */
+typedef struct {
+    const wp_merge_data *data;
+    wp_merge_mark mark;
+} merge_print;
+static merge_print *g_merge_print;
+
+static u32 print_copies(void) { return g_merge_print != NULL ? g_merge_print->data->records : 1u; }
+
+static wp_status print_copy_begin(wp_app_ctx *ctx, u32 i)
+{
+    if (g_merge_print == NULL) return WP_OK;
+    return wp_merge_apply(ctx->doc, g_merge_print->data, i, &g_merge_print->mark);
+}
+
+static void print_copy_end(wp_app_ctx *ctx)
+{
+    if (g_merge_print != NULL) wp_merge_restore(ctx->doc, &g_merge_print->mark);
+}
+
+static void tell_printed(wp_app_ctx *ctx, u32 pages);
+
 /* ---- Mail merge (M18; merge.h) --------------------------------------- */
 
 static void field_done(wp_app_ctx *ctx, const u8 *text, u32 len)
@@ -1820,6 +1846,52 @@ static wp_status merge_with(wp_app_ctx *ctx, wp_bool labels, u32 across, u32 dow
     return WP_OK;
 }
 
+/* A mail merge straight to the printer: the data read, then File >
+   Print's own choices and paths, a record at a time (g_merge_print);
+   the document on screen stays the template throughout. */
+static wp_status merge_print_now(wp_app_ctx *ctx)
+{
+    char path[WP_APP_PATH_MAX];
+    plat_file *f;
+    u32 size = 0, got = 0;
+    u8 *buf;
+    merge_print mp;
+    wp_merge_data data;
+    wp_status st;
+
+    if (ctx->pick_path == NULL || !ctx->pick_path(ctx, WP_FALSE, path, (u32)sizeof(path))) return WP_OK;
+    if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) {
+        wp_action_tell(ctx, "Couldn't open that file");
+        return WP_ERR;
+    }
+    if (plat_file_size(f, &size) != WP_OK || (buf = (u8 *)mem_alloc(size + 1u)) == NULL) {
+        plat_file_close(f);
+        wp_action_tell(ctx, "Not enough memory to read that file");
+        return WP_NOMEM;
+    }
+    st = plat_file_read(f, buf, size, &got);
+    plat_file_close(f);
+    if (st == WP_OK) st = wp_merge_data_read(buf, got, &data);
+    mem_free(buf);
+    if (st != WP_OK) {
+        wp_action_tell(ctx, st == WP_NOMEM ? "Not enough memory to read that file"
+                                           : "That file has no field names on its first line");
+        return st;
+    }
+    if (data.records == 0) {
+        wp_merge_data_free(&data);
+        wp_action_tell(ctx, "That file has field names but no records");
+        return WP_OK;
+    }
+    memset(&mp, 0, sizeof(mp));
+    mp.data = &data;
+    g_merge_print = &mp;
+    st = wp_action_file_print(ctx);
+    g_merge_print = NULL;
+    wp_merge_data_free(&data);
+    return st;
+}
+
 /* "3x8" (or "3 x 8", "3*8", "3,8"): labels across and down. */
 static void labels_done(wp_app_ctx *ctx, const u8 *text, u32 len)
 {
@@ -1840,9 +1912,10 @@ static void labels_done(wp_app_ctx *ctx, const u8 *text, u32 len)
    (a grid of them to a page, the page's margins the sheet's). */
 static wp_status act_file_merge(wp_app_ctx *ctx)
 {
-    static const char *const kinds[] = { "Letters (one to a page)", "Labels (several to a page)" };
-    const u8 *ptrs[2];
-    u32 lens[2], picked = 0;
+    static const char *const kinds[] = { "Letters (one to a page)", "Labels (several to a page)",
+                                         "Letters, printed one at a time" };
+    const u8 *ptrs[3];
+    u32 lens[3], picked = 0;
     wp_bool cancelled = WP_TRUE;
 
     if (!ctx->doc_loaded) return WP_OK;
@@ -1853,11 +1926,13 @@ static wp_status act_file_merge(wp_app_ctx *ctx)
     if (!wp_action_confirm_discard(ctx)) return WP_OK;
     ptrs[0] = (const u8 *)kinds[0]; lens[0] = (u32)strlen(kinds[0]);
     ptrs[1] = (const u8 *)kinds[1]; lens[1] = (u32)strlen(kinds[1]);
-    if (plat_dialog_choice(ctx->window, (const u8 *)"Mail Merge", 10, ptrs, lens, 2, 0,
+    ptrs[2] = (const u8 *)kinds[2]; lens[2] = (u32)strlen(kinds[2]);
+    if (plat_dialog_choice(ctx->window, (const u8 *)"Mail Merge", 10, ptrs, lens, 3, 0,
                            &cancelled, &picked) != WP_OK || cancelled) {
         return WP_OK;
     }
     if (picked == 0) return merge_with(ctx, WP_FALSE, 0, 0);
+    if (picked == 2) return merge_print_now(ctx);
     wp_prompt_begin(ctx, "Labels across x down (the page's margins are the sheet's):",
                     (const u8 *)"3x8", 3, labels_done);
     return WP_OK;
@@ -2383,13 +2458,20 @@ static wp_status print_on_gateway(wp_app_ctx *ctx)
         head = 4 + opts_len;
     }
 
+    {
+    u32 copy, sent = 0;
+    wp_status cst = WP_OK;
+    for (copy = 0; copy < print_copies(); copy++) {
+    if (print_copy_begin(ctx, copy) != WP_OK) { print_copy_end(ctx); cst = WP_NOMEM; break; }
     format_rtf_export(ctx->doc, NULL, 0, &rtf_len);
     if (rtf_len + head > convert_max_file()) {
+        print_copy_end(ctx);
         wp_action_tell(ctx, "The document is too large to send to the gateway");
         return WP_RANGE;
     }
     payload = (u8 *)mem_alloc(rtf_len + head);
     if (payload == NULL) {
+        print_copy_end(ctx);
         wp_action_tell(ctx, "Not enough memory to print");
         return WP_NOMEM;
     }
@@ -2404,9 +2486,11 @@ static wp_status print_on_gateway(wp_app_ctx *ctx)
     }
     if (format_rtf_export(ctx->doc, payload + head, rtf_len, &rtf_len) != WP_OK) {
         mem_free(payload);
+        print_copy_end(ctx);
         wp_action_tell(ctx, "Couldn't build the document to print");
         return WP_ERR;
     }
+    print_copy_end(ctx);
 
     req.op = OFFLOAD_PRINT;
     req.payload = payload;
@@ -2419,9 +2503,17 @@ static wp_status print_on_gateway(wp_app_ctx *ctx)
     }
     mem_free(payload);
     ok = (wp_bool)(resp.status == OFFLOAD_OK);
-    tell_reply(ctx, &resp, ok ? "Sent to the gateway's printer" : "The gateway couldn't print that");
+    if (g_merge_print == NULL || !ok) {
+        tell_reply(ctx, &resp, ok ? "Sent to the gateway's printer" : "The gateway couldn't print that");
+    }
     offload_response_free(&resp);
-    return ok ? WP_OK : WP_ERR;
+    if (!ok) return WP_ERR;
+    sent++;
+    }   /* each copy */
+    if (cst != WP_OK) { wp_action_tell(ctx, "Not enough memory to print every record"); return cst; }
+    if (g_merge_print != NULL) tell_printed(ctx, sent);
+    }
+    return WP_OK;
 }
 
 static wp_status write_printer(void *user, const u8 *bytes, u32 len)
@@ -2541,8 +2633,15 @@ static wp_status print_here(wp_app_ctx *ctx)
     if (ctx->printer_choosable && !choose_printer(ctx)) return WP_OK;
 
     if (ctx->printer_driver == WP_PRINTER_PAGES && ctx->print_pages != NULL) {
-        st = ctx->print_pages(ctx, &pages);
-        if (st == WP_OK) tell_printed(ctx, pages);
+        u32 copy, total = 0;
+        st = WP_OK;
+        for (copy = 0; copy < print_copies() && st == WP_OK; copy++) {   /* a GDOS job a copy */
+            st = print_copy_begin(ctx, copy);
+            if (st == WP_OK) st = ctx->print_pages(ctx, &pages);
+            print_copy_end(ctx);
+            total += pages;
+        }
+        if (st == WP_OK) tell_printed(ctx, total);
         return st;
     }
     if ((ctx->printer_ready != NULL && !ctx->printer_ready()) ||
@@ -2555,11 +2654,27 @@ static wp_status print_here(wp_app_ctx *ctx)
     opt.crlf = WP_TRUE;
     opt.driver = ctx->printer_driver;
     opt.sides = ctx->printer_sides;
-    if (opt.driver == WP_PRN_POSTSCRIPT) {
-        /* PostScript draws the page as the screen lays it out (psdev.h). */
-        st = wp_ps_print(ctx->doc, write_printer, prn, opt.sides, &pages);
-    } else {
-        st = format_prn_export(ctx->doc, &opt, write_printer, prn, &pages);
+    {
+        /* Every copy one job, one after another down the same port:
+           PostScript's prolog once and its trailer once (psdev.h, which
+           draws the page as the screen lays it out); a character
+           printer's output a copy at a time, each ending its page. */
+        u32 copy, total = 0;
+        st = opt.driver == WP_PRN_POSTSCRIPT ? wp_ps_begin(write_printer, prn, opt.sides) : WP_OK;
+        for (copy = 0; copy < print_copies() && st == WP_OK; copy++) {
+            st = print_copy_begin(ctx, copy);
+            if (st == WP_OK) {
+                st = opt.driver == WP_PRN_POSTSCRIPT ? wp_ps_document(ctx->doc, &pages)
+                                                     : format_prn_export(ctx->doc, &opt, write_printer, prn, &pages);
+            }
+            print_copy_end(ctx);
+            total += pages;
+        }
+        if (opt.driver == WP_PRN_POSTSCRIPT) {
+            wp_status end = wp_ps_end(&total);
+            if (st == WP_OK) st = end;
+        }
+        pages = total;
     }
     plat_file_close(prn);
     if (st == WP_NOMEM) {

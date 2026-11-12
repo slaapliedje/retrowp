@@ -37,6 +37,11 @@ static wp_status strpool_grow(wp_strpool *pool, u32 needed_len)
     return WP_OK;
 }
 
+void wp_strpool_truncate(wp_strpool *pool, u32 length)
+{
+    if (pool != NULL && length < pool->length) pool->length = length;
+}
+
 wp_status wp_strpool_append(wp_strpool *pool, const u8 *bytes, u32 len,
                              wp_span *out_span)
 {

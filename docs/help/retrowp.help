@@ -242,8 +242,11 @@ page. Choose Labels and the document is one label: give the
 labels across and down (3x8, say) and RetroWP fills the page with
 them, one record a label -- set Page Setup's margins to the
 label sheet's first. Either way the result is a new document:
-Save asks for a name, so the original is kept. A field the list
-has no column for stays as it is.
+Save asks for a name, so the original is kept. Choose "Letters,
+printed one at a time" to print a long list without making the
+whole merged document: Print's usual choices, then a letter a
+record, the document on screen unchanged. A field the list has
+no column for stays as it is.
 Atari Works documents keep their fields; RTF saves them as Word
 merge fields.
 

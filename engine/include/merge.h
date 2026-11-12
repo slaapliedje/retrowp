@@ -61,4 +61,15 @@ wp_status wp_merge_document(wp_document *doc, const wp_merge_data *d, u32 *copie
 wp_status wp_merge_labels(wp_document *doc, const wp_merge_data *d, u32 across, u32 down,
                           u32 *copies_out);
 
+/* One record filled into the document itself, to print it and put the
+   document back -- a long list printed a record at a time, never the
+   whole merged document in memory. `mark` keeps what restore needs. */
+typedef struct {
+    u32 pool_length;     /* the string pool before the record */
+    u32 count;           /* runs */
+    wp_span *saved;      /* each run's own text, in document order */
+} wp_merge_mark;
+wp_status wp_merge_apply(wp_document *doc, const wp_merge_data *d, u32 record, wp_merge_mark *mark);
+void      wp_merge_restore(wp_document *doc, wp_merge_mark *mark);
+
 #endif /* WP_MERGE_H */
