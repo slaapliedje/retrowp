@@ -81,6 +81,7 @@ void wp_line_walk_start(wp_line_walk *w, i32 y)
     w->in_row = WP_FALSE;
     w->page_top = w->frame_y = y;
     w->paper = WP_FALSE;
+    w->column = 0;
 }
 
 i32 wp_line_walk_next(wp_line_walk *w, const wp_line *line, wp_line_walk_px_fn px)
@@ -94,6 +95,12 @@ i32 wp_line_walk_next(wp_line_walk *w, const wp_line *line, wp_line_walk_px_fn p
         top = w->frame_y;
         w->frame_y += px(line->height_twips);
         return top;
+    }
+    if (w->paper && line->column != w->column) {
+        /* The next column (M19): from its top, at the line's place there. */
+        w->in_row = WP_FALSE;
+        w->y = w->page_top + px(line->page_y_twips);
+        w->column = line->column;
     }
     if (line->flags & WP_LINE_ROW_FIRST) {
         if (w->in_row) w->y = w->row_bottom;

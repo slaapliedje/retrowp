@@ -55,6 +55,28 @@ static wp_status open_zoomed(wp_document *doc, const wp_char_style *cs, plat_fon
 }
 static i32 unzoom(i32 twips) { return g_zoom == 100 ? twips : (i32)(((long)twips * 100L) / g_zoom); }
 
+/* At a zoom, where a word goes is measured in the face the layout
+   measured it in, the style's own size: a screen without a face as small
+   as the zoom asks opens a bigger one, and words advanced by its widths
+   would run past their column. The zoomed face only draws. One page at
+   a time, so one cached face. */
+static plat_font *g_base_font;
+static wp_cstyle g_base_style;
+
+static i32 base_width(wp_document *doc, wp_cstyle style, const u8 *bytes, u32 len)
+{
+    i32 w = 0;
+    if (g_base_font == NULL || g_base_style != style) {
+        const wp_char_style *cs = wp_document_cstyle_get(doc, style);
+        if (g_base_font != NULL) plat_font_close(g_base_font);
+        g_base_font = NULL;
+        if (cs == NULL || wp_cstyle_font_open(doc, cs, &g_base_font) != WP_OK) { g_base_font = NULL; return 0; }
+        g_base_style = style;
+    }
+    (void)plat_measure_text(g_base_font, bytes, len, &w);
+    return w;
+}
+
 static void frame_for(page_frame *fr, const wp_page_device *dev, const wp_section *sec)
 {
     fr->dev = dev;
@@ -315,15 +337,17 @@ static void draw_line(wp_document *doc, const page_frame *fr, wp_paragraph *para
             }
         }
         if (len == 0 || *font == NULL) continue;
-        (void)plat_measure_text(*font, bytes + frag.byte_start, len, &w);
-        w = unzoom(w);
+        if (g_zoom != 100) {
+            w = base_width(doc, run->style, bytes + frag.byte_start, len);
+        } else {
+            (void)plat_measure_text(*font, bytes + frag.byte_start, len, &w);
+        }
         if (fr->screen && *ascent + *descent > (line->text_height_twips * 5) / 4) {
             /* Greeked: the screen has no face this small (the ST's own
                bitmap fonts stop at a size a page fitted to the window
                is well under), so a word that would overrun its line is
                a grey bar its laid-out width -- what DTP programs show
                for text too small to read. Paper is never greeked. */
-            w = (i32)(((long)w * line->text_height_twips) / (*ascent + *descent));
             if (!frag.is_space) {
                 i32 by = text_top + (line->text_height_twips * 2) / 5;
                 i32 bh = at_y(fr, by + line->text_height_twips / 3) - at_y(fr, by);
@@ -359,12 +383,12 @@ static void draw_one(wp_document *doc, const page_frame *fr, wp_section *sec, u3
                      plat_font **font, wp_cstyle *cached, wp_bool *have_font, i32 *ascent, i32 *descent)
 {
     const wp_line *line = &layout->lines[li];
-    i32 left = sec->margin_left + line->cell_x0;
+    i32 left = sec->margin_left + line->col_x_twips + line->cell_x0;   /* its column's, its cell's */
 
     if (line->flags & WP_LINE_ROW_FIRST) {
         wp_border_draw_row(fr->dev->gc, wp_document_trow_get(doc, para->trow), line->row_h_twips,
                            (wp_bool)(pi > 0 && sec->paras[pi - 1].trow != 0 && !line->page_start),
-                           at_x(fr, sec->margin_left), at_y(fr, y),
+                           at_x(fr, sec->margin_left + line->col_x_twips), at_y(fr, y),
                            zx, zy, -32000, 32000);
     }
     {   /* the paragraph's border and shading, under its text */
@@ -517,6 +541,8 @@ wp_status wp_pageprint_page(wp_document *doc, const wp_page_device *dev, u32 pag
     }
 done:
     if (font != NULL) plat_font_close(font);
+    if (g_base_font != NULL) plat_font_close(g_base_font);
+    g_base_font = NULL;
     g_zoom = 100;
     return WP_OK;
 }

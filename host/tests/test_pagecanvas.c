@@ -192,3 +192,46 @@ void test_pagecanvas_paint_keeps_to_view(void)
     wp_pagecanvas_free(&c);
     wp_document_free(&doc);
 }
+
+/* At a zoom, a word goes where the layout put it: its place measured in
+   the face the layout used, not in the zoomed face (which a screen
+   without one that small opens bigger, and whose widths would carry the
+   words past their column). A long word at a low zoom makes the two
+   differ by pixels even with the host's proportional faces. */
+void test_pagecanvas_zoom_keeps_layout_places(void)
+{
+    static u8 src[128];
+    wp_document doc;
+    wp_pagecanvas c;
+    wp_paragraph *para;
+    const wp_line *line;
+    u32 i, n = 0;
+    i32 x, y, w, h, tx, ty, want;
+    const char *t;
+
+    for (i = 0; i < 70; i++) src[n++] = 'm';
+    memcpy(src + n, " next\n", 6);
+    n += 6;
+    ASSERT_TRUE(format_txt_import(src, n, &doc) == WP_OK);
+    (void)wp_pageview_relayout(&doc, 0);
+    wp_pagecanvas_init(&c, px15, px15, tw15, tw15);
+    c.fit = WP_ZOOM_FIXED;
+    c.set_zoom = 13;
+    ASSERT_TRUE(wp_pagecanvas_update(&c, &doc, 640, 400) == WP_OK);
+    ASSERT_TRUE(wp_pagecanvas_page_rect(&c, 0, &x, &y, &w, &h));
+    para = &doc.sections[0].paras[0];
+    line = &((const wp_paragraph_layout *)para->layout)->lines[0];
+    want = x + wp_pagecanvas_zx(&c, doc.sections[0].margin_left + line->x_twips +
+                                    wp_line_cursor_x_twips(&doc, para, line, 0, 71, 0));
+    draw_host_reset_text();
+    wp_pagecanvas_paint(&c, &doc, (plat_gc *)&c, 0, 0, 0, 0, 640, 400);
+    n = draw_host_text_count();
+    for (i = 0; i < n; i++) {
+        t = draw_host_text_at(i, &tx, &ty);
+        if (t != NULL && strcmp(t, "next") == 0) break;
+    }
+    ASSERT_TRUE(i < n);
+    ASSERT_TRUE(tx >= want - 1 && tx <= want + 1);
+    wp_pagecanvas_free(&c);
+    wp_document_free(&doc);
+}

@@ -233,6 +233,8 @@ static void rtf_open_section(rtf_parser *p)
     sec->margin_bottom = prev.margin_bottom;
     sec->header = prev.header;
     sec->footer = prev.footer;
+    sec->columns = prev.columns;
+    sec->col_gap = prev.col_gap;
     p->section_idx = idx;
     p->sec_has_header = p->sec_has_footer = 0;
     p->para_pending = WP_TRUE;
@@ -1324,6 +1326,17 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         sec->margin_right = p->doc_page[3];
         sec->margin_top = p->doc_page[4];
         sec->margin_bottom = p->doc_page[5];
+        sec->columns = 0;   /* one column, as RTF's default */
+        sec->col_gap = 0;
+        return;
+    }
+    /* Columns (M19): \colsN and the gap between them, \colsxN. */
+    if (has_param && (strcmp(name, "cols") == 0 || strcmp(name, "colsx") == 0)) {
+        wp_section *sec;
+        rtf_open_section(p);
+        sec = wp_document_section_get(p->doc, p->section_idx);
+        if (name[4] == '\0') sec->columns = (u8)(param < 1 ? 1 : param > 6 ? 6 : param);
+        else if (param >= 0) sec->col_gap = param;
         return;
     }
     /* Page setup, document-wide (\paperw...: the document's, and the

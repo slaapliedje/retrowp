@@ -360,6 +360,8 @@ wp_status wp_merge_document(wp_document *doc, const wp_merge_data *d, u32 *copie
                 dst->margin_bottom = src->margin_bottom;
                 dst->header = src->header;
                 dst->footer = src->footer;
+                dst->columns = src->columns;
+                dst->col_gap = src->col_gap;
             }
             for (pi = 0; pi < wp_document_section_get(doc, s)->para_count && st == WP_OK; pi++) {
                 st = copy_para(doc, s, pi, ns, d, rec);

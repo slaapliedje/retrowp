@@ -202,6 +202,15 @@ static void rtf_build_color_table(const wp_document *doc, rtf_color_table *ct)
 static void rtf_emit_para_props(rtf_writer *w, const wp_para_style *ps);
 static void rtf_emit_char_props(rtf_writer *w, const wp_char_style *cs, const rtf_color_table *ct);
 
+/* A section's columns, where it has more than one (\colsN, the gap
+   \colsxN). */
+static void rtf_emit_columns(rtf_writer *w, const wp_section *sec)
+{
+    if (sec->columns <= 1) return;
+    rtf_write_str(w, "\\cols"); rtf_write_i32(w, (i32)sec->columns);
+    rtf_write_str(w, "\\colsx"); rtf_write_i32(w, sec->col_gap > 0 ? sec->col_gap : 720);
+}
+
 static void rtf_emit_header(rtf_writer *w, const wp_document *doc, const rtf_color_table *ct)
 {
     u32 i;
@@ -271,6 +280,7 @@ static void rtf_emit_header(rtf_writer *w, const wp_document *doc, const rtf_col
         rtf_write_str(w, "\\margr");  rtf_write_i32(w, sec->margin_right);
         rtf_write_str(w, "\\margt");  rtf_write_i32(w, sec->margin_top);
         rtf_write_str(w, "\\margb");  rtf_write_i32(w, sec->margin_bottom);
+        rtf_emit_columns(w, sec);
         rtf_write_str(w, "\r\n");
     }
 }
@@ -708,6 +718,7 @@ static void rtf_emit_document(rtf_writer *w, const wp_document *doc, const rtf_c
             rtf_write_str(w, "\\margrsxn"); rtf_write_i32(w, sec->margin_right);
             rtf_write_str(w, "\\margtsxn"); rtf_write_i32(w, sec->margin_top);
             rtf_write_str(w, "\\margbsxn"); rtf_write_i32(w, sec->margin_bottom);
+            rtf_emit_columns(w, sec);
             rtf_write_str(w, "\r\n");
         }
         /* Its header and footer -- an empty one only where the section

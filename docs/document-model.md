@@ -541,14 +541,19 @@ it -- the PostScript of the character sheet is byte for byte what it
 was before the page printer learnt to draw one page at a zoom.
 
 At a zoom, each word is drawn in a face opened at the zoomed size,
-placed where the layout put it and its measured width scaled back, so
-the layout's line breaks never move with the zoom. Where the screen
+placed where the layout put it, so the layout's line breaks never move
+with the zoom. Where the screen
 has no face that small -- the ST's own bitmap fonts stop well above
 what a page fitted to its window asks for -- a word that would overrun
 its line is "greeked", a grey bar its laid-out width, as DTP programs
 show text too small to read. Paper is never greeked. Text keeps its
 colour on screen, black on paper. Only lines wholly inside the view
 are drawn (MUI gives a Draw method no clip).
+
+At a zoom a word's place is measured in the face the layout measured
+it in (the style's own size), and only drawn in the zoomed face: a
+screen without one as small as the zoom asks opens a bigger face, and
+words advanced by its widths ran into the next column.
 
 Clicks (`wp_pagecanvas_hit`), the caret (`wp_pagecanvas_caret`) and
 the selection (`wp_pagecanvas_selection`) walk each page's lines as
@@ -565,6 +570,40 @@ and grid are saved in the config file (view=, zoom=, grid=, gridsize=).
 The View menu sits after Edit on every GUI port; on the ST its title
 went in between Edit and Tools in the hand-built tree, every object
 from Tools on renumbered, because the AES finds a title's box by index.
+
+## Columns (M19)
+
+A section can be set in newspaper columns: `wp_section.columns` (0 or
+1: one) and `col_gap` (0: half an inch). `wp_section_column_twips` is
+then one column's width -- the text less the gaps, shared out -- so
+every paragraph wraps to it with no other change to layout. Page
+marking (paginate.c) fills a column, then the next from its top, then
+a new page; a page break always starts a new page. Each line records
+its column and that column's left edge (`wp_line.column`,
+`col_x_twips`); the page printer and page view draw a line that much
+to the right, and a printing walk (`wp_line_walk.paper`) starts each
+column at the top of the page. The plain view ignores both and shows
+the columns one after another, at a column's width -- which is also
+all DOS's text screen can do. A footnote goes at the foot of the
+column it is met in, its height kept clear in that column alone.
+Frames are placed on the page, not in a column.
+
+Found while checking columns on target (2026-11-12): the ST and the
+Amiga lay text out with their screen fonts, which GEM and Topaz size to
+the system font rather than to points, so their lines come out shorter
+than the type's size -- 10-point text at about 6-7 points of line
+height -- and a page holds more than it will on another machine. The
+ST's PostScript printing inherits those measures (only its GDOS path
+measures with the printer), so its printout sets the text smaller than
+asked. The page view shows that faithfully; the fix is measuring in
+true point metrics where layout is meant for paper -- the job of the
+outline-font tier discussed for the bigger machines, or of AFM-style
+widths for the PostScript faces. Recorded, not yet fixed.
+
+RTF: `\colsN` and `\colsxN`, document-wide for the first section and
+after `\sectd` for the others; `\sectd` resets to one column. Known
+gaps: columns are not balanced at a section's end, there is no column
+break, and the ruler shows one column.
 
 ## Footnotes (M19)
 

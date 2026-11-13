@@ -190,7 +190,7 @@ static i32 line_extra(wp_document *doc, wp_paragraph *para, const wp_line *line,
 /* The x, on the paper, where a line's content starts. */
 static i32 line_left(const wp_section *sec, const wp_line *line)
 {
-    return sec->margin_left + line->cell_x0 + line->x_twips;
+    return sec->margin_left + line->col_x_twips + line->cell_x0 + line->x_twips;
 }
 
 static void fill(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, i32 cx, i32 cy, i32 cw, i32 ch, u8 v)
@@ -285,8 +285,9 @@ wp_bool wp_pagecanvas_hit(const wp_pagecanvas *c, wp_document *doc, i32 cx, i32 
     iter_start(&it, c, doc, p);
     while (iter_next(&it, &line, &si, &pi, &li, &top)) {
         const wp_section *s = &doc->sections[si];
-        i32 x0 = s->margin_left + line->cell_x0;
-        i32 x1 = line->cell_x1 != 0 ? s->margin_left + line->cell_x1 : s->page_width - s->margin_right;
+        i32 x0 = s->margin_left + line->col_x_twips + line->cell_x0;
+        i32 x1 = line->cell_x1 != 0 ? s->margin_left + line->col_x_twips + line->cell_x1
+                                    : s->margin_left + line->col_x_twips + wp_section_column_twips(s);
         i32 d = y < top ? top - y : y >= top + line->height_twips ? y - (top + line->height_twips) + 1 : 0;
         /* Beside a cell or a frame is further than over it. */
         if (x < x0) d += (x0 - x) / 4;

@@ -65,7 +65,9 @@ typedef struct {
     i32     page_top;     /* the top margin's line of the page walked last */
     i32     frame_y;      /* where the current frame's next line starts */
     wp_bool paper;        /* a page being printed: footnotes at its foot, not in
-                             the flow (WP_LINE_NOTE); wp_line_walk_start clears it */
+                             the flow (WP_LINE_NOTE), and each column from the top
+                             (wp_line.column); wp_line_walk_start clears it */
+    u8      column;       /* a printing walk's column */
 } wp_line_walk;
 
 void wp_line_walk_start(wp_line_walk *w, i32 y);

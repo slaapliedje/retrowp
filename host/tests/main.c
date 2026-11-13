@@ -476,12 +476,17 @@ void test_styles_define_and_redefine(void);
 void test_styles_next_style_and_typing(void);
 void test_styles_rtf_round_trip(void);
 void test_styles_rtf_from_word(void);
+void test_columns_flow(void);
+void test_columns_page_view(void);
+void test_columns_note_and_break(void);
+void test_columns_rtf(void);
 void test_config_view_keys(void);
 void test_pagecanvas_fit_and_stack(void);
 void test_pagecanvas_paint_caret_hit(void);
 void test_pagecanvas_note_at_foot(void);
 void test_pagecanvas_follow_select_snap(void);
 void test_pagecanvas_paint_keeps_to_view(void);
+void test_pagecanvas_zoom_keeps_layout_places(void);
 void test_notes_insert_and_type(void);
 void test_notes_renumber(void);
 void test_notes_at_page_foot(void);
@@ -1213,12 +1218,17 @@ static const test_case g_cases[] = {
     { "styles_next_style_and_typing", test_styles_next_style_and_typing },
     { "styles_rtf_round_trip", test_styles_rtf_round_trip },
     { "styles_rtf_from_word", test_styles_rtf_from_word },
+    { "columns_flow", test_columns_flow },
+    { "columns_page_view", test_columns_page_view },
+    { "columns_note_and_break", test_columns_note_and_break },
+    { "columns_rtf", test_columns_rtf },
     { "config_view_keys", test_config_view_keys },
     { "pagecanvas_fit_and_stack", test_pagecanvas_fit_and_stack },
     { "pagecanvas_paint_caret_hit", test_pagecanvas_paint_caret_hit },
     { "pagecanvas_note_at_foot", test_pagecanvas_note_at_foot },
     { "pagecanvas_follow_select_snap", test_pagecanvas_follow_select_snap },
     { "pagecanvas_paint_keeps_to_view", test_pagecanvas_paint_keeps_to_view },
+    { "pagecanvas_zoom_keeps_layout_places", test_pagecanvas_zoom_keeps_layout_places },
     { "notes_insert_and_type", test_notes_insert_and_type },
     { "notes_renumber", test_notes_renumber },
     { "notes_at_page_foot", test_notes_at_page_foot },

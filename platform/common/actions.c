@@ -1943,6 +1943,32 @@ static wp_status act_view_grid(wp_app_ctx *ctx)
     return WP_OK;
 }
 
+/* ---- Columns (M19; docmodel.h) ---------------------------------------- */
+
+/* Format > Columns: the caret's section in one to four columns, half an
+   inch apart. The text wraps to a column at once; on paper and in page
+   view a full column goes on in the next. */
+static wp_status act_format_columns(wp_app_ctx *ctx)
+{
+    static const char *labels[] = { "One column", "Two columns", "Three columns", "Four columns" };
+    wp_pos *cur;
+    wp_section *sec;
+    u32 picked = 0, pi;
+
+    if (!ctx->doc_loaded) return WP_OK;
+    cur = wp_keymap_cursor(ctx);
+    if (cur->section >= ctx->doc->section_count) return WP_OK;
+    sec = wp_document_section_get(ctx->doc, cur->section);
+    if (!choose_one(ctx, "Columns", labels, 4, sec->columns > 1 ? (u32)sec->columns - 1u : 0u, &picked)) return WP_OK;
+    sec->columns = (u8)(picked + 1u);
+    if (sec->col_gap <= 0) sec->col_gap = 720;
+    for (pi = 0; pi < sec->para_count; pi++) wp_section_paragraph_get(sec, pi)->layout_dirty = WP_TRUE;
+    wp_document_mark_modified(ctx->doc);
+    if (picked > 0 && ctx->page_view_able && !ctx->page_view)
+        wp_action_tell(ctx, "Columns show side by side in page view and on paper");
+    return WP_OK;
+}
+
 /* ---- Mail merge (M18; merge.h) --------------------------------------- */
 
 static void field_done(wp_app_ctx *ctx, const u8 *text, u32 len)
@@ -2231,7 +2257,8 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_TOOLS_INSERTFOOTNOTE, WP_MENU_TOOLS, "Insert Footnote", 0,     0,    act_insert_footnote, NULL },
     { WP_ACT_VIEW_PAGE,          WP_MENU_VIEW,   "Page View",       0,      0,    act_view_page, NULL },
     { WP_ACT_VIEW_ZOOM,          WP_MENU_VIEW,   "Zoom...",         0,      0,    act_view_zoom, NULL },
-    { WP_ACT_VIEW_GRID,          WP_MENU_VIEW,   "Grid...",         0,      0,    act_view_grid, NULL }
+    { WP_ACT_VIEW_GRID,          WP_MENU_VIEW,   "Grid...",         0,      0,    act_view_grid, NULL },
+    { WP_ACT_FORMAT_COLUMNS,     WP_MENU_FORMAT, "Columns...",      0,      0,    act_format_columns, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

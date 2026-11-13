@@ -253,6 +253,14 @@ snap to grid" also makes the ruler's markers move in grid steps.
 RetroWP remembers these choices. Page view needs a graphics
 screen, so DOS keeps its own view.
 
+Columns... (Format menu; Alt+L on DOS) sets the text of the
+section the caret is in in one to four newspaper columns, half an
+inch apart. The text wraps to a column straight away; in page
+view and on paper a full column carries on at the top of the next,
+and the last onto a new page. The plain view shows the columns one
+after another. A footnote goes at the foot of its column. Columns
+are saved in the RTF.
+
 Insert Footnote (Tools menu; Alt+N on DOS) puts a raised number
 at the caret and takes you to the note, at the foot of the page,
 to type it; Enter there starts another paragraph of the same

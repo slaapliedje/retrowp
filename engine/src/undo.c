@@ -856,6 +856,8 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
             back->margin_bottom = was->margin_bottom;
             back->header = was->header;
             back->footer = was->footer;
+            back->columns = was->columns;
+            back->col_gap = was->col_gap;
         }
         return;
     }

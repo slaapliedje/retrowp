@@ -2488,7 +2488,18 @@ the list").
       click and caret agreeing, a note at the paper's foot, following
       the caret, selection strips, snapping, the view's clip, the config
       keys; each shown to fail when broken.
-- [ ] T19.4 Columns (in page view, side by side; DOS one after another).
+- [x] T19.4 Columns (in page view, side by side; DOS one after another).
+      AC: a section in one to four columns (wp_section.columns,
+      col_gap); text wraps to a column; on paper and in page view a full
+      column goes on at the top of the next, then a new page, a page
+      break always a new page; footnotes at the foot of their column;
+      the plain view and DOS show columns one after another. Format >
+      Columns (ST menu item appended, self-check and leaf count; DOS
+      Alt+L). RTF \cols and \colsx both ways. Tests: flow and the
+      printing walk's column restart, page view caret, click and
+      drawing in column two, a note in column two, a page break from
+      it, RTF; each shown to fail when broken. Not yet: balancing at a
+      section's end, a column break, the ruler showing every column.
 
 ---
 

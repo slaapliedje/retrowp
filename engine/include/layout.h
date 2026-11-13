@@ -57,6 +57,12 @@ typedef struct {
     /* Frames (docs/document-model.md, "Frames"), set by page marking. */
     i32 page_y_twips;       /* the line's top below its page's top margin */
     i32 frame_top_twips;    /* a frame line: its frame's top below the top margin */
+    /* Columns (M19), set by page marking: the line's column on its page
+       and that column's left edge from the text's. On paper and in page
+       view a line is drawn col_x_twips to the right; the plain view
+       shows columns one after another and ignores both. */
+    u8  column;
+    i32 col_x_twips;
 } wp_line;
 
 #define WP_LINE_ROW_FIRST   0x01   /* the first line of a table row */
@@ -160,6 +166,8 @@ u32 wp_document_mark_pages(wp_document *doc);
 /* The text column of a section's page: page width less both margins
    (never less than an inch, so a nonsense page setup still lays out). */
 i32 wp_section_column_twips(const wp_section *sec);
+/* The gap between a section's columns (M19): its col_gap, else half an inch. */
+i32 wp_section_col_gap(const wp_section *sec);
 
 
 /* ------------------------------------------------------------------ */

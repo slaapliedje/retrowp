@@ -264,6 +264,12 @@ typedef struct {
        top and bottom margins (PDF; RTF's \header/\footer). */
     wp_span header;
     wp_span footer;
+    /* Columns (M19): the text set in this many newspaper columns (0 or 1:
+       one), col_gap twips between them (0: half an inch). Each column is
+       wp_section_column_twips wide; on paper a column filled goes on in
+       the next, the last onto a new page (paginate.c). */
+    u8  columns;
+    i32 col_gap;
     wp_paragraph *paras;
     u32           para_count;
     u32           para_capacity;

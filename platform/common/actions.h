@@ -124,6 +124,9 @@ typedef enum {
     WP_ACT_VIEW_PAGE,
     WP_ACT_VIEW_ZOOM,
     WP_ACT_VIEW_GRID,
+    /* M19: Format > Columns -- the caret's section in one to four
+       newspaper columns (docmodel.h, wp_section.columns). */
+    WP_ACT_FORMAT_COLUMNS,
     WP_ACT_COUNT
 } wp_action_id;
 
