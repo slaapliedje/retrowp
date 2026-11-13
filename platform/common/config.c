@@ -48,6 +48,7 @@ static void view_defaults(wp_config *out)
     out->grid = 0;
     out->grid_twips = 360;
     out->paper_metrics = 1;
+    out->return_addr[0] = '\0';
 }
 
 static void parse_line(const u8 *bytes, u32 len, wp_config *out)
@@ -100,6 +101,12 @@ static void parse_line(const u8 *bytes, u32 len, wp_config *out)
         if (ascii_ieq(v, val_len, "off")) out->grid = 0;
         else if (ascii_ieq(v, val_len, "show")) out->grid = 1;
         else if (ascii_ieq(v, val_len, "snap")) out->grid = 2;
+        return;
+    }
+    if (ascii_ieq(bytes + key_start, key_len, "return")) {
+        u32 n = val_len < sizeof(out->return_addr) - 1 ? val_len : (u32)sizeof(out->return_addr) - 1;
+        memcpy(out->return_addr, bytes + val_start, n);
+        out->return_addr[n] = '\0';
         return;
     }
     if (ascii_ieq(bytes + key_start, key_len, "metrics")) {
@@ -335,4 +342,12 @@ void wp_config_view_apply(const wp_config *cfg, wp_app_ctx *ctx)
     ctx->canvas.grid_on = (wp_bool)(cfg->grid != 0);
     ctx->canvas.snap_on = (wp_bool)(cfg->grid == 2);
     ctx->canvas.grid_twips = (cfg->grid_twips >= 60 && cfg->grid_twips <= 2880) ? cfg->grid_twips : 360;
+}
+
+wp_status wp_config_save_return(const char *native_path, const char *text)
+{
+    static const char *const keys[] = { "return" };
+    const char *values[1];
+    values[0] = text;
+    return save_keys(native_path, keys, values, 1);
 }

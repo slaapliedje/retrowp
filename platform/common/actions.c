@@ -5,6 +5,7 @@
 #include "merge.h"
 #include "styles.h"
 #include "notes.h"
+#include "paper.h"
 #include "actions.h"
 #include "app_ctx.h"
 #include "format_txt.h"
@@ -938,17 +939,19 @@ static i32 parse_length(const u8 **pp, const u8 *end)
             any = WP_TRUE;
         }
     }
-    if (!any || whole > 100) { *pp = p; return -1; }
+    if (!any || whole > 1000) { *pp = p; return -1; }
     while (p < end && *p == ' ') p++;
     *pp = p;
-    if (end - p >= 2 && (p[0] | 32) == 'c' && (p[1] | 32) == 'm') {      /* 567 twips a cm */
+    if (end - p >= 2 && (p[0] | 32) == 'c' && (p[1] | 32) == 'm') {      /* centimetres */
         *pp = p + 2;
-        return (whole * 567) + (frac * 567) / scale;
+        if (whole > 100) return -1;
+        return (i32)(((long)whole * 144000L + ((long)frac * 144000L) / scale + 127L) / 254L);   /* 1440 / 2.54 */
     }
-    if (end - p >= 2 && (p[0] | 32) == 'm' && (p[1] | 32) == 'm') {
+    if (end - p >= 2 && (p[0] | 32) == 'm' && (p[1] | 32) == 'm') {      /* millimetres, a paper's to 1000 */
         *pp = p + 2;
-        return (whole * 567 + (frac * 567) / scale) / 10;
+        return (i32)(((long)whole * 14400L + ((long)frac * 14400L) / scale + 127L) / 254L);
     }
+    if (whole > 100) return -1;
     if (end - p >= 2 && (p[0] | 32) == 'i' && (p[1] | 32) == 'n') *pp = p + 2;
     else if (p < end && *p == '"') *pp = p + 1;
     return whole * 1440 + (frac * 1440) / scale;
@@ -985,34 +988,133 @@ static void margins_done(wp_app_ctx *ctx, const u8 *text, u32 len)
     section_changed(ctx, sec);
 }
 
+/* The section given paper of w x h twips; margins that would leave less
+   than an inch each way shrink to half an inch (a card, an envelope), a
+   disc's to a centimetre round its edge. */
+static void apply_paper(wp_app_ctx *ctx, wp_section *sec, i32 w, i32 h, u8 kind)
+{
+    sec->page_width = w;
+    sec->page_height = h;
+    if (kind == (u8)WP_PAPER_DISC) {
+        sec->margin_left = sec->margin_right = sec->margin_top = sec->margin_bottom = 567;
+    } else if (w - sec->margin_left - sec->margin_right < 1440 || h - sec->margin_top - sec->margin_bottom < 1440) {
+        sec->margin_left = sec->margin_right = sec->margin_top = sec->margin_bottom = 720;
+    }
+    section_changed(ctx, sec);
+}
+
+/* A named size chosen: turned as asked (an envelope addressed across its
+   length offers landscape first), a disc as it is. */
+static void choose_turn(wp_app_ctx *ctx, wp_section *sec, const wp_paper *pp)
+{
+    static const char *const turns[] = { "Portrait", "Landscape" };
+    u32 turn = 0;
+    wp_bool was_land = (wp_bool)(sec->page_width > sec->page_height);
+
+    if (pp->kind != (u8)WP_PAPER_DISC && pp->w != pp->h) {
+        u32 dflt = (pp->kind == (u8)WP_PAPER_ENVELOPE || was_land) ? 1u : 0u;
+        if (!choose_one(ctx, pp->name, turns, 2, dflt, &turn)) return;
+    }
+    if (turn == 1) apply_paper(ctx, sec, pp->h, pp->w, pp->kind);
+    else apply_paper(ctx, sec, pp->w, pp->h, pp->kind);
+}
+
+/* The sizes of one kind (sheets past the first four for "Other sizes"),
+   one chosen. */
+static void choose_paper_of(wp_app_ctx *ctx, wp_section *sec, const char *title, u8 kind, u32 skip_first)
+{
+    const char *labels[9];
+    const wp_paper *papers[9];
+    u32 i, n = 0, seen = 0, picked = 0;
+
+    for (i = 0; i < wp_paper_count() && n < 9; i++) {
+        const wp_paper *pp = wp_paper_get(i);
+        if (pp->kind != kind && !(kind == (u8)WP_PAPER_CARD && pp->kind == (u8)WP_PAPER_DISC)) continue;
+        if (seen++ < skip_first) continue;
+        labels[n] = pp->name;
+        papers[n++] = pp;
+    }
+    if (n == 0 || !choose_one(ctx, title, labels, n, 0, &picked)) return;
+    choose_turn(ctx, sec, papers[picked]);
+}
+
+static void paper_size_done(wp_app_ctx *ctx, const u8 *text, u32 len)
+{
+    wp_section *sec = caret_section(ctx);
+    const u8 *p = text, *end = text + len;
+    i32 w, h;
+
+    if (sec == NULL) return;
+    w = parse_length(&p, end);
+    h = parse_length(&p, end);
+    while (p < end && *p == ' ') p++;
+    if (w < 0 || h < 0 || p != end) {
+        wp_action_tell(ctx, "Paper size: width then height, as 8.5 11 or 120mm 120mm");
+        return;
+    }
+    if (w < 2160 || h < 2160 || w > 28800 || h > 28800) {
+        wp_action_tell(ctx, "Paper from 1.5 to 20 inches each way");
+        return;
+    }
+    {
+        const wp_paper *pp = wp_paper_match(w, h, NULL);
+        apply_paper(ctx, sec, w, h, pp != NULL ? pp->kind : (u8)WP_PAPER_SHEET);
+    }
+}
+
+/* Format > Page Setup: the caret's section's paper -- the common sizes
+   first, then envelopes, cards and disc labels, the other sheets, or a
+   size typed in -- turned portrait or landscape; or its margins. */
 static wp_status act_page_setup(wp_app_ctx *ctx)
 {
-    static const char *const labels[] = {
-        "Letter", "Letter, landscape", "A4", "A4, landscape",
-        "Legal", "A5", "Margins..."
+    static const char *const top[] = {
+        "Letter", "A4", "Legal", "A5", "Envelopes...", "Cards and discs...",
+        "Other sizes...", "Custom size...", "Margins..."
     };
-    static const i32 sizes[][2] = {
-        { 12240, 15840 }, { 15840, 12240 }, { 11906, 16838 }, { 16838, 11906 },
-        { 12240, 20160 }, { 8391, 11906 }
-    };
-    const u32 count = (u32)(sizeof(labels) / sizeof(labels[0]));
-    const u8 *label_ptrs[7];
-    u32 label_lens[7], i, chosen = 0, def = 0;
-    wp_bool cancelled;
     wp_section *sec = caret_section(ctx);
-    wp_status st;
+    u32 chosen = 0, def = 0, i;
+    const wp_paper *now;
 
     if (sec == NULL) return WP_OK;
-    for (i = 0; i < count; i++) {
-        label_ptrs[i] = (const u8 *)labels[i];
-        label_lens[i] = (u32)strlen(labels[i]);
-        if (i < count - 1 && sizes[i][0] == sec->page_width && sizes[i][1] == sec->page_height) def = i;
+    /* Offered first: the paper the section has, or the list it is in. */
+    now = wp_paper_match(sec->page_width, sec->page_height, NULL);
+    if (now == NULL) def = 7;
+    else {
+        def = now->kind == (u8)WP_PAPER_ENVELOPE ? 4u : now->kind == (u8)WP_PAPER_SHEET ? 6u : 5u;
+        for (i = 0; i < 4; i++) if (strcmp(now->name, top[i]) == 0) def = i;
     }
-    st = plat_dialog_choice(ctx->window, (const u8 *)"Page Setup", 10, label_ptrs, label_lens,
-                            count, def, &cancelled, &chosen);
-    if (st != WP_OK || cancelled) return st;
+    if (!choose_one(ctx, "Page Setup", top, 9, def, &chosen)) return WP_OK;
 
-    if (chosen == count - 1) {
+    if (chosen < 4) {
+        u32 k;
+        for (k = 0; k < wp_paper_count(); k++) {
+            if (strcmp(wp_paper_get(k)->name, top[chosen]) == 0) { choose_turn(ctx, sec, wp_paper_get(k)); break; }
+        }
+    } else if (chosen == 4) {
+        choose_paper_of(ctx, sec, "Envelopes", (u8)WP_PAPER_ENVELOPE, 0);
+    } else if (chosen == 5) {
+        choose_paper_of(ctx, sec, "Cards and discs", (u8)WP_PAPER_CARD, 0);
+    } else if (chosen == 6) {
+        /* The sheets but Letter, Legal, A4 and A5 (listed above). */
+        const char *labels[9];
+        const wp_paper *papers[9];
+        u32 n = 0, picked = 0, k;
+        for (k = 0; k < wp_paper_count() && n < 9; k++) {
+            const wp_paper *pp = wp_paper_get(k);
+            if (pp->kind != (u8)WP_PAPER_SHEET) continue;
+            if (!strcmp(pp->name, "Letter") || !strcmp(pp->name, "Legal") || !strcmp(pp->name, "A4") ||
+                !strcmp(pp->name, "A5")) continue;
+            labels[n] = pp->name;
+            papers[n++] = pp;
+        }
+        if (choose_one(ctx, "Other sizes", labels, n, 0, &picked)) choose_turn(ctx, sec, papers[picked]);
+    } else if (chosen == 7) {
+        static char cur[48];
+        u32 n = 0;
+        n += fmt_inches(sec->page_width, cur + n);  cur[n++] = ' ';
+        n += fmt_inches(sec->page_height, cur + n);
+        wp_prompt_begin(ctx, "Paper size, inches (width height; or cm, mm):", (const u8 *)cur, n, paper_size_done);
+    } else {
         static char cur[48];
         u32 n = 0;
         n += fmt_inches(sec->margin_left, cur + n);   cur[n++] = ' ';
@@ -1020,16 +1122,7 @@ static wp_status act_page_setup(wp_app_ctx *ctx)
         n += fmt_inches(sec->margin_top, cur + n);    cur[n++] = ' ';
         n += fmt_inches(sec->margin_bottom, cur + n);
         wp_prompt_begin(ctx, "Margins, inches (left right top bottom):", (const u8 *)cur, n, margins_done);
-        return WP_OK;
     }
-    if (sizes[chosen][0] - sec->margin_left - sec->margin_right < 1440 ||
-        sizes[chosen][1] - sec->margin_top - sec->margin_bottom < 1440) {
-        wp_action_tell(ctx, "The margins are too wide for that paper");
-        return WP_OK;
-    }
-    sec->page_width = sizes[chosen][0];
-    sec->page_height = sizes[chosen][1];
-    section_changed(ctx, sec);
     return WP_OK;
 }
 
@@ -1969,6 +2062,178 @@ static wp_status act_format_columns(wp_app_ctx *ctx)
     return WP_OK;
 }
 
+/* ---- Envelopes (M19; paper.h) ----------------------------------------- */
+
+static const wp_paper *g_env_paper;
+static char g_env_to[256];
+
+/* Paragraph pi's text, '|' after it, onto out (to cap). */
+static u32 env_para_text(wp_document *doc, u32 si, u32 pi, char *out, u32 n, u32 cap)
+{
+    wp_paragraph *para = wp_section_paragraph_get(wp_document_section_get(doc, si), pi);
+    u16 ri;
+    if (n > 0 && n + 1 < cap) out[n++] = '|';
+    for (ri = 0; ri < para->run_count; ri++) {
+        wp_run *r = wp_paragraph_run_get(para, ri);
+        const u8 *b = wp_strpool_get(&doc->strings, r->text);
+        u32 k;
+        for (k = 0; k < r->text.length && n + 1 < cap; k++) out[n++] = (b[k] == '|') ? '/' : (char)b[k];
+    }
+    out[n] = '\0';
+    return n;
+}
+
+/* The envelope's lines, '|'-separated, as paragraphs at the document's
+   start; how many. Made of journaled edits. */
+static wp_status env_lines(wp_app_ctx *ctx, const char *text, u32 *count)
+{
+    const char *starts[16];
+    u32 lens[16], n = 0, i;
+    const char *p = text;
+    wp_pos at;
+    wp_status st = WP_OK;
+
+    while (*p != '\0' && n < 16) {
+        const char *e = p;
+        while (*e != '\0' && *e != '|') e++;
+        while (p < e && *p == ' ') p++;
+        starts[n] = p;
+        lens[n] = (u32)(e - p);
+        while (lens[n] > 0 && p[lens[n] - 1] == ' ') lens[n]--;
+        if (lens[n] > 0) n++;
+        p = (*e == '|') ? e + 1 : e;
+    }
+    memset(&at, 0, sizeof(at));
+    for (i = n; i > 0 && st == WP_OK; i--) {
+        st = wp_edit_split_paragraph(ctx->doc, ctx->journal, at, NULL);
+        if (st == WP_OK) st = wp_edit_insert_text(ctx->doc, ctx->journal, at, (const u8 *)starts[i - 1], lens[i - 1], NULL);
+    }
+    *count = n;
+    return st;
+}
+
+static void env_return_done(wp_app_ctx *ctx, const u8 *text, u32 len)
+{
+    char from[128];
+    const wp_paper *pp = g_env_paper;
+    u32 nret = 0, nto = 0, k;
+    wp_pos at;
+    wp_section *sec;
+    wp_status st;
+    i32 w, h;
+
+    if (pp == NULL) return;
+    if (len >= sizeof(from)) len = (u32)sizeof(from) - 1;
+    memcpy(from, text, len);
+    from[len] = '\0';
+    if (ctx->config_path != NULL) (void)wp_config_save_return(ctx->config_path, from);
+
+    /* Recipient first (it goes nearer the letter), then the return
+       address above it, each line a paragraph at the start; then the
+       break that makes them the envelope's own section. One undo step;
+       undoing it gives the letter its page back (the split remembers). */
+    wp_undo_group_begin(ctx->journal);
+    st = env_lines(ctx, g_env_to, &nto);
+    if (st == WP_OK) st = env_lines(ctx, from, &nret);
+    memset(&at, 0, sizeof(at));
+    at.paragraph = nret + nto;
+    if (st == WP_OK && nret + nto > 0) st = wp_edit_split_section(ctx->doc, ctx->journal, at, NULL);
+    wp_undo_group_end(ctx->journal);
+    if (st != WP_OK || nret + nto == 0) {
+        wp_action_tell(ctx, nret + nto == 0 ? "No address to put on the envelope" : "Couldn't add the envelope");
+        return;
+    }
+
+    /* The envelope's page: landscape, half-inch margins, no header or
+       footer; its lines plain, the recipient's block from the middle,
+       a little left of centre, as a postal service reads it. */
+    sec = wp_document_section_get(ctx->doc, 0);
+    w = pp->h;
+    h = pp->w;
+    sec->page_width = w;
+    sec->page_height = h;
+    sec->margin_left = sec->margin_right = sec->margin_top = sec->margin_bottom = 720;
+    sec->header.length = 0;
+    sec->footer.length = 0;
+    sec->columns = 0;
+    for (k = 0; k < sec->para_count; k++) {
+        const wp_para_style *base = wp_document_pstyle_get(ctx->doc, ctx->doc->default_pstyle);
+        wp_para_style ps;
+        wp_pstyle hs;
+        if (base == NULL) break;
+        ps = *base;
+        ps.space_before = ps.space_after = 0;
+        ps.indent_left = ps.indent_right = ps.indent_first = 0;
+        ps.align = WP_ALIGN_LEFT;
+        if (k >= nret) {
+            ps.indent_left = (w * 2) / 5 - sec->margin_left;
+            if (k == nret) ps.space_before = h / 2 - sec->margin_top - (i32)nret * 280;
+            if (ps.space_before < 0) ps.space_before = 0;
+        }
+        if (wp_document_pstyle_find_or_add(ctx->doc, &ps, &hs) == WP_OK) {
+            sec = wp_document_section_get(ctx->doc, 0);
+            wp_paragraph_pstyle_set(wp_section_paragraph_get(sec, k), hs);
+        }
+        wp_section_paragraph_get(sec, k)->layout_dirty = WP_TRUE;
+    }
+    memset(wp_keymap_cursor(ctx), 0, sizeof(wp_pos));
+    wp_document_mark_modified(ctx->doc);
+    wp_action_tell(ctx, "Envelope added as the first page");
+}
+
+static void env_to_done(wp_app_ctx *ctx, const u8 *text, u32 len)
+{
+    wp_config cfg;
+    if (len >= sizeof(g_env_to)) len = (u32)sizeof(g_env_to) - 1;
+    memcpy(g_env_to, text, len);
+    g_env_to[len] = '\0';
+    cfg.return_addr[0] = '\0';
+    if (ctx->config_path != NULL) (void)wp_config_load(ctx->config_path, &cfg);
+    wp_prompt_begin(ctx, "Return address (lines split by |):", (const u8 *)cfg.return_addr,
+                    (u32)strlen(cfg.return_addr), env_return_done);
+}
+
+/* Tools > Envelope: a size, the address -- the selected paragraphs,
+   offered for editing, or typed -- and the return address (the last one
+   used); the envelope goes in before the document, as its first page. */
+static wp_status act_tools_envelope(wp_app_ctx *ctx)
+{
+    const char *labels[9];
+    const wp_paper *papers[9];
+    u32 i, n = 0, picked = 0, len = 0;
+    wp_selection sel;
+    wp_section *sec;
+
+    if (!ctx->doc_loaded) return WP_OK;
+    sec = wp_document_section_get(ctx->doc, 0);
+    if (sec->para_count > 0 && (sec->paras[0].trow != 0 || sec->paras[0].frame != 0 || sec->paras[0].note != 0)) {
+        wp_action_tell(ctx, "The document starts with a table or frame; no room for an envelope");
+        return WP_OK;
+    }
+    for (i = 0; i < wp_paper_count() && n < 9; i++) {
+        const wp_paper *pp = wp_paper_get(i);
+        if (pp->kind != (u8)WP_PAPER_ENVELOPE) continue;
+        labels[n] = pp->name;
+        papers[n++] = pp;
+    }
+    if (!choose_one(ctx, "Envelope", labels, n, 0, &picked)) return WP_OK;
+    g_env_paper = papers[picked];
+    g_env_to[0] = '\0';
+    if (wp_keymap_selection(ctx, &sel)) {
+        wp_pos a = sel.anchor, b = sel.caret, t;
+        u32 si, pi;
+        if (wp_pos_compare(a, b) > 0) { t = a; a = b; b = t; }
+        for (si = a.section; si <= b.section && si < ctx->doc->section_count; si++) {
+            wp_section *s2 = wp_document_section_get(ctx->doc, si);
+            u32 p0 = (si == a.section) ? a.paragraph : 0;
+            u32 p1 = (si == b.section) ? b.paragraph : (s2->para_count > 0 ? s2->para_count - 1 : 0);
+            for (pi = p0; pi <= p1 && pi < s2->para_count; pi++) len = env_para_text(ctx->doc, si, pi, g_env_to, len, sizeof(g_env_to));
+        }
+    }
+    wp_prompt_begin(ctx, "Address (lines split by |):", (const u8 *)g_env_to, (u32)strlen(g_env_to), env_to_done);
+    return WP_OK;
+}
+
 /* ---- Mail merge (M18; merge.h) --------------------------------------- */
 
 static void field_done(wp_app_ctx *ctx, const u8 *text, u32 len)
@@ -2258,7 +2523,8 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_VIEW_PAGE,          WP_MENU_VIEW,   "Page View",       0,      0,    act_view_page, NULL },
     { WP_ACT_VIEW_ZOOM,          WP_MENU_VIEW,   "Zoom...",         0,      0,    act_view_zoom, NULL },
     { WP_ACT_VIEW_GRID,          WP_MENU_VIEW,   "Grid...",         0,      0,    act_view_grid, NULL },
-    { WP_ACT_FORMAT_COLUMNS,     WP_MENU_FORMAT, "Columns...",      0,      0,    act_format_columns, NULL }
+    { WP_ACT_FORMAT_COLUMNS,     WP_MENU_FORMAT, "Columns...",      0,      0,    act_format_columns, NULL },
+    { WP_ACT_TOOLS_ENVELOPE,     WP_MENU_TOOLS,  "Envelope...",     0,      0,    act_tools_envelope, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

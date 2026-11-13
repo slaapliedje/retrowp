@@ -482,6 +482,9 @@ void test_columns_note_and_break(void);
 void test_columns_rtf(void);
 void test_papermetrics_widths(void);
 void test_papermetrics_layout_and_config(void);
+void test_actions_envelope(void);
+void test_pagecanvas_disc_guides(void);
+void test_pagecanvas_disc_guides_tall_pixels(void);
 void test_config_view_keys(void);
 void test_pagecanvas_fit_and_stack(void);
 void test_pagecanvas_paint_caret_hit(void);
@@ -1226,6 +1229,9 @@ static const test_case g_cases[] = {
     { "columns_rtf", test_columns_rtf },
     { "papermetrics_widths", test_papermetrics_widths },
     { "papermetrics_layout_and_config", test_papermetrics_layout_and_config },
+    { "actions_envelope", test_actions_envelope },
+    { "pagecanvas_disc_guides", test_pagecanvas_disc_guides },
+    { "pagecanvas_disc_guides_tall_pixels", test_pagecanvas_disc_guides_tall_pixels },
     { "config_view_keys", test_config_view_keys },
     { "pagecanvas_fit_and_stack", test_pagecanvas_fit_and_stack },
     { "pagecanvas_paint_caret_hit", test_pagecanvas_paint_caret_hit },

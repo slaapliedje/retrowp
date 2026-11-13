@@ -36,6 +36,9 @@ typedef struct {
        (plat_metrics_set_paper; retroplat's papermetrics.h) or with the
        screen's own fonts. A text screen ignores it. */
     u8  paper_metrics;
+    /* "return=Name|Street|Town": the envelope's return address, its
+       lines split by '|' (Tools > Envelope keeps the last one used). */
+    char return_addr[128];
 } wp_config;
 
 /* Line-based `key=value` text, `#`/`;` comment lines, blank lines
@@ -81,5 +84,8 @@ wp_status wp_config_save_printer(const char *native_path, u8 driver, u8 sides);
 wp_status wp_config_save_view(const char *native_path, const wp_config *cfg);
 void      wp_config_view_get(wp_config *cfg, const struct wp_app_ctx *ctx);
 void      wp_config_view_apply(const wp_config *cfg, struct wp_app_ctx *ctx);
+
+/* The envelope's return address written (return=), the same way. */
+wp_status wp_config_save_return(const char *native_path, const char *text);
 
 #endif /* WP_CONFIG_H */

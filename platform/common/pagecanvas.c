@@ -5,6 +5,7 @@
 #include "pageview.h"
 #include "layout.h"
 #include "selspan.h"
+#include "paper.h"
 
 void wp_pagecanvas_init(wp_pagecanvas *c, wp_page_px_fn x_px, wp_page_px_fn y_px,
                         wp_page_px_fn x_tw, wp_page_px_fn y_tw)
@@ -203,6 +204,27 @@ static void fill(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, i32 cx, i32 cy, i32 cw
     if (x1 > x && y1 > y) (void)plat_fill_rect(gc, x, y, x1 - x, y1 - y, v, v, v);
 }
 
+/* cos(2 pi i / 48), thousandths: a circle as 48 segments. */
+static const i16 g_cos48[48] = {
+    1000, 991, 966, 924, 866, 793, 707, 609, 500, 383, 259, 131, 0, -131, -259, -383, -500, -609,
+    -707, -793, -866, -924, -966, -991, -1000, -991, -966, -924, -866, -793, -707, -609, -500, -383,
+    -259, -131, 0, 131, 259, 383, 500, 609, 707, 793, 866, 924, 966, 991
+};
+
+/* A circle's outline, centre (cx, cy), radii rx and ry pixels (a
+   screen's pixels need not be square: the ST's are not) -- a disc
+   label's edge and its hole, guides on screen only. */
+static void circle(plat_gc *gc, i32 cx, i32 cy, i32 rx, i32 ry)
+{
+    i32 xy[98];
+    u32 i;
+    for (i = 0; i <= 48; i++) {
+        xy[i * 2] = cx + (rx * g_cos48[i % 48]) / 1000;
+        xy[i * 2 + 1] = cy + (ry * g_cos48[(i + 36) % 48]) / 1000;   /* sin = cos shifted a quarter */
+    }
+    (void)plat_draw_polyline(gc, xy, 49, 1, 0, 0, 0);
+}
+
 void wp_pagecanvas_paint(const wp_pagecanvas *c, wp_document *doc, plat_gc *gc,
                          i32 win_x, i32 win_y, i32 clip_x, i32 clip_y, i32 clip_w, i32 clip_h)
 {
@@ -232,6 +254,17 @@ void wp_pagecanvas_paint(const wp_pagecanvas *c, wp_document *doc, plat_gc *gc,
         fill(gc, px + pw, py, 1, ph, clip_x, clip_y, clip_w, clip_h, 0);
         fill(gc, px + 2, py + ph + 1, pw, 2, clip_x, clip_y, clip_w, clip_h, 0);
         fill(gc, px + pw + 1, py + 2, 2, ph, clip_x, clip_y, clip_w, clip_h, 0);
+        /* A disc label (paper.h): the disc's edge and its hole, where
+           the printable ring is. */
+        {
+            const wp_paper *pp = wp_paper_match(sec->page_width, sec->page_height, NULL);
+            if (pp != NULL && pp->kind == (u8)WP_PAPER_DISC && py >= clip_y && py + ph <= clip_y + clip_h) {
+                circle(gc, px + pw / 2, py + ph / 2,
+                       wp_pagecanvas_zx(c, WP_DISC_TWIPS / 2), wp_pagecanvas_zy(c, WP_DISC_TWIPS / 2));
+                circle(gc, px + pw / 2, py + ph / 2,
+                       wp_pagecanvas_zx(c, WP_DISC_HOLE_TWIPS / 2), wp_pagecanvas_zy(c, WP_DISC_HOLE_TWIPS / 2));
+            }
+        }
         /* The margins' corners, as crop marks. */
         ml = px + wp_pagecanvas_zx(c, sec->margin_left);
         mt = py + wp_pagecanvas_zy(c, sec->margin_top);

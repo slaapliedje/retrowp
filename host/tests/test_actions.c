@@ -1710,13 +1710,14 @@ void test_actions_page_setup_paper_and_margins(void)
     ctx_setup_imported(&doc, &journal, &ctx, "Body\n");
     sec = &doc.sections[0];
 
-    window_host_next_choice(3);                         /* A4, landscape */
+    window_host_next_choice(1);                         /* A4, */
+    window_host_next_choice(1);                         /* landscape */
     ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
     ASSERT_EQ_U32((u32)sec->page_width, 16838);
     ASSERT_EQ_U32((u32)sec->page_height, 11906);
     ASSERT_TRUE(wp_document_is_modified(&doc));
 
-    window_host_next_choice(6);                         /* Margins... */
+    window_host_next_choice(8);                         /* Margins... */
     ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
     ASSERT_TRUE(ctx.prompt.active);
     ASSERT_EQ_U32(ctx.prompt.len, 7);                   /* "1 1 1 1" */
@@ -1727,7 +1728,7 @@ void test_actions_page_setup_paper_and_margins(void)
     ASSERT_EQ_U32((u32)sec->margin_left, 1080);         /* one length: all four */
     ASSERT_EQ_U32((u32)sec->margin_bottom, 1080);
 
-    window_host_next_choice(6);
+    window_host_next_choice(8);
     ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
     for (i = 0; i < 20; i++) (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_BACKSPACE), 0);
     type_text(&ctx, "2.5cm 1in 1 1.25");
@@ -1738,17 +1739,47 @@ void test_actions_page_setup_paper_and_margins(void)
     ASSERT_EQ_U32((u32)sec->margin_bottom, 1800);
 
     /* Nonsense, and margins that leave no page, change nothing. */
-    window_host_next_choice(6);
+    window_host_next_choice(8);
     ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
     for (i = 0; i < 30; i++) (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_BACKSPACE), 0);
     type_text(&ctx, "1 2 x");
     (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
-    window_host_next_choice(6);
+    window_host_next_choice(8);
     ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
     for (i = 0; i < 30; i++) (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_BACKSPACE), 0);
     type_text(&ctx, "6 6 1 1");
     (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
     ASSERT_EQ_U32((u32)sec->margin_left, 1417);
+
+    /* An envelope offers landscape first; a 3x5 card's margins shrink to
+       half an inch; a disc label is square, unturned, a centimetre in;
+       a size typed in millimetres. */
+    window_host_next_choice(4);                         /* Envelopes... */
+    window_host_next_choice(0);                         /* #10 */
+    window_host_next_choice(1);                         /* landscape */
+    ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32((u32)sec->page_width, 13680);
+    ASSERT_EQ_U32((u32)sec->page_height, 5940);
+    window_host_next_choice(5);                         /* Cards and discs... */
+    window_host_next_choice(0);                         /* 3x5 */
+    window_host_next_choice(1);                         /* landscape */
+    ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32((u32)sec->page_width, 7200);
+    ASSERT_EQ_U32((u32)sec->margin_left, 720);
+    window_host_next_choice(5);
+    window_host_next_choice(3);                         /* CD/DVD label */
+    ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32((u32)sec->page_width, 6803);
+    ASSERT_EQ_U32((u32)sec->page_height, 6803);
+    ASSERT_EQ_U32((u32)sec->margin_top, 567);
+    window_host_next_choice(7);                         /* Custom size... */
+    ASSERT_TRUE(wp_action_find(WP_ACT_PAGE_SETUP)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(ctx.prompt.active);
+    for (i = 0; i < 30; i++) (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_BACKSPACE), 0);
+    type_text(&ctx, "150mm 118mm");
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
+    ASSERT_EQ_U32((u32)sec->page_width, 8504);
+    ASSERT_EQ_U32((u32)sec->page_height, 6690);
     ctx_teardown(&doc, &journal, &ctx);
 }
 
@@ -2348,5 +2379,66 @@ void test_actions_format_style_and_define(void)
     ps = wp_document_pstyle_get(&doc, doc.sections[0].paras[1].style);
     nm = wp_style_name(&doc, ps->style_id, &len);
     ASSERT_TRUE(nm != NULL && len == 4 && memcmp(nm, "Note", 4) == 0);
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* Tools > Envelope: the selected address offered, a return address
+   typed, the envelope added before the letter as its own landscape
+   section with the address block indented; one undo takes it away and
+   gives the letter its own page back. */
+void test_actions_envelope(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    const wp_para_style *ps;
+    char t[64];
+    u16 ri;
+    u32 n;
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Jane Doe\n12 Main St\nSpringfield\nDear Jane,\n");
+    ctx.km.vi.mode = (u8)WP_VIMODE_VISUAL;
+    memset(&ctx.km.vi.visual.anchor, 0, sizeof(wp_pos));
+    ctx.km.vi.visual.caret = ctx.km.vi.visual.anchor;
+    ctx.km.vi.visual.caret.paragraph = 2;
+    ctx.km.vi.visual.caret.offset = 3;
+    window_host_next_choice(0);                          /* #10 */
+    ASSERT_TRUE(wp_action_find(WP_ACT_TOOLS_ENVELOPE)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(ctx.prompt.active);
+    ASSERT_MEM_EQ(ctx.prompt.text, "Jane Doe|12 Main St|Springfield", 31);
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
+    ASSERT_TRUE(ctx.prompt.active);                       /* the return address now */
+    type_text(&ctx, "Me|1 Elm Rd");
+    (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
+
+    ASSERT_EQ_U32(doc.section_count, 2);
+    ASSERT_EQ_U32((u32)doc.sections[0].page_width, 13680);
+    ASSERT_EQ_U32((u32)doc.sections[0].page_height, 5940);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 5);
+    ASSERT_EQ_U32((u32)doc.sections[1].page_width, 12240);
+    {
+        static const char *const want[] = { "Me", "1 Elm Rd", "Jane Doe", "12 Main St", "Springfield" };
+        u32 pi;
+        for (pi = 0; pi < 5; pi++) {
+            wp_paragraph *p = &doc.sections[0].paras[pi];
+            n = 0;
+            for (ri = 0; ri < p->run_count; ri++) {
+                memcpy(t + n, wp_strpool_get(&doc.strings, p->runs[ri].text), p->runs[ri].text.length);
+                n += p->runs[ri].text.length;
+            }
+            t[n] = '\0';
+            ASSERT_EQ_STR(t, want[pi]);
+        }
+    }
+    ps = wp_document_pstyle_get(&doc, doc.sections[0].paras[2].style);
+    ASSERT_TRUE(ps != NULL && ps->indent_left > 3000 && ps->space_before > 0);
+    ps = wp_document_pstyle_get(&doc, doc.sections[0].paras[0].style);
+    ASSERT_TRUE(ps != NULL && ps->indent_left == 0);
+
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_UNDO)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 1);
+    ASSERT_EQ_U32((u32)doc.sections[0].page_width, 12240);
+    ASSERT_EQ_U32((u32)doc.sections[0].page_height, 15840);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 4);
     ctx_teardown(&doc, &journal, &ctx);
 }

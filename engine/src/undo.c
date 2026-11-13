@@ -375,6 +375,17 @@ wp_status wp_edit_split_section(wp_document *doc, wp_undo_journal *journal,
         if (grouped) wp_undo_group_end(journal);
         return WP_NOMEM;
     }
+    /* The section's page setup as it was: undoing the split gives it
+       back to the joined section, whatever was set on the first half
+       since (an envelope added before a letter, Page Setup after a
+       break). Without it, the first half's would win. */
+    op->extra = mem_alloc((u32)sizeof(wp_section));
+    if (op->extra != NULL) {
+        wp_section *was = (wp_section *)op->extra;
+        *was = doc->sections[pos.section];
+        was->paras = NULL;
+        was->para_count = was->para_capacity = 0;
+    }
     st = wp_document_split_section_raw(doc, pos.section, at);
     if (st != WP_OK) {
         op_free(op);
@@ -838,7 +849,20 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
     wp_paragraph *para;
 
     if (op->kind == (u8)WP_OP_SPLIT_SECTION) {
-        (void)wp_document_merge_section_raw(doc, op->at.section);
+        if (wp_document_merge_section_raw(doc, op->at.section) == WP_OK && op->extra != NULL) {
+            wp_section *back = &doc->sections[op->at.section];
+            const wp_section *was = (const wp_section *)op->extra;
+            back->page_width = was->page_width;
+            back->page_height = was->page_height;
+            back->margin_left = was->margin_left;
+            back->margin_right = was->margin_right;
+            back->margin_top = was->margin_top;
+            back->margin_bottom = was->margin_bottom;
+            back->header = was->header;
+            back->footer = was->footer;
+            back->columns = was->columns;
+            back->col_gap = was->col_gap;
+        }
         return;
     }
     if (op->kind == (u8)WP_OP_MERGE_SECTION) {

@@ -166,9 +166,11 @@ the mouse. Its buttons, left to right:
   Header, Footer (a line printed at the top or bottom of every
               page; the Format menu has them too on the Amiga
               and Mac)
-  Page Setup (the paper -- Letter, A4, Legal or A5, upright or
-              on its side -- or the margins; the File menu has
-              it too on the Amiga and Mac)
+  Page Setup (the paper -- Letter, A4, Legal, A5, envelopes,
+              index cards, CD/DVD labels and inserts, other
+              sheets or a size you type -- upright or on its side,
+              or the margins; the File menu has it too on the
+              Amiga and Mac)
   Borders (a box or rules around the paragraphs you are in or
               have selected -- none, a box, top, bottom, or top
               and bottom; single, double or thick lines -- and
@@ -198,7 +200,20 @@ in the file under its own name.
 Page Setup's Margins asks in the status line, in inches: one
 length for all four margins, or four for left, right, top and
 bottom ("1 1 0.75 0.75"). A number may say cm or mm instead.
-Paper and margins belong to the section the caret is in.
+Custom size asks for the paper's width and height the same way
+("5.5 8.5", "120mm 120mm"). Paper too small for the margins gets
+half-inch margins; a CD/DVD label is the disc's 120 mm square with
+a centimetre round it, and page view draws the disc's edge and its
+hole so you can see the printable ring. Paper and margins belong
+to the section the caret is in.
+
+Envelope (Tools menu; Alt+E on DOS) asks the envelope's size,
+then the address -- the paragraphs you have selected are offered,
+their lines split by | -- and the return address (RetroWP
+remembers the last one). The envelope goes in before the document
+as its own first page, landscape, the address set where a postal
+service reads it; Undo takes it away again. Print it with the
+letter, or print the first page alone.
 
 A file from another word processor may hold frames: text boxes
 at a fixed place on the page, such as a form's fields or a

@@ -240,7 +240,9 @@
 #define WP_MENU_OBJ_VIEW_GRID            58
 /* Format > Columns... (M19), appended last in the Format chain. */
 #define WP_MENU_OBJ_FORMAT_COLUMNS       59
-#define WP_MENU_OBJ_COUNT        60
+/* Tools > Envelope... (M19), appended last in the Tools chain. */
+#define WP_MENU_OBJ_TOOLS_ENVELOPE       60
+#define WP_MENU_OBJ_COUNT        61
 
 extern WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 

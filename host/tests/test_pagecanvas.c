@@ -8,6 +8,7 @@
 #include "editing.h"
 #include "layout.h"
 #include "draw_host.h"
+#include "paper.h"
 
 /* Page view (pagecanvas.h), with a 96-dpi screen: 15 twips a pixel. */
 
@@ -232,6 +233,77 @@ void test_pagecanvas_zoom_keeps_layout_places(void)
     }
     ASSERT_TRUE(i < n);
     ASSERT_TRUE(tx >= want - 1 && tx <= want + 1);
+    wp_pagecanvas_free(&c);
+    wp_document_free(&doc);
+}
+
+/* A disc label's page shows the disc's edge and hole as guides -- two
+   outlines, the outer as wide as the disc -- and an ordinary page none.
+   The paper table names a size either way round. */
+void test_pagecanvas_disc_guides(void)
+{
+    wp_document doc;
+    wp_pagecanvas c;
+    wp_section *sec;
+    i32 x0, y0, x1, y1;
+    wp_bool land = WP_FALSE;
+    const wp_paper *pp;
+
+    pp = wp_paper_match(13680, 5940, &land);
+    ASSERT_TRUE(pp != NULL && strcmp(pp->name, "Envelope #10") == 0 && land);
+    pp = wp_paper_match(11906, 16838, &land);
+    ASSERT_TRUE(pp != NULL && strcmp(pp->name, "A4") == 0 && !land);
+    ASSERT_TRUE(wp_paper_match(9999, 9999, NULL) == NULL);
+
+    ASSERT_TRUE(format_txt_import((const u8 *)"Mix tape\n", 9, &doc) == WP_OK);
+    (void)wp_pageview_relayout(&doc, 0);
+    wp_pagecanvas_init(&c, px15, px15, tw15, tw15);
+    ASSERT_TRUE(wp_pagecanvas_update(&c, &doc, 640, 400) == WP_OK);
+    draw_host_reset_fills();
+    wp_pagecanvas_paint(&c, &doc, (plat_gc *)&c, 0, 0, 0, 0, 640, 400);
+    ASSERT_EQ_U32(draw_host_polyline_calls(), 0);
+
+    sec = wp_document_section_get(&doc, 0);
+    sec->page_width = sec->page_height = WP_DISC_TWIPS;
+    sec->margin_left = sec->margin_right = sec->margin_top = sec->margin_bottom = 567;
+    sec->paras[0].layout_dirty = WP_TRUE;
+    (void)wp_pageview_relayout(&doc, 0);
+    c.fit = WP_ZOOM_FIT_PAGE;
+    ASSERT_TRUE(wp_pagecanvas_update(&c, &doc, 640, 400) == WP_OK);
+    draw_host_reset_fills();
+    wp_pagecanvas_paint(&c, &doc, (plat_gc *)&c, 0, 0, 0, 0, 640, 400);
+    ASSERT_EQ_U32(draw_host_polyline_calls(), 2);
+    ASSERT_TRUE(draw_host_vector_box(&x0, &y0, &x1, &y1));
+    ASSERT_TRUE(x1 - x0 >= wp_pagecanvas_zx(&c, WP_DISC_TWIPS) - 2 && x1 - x0 <= wp_pagecanvas_zx(&c, WP_DISC_TWIPS) + 2);
+    wp_pagecanvas_free(&c);
+    wp_document_free(&doc);
+}
+
+static i32 px15y(i32 t) { return t / 30; }   /* pixels twice as tall as wide */
+static i32 tw15y(i32 p) { return p * 30; }
+
+/* On a screen whose pixels are not square, the disc's outline is the
+   page's: as wide as it and as tall as it, in each axis's own pixels. */
+void test_pagecanvas_disc_guides_tall_pixels(void)
+{
+    wp_document doc;
+    wp_pagecanvas c;
+    wp_section *sec;
+    i32 x0, y0, x1, y1;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)"Mix tape\n", 9, &doc) == WP_OK);
+    sec = wp_document_section_get(&doc, 0);
+    sec->page_width = sec->page_height = WP_DISC_TWIPS;
+    sec->margin_left = sec->margin_right = sec->margin_top = sec->margin_bottom = 567;
+    (void)wp_pageview_relayout(&doc, 0);
+    wp_pagecanvas_init(&c, px15, px15y, tw15, tw15y);
+    c.fit = WP_ZOOM_FIT_PAGE;
+    ASSERT_TRUE(wp_pagecanvas_update(&c, &doc, 640, 400) == WP_OK);
+    draw_host_reset_fills();
+    wp_pagecanvas_paint(&c, &doc, (plat_gc *)&c, 0, 0, 0, 0, 640, 400);
+    ASSERT_TRUE(draw_host_vector_box(&x0, &y0, &x1, &y1));
+    ASSERT_TRUE(y1 - y0 >= wp_pagecanvas_zy(&c, WP_DISC_TWIPS) - 2 && y1 - y0 <= wp_pagecanvas_zy(&c, WP_DISC_TWIPS) + 2);
+    ASSERT_TRUE(x1 - x0 >= wp_pagecanvas_zx(&c, WP_DISC_TWIPS) - 2 && x1 - x0 <= wp_pagecanvas_zx(&c, WP_DISC_TWIPS) + 2);
     wp_pagecanvas_free(&c);
     wp_document_free(&doc);
 }

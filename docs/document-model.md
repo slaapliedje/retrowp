@@ -594,6 +594,18 @@ the system font rather than to points, so 10-point text got about 6-7
 points of line height, a page held too much, and the ST's PostScript
 printed small. Fixed by paper metrics (T19.5, below).
 
+## Paper sizes (M19)
+
+A section's paper is its page width and height; engine/include/paper.h
+only names sizes and says what kind each is (sheet, envelope, card,
+disc), matched either way round, so a page from any file finds its
+name. Page view draws a disc label's edge and hole (WP_DISC_TWIPS, the
+41 mm clear centre) as guides -- never on paper. Tools > Envelope adds
+the envelope as section 0 by journaled edits and a section split; the
+split now remembers the section's page setup and its undo gives it
+back, so the letter is not left envelope-sized. Redo re-splits but does
+not re-apply the envelope's page (page setup is not journaled).
+
 ## Paper metrics (M19)
 
 Layout measures text as it will print, on every graphics screen

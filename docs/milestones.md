@@ -2515,6 +2515,27 @@ the list").
       faces by name and family, Windows-1252 and missing characters,
       line height, layout under the mode, the config key; the backend
       hook shown to fail when broken.
+- [x] T19.6 Paper sizes, envelopes, disc labels.
+      AC: Page Setup offers 21 named sizes (engine paper.h) -- sheets
+      (Letter, Legal, Executive, Half Letter, Tabloid, A3-A6, B5),
+      envelopes (#10, DL, C5, C6, Monarch), index cards, a CD/DVD label
+      (the disc's 120 mm square), CD booklet and tray card -- turned
+      portrait or landscape (an envelope offers landscape first), or a
+      size typed in inches, cm or mm (now converted exactly); margins
+      that leave no room shrink to half an inch, a disc's to a
+      centimetre. Page view draws a disc's edge and hole. Tools >
+      Envelope (ST menu item appended; DOS Alt+E): the selected address
+      offered, a return address remembered in the config file, the
+      envelope added as the document's first section, landscape, the
+      address block where a postal service reads it, one undo step --
+      and undoing a section split now gives the joined section its own
+      page setup back (it took the first half's). PostScript already
+      names its page size to the printer. Tests: the size lists and
+      turns, custom sizes, the envelope and its undo, disc guides,
+      matching sizes either way round; split-undo shown to fail when
+      broken. Next: printing to the Canon's disc tray through the
+      gateway once its CUPS queue is set up (its InputSlot and media),
+      and label-sheet templates.
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)

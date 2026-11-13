@@ -169,7 +169,7 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_EDIT_COPY,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 8,  1 },
     { WP_MENU_OBJ_EDIT_PASTE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 8,  1 },
     { WP_MENU_OBJ_EDIT_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  3, 8,  1 },
-    { WP_MENU_OBJ_FORMAT_BOX,    WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE, G_BOX, OF_NONE    , OS_NORMAL, OB_SPEC_ZERO, 18, 0, 18, 6 },
+    { WP_MENU_OBJ_FORMAT_BOX,    WP_MENU_OBJ_TOOLS_SPELLCHECK, WP_MENU_OBJ_TOOLS_ENVELOPE, G_BOX, OF_NONE    , OS_NORMAL, OB_SPEC_ZERO, 18, 0, 18, 7 },
     { WP_MENU_OBJ_TOOLS_THESAURUS, -1,                    -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 0, 18, 1 },
     { WP_MENU_OBJ_TOOLS_GRAMMARCHECK, -1,                 -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 1, 18, 1 },
     { WP_MENU_OBJ_TOOLS_CHAT,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 2, 18, 1 },
@@ -229,7 +229,7 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_FORMAT_COLUMNS, -1,                     -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  9, 18, 1 },
     /* Tools > Insert Footnote (M19), appended: last in the Tools chain,
        after Insert Field (y 5; the box to six rows). OF_LASTOB here. */
-    { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 18, 1 },
+    { WP_MENU_OBJ_TOOLS_ENVELOPE, -1,                     -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 18, 1 },
     /* View (M19): its box between Edit's and Tools' in the dropdowns'
        chain, as its title is between theirs; OF_LASTOB on Grid. */
     { WP_MENU_OBJ_TOOLS_BOX,     WP_MENU_OBJ_VIEW_PAGE,   WP_MENU_OBJ_VIEW_GRID,  G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 12, 0, 12, 3 },
@@ -238,7 +238,10 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_VIEW_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 12, 1 },
     /* Format > Columns... (M19), appended: after Define Style (y 10; the
        box to eleven rows). OF_LASTOB here. */
-    { WP_MENU_OBJ_FORMAT_BOX,    -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0, 10, 18, 1 }
+    { WP_MENU_OBJ_FORMAT_BOX,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 10, 18, 1 },
+    /* Tools > Envelope... (M19), appended: after Insert Footnote (y 6;
+       the box to seven rows). OF_LASTOB here. */
+    { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 18, 1 }
 };
 
 /* T169: how many text fragments the paint loop has actually drawn since
@@ -269,6 +272,7 @@ static WP_AES_NEAR char g_text_insert_footnote[] = "  Insert Footnote";
 static WP_AES_NEAR char g_text_style[] = "  Style...";
 static WP_AES_NEAR char g_text_define_style[] = "  Define Style...";
 static WP_AES_NEAR char g_text_columns[] = "  Columns...";
+static WP_AES_NEAR char g_text_envelope[] = "  Envelope...";
 static WP_AES_NEAR char g_text_undo[]  = "  Undo";
 static WP_AES_NEAR char g_text_cut[]   = "  Cut";
 static WP_AES_NEAR char g_text_copy[]  = "  Copy";
@@ -400,6 +404,7 @@ void wp_menu_tree_init(short wcell, short hcell,
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_STYLE], g_text_style);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_DEFINESTYLE], g_text_define_style);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_COLUMNS], g_text_columns);
+    OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_ENVELOPE], g_text_envelope);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO],  g_text_undo);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_CUT],  g_text_cut);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_COPY],  g_text_copy);
@@ -571,7 +576,7 @@ static wp_bool child_chain_ok(short parent)
    the table nor the local-item list, i.e. drawn, highlightable, and
    silently inert. Bumping it remains the prompt to go wire the item up. */
 #define WP_ATARI_MENU_TITLES              7   /* Desk File Edit View Tools Format Help */
-#define WP_ATARI_MENU_DISPATCHED_LEAVES  35   /* About + 7 File + 4 Edit + 3 View + 6 Tools + 11 Format + 3 Help */
+#define WP_ATARI_MENU_DISPATCHED_LEAVES  36   /* About + 7 File + 4 Edit + 3 View + 7 Tools + 11 Format + 3 Help */
 #define WP_ATARI_MENU_INERT_LEAVES        7   /* separator + 6 AES-reserved Desk slots */
 
 /* Defined next to the dispatch table it validates, far below -- this
@@ -848,7 +853,7 @@ wp_bool wp_menu_tree_selfcheck(void)
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_next != WP_MENU_OBJ_FORMAT_BOX) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_head != WP_MENU_OBJ_TOOLS_SPELLCHECK) TREE_FAIL();
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_tail != WP_MENU_OBJ_TOOLS_ENVELOPE) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_type != G_BOX) TREE_FAIL();
     if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX].ob_flags & OF_HIDETREE) != 0) TREE_FAIL();
     if (!menu_box_placed_ok(WP_MENU_OBJ_TOOLS_TITLE, WP_MENU_OBJ_TOOLS_BOX)) TREE_FAIL();
@@ -867,7 +872,9 @@ wp_bool wp_menu_tree_selfcheck(void)
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT].ob_next != WP_MENU_OBJ_TOOLS_INSERTFIELD) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFIELD].ob_next != WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE) TREE_FAIL();
-    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE].ob_next != WP_MENU_OBJ_TOOLS_BOX) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE].ob_next != WP_MENU_OBJ_TOOLS_ENVELOPE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_TOOLS_ENVELOPE].ob_next != WP_MENU_OBJ_TOOLS_BOX) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_ENVELOPE], g_text_envelope)) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE], g_text_insert_footnote)) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFIELD], g_text_insert_field)) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_CHAT], g_text_chat)) TREE_FAIL();
@@ -946,8 +953,9 @@ wp_bool wp_menu_tree_selfcheck(void)
     if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when View was appended */
     if ((wp_menu_tree[WP_MENU_OBJ_VIEW_PAGE].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
     if ((wp_menu_tree[WP_MENU_OBJ_VIEW_GRID].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Columns was appended */
-    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_COLUMNS].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
-    if (WP_MENU_OBJ_FORMAT_COLUMNS != WP_MENU_OBJ_COUNT - 1) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_COLUMNS].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Envelope was appended */
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_ENVELOPE].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
+    if (WP_MENU_OBJ_TOOLS_ENVELOPE != WP_MENU_OBJ_COUNT - 1) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_type != G_STRING) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_head != -1) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFIELD].ob_type != G_STRING) TREE_FAIL();
@@ -4777,6 +4785,7 @@ static const wp_menu_action_pair g_menu_actions[] = {
     { WP_MENU_OBJ_FORMAT_STYLE,       WP_ACT_FORMAT_STYLE },
     { WP_MENU_OBJ_FORMAT_DEFINESTYLE, WP_ACT_FORMAT_DEFINESTYLE },
     { WP_MENU_OBJ_FORMAT_COLUMNS,     WP_ACT_FORMAT_COLUMNS },
+    { WP_MENU_OBJ_TOOLS_ENVELOPE,     WP_ACT_TOOLS_ENVELOPE },
     { WP_MENU_OBJ_FORMAT_BOLD,        WP_ACT_FORMAT_BOLD },
     { WP_MENU_OBJ_FORMAT_ITALIC,      WP_ACT_FORMAT_ITALIC },
     { WP_MENU_OBJ_FORMAT_UNDERLINE,   WP_ACT_FORMAT_UNDERLINE },

@@ -127,6 +127,9 @@ typedef enum {
     /* M19: Format > Columns -- the caret's section in one to four
        newspaper columns (docmodel.h, wp_section.columns). */
     WP_ACT_FORMAT_COLUMNS,
+    /* M19: Tools > Envelope -- an envelope addressed from the selection
+       (or as typed) added before the document, as its first section. */
+    WP_ACT_TOOLS_ENVELOPE,
     WP_ACT_COUNT
 } wp_action_id;
 
