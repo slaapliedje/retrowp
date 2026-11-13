@@ -116,6 +116,8 @@ typedef struct {
     i32     twips;          /* where it is now, snapped */
     i32     wrap;           /* the column width the ruler shows */
     i32     press_x, press_y;
+    i32     snap;           /* what positions round to: the grid's spacing when
+                               snapping to it (pagecanvas.h), else an eighth inch */
 } wp_rulerbar_drag;
 
 /* WP_TRUE when (x, y) is on the ruler strip; *d is then set up. */

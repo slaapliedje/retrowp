@@ -32,7 +32,7 @@ wp_bool wp_menu_label_is_literal_safe(const char *label)
 wp_bool wp_menu_model_selfcheck(void)
 {
     static const wp_menu_group groups[] = {
-        WP_MENU_FILE, WP_MENU_EDIT, WP_MENU_FORMAT, WP_MENU_TOOLS, WP_MENU_HELP
+        WP_MENU_FILE, WP_MENU_EDIT, WP_MENU_VIEW, WP_MENU_FORMAT, WP_MENU_TOOLS, WP_MENU_HELP
     };
     const u32 group_count = (u32)(sizeof(groups) / sizeof(groups[0]));
     u32 i, j;

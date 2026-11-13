@@ -8,6 +8,7 @@
 #include "keymap.h"
 #include "viewport.h"
 #include "prompt.h"
+#include "pagecanvas.h"
 #include "platform.h"
 
 /* Room for a native path in wp_app_ctx. Longer than any target needs
@@ -131,6 +132,15 @@ typedef struct wp_app_ctx {
     const char *config_path;
 
     wp_prompt prompt;   /* the status line's one-line text prompt (prompt.h) */
+
+    /* Page view (pagecanvas.h): the document as its pages, drawn by the
+       page printer. page_view_able is the shell's to set -- a graphics
+       screen that has filled in canvas's four conversions; DOS's text
+       screen leaves it off and the View menu says so. The grid and zoom
+       live in canvas and stay while page view is off. */
+    wp_bool page_view_able;
+    wp_bool page_view;
+    wp_pagecanvas canvas;
 
     wp_bool doc_loaded;
     wp_bool quit_requested; /* WP_ACT_FILE_QUIT sets this; the backend's own event

@@ -1873,6 +1873,76 @@ static wp_status act_insert_footnote(wp_app_ctx *ctx)
     return WP_OK;
 }
 
+/* ---- Page view (M19; pagecanvas.h) ------------------------------------ */
+
+/* The View menu's settings kept for next time, where there is a
+   config file. */
+static void view_save(wp_app_ctx *ctx)
+{
+    wp_config cfg;
+    if (ctx->config_path == NULL) return;
+    wp_config_view_get(&cfg, ctx);
+    (void)wp_config_save_view(ctx->config_path, &cfg);
+}
+
+static wp_bool view_able(wp_app_ctx *ctx)
+{
+    if (ctx->page_view_able) return WP_TRUE;
+    wp_action_tell(ctx, "Page view needs a graphics screen");
+    return WP_FALSE;
+}
+
+/* View > Page View: the pages as they print, or the text as one scroll. */
+static wp_status act_view_page(wp_app_ctx *ctx)
+{
+    if (!view_able(ctx)) return WP_OK;
+    ctx->page_view = (wp_bool)!ctx->page_view;
+    wp_action_tell(ctx, ctx->page_view ? "Page view" : "Page view off");
+    view_save(ctx);
+    return WP_OK;
+}
+
+/* View > Zoom: a fit or a size, page view turned on with it. */
+static wp_status act_view_zoom(wp_app_ctx *ctx)
+{
+    static const char *labels[] = { "Fit Width", "Whole Page", "50%", "75%", "100%", "150%", "200%" };
+    static const i32 sizes[] = { 0, 0, 50, 75, 100, 150, 200 };
+    wp_pagecanvas *c = &ctx->canvas;
+    u32 cur = c->fit == WP_ZOOM_FIT_WIDTH ? 0u : c->fit == WP_ZOOM_FIT_PAGE ? 1u : 4u, picked = 0, i;
+
+    if (!view_able(ctx)) return WP_OK;
+    for (i = 2; i < 7 && c->fit == WP_ZOOM_FIXED; i++) if (sizes[i] == c->set_zoom) cur = i;
+    if (!choose_one(ctx, "Zoom", labels, 7, cur, &picked)) return WP_OK;
+    if (picked == 0) c->fit = WP_ZOOM_FIT_WIDTH;
+    else if (picked == 1) c->fit = WP_ZOOM_FIT_PAGE;
+    else { c->fit = WP_ZOOM_FIXED; c->set_zoom = sizes[picked]; }
+    ctx->page_view = WP_TRUE;
+    view_save(ctx);
+    return WP_OK;
+}
+
+/* View > Grid: off, shown, or shown and snapped to; then its spacing.
+   Drawn in page view from the margins' corner; the ruler's markers snap
+   to it when snapping is on. */
+static wp_status act_view_grid(wp_app_ctx *ctx)
+{
+    static const char *modes[] = { "No grid", "Show grid", "Show and snap to grid" };
+    static const char *spacings[] = { "1/8 inch", "1/4 inch", "1/2 inch", "1 inch", "5 mm", "1 cm" };
+    static const i32 twips[] = { 180, 360, 720, 1440, 283, 567 };
+    wp_pagecanvas *c = &ctx->canvas;
+    u32 mode = !c->grid_on ? 0u : c->snap_on ? 2u : 1u, picked = 0, cur = 1, i;
+
+    if (!choose_one(ctx, "Grid", modes, 3, mode, &picked)) return WP_OK;
+    c->grid_on = (wp_bool)(picked != 0);
+    c->snap_on = (wp_bool)(picked == 2);
+    if (!c->grid_on) { view_save(ctx); return WP_OK; }
+    for (i = 0; i < 6; i++) if (twips[i] == c->grid_twips) cur = i;
+    if (choose_one(ctx, "Grid spacing", spacings, 6, cur, &picked)) c->grid_twips = twips[picked];
+    view_save(ctx);
+    if (ctx->page_view_able && !ctx->page_view) wp_action_tell(ctx, "The grid shows in page view");
+    return WP_OK;
+}
+
 /* ---- Mail merge (M18; merge.h) --------------------------------------- */
 
 static void field_done(wp_app_ctx *ctx, const u8 *text, u32 len)
@@ -2158,7 +2228,10 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_TOOLS_INSERTFIELD, WP_MENU_TOOLS,  "Insert Field...", 0,       0,    act_insert_field, NULL },
     { WP_ACT_FORMAT_STYLE,      WP_MENU_FORMAT, "Style...",       0,        0,    act_format_style, NULL },
     { WP_ACT_FORMAT_DEFINESTYLE, WP_MENU_FORMAT, "Define Style...", 0,      0,    act_define_style, NULL },
-    { WP_ACT_TOOLS_INSERTFOOTNOTE, WP_MENU_TOOLS, "Insert Footnote", 0,     0,    act_insert_footnote, NULL }
+    { WP_ACT_TOOLS_INSERTFOOTNOTE, WP_MENU_TOOLS, "Insert Footnote", 0,     0,    act_insert_footnote, NULL },
+    { WP_ACT_VIEW_PAGE,          WP_MENU_VIEW,   "Page View",       0,      0,    act_view_page, NULL },
+    { WP_ACT_VIEW_ZOOM,          WP_MENU_VIEW,   "Zoom...",         0,      0,    act_view_zoom, NULL },
+    { WP_ACT_VIEW_GRID,          WP_MENU_VIEW,   "Grid...",         0,      0,    act_view_grid, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

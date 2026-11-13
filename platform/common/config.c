@@ -38,6 +38,17 @@ static void trim(const u8 *bytes, u32 len, u32 *out_start, u32 *out_len)
     *out_len = end - start;
 }
 
+static u32 parse_num(const u8 *v, u32 len);
+
+static void view_defaults(wp_config *out)
+{
+    out->page_view = 0;
+    out->zoom_fit = (u8)WP_ZOOM_FIT_WIDTH;
+    out->zoom = 100;
+    out->grid = 0;
+    out->grid_twips = 360;
+}
+
 static void parse_line(const u8 *bytes, u32 len, wp_config *out)
 {
     u32 start, trimmed_len, eq, key_start, key_len, val_start, val_len;
@@ -72,6 +83,28 @@ static void parse_line(const u8 *bytes, u32 len, wp_config *out)
         else if (ascii_ieq(v, val_len, "short")) out->printer_sides = (u8)WP_PRN_DUPLEX_SHORT;
         return;
     }
+    if (ascii_ieq(bytes + key_start, key_len, "view")) {
+        out->page_view = (u8)(ascii_ieq(bytes + val_start, val_len, "page") ? 1 : 0);
+        return;
+    }
+    if (ascii_ieq(bytes + key_start, key_len, "zoom")) {
+        const u8 *v = bytes + val_start;
+        if (ascii_ieq(v, val_len, "width")) out->zoom_fit = (u8)WP_ZOOM_FIT_WIDTH;
+        else if (ascii_ieq(v, val_len, "page")) out->zoom_fit = (u8)WP_ZOOM_FIT_PAGE;
+        else if (val_len > 0 && v[0] >= '0' && v[0] <= '9') { out->zoom_fit = (u8)WP_ZOOM_FIXED; out->zoom = (u16)parse_num(v, val_len); }
+        return;
+    }
+    if (ascii_ieq(bytes + key_start, key_len, "grid")) {
+        const u8 *v = bytes + val_start;
+        if (ascii_ieq(v, val_len, "off")) out->grid = 0;
+        else if (ascii_ieq(v, val_len, "show")) out->grid = 1;
+        else if (ascii_ieq(v, val_len, "snap")) out->grid = 2;
+        return;
+    }
+    if (ascii_ieq(bytes + key_start, key_len, "gridsize")) {
+        out->grid_twips = (u16)parse_num(bytes + val_start, val_len);
+        return;
+    }
     if (!ascii_ieq(bytes + key_start, key_len, "keymap")) return;
 
     if (ascii_ieq(bytes + val_start, val_len, "vim")) {
@@ -98,6 +131,7 @@ wp_status wp_config_parse(const u8 *bytes, u32 len, wp_config *out)
     out->keymap_id = (u8)WP_KEYMAP_VI;
     out->printer_driver = (u8)WP_PRN_PLAIN;
     out->printer_sides = (u8)WP_PRN_SIMPLEX;
+    view_defaults(out);
     if (bytes == NULL) return WP_OK;
 
     line_start = 0;
@@ -126,6 +160,7 @@ wp_status wp_config_load(const char *native_path, wp_config *out)
     out->keymap_id = (u8)WP_KEYMAP_VI;
     out->printer_driver = (u8)WP_PRN_PLAIN;
     out->printer_sides = (u8)WP_PRN_SIMPLEX;
+    view_defaults(out);
 
     if (plat_file_exists(native_path, &exists) != WP_OK || !exists) return WP_OK;
     if (plat_file_open(native_path, PLAT_FILE_READ, &f) != WP_OK) return WP_OK;
@@ -173,17 +208,17 @@ static wp_bool line_sets(const u8 *line, u32 len, const char *key)
     return ascii_ieq(line + start + ks, kl, key);
 }
 
-wp_status wp_config_save_printer(const char *native_path, u8 driver, u8 sides)
+/* The config file at native_path with each of keys[] set to values[]:
+   their old lines dropped, every other line kept as it was, the new ones
+   at the end. The file is made if there is none. */
+static wp_status save_keys(const char *native_path, const char *const *keys, const char *const *values, u32 nk)
 {
-    static const char *const drivers[] = { "plain", "epson", "pcl", "plain", "postscript", "gdos" };
-    static const char *const sides_names[] = { "off", "long", "short" };
     plat_file *f;
-    u32 size = 0, read_len = 0, i, line_start, n = 0;
+    u32 size = 0, read_len = 0, i, k, line_start, n = 0, extra = 0;
     u8 *old = NULL, *out;
     wp_bool exists = WP_FALSE;
-    const char *dv = driver <= WP_PRINTER_PAGES ? drivers[driver] : "plain";
-    const char *sv = sides < 3 ? sides_names[sides] : "off";
 
+    for (k = 0; k < nk; k++) extra += (u32)strlen(keys[k]) + (u32)strlen(values[k]) + 2u;
     if (plat_file_exists(native_path, &exists) == WP_OK && exists &&
         plat_file_open(native_path, PLAT_FILE_READ, &f) == WP_OK) {
         if (plat_file_size(f, &size) != WP_OK) size = 0;
@@ -192,20 +227,20 @@ wp_status wp_config_save_printer(const char *native_path, u8 driver, u8 sides)
         if (old == NULL || plat_file_read(f, old, size, &read_len) != WP_OK) read_len = 0;
         plat_file_close(f);
     }
-    out = (u8 *)mem_alloc(read_len + 64u);
+    out = (u8 *)mem_alloc(read_len + extra + 2u);
     if (out == NULL) {
         if (old != NULL) mem_free(old);
         return WP_NOMEM;
     }
-    /* Every line but printer= and duplex=, as it was, each ended with a
-       newline (a last line without one gets one). */
+    /* Every other line, as it was, each ended with a newline (a last
+       line without one gets one). */
     line_start = 0;
     for (i = 0; i <= read_len; i++) {
         if (i == read_len || old[i] == '\n') {
             u32 len = i - line_start;
-            wp_bool tail = (wp_bool)(i == read_len && len == 0);   /* after a final newline */
-            if (!tail && !line_sets(old + line_start, len, "printer") &&
-                !line_sets(old + line_start, len, "duplex")) {
+            wp_bool keep = (wp_bool)!(i == read_len && len == 0);   /* not the nothing after a final newline */
+            for (k = 0; k < nk && keep; k++) if (line_sets(old + line_start, len, keys[k])) keep = WP_FALSE;
+            if (keep) {
                 memcpy(out + n, old + line_start, len);
                 n += len;
                 out[n++] = '\n';
@@ -213,12 +248,13 @@ wp_status wp_config_save_printer(const char *native_path, u8 driver, u8 sides)
             line_start = i + 1;
         }
     }
-    memcpy(out + n, "printer=", 8); n += 8;
-    memcpy(out + n, dv, strlen(dv)); n += (u32)strlen(dv);
-    out[n++] = '\n';
-    memcpy(out + n, "duplex=", 7); n += 7;
-    memcpy(out + n, sv, strlen(sv)); n += (u32)strlen(sv);
-    out[n++] = '\n';
+    for (k = 0; k < nk; k++) {
+        u32 kl = (u32)strlen(keys[k]), vl = (u32)strlen(values[k]);
+        memcpy(out + n, keys[k], kl); n += kl;
+        out[n++] = '=';
+        memcpy(out + n, values[k], vl); n += vl;
+        out[n++] = '\n';
+    }
     if (old != NULL) mem_free(old);
 
     if (plat_file_open(native_path, PLAT_FILE_WRITE, &f) != WP_OK) {
@@ -229,4 +265,68 @@ wp_status wp_config_save_printer(const char *native_path, u8 driver, u8 sides)
     plat_file_close(f);
     mem_free(out);
     return i ? WP_OK : WP_ERR;
+}
+
+wp_status wp_config_save_printer(const char *native_path, u8 driver, u8 sides)
+{
+    static const char *const drivers[] = { "plain", "epson", "pcl", "plain", "postscript", "gdos" };
+    static const char *const sides_names[] = { "off", "long", "short" };
+    static const char *const keys[] = { "printer", "duplex" };
+    const char *values[2];
+
+    values[0] = driver <= WP_PRINTER_PAGES ? drivers[driver] : "plain";
+    values[1] = sides < 3 ? sides_names[sides] : "off";
+    return save_keys(native_path, keys, values, 2);
+}
+
+static void put_num(char *out, u32 v)
+{
+    char d[12];
+    u32 k = 0, i = 0;
+    do { d[k++] = (char)('0' + v % 10u); v /= 10u; } while (v > 0 && k < 11);
+    while (k > 0) out[i++] = d[--k];
+    out[i] = '\0';
+}
+
+wp_status wp_config_save_view(const char *native_path, const wp_config *cfg)
+{
+    static const char *const keys[] = { "view", "zoom", "grid", "gridsize" };
+    static const char *const grids[] = { "off", "show", "snap" };
+    const char *values[4];
+    char zoom[12], size[12];
+
+    values[0] = cfg->page_view ? "page" : "text";
+    if (cfg->zoom_fit == WP_ZOOM_FIT_WIDTH) values[1] = "width";
+    else if (cfg->zoom_fit == WP_ZOOM_FIT_PAGE) values[1] = "page";
+    else { put_num(zoom, cfg->zoom); values[1] = zoom; }
+    values[2] = grids[cfg->grid < 3 ? cfg->grid : 0];
+    put_num(size, cfg->grid_twips);
+    values[3] = size;
+    return save_keys(native_path, keys, values, 4);
+}
+
+static u32 parse_num(const u8 *v, u32 len)
+{
+    u32 n = 0, i;
+    for (i = 0; i < len && v[i] >= '0' && v[i] <= '9'; i++) n = n * 10u + (u32)(v[i] - '0');
+    return n;
+}
+
+void wp_config_view_get(wp_config *cfg, const wp_app_ctx *ctx)
+{
+    cfg->page_view = (u8)(ctx->page_view ? 1 : 0);
+    cfg->zoom_fit = ctx->canvas.fit;
+    cfg->zoom = (u16)ctx->canvas.set_zoom;
+    cfg->grid = (u8)(!ctx->canvas.grid_on ? 0 : ctx->canvas.snap_on ? 2 : 1);
+    cfg->grid_twips = (u16)ctx->canvas.grid_twips;
+}
+
+void wp_config_view_apply(const wp_config *cfg, wp_app_ctx *ctx)
+{
+    ctx->page_view = (wp_bool)(cfg->page_view && ctx->page_view_able);
+    ctx->canvas.fit = cfg->zoom_fit <= WP_ZOOM_FIT_PAGE ? cfg->zoom_fit : (u8)WP_ZOOM_FIT_WIDTH;
+    ctx->canvas.set_zoom = (cfg->zoom >= 10 && cfg->zoom <= 400) ? cfg->zoom : 100;
+    ctx->canvas.grid_on = (wp_bool)(cfg->grid != 0);
+    ctx->canvas.snap_on = (wp_bool)(cfg->grid == 2);
+    ctx->canvas.grid_twips = (cfg->grid_twips >= 60 && cfg->grid_twips <= 2880) ? cfg->grid_twips : 360;
 }

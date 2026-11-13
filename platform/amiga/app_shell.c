@@ -263,7 +263,9 @@ static void relayout_document(i32 content_width_twips)
        (pageview.h), relaid only where something changed; then the page
        breaks are marked. */
     g_content_width_twips = content_width_twips;
-    (void)wp_pageview_relayout(&g_amiga_doc, content_width_twips);
+    /* Page view lays out at the page's column whatever the window; the
+       window's is still kept, since 0 means "no width known yet" here. */
+    (void)wp_pageview_relayout(&g_amiga_doc, g_ctx.page_view ? 0 : content_width_twips);
 }
 
 /* Rebuilds the layout of whatever the engine just marked dirty, to be
@@ -1145,6 +1147,10 @@ static i32 amiga_font_line_height_px(i32 size_twips)
    PAL/NTSC hires screen's pixels are about twice as tall as wide, so the
    icons fold to eight rows there and keep their shape; an object too
    short to hold the bar and a few lines of text gets none. */
+/* Page view's x conversions, for the ruler over the page (pagecanvas.h). */
+static i32 pv_twips_to_x(i32 t) { return wp_pagecanvas_zx(&g_ctx.canvas, t); }
+static i32 pv_x_to_twips(i32 x) { return wp_pagecanvas_tx(&g_ctx.canvas, x); }
+
 static wp_bool amiga_rulerbar(Object *obj, wp_rulerbar *rb)
 {
     i32 tall = (amiga_twips_to_px_y(1440) * 4 < amiga_twips_to_px_x(1440) * 3);
@@ -1162,6 +1168,16 @@ static wp_bool amiga_rulerbar(Object *obj, wp_rulerbar *rb)
     rb->origin_x = _mleft(obj) + WP_EDITOR_LEFT_MARGIN_PX;
     rb->twips_to_x = amiga_twips_to_px_x;
     rb->x_to_twips = amiga_px_to_twips_x;
+    if (g_ctx.page_view && g_ctx.canvas.page_count > 0) {
+        /* Page view: the ruler over the page's text column, at its zoom. */
+        const wp_pos *cur = wp_keymap_cursor(&g_ctx);
+        const wp_section *sec = &g_amiga_doc.sections[cur->section < g_amiga_doc.section_count ? cur->section : 0];
+        i32 pw = wp_pagecanvas_zx(&g_ctx.canvas, sec->page_width);
+        rb->origin_x = _mleft(obj) + (g_ctx.canvas.canvas_w - pw) / 2 - g_ctx.canvas.scroll_x +
+                       wp_pagecanvas_zx(&g_ctx.canvas, sec->margin_left);
+        rb->twips_to_x = pv_twips_to_x;
+        rb->x_to_twips = pv_x_to_twips;
+    }
     return (wp_bool)(wp_rulerbar_height(rb) * 3 < obj_h);
 }
 
@@ -1291,6 +1307,54 @@ static void paint_ruler_scale_amiga(Object *obj)
     plat_font_close(font);
 }
 
+/* Page view (pagecanvas.h): the pages as they print, drawn by the page
+   printer, then the caret and the selection over them; the ruler over
+   the page. The view follows the caret -- this object has no scroll
+   bars. A pure painter, as Draw must be here: the layouts are current
+   (amiga_relayout_after_edit), and nothing is measured anew. */
+typedef struct { struct RastPort *rp; i32 x, y; } pv_invert_ctx;
+
+static void pv_invert(void *user, i32 cx, i32 cy, i32 w, i32 h)
+{
+    pv_invert_ctx *k = (pv_invert_ctx *)user;
+    if (w <= 0 || h <= 0) return;
+    SetDrMd(k->rp, COMPLEMENT);
+    RectFill(k->rp, k->x + cx, k->y + cy, k->x + cx + w - 1, k->y + cy + h - 1);
+    SetDrMd(k->rp, JAM1);
+}
+
+static void draw_page_view(Object *obj, amiga_gc *gc, i32 doc_bottom)
+{
+    wp_pagecanvas *c = &g_ctx.canvas;
+    i32 left = (i32)_mleft(obj), top, w = (i32)(_mright(obj) - _mleft(obj) + 1), cx, cy, ch;
+    wp_selection sel;
+    pv_invert_ctx k;
+
+    top = amiga_doc_top(obj);
+    (void)wp_pagecanvas_update(c, &g_amiga_doc, w, doc_bottom - top + 1);
+    if (!g_ctx.view.manual) (void)wp_pagecanvas_follow(c, &g_amiga_doc, wp_keymap_cursor(&g_ctx));
+    {
+        wp_rulerbar rb;
+        plat_font *bar_font;
+        plat_font_metrics bfm;
+
+        if (amiga_rulerbar(obj, &rb) &&
+            plat_font_open((const u8 *)"", 0, WP_AMIGA_STATUSLINE_SIZE_TWIPS, 0, &bar_font) == WP_OK) {
+            plat_font_metrics_get(bar_font, &bfm);
+            wp_rulerbar_paint((plat_gc *)gc, bar_font, amiga_twips_to_px_y(bfm.ascent), &rb, &g_ctx);
+            plat_font_close(bar_font);
+        }
+    }
+    wp_pagecanvas_paint(c, &g_amiga_doc, (plat_gc *)gc, left, top, left, top, w, doc_bottom - top + 1);
+    k.rp = gc->rp;
+    k.x = left - c->scroll_x;
+    k.y = top - c->scroll_y;
+    if (wp_pagecanvas_caret(c, &g_amiga_doc, wp_keymap_cursor(&g_ctx), &cx, &cy, &ch)) {
+        (void)plat_fill_rect((plat_gc *)gc, k.x + cx, k.y + cy, 2, ch, 0, 0, 0);
+    }
+    if (wp_keymap_selection(&g_ctx, &sel)) wp_pagecanvas_selection(c, &g_amiga_doc, sel, pv_invert, &k);
+}
+
 static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
 {
     amiga_gc gc;
@@ -1377,6 +1441,12 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     bar_h_px = amiga_font_line_height_px(WP_AMIGA_STATUSLINE_SIZE_TWIPS);
     if (bar_h_px > (i32)(_mbottom(obj) - _mtop(obj) + 1)) bar_h_px = 0;
     doc_bottom = (i32)_mbottom(obj) - bar_h_px;
+
+    if (g_ctx.page_view) {
+        draw_page_view(obj, &gc, doc_bottom);
+        paint_status_line_amiga(&gc, obj, bar_h_px);
+        return 0;
+    }
 
     {
         wp_rulerbar rb;
@@ -1718,6 +1788,14 @@ static wp_bool amiga_click(Object *obj, struct IntuiMessage *imsg)
         }
     }
 
+    if (g_ctx.page_view) {
+        /* Page view: the click on the canvas, as the pages lie. */
+        if (!wp_pagecanvas_hit(&g_ctx.canvas, &g_amiga_doc, x - _mleft(obj) + g_ctx.canvas.scroll_x,
+                               y - amiga_doc_top(obj) + g_ctx.canvas.scroll_y, &pos)) return WP_FALSE;
+        wp_keymap_click(&g_ctx, pos,
+                        (wp_bool)((imsg->Qualifier & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT)) != 0));
+        return WP_TRUE;
+    }
     if (!wp_viewport_hit_test(&g_ctx.view, &g_amiga_doc, g_content_width_twips,
                               x - (_mleft(obj) + WP_EDITOR_LEFT_MARGIN_PX),
                               y - amiga_doc_top(obj),
@@ -1822,6 +1900,7 @@ static const char *group_title(wp_menu_group group)
     switch (group) {
     case WP_MENU_FILE:   return "Project";
     case WP_MENU_EDIT:   return "Edit";
+    case WP_MENU_VIEW:   return "View";
     case WP_MENU_FORMAT: return "Format";
     case WP_MENU_TOOLS:  return "Tools";
     case WP_MENU_HELP:   return "Help";
@@ -1913,7 +1992,7 @@ static void amiga_ci_write_alive(void)
 static Object *build_menustrip(void)
 {
     static const wp_menu_group groups[] = {
-        WP_MENU_FILE, WP_MENU_EDIT, WP_MENU_FORMAT, WP_MENU_TOOLS, WP_MENU_HELP
+        WP_MENU_FILE, WP_MENU_EDIT, WP_MENU_VIEW, WP_MENU_FORMAT, WP_MENU_TOOLS, WP_MENU_HELP
     };
     Object *strip;
     u32 gi, ai;
@@ -2058,6 +2137,15 @@ void app_shell_run(void)
     g_ctx.ensure_offload = ensure_offload; /* ODT/PDF in the shared file flow */
     g_ctx.clipart_dir = "PROGDIR:CLIPART/";   /* the bundled clipart, beside the program */
     g_ctx.pick_path = amiga_pick_path;   /* Mail Merge asks for its data file so */
+    /* Page view (pagecanvas.h): this screen's conversions at 100%, and
+       the View menu's settings from the config file, kept there. */
+    g_ctx.canvas.x_px = amiga_twips_to_px_x;
+    g_ctx.canvas.y_px = amiga_twips_to_px_y;
+    g_ctx.canvas.x_tw = amiga_px_to_twips_x;
+    g_ctx.canvas.y_tw = amiga_px_to_twips_y;
+    g_ctx.page_view_able = WP_TRUE;
+    g_ctx.config_path = WP_AMIGA_CONFIG_PATH;
+    wp_config_view_apply(&cfg, &g_ctx);
     /* PRT:, through printer.device and the writer's Printer prefs, which
        take the Amiga's own ISO 8859-1. */
     g_ctx.printer_path = "PRT:";
@@ -2585,6 +2673,7 @@ wp_bool wp_amiga_menu_selfcheck(void)
        MenuObjectT a NULL and silently drop the whole menu. */
     if (group_title(WP_MENU_FILE) == (const char *)0) return WP_FALSE;
     if (group_title(WP_MENU_EDIT) == (const char *)0) return WP_FALSE;
+    if (group_title(WP_MENU_VIEW) == (const char *)0) return WP_FALSE;
     if (group_title(WP_MENU_FORMAT) == (const char *)0) return WP_FALSE;
     if (group_title(WP_MENU_TOOLS) == (const char *)0) return WP_FALSE;
     if (group_title(WP_MENU_HELP) == (const char *)0) return WP_FALSE;

@@ -692,6 +692,7 @@ static const char *group_title(wp_menu_group group)
     switch (group) {
     case WP_MENU_FILE:   return "File";
     case WP_MENU_EDIT:   return "Edit";
+    case WP_MENU_VIEW:   return "View";
     case WP_MENU_FORMAT: return "Format";
     case WP_MENU_TOOLS:  return "Tools";
     case WP_MENU_HELP:   return "Help";
@@ -702,7 +703,7 @@ static const char *group_title(wp_menu_group group)
 static void build_action_menus(void)
 {
     static const wp_menu_group groups[] = {
-        WP_MENU_FILE, WP_MENU_EDIT, WP_MENU_FORMAT, WP_MENU_TOOLS, WP_MENU_HELP
+        WP_MENU_FILE, WP_MENU_EDIT, WP_MENU_VIEW, WP_MENU_FORMAT, WP_MENU_TOOLS, WP_MENU_HELP
     };
     u32 gi, ai;
 
@@ -1030,6 +1031,10 @@ static i32 statusline_height_px(void)
 /* The ruler bar along the top of the window (rulerbar.h); the Mac's
    pixels are square, so the icons are their full sixteen rows. A window
    too short for the bar and a few lines of text gets none. */
+/* Page view's x conversions, for the ruler over the page (pagecanvas.h). */
+static i32 pv_twips_to_x(i32 t) { return wp_pagecanvas_zx(&g_ctx.canvas, t); }
+static i32 pv_x_to_twips(i32 x) { return wp_pagecanvas_tx(&g_ctx.canvas, x); }
+
 static wp_bool mac_rulerbar(Rect r, wp_rulerbar *rb)
 {
     rb->x = r.left + 2;
@@ -1043,6 +1048,16 @@ static wp_bool mac_rulerbar(Rect r, wp_rulerbar *rb)
     rb->origin_x = r.left + WP_DOC_LEFT_MARGIN_PX;
     rb->twips_to_x = mac_twips_to_px;
     rb->x_to_twips = mac_px_to_twips;
+    if (g_ctx.page_view && g_ctx.canvas.page_count > 0) {
+        /* Page view: the ruler over the page's text column, at its zoom. */
+        const wp_pos *cur = wp_keymap_cursor(&g_ctx);
+        const wp_section *sec = &g_mac_doc.sections[cur->section < g_mac_doc.section_count ? cur->section : 0];
+        i32 pw = wp_pagecanvas_zx(&g_ctx.canvas, sec->page_width);
+        rb->origin_x = r.left + (g_ctx.canvas.canvas_w - pw) / 2 - g_ctx.canvas.scroll_x +
+                       wp_pagecanvas_zx(&g_ctx.canvas, sec->margin_left);
+        rb->twips_to_x = pv_twips_to_x;
+        rb->x_to_twips = pv_x_to_twips;
+    }
     return (wp_bool)(wp_rulerbar_height(rb) * 3 < (i32)(r.bottom - r.top));
 }
 
@@ -1153,6 +1168,53 @@ static void paint_help_mac(WindowPtr w, Rect full_rect)
     }
 }
 
+/* Page view (pagecanvas.h): the pages as they print, drawn by the page
+   printer, then the caret and the selection over them; the ruler over
+   the page. The view follows the caret -- this window has no scroll
+   bars. */
+static void pv_invert(void *user, i32 cx, i32 cy, i32 w, i32 h)
+{
+    const Rect *o = (const Rect *)user;
+    Rect hl;
+    SetRect(&hl, (short)(o->left + cx), (short)(o->top + cy), (short)(o->left + cx + w), (short)(o->top + cy + h));
+    InvertRect(&hl);
+}
+
+static void draw_page_view(WindowPtr w, mac_gc *gc, Rect r, short doc_bottom)
+{
+    wp_pagecanvas *c = &g_ctx.canvas;
+    i32 top = mac_doc_top(r), cx, cy, ch;
+    wp_selection sel;
+    Rect origin;
+
+    (void)w;
+    (void)wp_pagecanvas_update(c, &g_mac_doc, (i32)(r.right - r.left), (i32)doc_bottom - top);
+    if (!g_ctx.view.manual) (void)wp_pagecanvas_follow(c, &g_mac_doc, wp_keymap_cursor(&g_ctx));
+    {
+        wp_rulerbar rb;
+        plat_font *bar_font;
+        plat_font_metrics bfm;
+
+        if (mac_rulerbar(r, &rb) &&
+            plat_font_open((const u8 *)"", 0, WP_MAC_STATUSLINE_SIZE_TWIPS, 0, &bar_font) == WP_OK) {
+            plat_font_metrics_get(bar_font, &bfm);
+            wp_rulerbar_paint((plat_gc *)gc, bar_font, mac_twips_to_px(bfm.ascent), &rb, &g_ctx);
+            plat_font_close(bar_font);
+        }
+    }
+    wp_pagecanvas_paint(c, &g_mac_doc, (plat_gc *)gc, r.left, top, r.left, top,
+                        (i32)(r.right - r.left), (i32)doc_bottom - top);
+    origin.left = (short)(r.left - c->scroll_x);
+    origin.top = (short)(top - c->scroll_y);
+    if (wp_pagecanvas_caret(c, &g_mac_doc, wp_keymap_cursor(&g_ctx), &cx, &cy, &ch)) {
+        Rect mark;
+        SetRect(&mark, (short)(origin.left + cx), (short)(origin.top + cy),
+                (short)(origin.left + cx + 2), (short)(origin.top + cy + ch));
+        PaintRect(&mark);
+    }
+    if (wp_keymap_selection(&g_ctx, &sel)) wp_pagecanvas_selection(c, &g_mac_doc, sel, pv_invert, &origin);
+}
+
 static void draw_document(WindowPtr w)
 {
     mac_gc gc;
@@ -1221,9 +1283,16 @@ static void draw_document(WindowPtr w)
        consults layout_dirty itself, so a redraw that changed nothing
        still does no measuring. platform/dos/app_shell.c already carried
        this fix; Mac, Amiga and Atari never got it. */
-    relayout_document(content_width_twips);
+    relayout_document(g_ctx.page_view ? 0 : content_width_twips);   /* page view: the page's column */
 
     gc.window = w;
+
+    if (g_ctx.page_view) {
+        draw_page_view(w, &gc, r, doc_bottom);
+        paint_status_line_mac(w, r, bar_h_px);
+        EndUpdate(w);
+        return;
+    }
 
     {
         wp_rulerbar rb;
@@ -1560,7 +1629,7 @@ static void mac_click(Point where, wp_bool extend)
     wp_pos pos;
     i32 bar_h_px;
 
-    if (!g_ctx.doc_loaded || g_help_active || g_content_width_twips <= 0) return;
+    if (!g_ctx.doc_loaded || g_help_active || (g_content_width_twips <= 0 && !g_ctx.page_view)) return;
     SetPort(g_win);
     GlobalToLocal(&pt);
     bar_h_px = statusline_height_px();
@@ -1581,6 +1650,14 @@ static void mac_click(Point where, wp_bool extend)
         }
     }
 
+    if (g_ctx.page_view) {
+        /* Page view: the click on the canvas, as the pages lie. */
+        if (wp_pagecanvas_hit(&g_ctx.canvas, &g_mac_doc, (i32)pt.h - g_win->portRect.left + g_ctx.canvas.scroll_x,
+                              (i32)pt.v - mac_doc_top(g_win->portRect) + g_ctx.canvas.scroll_y, &pos)) {
+            wp_keymap_click(&g_ctx, pos, extend);
+        }
+        return;
+    }
     if (!wp_viewport_hit_test(&g_ctx.view, &g_mac_doc, g_content_width_twips,
                               (i32)pt.h - WP_DOC_LEFT_MARGIN_PX, (i32)pt.v - mac_doc_top(g_win->portRect),
                               mac_px_to_twips, mac_twips_to_px, &pos)) return;
@@ -1821,6 +1898,15 @@ void app_shell_run(void)
     g_ctx.clipart_dir = ":CLIPART:";   /* the bundled clipart, beside the program */
     g_ctx.pick_path = mac_pick_path;   /* Mail Merge asks for its data file so */
     g_ctx.view.line_px = mac_twips_to_px; /* the conversion draw_document advances y with */
+    /* Page view (pagecanvas.h): this screen's conversions at 100%, and
+       the View menu's settings from the config file, kept there. */
+    g_ctx.canvas.x_px = mac_twips_to_px;
+    g_ctx.canvas.y_px = mac_twips_to_px;
+    g_ctx.canvas.x_tw = mac_px_to_twips;
+    g_ctx.canvas.y_tw = mac_px_to_twips;
+    g_ctx.page_view_able = WP_TRUE;
+    g_ctx.config_path = WP_MAC_CONFIG_PATH;
+    wp_config_view_apply(&cfg, &g_ctx);
     load_sample_document();
 
     /* Phase 5: parsed ONCE at startup from the generated
@@ -2160,7 +2246,7 @@ wp_bool wp_mac_config_selfcheck(void)
 wp_bool wp_mac_menu_selfcheck(void)
 {
     static const wp_menu_group groups[] = {
-        WP_MENU_FILE, WP_MENU_EDIT, WP_MENU_FORMAT, WP_MENU_TOOLS, WP_MENU_HELP
+        WP_MENU_FILE, WP_MENU_EDIT, WP_MENU_VIEW, WP_MENU_FORMAT, WP_MENU_TOOLS, WP_MENU_HELP
     };
     const u32 group_count = (u32)(sizeof(groups) / sizeof(groups[0]));
     unsigned char pbuf[256];

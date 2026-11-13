@@ -63,4 +63,16 @@ typedef struct {
    returned. */
 wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_out);
 
+/* One page drawn onto a screen, for page view (pagecanvas.h): page
+   `page` (0-based, as wp_line.page) with its paper's top-left corner at
+   (x, y) on dev->gc, at `zoom` percent -- dev's conversions are the
+   screen's at 100%, and a word is drawn in a face of the zoomed size at
+   its laid-out place. Nothing is laid out again (the layouts must be
+   current, at the page's column: wp_pageview_relayout(doc, 0)), nothing
+   but the page's text and pictures is drawn (not its paper), and no
+   page is begun or ended. Only what lies wholly between device rows
+   clip_y0 and clip_y1 is drawn (a toolkit may give no clip of its own). */
+wp_status wp_pageprint_page(wp_document *doc, const wp_page_device *dev, u32 page,
+                            i32 x, i32 y, i32 zoom, i32 clip_y0, i32 clip_y1);
+
 #endif /* WP_PAGEPRINT_H */

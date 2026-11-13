@@ -119,6 +119,11 @@ typedef enum {
     /* M19: Tools > Insert Footnote -- a reference at the caret and its
        note at the foot of the page, the caret moved into it (notes.h). */
     WP_ACT_TOOLS_INSERTFOOTNOTE,
+    /* M19: the View menu -- page view on and off, its zoom, the layout
+       grid (pagecanvas.h). The shell redraws whole after each. */
+    WP_ACT_VIEW_PAGE,
+    WP_ACT_VIEW_ZOOM,
+    WP_ACT_VIEW_GRID,
     WP_ACT_COUNT
 } wp_action_id;
 
@@ -128,7 +133,8 @@ typedef enum {
     WP_MENU_EDIT,
     WP_MENU_FORMAT,
     WP_MENU_TOOLS,
-    WP_MENU_HELP
+    WP_MENU_HELP,
+    WP_MENU_VIEW     /* M19: Page View, Zoom, Grid -- placed after Edit by each shell */
 } wp_menu_group;
 
 typedef wp_status (*wp_action_fn)(struct wp_app_ctx *ctx);

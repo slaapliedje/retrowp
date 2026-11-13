@@ -35,6 +35,9 @@ void wp_app_ctx_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
     ctx->print_pages = NULL;
     ctx->print_pages_name = NULL;
     memset(&ctx->prompt, 0, sizeof(ctx->prompt));
+    ctx->page_view_able = WP_FALSE;
+    ctx->page_view = WP_FALSE;
+    wp_pagecanvas_init(&ctx->canvas, NULL, NULL, NULL, NULL);
 
     ctx->doc_loaded = WP_FALSE;
     ctx->quit_requested = WP_FALSE;

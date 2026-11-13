@@ -471,7 +471,11 @@ void wp_rulerbar_paint(plat_gc *gc, plat_font *font, i32 ascent,
 
 /* ---- Dragging --------------------------------------------------------- */
 
-static i32 snap_eighth(i32 t) { return (t < 0) ? 0 : ((t + 90) / 180) * 180; }
+static i32 snap_to(const wp_rulerbar_drag *d, i32 t)
+{
+    i32 g = d->snap > 0 ? d->snap : 180;
+    return (t < 0) ? 0 : ((t + g / 2) / g) * g;
+}
 
 void wp_rulerbar_scale_rect(const wp_rulerbar *rb, i32 *y, i32 *h)
 {
@@ -495,7 +499,8 @@ wp_bool wp_rulerbar_drag_begin(const wp_rulerbar *rb, wp_app_ctx *ctx,
     d->press_x = x;
     d->press_y = y;
     d->press_twips = rb->x_to_twips(x - rb->origin_x);
-    d->twips = snap_eighth(d->press_twips);
+    d->snap = (ctx->canvas.grid_on && ctx->canvas.snap_on) ? ctx->canvas.grid_twips : 180;
+    d->twips = snap_to(d, d->press_twips);
     d->from_twips = d->twips;
     d->kind = (u8)WP_RB_DRAG_NEWTAB;
     if (ps == NULL) return WP_TRUE;
@@ -551,7 +556,7 @@ wp_bool wp_rulerbar_drag_move(const wp_rulerbar *rb, wp_rulerbar_drag *d, i32 x,
     off = (wp_bool)(y < top - slack || y >= top + h + slack);
     if (d->kind != (u8)WP_RB_DRAG_TAB && d->kind != (u8)WP_RB_DRAG_NEWTAB) off = WP_FALSE;
 
-    t = snap_eighth(rb->x_to_twips(x - rb->origin_x));
+    t = snap_to(d, rb->x_to_twips(x - rb->origin_x));
     if (t > d->wrap) t = d->wrap;
     if (!d->moved) {
         i32 dx = x - d->press_x;

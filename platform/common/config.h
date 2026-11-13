@@ -4,6 +4,7 @@
 
 #include "types.h"
 #include "keymap.h"
+#include "app_ctx.h"
 
 /* M10: a tiny startup config file, read once and fixed for the process
    lifetime (no live reload) -- currently the sole purpose is picking
@@ -23,6 +24,14 @@ typedef struct {
                           WP_PRINTER_PAGES: "printer=plain|epson|pcl|
                           postscript|gdos" (plain) */
     u8 printer_sides;  /* wp_prn_sides: "duplex=off|long|short" (off) */
+    /* The View menu's (M19; pagecanvas.h), saved when changed:
+       "view=text|page" (text), "zoom=width|page|N" (width),
+       "grid=off|show|snap" (off), "gridsize=N" twips (360). */
+    u8  page_view;
+    u8  zoom_fit;      /* WP_ZOOM_* */
+    u16 zoom;          /* percent, for WP_ZOOM_FIXED */
+    u8  grid;          /* 0 off, 1 shown, 2 shown and snapped to */
+    u16 grid_twips;
 } wp_config;
 
 /* Line-based `key=value` text, `#`/`;` comment lines, blank lines
@@ -61,5 +70,12 @@ wp_status wp_config_load(const char *native_path, wp_config *out);
    made if there is none. What the Printer choice in File > Print saves,
    so it stays chosen. WP_ERR if the file cannot be written. */
 wp_status wp_config_save_printer(const char *native_path, u8 driver, u8 sides);
+
+/* The View menu's settings: written (view=, zoom=, grid=, gridsize=, the
+   same way as the printer's), read from the running app, and put into
+   it at startup -- page view only where the shell can show it. */
+wp_status wp_config_save_view(const char *native_path, const wp_config *cfg);
+void      wp_config_view_get(wp_config *cfg, const struct wp_app_ctx *ctx);
+void      wp_config_view_apply(const wp_config *cfg, struct wp_app_ctx *ctx);
 
 #endif /* WP_CONFIG_H */

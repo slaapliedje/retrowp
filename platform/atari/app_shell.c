@@ -23,10 +23,14 @@
 #include "endian.h"
 #include "keyevent.h"
 
-/* gem4xe's gem.h spells the slider-size mode WF_VSLSIZ where gemlib has
-   WF_VSLSIZE; the number (16) is the same AES mode on both. */
+/* gem4xe's gem.h spells the slider-size modes WF_VSLSIZ and WF_HSLSIZ
+   where gemlib has WF_VSLSIZE and WF_HSLSIZE; the numbers (16, 15) are
+   the same AES modes on both. */
 #ifndef WF_VSLSIZE
 #define WF_VSLSIZE WF_VSLSIZ
+#endif
+#ifndef WF_HSLSIZE
+#define WF_HSLSIZE WF_HSLSIZ
 #endif
 #include "vimode.h"
 #include "keymap.h"
@@ -142,10 +146,11 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_BAR,           WP_MENU_OBJ_DESK_TITLE,  WP_MENU_OBJ_HELP_TITLE,   G_BOX,  OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  0, 40, 1 },
     { WP_MENU_OBJ_FILE_TITLE,    -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  0, 6,  1 },
     { WP_MENU_OBJ_EDIT_TITLE,    -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 6,  0, 6,  1 },
-    { WP_MENU_OBJ_TOOLS_TITLE,   -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 12, 0, 6,  1 },
-    { WP_MENU_OBJ_FORMAT_TITLE,  -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 18, 0, 7,  1 },
-    { WP_MENU_OBJ_HELP_TITLE,    -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 25, 0, 8,  1 },
-    { WP_MENU_OBJ_ACTIVE,        -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 33, 0, 6,  1 },
+    { WP_MENU_OBJ_VIEW_TITLE,    -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 12, 0, 6,  1 },
+    { WP_MENU_OBJ_TOOLS_TITLE,   -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 18, 0, 6,  1 },
+    { WP_MENU_OBJ_FORMAT_TITLE,  -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 24, 0, 7,  1 },
+    { WP_MENU_OBJ_HELP_TITLE,    -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 31, 0, 8,  1 },
+    { WP_MENU_OBJ_ACTIVE,        -1,                      -1,                     G_TITLE,  OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 39, 0, 6,  1 },
     { WP_MENU_OBJ_ROOT,          WP_MENU_OBJ_DESK_BOX,    WP_MENU_OBJ_HELP_BOX,   G_IBOX,   OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 40, 8 },
     { WP_MENU_OBJ_FILE_BOX,      WP_MENU_OBJ_DESK_ABOUT,  WP_MENU_OBJ_DESK_DUMMY6, G_BOX,   OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 0,  0, 20, 8 },
     { WP_MENU_OBJ_DESK_SEP,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  0, 20, 1 },
@@ -160,7 +165,7 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 1, 16, 1 },
     { WP_MENU_OBJ_FILE_SAVE_AS,  -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 2, 16, 1 },
     { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 6, 16, 1 },
-    { WP_MENU_OBJ_TOOLS_BOX,     WP_MENU_OBJ_EDIT_UNDO,   WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 12, 0, 8,  4 },
+    { WP_MENU_OBJ_VIEW_BOX,      WP_MENU_OBJ_EDIT_UNDO,   WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 12, 0, 8,  4 },
     { WP_MENU_OBJ_EDIT_COPY,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 8,  1 },
     { WP_MENU_OBJ_EDIT_PASTE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 8,  1 },
     { WP_MENU_OBJ_EDIT_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  3, 8,  1 },
@@ -224,7 +229,13 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_FORMAT_BOX,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  9, 18, 1 },
     /* Tools > Insert Footnote (M19), appended: last in the Tools chain,
        after Insert Field (y 5; the box to six rows). OF_LASTOB here. */
-    { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 18, 1 }
+    { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 18, 1 },
+    /* View (M19): its box between Edit's and Tools' in the dropdowns'
+       chain, as its title is between theirs; OF_LASTOB on Grid. */
+    { WP_MENU_OBJ_TOOLS_BOX,     WP_MENU_OBJ_VIEW_PAGE,   WP_MENU_OBJ_VIEW_GRID,  G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 12, 0, 12, 3 },
+    { WP_MENU_OBJ_VIEW_ZOOM,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  0, 12, 1 },
+    { WP_MENU_OBJ_VIEW_GRID,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 12, 1 },
+    { WP_MENU_OBJ_VIEW_BOX,      -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 12, 1 }
 };
 
 /* T169: how many text fragments the paint loop has actually drawn since
@@ -239,6 +250,10 @@ static WP_AES_NEAR char g_text_desk[]  = " Desk ";
 static WP_AES_NEAR char g_text_file[]  = " File ";
 static WP_AES_NEAR char g_text_edit[]  = " Edit ";
 static WP_AES_NEAR char g_text_tools[] = " Tools ";
+static WP_AES_NEAR char g_text_view[]  = " View ";
+static WP_AES_NEAR char g_text_page_view[] = "  Page View";
+static WP_AES_NEAR char g_text_zoom[]  = "  Zoom...";
+static WP_AES_NEAR char g_text_grid[]  = "  Grid...";
 static WP_AES_NEAR char g_text_new[]   = "  New";
 static WP_AES_NEAR char g_text_open[]  = "  Open";
 static WP_AES_NEAR char g_text_save[]  = "  Save";
@@ -365,6 +380,10 @@ void wp_menu_tree_init(short wcell, short hcell,
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_TITLE],  g_text_file);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE],  g_text_edit);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE],  g_text_tools);
+    OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_VIEW_TITLE],   g_text_view);
+    OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_VIEW_PAGE],    g_text_page_view);
+    OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_VIEW_ZOOM],    g_text_zoom);
+    OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_VIEW_GRID],    g_text_grid);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_NEW],  g_text_new);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_OPEN],  g_text_open);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE],  g_text_save);
@@ -417,6 +436,7 @@ void wp_menu_tree_init(short wcell, short hcell,
     OB_SPEC_SET_INDEX(wp_menu_tree[WP_MENU_OBJ_FILE_BOX],    WP_MENU_BOX_OBSPEC);
     OB_SPEC_SET_INDEX(wp_menu_tree[WP_MENU_OBJ_EDIT_BOX],    WP_MENU_BOX_OBSPEC);
     OB_SPEC_SET_INDEX(wp_menu_tree[WP_MENU_OBJ_TOOLS_BOX],   WP_MENU_BOX_OBSPEC);
+    OB_SPEC_SET_INDEX(wp_menu_tree[WP_MENU_OBJ_VIEW_BOX],    WP_MENU_BOX_OBSPEC);
     OB_SPEC_SET_INDEX(wp_menu_tree[WP_MENU_OBJ_FORMAT_BOX],  WP_MENU_BOX_OBSPEC);
     OB_SPEC_SET_INDEX(wp_menu_tree[WP_MENU_OBJ_HELP_BOX],     WP_MENU_BOX_OBSPEC);
 
@@ -487,6 +507,7 @@ void wp_menu_tree_init(short wcell, short hcell,
             WP_MENU_OBJ_DESK_TITLE,   WP_MENU_OBJ_DESK_BOX,
             WP_MENU_OBJ_FILE_TITLE,   WP_MENU_OBJ_FILE_BOX,
             WP_MENU_OBJ_EDIT_TITLE,   WP_MENU_OBJ_EDIT_BOX,
+            WP_MENU_OBJ_VIEW_TITLE,   WP_MENU_OBJ_VIEW_BOX,
             WP_MENU_OBJ_TOOLS_TITLE,  WP_MENU_OBJ_TOOLS_BOX,
             WP_MENU_OBJ_FORMAT_TITLE, WP_MENU_OBJ_FORMAT_BOX,
             WP_MENU_OBJ_HELP_TITLE,   WP_MENU_OBJ_HELP_BOX
@@ -544,8 +565,8 @@ static wp_bool child_chain_ok(short parent)
    neither of those can -- a leaf added to the tree that is in NEITHER
    the table nor the local-item list, i.e. drawn, highlightable, and
    silently inert. Bumping it remains the prompt to go wire the item up. */
-#define WP_ATARI_MENU_TITLES              6   /* Desk File Edit Tools Format Help */
-#define WP_ATARI_MENU_DISPATCHED_LEAVES  31   /* About + 7 File + 4 Edit + 6 Tools + 10 Format + 3 Help */
+#define WP_ATARI_MENU_TITLES              7   /* Desk File Edit View Tools Format Help */
+#define WP_ATARI_MENU_DISPATCHED_LEAVES  34   /* About + 7 File + 4 Edit + 3 View + 6 Tools + 10 Format + 3 Help */
 #define WP_ATARI_MENU_INERT_LEAVES        7   /* separator + 6 AES-reserved Desk slots */
 
 /* Defined next to the dispatch table it validates, far below -- this
@@ -660,9 +681,13 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FILE_TITLE].ob_type != G_TITLE) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_TITLE], g_text_file)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_next != WP_MENU_OBJ_TOOLS_TITLE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_next != WP_MENU_OBJ_VIEW_TITLE) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE].ob_type != G_TITLE) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_TITLE], g_text_edit)) TREE_FAIL();
+
+    if (wp_menu_tree[WP_MENU_OBJ_VIEW_TITLE].ob_next != WP_MENU_OBJ_TOOLS_TITLE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_VIEW_TITLE].ob_type != G_TITLE) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_VIEW_TITLE], g_text_view)) TREE_FAIL();
 
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_next != WP_MENU_OBJ_FORMAT_TITLE) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_TITLE].ob_type != G_TITLE) TREE_FAIL();
@@ -696,7 +721,8 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (WP_MENU_OBJ_DESK_TITLE != WP_MENU_OBJ_ACTIVE + 1) TREE_FAIL();
     if (WP_MENU_OBJ_FILE_TITLE != WP_MENU_OBJ_DESK_TITLE + 1) TREE_FAIL();
     if (WP_MENU_OBJ_EDIT_TITLE != WP_MENU_OBJ_FILE_TITLE + 1) TREE_FAIL();
-    if (WP_MENU_OBJ_TOOLS_TITLE != WP_MENU_OBJ_EDIT_TITLE + 1) TREE_FAIL();
+    if (WP_MENU_OBJ_VIEW_TITLE != WP_MENU_OBJ_EDIT_TITLE + 1) TREE_FAIL();
+    if (WP_MENU_OBJ_TOOLS_TITLE != WP_MENU_OBJ_VIEW_TITLE + 1) TREE_FAIL();
     if (WP_MENU_OBJ_FORMAT_TITLE != WP_MENU_OBJ_TOOLS_TITLE + 1) TREE_FAIL();
     if (WP_MENU_OBJ_HELP_TITLE != WP_MENU_OBJ_FORMAT_TITLE + 1) TREE_FAIL();
 
@@ -786,7 +812,19 @@ wp_bool wp_menu_tree_selfcheck(void)
     if ((wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_QUIT], g_text_quit)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_next != WP_MENU_OBJ_TOOLS_BOX) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_next != WP_MENU_OBJ_VIEW_BOX) TREE_FAIL();
+    if (!child_chain_ok(WP_MENU_OBJ_VIEW_BOX)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_VIEW_BOX].ob_next != WP_MENU_OBJ_TOOLS_BOX) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_VIEW_BOX].ob_head != WP_MENU_OBJ_VIEW_PAGE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_VIEW_BOX].ob_tail != WP_MENU_OBJ_VIEW_GRID) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_VIEW_BOX].ob_type != G_BOX) TREE_FAIL();
+    if (!menu_box_placed_ok(WP_MENU_OBJ_VIEW_TITLE, WP_MENU_OBJ_VIEW_BOX)) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_VIEW_PAGE].ob_next != WP_MENU_OBJ_VIEW_ZOOM) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_VIEW_ZOOM].ob_next != WP_MENU_OBJ_VIEW_GRID) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_VIEW_GRID].ob_next != WP_MENU_OBJ_VIEW_BOX) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_VIEW_PAGE], g_text_page_view)) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_VIEW_ZOOM], g_text_zoom)) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_VIEW_GRID], g_text_grid)) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_BOX].ob_head != WP_MENU_OBJ_EDIT_UNDO) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO].ob_next != WP_MENU_OBJ_EDIT_CUT) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_EDIT_UNDO], g_text_undo)) TREE_FAIL();
@@ -898,7 +936,10 @@ wp_bool wp_menu_tree_selfcheck(void)
     if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFIELD].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Style was appended */
     if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_STYLE].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
     if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_DEFINESTYLE].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Insert Footnote was appended */
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when View was appended */
+    if ((wp_menu_tree[WP_MENU_OBJ_VIEW_PAGE].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_VIEW_GRID].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
+    if (WP_MENU_OBJ_VIEW_GRID != WP_MENU_OBJ_COUNT - 1) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_type != G_STRING) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_head != -1) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFIELD].ob_type != G_STRING) TREE_FAIL();
@@ -3758,6 +3799,10 @@ static i32 statusline_height_px(void)
     return font_line_height_px(WP_ATARI_STATUSLINE_SIZE_TWIPS);
 }
 
+/* Page view's x conversions, for the ruler over the page (pagecanvas.h). */
+static i32 pv_twips_to_x(i32 t) { return wp_pagecanvas_zx(&g_ctx.canvas, t); }
+static i32 pv_x_to_twips(i32 x) { return wp_pagecanvas_tx(&g_ctx.canvas, x); }
+
 /* The ruler bar's place at the top of the work area (rulerbar.h). On a
    screen whose pixels are much taller than wide -- medium resolution,
    640x200 -- the icons fold to eight rows so they keep their shape. A
@@ -3779,6 +3824,16 @@ static wp_bool atari_rulerbar(GRECT work, wp_rulerbar *rb)
     rb->origin_x = work.g_x;
     rb->twips_to_x = atari_twips_to_px_x;
     rb->x_to_twips = atari_px_to_twips_x;
+    if (g_ctx.page_view && g_ctx.canvas.page_count > 0) {
+        /* Page view: the ruler over the page's text column, at its zoom. */
+        const wp_pos *cur = wp_keymap_cursor(&g_ctx);
+        const wp_section *sec = &g_doc.sections[cur->section < g_doc.section_count ? cur->section : 0];
+        i32 pw = wp_pagecanvas_zx(&g_ctx.canvas, sec->page_width);
+        rb->origin_x = work.g_x + (g_ctx.canvas.canvas_w - pw) / 2 - g_ctx.canvas.scroll_x +
+                       wp_pagecanvas_zx(&g_ctx.canvas, sec->margin_left);
+        rb->twips_to_x = pv_twips_to_x;
+        rb->x_to_twips = pv_x_to_twips;
+    }
     return (wp_bool)(wp_rulerbar_height(rb) * 3 < work.g_h);
 }
 
@@ -3967,6 +4022,51 @@ static void paint_help(short window_handle, VdiHdl vdi)
    and then "restored" on first movement. On a 4-plane Medium-res screen
    the stale planes decode to a solid green rectangle, which is what made
    it look like an image-drawing bug rather than a cursor bug. */
+/* Page view (pagecanvas.h): the pages as they print, drawn by the page
+   printer into this redraw rectangle, then the caret and the selection
+   over them. */
+typedef struct { VdiHdl vdi; i32 x, y; } pv_invert_ctx;
+
+static void pv_invert(void *user, i32 cx, i32 cy, i32 w, i32 h)
+{
+    pv_invert_ctx *k = (pv_invert_ctx *)user;
+    atari_invert_rect(k->vdi, k->x + cx, k->y + cy, w, h);
+}
+
+static void paint_page_view(short window_handle, VdiHdl vdi, GRECT area, GRECT r)
+{
+    atari_gc gc;
+    wp_pagecanvas *c = &g_ctx.canvas;
+    i32 x0 = r.g_x > area.g_x ? r.g_x : area.g_x;
+    i32 y0 = r.g_y > area.g_y ? r.g_y : area.g_y;
+    i32 x1 = (r.g_x + r.g_w < area.g_x + area.g_w) ? r.g_x + r.g_w : area.g_x + area.g_w;
+    i32 y1 = (r.g_y + r.g_h < area.g_y + area.g_h) ? r.g_y + r.g_h : area.g_y + area.g_h;
+    i32 ox = area.g_x - c->scroll_x, oy = area.g_y - c->scroll_y;
+    i32 cx, cy, ch;
+    wp_selection sel;
+
+    if (x1 <= x0 || y1 <= y0) return;
+    memset(&gc, 0, sizeof(gc));
+    gc.vdi = vdi;
+    gc.window_handle = window_handle;
+    gc.clip_on = 1;   /* a picture's blit keeps to this rectangle itself */
+    gc.clip[0] = (short)x0;
+    gc.clip[1] = (short)y0;
+    gc.clip[2] = (short)(x1 - 1);
+    gc.clip[3] = (short)(y1 - 1);
+    wp_pagecanvas_paint(c, &g_doc, (plat_gc *)&gc, area.g_x, area.g_y, x0, y0, x1 - x0, y1 - y0);
+    if (wp_pagecanvas_caret(c, &g_doc, wp_keymap_cursor(&g_ctx), &cx, &cy, &ch)) {
+        (void)plat_fill_rect((plat_gc *)&gc, ox + cx, oy + cy, WP_ATARI_CARET_W_PX, ch, 0, 0, 0);
+    }
+    if (wp_keymap_selection(&g_ctx, &sel)) {
+        pv_invert_ctx k;
+        k.vdi = vdi;
+        k.x = ox;
+        k.y = oy;
+        wp_pagecanvas_selection(c, &g_doc, sel, pv_invert, &k);
+    }
+}
+
 /* Keeps the window's vertical slider telling the truth about the view:
    its size is the share of the document's display lines that fit, its
    position how far down the top line is (both on the AES's 1..1000
@@ -3976,10 +4076,23 @@ static void atari_update_slider(short window_handle)
 {
     static short last_size = -1;
     static short last_pos = -1;
+    static short last_hsize = -1, last_hpos = -1;
     short size = 1000;
     short pos = 1;
+    short hsize = 1000, hpos = 1;
 
-    if (g_ctx.doc_loaded) {
+    if (g_ctx.doc_loaded && g_ctx.page_view) {
+        /* Page view scrolls the canvas in pixels, both ways. */
+        const wp_pagecanvas *c = &g_ctx.canvas;
+        if (c->canvas_h > c->view_h) {
+            size = (short)((1000L * c->view_h) / c->canvas_h);
+            pos = (short)(1 + (999L * c->scroll_y) / (c->canvas_h - c->view_h));
+        }
+        if (c->canvas_w > c->view_w) {
+            hsize = (short)((1000L * c->view_w) / c->canvas_w);
+            hpos = (short)(1 + (999L * c->scroll_x) / (c->canvas_w - c->view_w));
+        }
+    } else if (g_ctx.doc_loaded) {
         u32 total = 0;
         u32 page = wp_viewport_page_lines(&g_ctx.view, &g_doc);
         u32 max_top = wp_viewport_max_top(&g_ctx.view, &g_doc);
@@ -3996,6 +4109,15 @@ static void atari_update_slider(short window_handle)
     if (pos != last_pos) {
         wind_set(window_handle, WF_VSLIDE, pos, 0, 0, 0);
         last_pos = pos;
+    }
+    if (hsize < 1) hsize = 1;
+    if (hsize != last_hsize) {
+        wind_set(window_handle, WF_HSLSIZE, hsize, 0, 0, 0);
+        last_hsize = hsize;
+    }
+    if (hpos != last_hpos) {
+        wind_set(window_handle, WF_HSLIDE, hpos, 0, 0, 0);
+        last_hpos = hpos;
     }
 }
 
@@ -4032,7 +4154,8 @@ static void redraw_window(short window_handle, VdiHdl vdi)
        relayout_document skips clean paragraphs, so this costs one flag
        test per paragraph on a redraw that changed nothing. */
     if (g_ctx.doc_loaded) {
-        relayout_document(atari_px_to_twips_x((i32)work.g_w));
+        /* Page view lays out at the page's column whatever the window. */
+        relayout_document(g_ctx.page_view ? 0 : atari_px_to_twips_x((i32)work.g_w));
     }
 
     bar_h_px = statusline_height_px();
@@ -4052,7 +4175,20 @@ static void redraw_window(short window_handle, VdiHdl vdi)
        left alone. */
     if (g_ctx.doc_loaded) {
         g_ctx.view.view_h_px = doc_area.g_h;
-        wp_viewport_follow_cursor(&g_ctx.view, &g_doc, wp_keymap_cursor(&g_ctx));
+        if (g_ctx.page_view) {
+            static i32 last_origin = -1, last_zoom = -1;
+            wp_rulerbar rb;
+            (void)wp_pagecanvas_update(&g_ctx.canvas, &g_doc, doc_area.g_w, doc_area.g_h);
+            if (!g_ctx.view.manual) (void)wp_pagecanvas_follow(&g_ctx.canvas, &g_doc, wp_keymap_cursor(&g_ctx));
+            /* The ruler follows the page across and the zoom. */
+            if (atari_rulerbar(work, &rb) && (rb.origin_x != last_origin || g_ctx.canvas.zoom != last_zoom)) {
+                g_rulerbar_damaged = WP_TRUE;
+                last_origin = rb.origin_x;
+                last_zoom = g_ctx.canvas.zoom;
+            }
+        } else {
+            wp_viewport_follow_cursor(&g_ctx.view, &g_doc, wp_keymap_cursor(&g_ctx));
+        }
     }
 
     wind_get_grect(window_handle, WF_FIRSTXYWH, &r);
@@ -4072,7 +4208,8 @@ static void redraw_window(short window_handle, VdiHdl vdi)
            above the text, so the writer sees the answer before the
            document finishes repainting under it. */
         if (r.g_y < doc_area.g_y) paint_rulerbar(window_handle, vdi, work, pxy);
-        paint_document(window_handle, vdi, doc_area);
+        if (g_ctx.page_view && g_ctx.doc_loaded) paint_page_view(window_handle, vdi, doc_area, r);
+        else paint_document(window_handle, vdi, doc_area);
         wind_get_grect(window_handle, WF_NEXTXYWH, &r);
     }
     vs_clip(vdi, 0, pxy);
@@ -4626,6 +4763,9 @@ static const wp_menu_action_pair g_menu_actions[] = {
     { WP_MENU_OBJ_TOOLS_CHAT,         WP_ACT_TOOLS_CHAT },
     { WP_MENU_OBJ_TOOLS_INSERTFIELD,  WP_ACT_TOOLS_INSERTFIELD },
     { WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE, WP_ACT_TOOLS_INSERTFOOTNOTE },
+    { WP_MENU_OBJ_VIEW_PAGE,          WP_ACT_VIEW_PAGE },
+    { WP_MENU_OBJ_VIEW_ZOOM,          WP_ACT_VIEW_ZOOM },
+    { WP_MENU_OBJ_VIEW_GRID,          WP_ACT_VIEW_GRID },
     { WP_MENU_OBJ_FORMAT_STYLE,       WP_ACT_FORMAT_STYLE },
     { WP_MENU_OBJ_FORMAT_DEFINESTYLE, WP_ACT_FORMAT_DEFINESTYLE },
     { WP_MENU_OBJ_FORMAT_BOLD,        WP_ACT_FORMAT_BOLD },
@@ -4909,6 +5049,14 @@ static void atari_click(short window_handle, VdiHdl vdi, short mx, short my, sho
     }
     ruler_h_px = atari_rulerbar_h(work);
 
+    if (g_ctx.page_view) {
+        /* Page view: the click on the canvas, as the pages lie. */
+        if (!wp_pagecanvas_hit(&g_ctx.canvas, &g_doc, (i32)(mx - work.g_x) + g_ctx.canvas.scroll_x,
+                               (i32)(my - work.g_y - ruler_h_px) + g_ctx.canvas.scroll_y, &pos)) return;
+        wp_keymap_click(&g_ctx, pos, (wp_bool)((kstate & 0x03) != 0));
+        redraw_window(window_handle, vdi);
+        return;
+    }
     if (!wp_viewport_hit_test(&g_ctx.view, &g_doc, g_content_width_twips,
                               (i32)(mx - work.g_x), (i32)(my - work.g_y - ruler_h_px),
                               atari_px_to_twips_x, atari_twips_to_px_x, &pos)) return;
@@ -5004,7 +5152,7 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
         if (g_ctx.doc_loaded) {
             GRECT work;
             wind_get_grect(window_handle, WF_WORKXYWH, &work);
-            relayout_document(atari_px_to_twips_x((i32)work.g_w));
+            relayout_document(g_ctx.page_view ? 0 : atari_px_to_twips_x((i32)work.g_w));
         }
         return WP_FALSE;
 
@@ -5012,7 +5160,24 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
        scroll the view by hand, which holds it where the writer put it
        until the next keystroke (viewport.h). */
     case WM_ARROWED:
-        if (g_ctx.doc_loaded) {
+        if (g_ctx.doc_loaded && g_ctx.page_view) {
+            /* Page view: the canvas, a line's worth or a window's. */
+            wp_pagecanvas *c = &g_ctx.canvas;
+            i32 line = statusline_height_px(), pv = c->view_h - line, ph = c->view_w - line;
+            switch (msg[4]) {
+            case WA_UPPAGE: wp_pagecanvas_scroll_by(c, 0, -pv);  break;
+            case WA_DNPAGE: wp_pagecanvas_scroll_by(c, 0, pv);   break;
+            case WA_UPLINE: wp_pagecanvas_scroll_by(c, 0, -line); break;
+            case WA_DNLINE: wp_pagecanvas_scroll_by(c, 0, line);  break;
+            case WA_LFPAGE: wp_pagecanvas_scroll_by(c, -ph, 0);  break;
+            case WA_RTPAGE: wp_pagecanvas_scroll_by(c, ph, 0);   break;
+            case WA_LFLINE: wp_pagecanvas_scroll_by(c, -line, 0); break;
+            case WA_RTLINE: wp_pagecanvas_scroll_by(c, line, 0);  break;
+            default: break;
+            }
+            g_ctx.view.manual = WP_TRUE;
+            redraw_window(window_handle, vdi);
+        } else if (g_ctx.doc_loaded) {
             i32 page = (i32)wp_viewport_page_lines(&g_ctx.view, &g_doc);
 
             switch (msg[4]) {
@@ -5026,8 +5191,22 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
         }
         return WP_FALSE;
 
+    case WM_HSLID:
+        if (g_ctx.doc_loaded && g_ctx.page_view) {
+            wp_pagecanvas *c = &g_ctx.canvas;
+            wp_pagecanvas_scroll_to(c, (i32)(((long)(c->canvas_w - c->view_w) * msg[4] + 500L) / 1000L), c->scroll_y);
+            g_ctx.view.manual = WP_TRUE;
+            redraw_window(window_handle, vdi);
+        }
+        return WP_FALSE;
+
     case WM_VSLID:
-        if (g_ctx.doc_loaded) {
+        if (g_ctx.doc_loaded && g_ctx.page_view) {
+            wp_pagecanvas *c = &g_ctx.canvas;
+            wp_pagecanvas_scroll_to(c, c->scroll_x, (i32)(((long)(c->canvas_h - c->view_h) * msg[4] + 500L) / 1000L));
+            g_ctx.view.manual = WP_TRUE;
+            redraw_window(window_handle, vdi);
+        } else if (g_ctx.doc_loaded) {
             u32 max_top = wp_viewport_max_top(&g_ctx.view, &g_doc);
             u32 where = (u32)((max_top * (u32)msg[4] + 500UL) / 1000UL); /* msg[4] is 0..1000 */
 
@@ -5275,6 +5454,13 @@ void app_shell_run(void)
         g_ctx.ensure_offload = ensure_offload; /* ODT/PDF in the shared file flow */
         g_ctx.clipart_dir = "CLIPART\\";   /* the bundled clipart, beside the program */
         g_ctx.pick_path = atari_pick_path;   /* Mail Merge asks for its data file so */
+        /* Page view (pagecanvas.h): this screen's conversions at 100%. */
+        g_ctx.canvas.x_px = atari_twips_to_px_x;
+        g_ctx.canvas.y_px = atari_twips_to_px_y;
+        g_ctx.canvas.x_tw = atari_px_to_twips_x;
+        g_ctx.canvas.y_tw = atari_px_to_twips_y;
+        g_ctx.page_view_able = WP_TRUE;
+        wp_config_view_apply(&cfg, &g_ctx);   /* View's settings from RETROWP.CFG */
 #ifndef GEM4XE_APP_GEM_H
         /* GEMDOS's printer, the Centronics port: an Epson-style printer
            takes the PC character set, which the ST's own largely is.
@@ -5362,7 +5548,8 @@ void app_shell_run(void)
     /* The vertical slider and its arrows are the GEM way to scroll a
        document; wp_dispatch_message turns their WM_ARROWED/WM_VSLID
        into viewport moves and redraw_window keeps the slider honest. */
-    window_handle = wind_create_grect(NAME | MOVER | CLOSER | SIZER | VSLIDE | UPARROW | DNARROW, &desk);
+    window_handle = wind_create_grect(NAME | MOVER | CLOSER | SIZER | VSLIDE | UPARROW | DNARROW |
+                                      HSLIDE | LFARROW | RTARROW, &desk);   /* across: page view */
     g_window_handle = window_handle;
     wind_set_str(window_handle, WF_NAME, "RetroWP");
     wind_open_grect(window_handle, &desk);

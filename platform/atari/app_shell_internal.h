@@ -135,8 +135,13 @@
 #define WP_MENU_OBJ_DESK_TITLE         3
 #define WP_MENU_OBJ_FILE_TITLE         4
 #define WP_MENU_OBJ_EDIT_TITLE         5
-#define WP_MENU_OBJ_TOOLS_TITLE        6
-#define WP_MENU_OBJ_FORMAT_TITLE       7
+/* View (M19): Page View, Zoom, Grid. Its title sits between Edit and
+   Tools -- titles must be contiguous (menu_sub walks to a title's box by
+   index arithmetic), so everything from Tools on moved up one; its box
+   and items are appended, items being found by link. */
+#define WP_MENU_OBJ_VIEW_TITLE         6
+#define WP_MENU_OBJ_TOOLS_TITLE        7
+#define WP_MENU_OBJ_FORMAT_TITLE       8
 /* Help's title. It MUST live here, immediately after Format, and every
    title MUST stay contiguous from WP_MENU_OBJ_DESK_TITLE -- this is not
    tidiness, it is the AES's own addressing scheme. This header already
@@ -155,39 +160,39 @@
    of a cursor traverse, and an A/B against the pre-change binary, to
    catch and attribute. At index 8 the arithmetic gives 8 - 2 - 1 = 5,
    the sixth child of DROPDOWNS, which is Help's box. */
-#define WP_MENU_OBJ_HELP_TITLE         8
-#define WP_MENU_OBJ_DROPDOWNS          9
-#define WP_MENU_OBJ_DESK_BOX           10
-#define WP_MENU_OBJ_DESK_ABOUT         11
-#define WP_MENU_OBJ_DESK_SEP           12
-#define WP_MENU_OBJ_DESK_DUMMY1        13
-#define WP_MENU_OBJ_DESK_DUMMY2        14
-#define WP_MENU_OBJ_DESK_DUMMY3        15
-#define WP_MENU_OBJ_DESK_DUMMY4        16
-#define WP_MENU_OBJ_DESK_DUMMY5        17
-#define WP_MENU_OBJ_DESK_DUMMY6        18
-#define WP_MENU_OBJ_FILE_BOX           19
-#define WP_MENU_OBJ_FILE_OPEN          20
-#define WP_MENU_OBJ_FILE_SAVE          21
-#define WP_MENU_OBJ_FILE_QUIT          22
-#define WP_MENU_OBJ_EDIT_BOX           23
-#define WP_MENU_OBJ_EDIT_CUT           24
-#define WP_MENU_OBJ_EDIT_COPY          25
-#define WP_MENU_OBJ_EDIT_PASTE         26
-#define WP_MENU_OBJ_TOOLS_BOX          27
-#define WP_MENU_OBJ_TOOLS_SPELLCHECK   28
-#define WP_MENU_OBJ_TOOLS_THESAURUS    29
-#define WP_MENU_OBJ_TOOLS_GRAMMARCHECK 30
-#define WP_MENU_OBJ_TOOLS_CHAT         31
-#define WP_MENU_OBJ_FORMAT_BOX         32
-#define WP_MENU_OBJ_FORMAT_BOLD        33
-#define WP_MENU_OBJ_FORMAT_ITALIC      34
-#define WP_MENU_OBJ_FORMAT_UNDERLINE   35
-#define WP_MENU_OBJ_FORMAT_SIZE_UP     36
-#define WP_MENU_OBJ_FORMAT_SIZE_DOWN   37
-#define WP_MENU_OBJ_FORMAT_ALIGN_LEFT    38
-#define WP_MENU_OBJ_FORMAT_ALIGN_CENTER  39
-#define WP_MENU_OBJ_FORMAT_ALIGN_RIGHT   40
+#define WP_MENU_OBJ_HELP_TITLE         9
+#define WP_MENU_OBJ_DROPDOWNS          10
+#define WP_MENU_OBJ_DESK_BOX           11
+#define WP_MENU_OBJ_DESK_ABOUT         12
+#define WP_MENU_OBJ_DESK_SEP           13
+#define WP_MENU_OBJ_DESK_DUMMY1        14
+#define WP_MENU_OBJ_DESK_DUMMY2        15
+#define WP_MENU_OBJ_DESK_DUMMY3        16
+#define WP_MENU_OBJ_DESK_DUMMY4        17
+#define WP_MENU_OBJ_DESK_DUMMY5        18
+#define WP_MENU_OBJ_DESK_DUMMY6        19
+#define WP_MENU_OBJ_FILE_BOX           20
+#define WP_MENU_OBJ_FILE_OPEN          21
+#define WP_MENU_OBJ_FILE_SAVE          22
+#define WP_MENU_OBJ_FILE_QUIT          23
+#define WP_MENU_OBJ_EDIT_BOX           24
+#define WP_MENU_OBJ_EDIT_CUT           25
+#define WP_MENU_OBJ_EDIT_COPY          26
+#define WP_MENU_OBJ_EDIT_PASTE         27
+#define WP_MENU_OBJ_TOOLS_BOX          28
+#define WP_MENU_OBJ_TOOLS_SPELLCHECK   29
+#define WP_MENU_OBJ_TOOLS_THESAURUS    30
+#define WP_MENU_OBJ_TOOLS_GRAMMARCHECK 31
+#define WP_MENU_OBJ_TOOLS_CHAT         32
+#define WP_MENU_OBJ_FORMAT_BOX         33
+#define WP_MENU_OBJ_FORMAT_BOLD        34
+#define WP_MENU_OBJ_FORMAT_ITALIC      35
+#define WP_MENU_OBJ_FORMAT_UNDERLINE   36
+#define WP_MENU_OBJ_FORMAT_SIZE_UP     37
+#define WP_MENU_OBJ_FORMAT_SIZE_DOWN   38
+#define WP_MENU_OBJ_FORMAT_ALIGN_LEFT    39
+#define WP_MENU_OBJ_FORMAT_ALIGN_CENTER  40
+#define WP_MENU_OBJ_FORMAT_ALIGN_RIGHT   41
 /* Help (M8.5's action registry finally reaching this backend's own menu
    bar). APPENDED at the end rather than inserted in on-screen order:
    nothing in the AES cares about array position -- it walks ob_next/
@@ -198,10 +203,10 @@
    one real contiguity rule applies only to the AES-reserved Desk block
    at 10..17, far above anything touched here. So: array order no longer
    matches menu-bar order, deliberately. */
-#define WP_MENU_OBJ_HELP_BOX             41
-#define WP_MENU_OBJ_HELP_CONTENTS        42
-#define WP_MENU_OBJ_HELP_KEYS            43
-#define WP_MENU_OBJ_HELP_FORMAT          44
+#define WP_MENU_OBJ_HELP_BOX             42
+#define WP_MENU_OBJ_HELP_CONTENTS        43
+#define WP_MENU_OBJ_HELP_KEYS            44
+#define WP_MENU_OBJ_HELP_FORMAT          45
 /* File > New (T170). APPENDED for exactly the reason Help's block above
    was: array position is nothing to the AES -- it walks ob_next/ob_head/
    ob_tail indices -- while renumbering the 44 entries above is the
@@ -213,23 +218,27 @@
 
    Only the File dropdown's own sibling chain and item y-positions
    change, and wp_menu_tree_selfcheck walks that chain. */
-#define WP_MENU_OBJ_FILE_NEW             45
-#define WP_MENU_OBJ_EDIT_UNDO            46
+#define WP_MENU_OBJ_FILE_NEW             46
+#define WP_MENU_OBJ_EDIT_UNDO            47
 /* File > Save As. Appended, like New and Undo: array order is nothing
    to the AES. OF_LASTOB moves to this final object. */
-#define WP_MENU_OBJ_FILE_SAVE_AS         47
+#define WP_MENU_OBJ_FILE_SAVE_AS         48
 /* File > Print..., appended the same way; OF_LASTOB moves here. */
-#define WP_MENU_OBJ_FILE_PRINT           48
+#define WP_MENU_OBJ_FILE_PRINT           49
 /* File > Mail Merge... and Tools > Insert Field... (M18), appended the
    same way; OF_LASTOB moves to the last. */
-#define WP_MENU_OBJ_FILE_MERGE           49
-#define WP_MENU_OBJ_TOOLS_INSERTFIELD    50
+#define WP_MENU_OBJ_FILE_MERGE           50
+#define WP_MENU_OBJ_TOOLS_INSERTFIELD    51
 /* Format > Style... and Define Style... (M19), appended the same way. */
-#define WP_MENU_OBJ_FORMAT_STYLE         51
-#define WP_MENU_OBJ_FORMAT_DEFINESTYLE   52
+#define WP_MENU_OBJ_FORMAT_STYLE         52
+#define WP_MENU_OBJ_FORMAT_DEFINESTYLE   53
 /* Tools > Insert Footnote (M19), appended likewise. */
-#define WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE 53
-#define WP_MENU_OBJ_COUNT        54
+#define WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE 54
+#define WP_MENU_OBJ_VIEW_BOX             55
+#define WP_MENU_OBJ_VIEW_PAGE            56
+#define WP_MENU_OBJ_VIEW_ZOOM            57
+#define WP_MENU_OBJ_VIEW_GRID            58
+#define WP_MENU_OBJ_COUNT        59
 
 extern WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 

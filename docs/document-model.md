@@ -523,6 +523,49 @@ paragraph styles and are passed over. Format > Style (eight to a page,
 "More..."), Format > Define Style (the status line, the current
 style's name offered); on DOS, Alt+S and Alt+Y.
 
+## Page view (M19)
+
+The screen's usual view is the text as one scroll, page breaks ruled
+across it: a screen page is only as tall as its text, so nothing that
+sits at a place on the page -- a footnote at its foot, a frame, a
+column beside another -- can be shown where it goes. Page view shows
+the pages themselves (platform/common/pagecanvas.h), stacked down a
+canvas with a gap between, each whole at its size and the zoom.
+
+NeXT's WYSIWYG came from drawing the screen with the printer's
+imaging model (Display PostScript). RetroWP takes the principle, not
+the interpreter: the page view is drawn by the page printer itself
+(`wp_pageprint_page`, pageprint.c), so what is on screen is what
+prints because one piece of code draws both. Printing is unchanged by
+it -- the PostScript of the character sheet is byte for byte what it
+was before the page printer learnt to draw one page at a zoom.
+
+At a zoom, each word is drawn in a face opened at the zoomed size,
+placed where the layout put it and its measured width scaled back, so
+the layout's line breaks never move with the zoom. Where the screen
+has no face that small -- the ST's own bitmap fonts stop well above
+what a page fitted to its window asks for -- a word that would overrun
+its line is "greeked", a grey bar its laid-out width, as DTP programs
+show text too small to read. Paper is never greeked. Text keeps its
+colour on screen, black on paper. Only lines wholly inside the view
+are drawn (MUI gives a Draw method no clip).
+
+Clicks (`wp_pagecanvas_hit`), the caret (`wp_pagecanvas_caret`) and
+the selection (`wp_pagecanvas_selection`) walk each page's lines as
+the printer does -- a printing walk, footnotes at the foot -- and use
+the same `wp_line_pos_at_x_twips` and `wp_line_cursor_x_twips` as the
+plain view, so click, caret and highlight agree. The ST scrolls the
+canvas with both its sliders (the window gained a horizontal one); the
+Amiga and the Mac, which have no scroll bars, follow the caret.
+
+The grid is a view setting: dots from the margins' corner at a chosen
+spacing; with snapping on, the ruler's markers move in grid steps
+instead of eighths of an inch (`wp_rulerbar_drag.snap`). View, zoom
+and grid are saved in the config file (view=, zoom=, grid=, gridsize=).
+The View menu sits after Edit on every GUI port; on the ST its title
+went in between Edit and Tools in the hand-built tree, every object
+from Tools on renumbered, because the AES finds a title's box by index.
+
 ## Footnotes (M19)
 
 A footnote is two things in the model, both existing kinds with one

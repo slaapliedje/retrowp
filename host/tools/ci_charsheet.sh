@@ -31,6 +31,7 @@ MAC_RETRO68_TOOLCHAIN="${MAC_RETRO68_TOOLCHAIN:-$HOME/opt/Retro68-build/toolchai
 
 EXPECT="${CHARSHEET_EXPECT:-doc paras=87 pictures=0 drawings=2 rows=16 frames=1}"   # overridable, to prove the gate can fail
 SHEET="${CHARSHEET_FILE:-host/tests/fixtures/CHARSHT.RTF}"   # another file: its screenshots, for looking at
+CFG_EXTRA="${CHARSHEET_CFG:-}"   # config lines added, e.g. 'view=page\r\n': its screenshots, for looking at
 OUTDIR=build/charsheet
 mkdir -p "$OUTDIR"
 PASS=0
@@ -87,7 +88,7 @@ run_st() {
     mkdir -p "$_dir/c"
     cp bin/atari/RETROWP.PRG bin/atari/LAUNCH.PRG "$_dir/c/"
     cp "$SHEET" "$_dir/c/TEST.RTF"
-    printf 'printer = postscript\r\n' > "$_dir/c/RETROWP.CFG"
+    printf 'printer = postscript\r\n%b' "$CFG_EXTRA" > "$_dir/c/RETROWP.CFG"
     echo ci > "$_dir/c/RETROWP.CI"
     _d=":$((300 + $$ % 200))"
     start_xvfb "$_d"
@@ -148,6 +149,7 @@ run_amiga() {
     fi
     sed -e "s|$AMIGA_FIXTURE/wb|$_dir/wb|g" -e "s|rw,DH1:|ro,DH1:|g" "$AMIGA_FIXTURE/mounts.uae" > "$_dir/mounts.uae"
     cp bin/amiga/RETROWP "$_dir/wb/RETROWP"
+    [ -n "$CFG_EXTRA" ] && printf '%b' "$CFG_EXTRA" > "$_dir/wb/RetroWP.cfg"
     cp "$SHEET" "$_dir/wb/TEST.RTF"
     echo ci > "$_dir/wb/RETROWP_CI"
     rm -f "$_dir/wb/retrowp_ci_alive"
@@ -190,6 +192,7 @@ run_mac() {
     cp build/mac/.rsrc/RETROWP.APPL "$_sh/.rsrc/CI_TARGET.APPL"
     cp build/mac/.finf/RETROWP.APPL "$_sh/.finf/CI_TARGET.APPL"
     cp "$SHEET" "$_sh/TEST.RTF"
+    [ -n "$CFG_EXTRA" ] && printf '%b' "$CFG_EXTRA" > "$_sh/RetroWP.cfg"
     printf 'open Unix:TEST.RTF\n' > "$_sh/RETROWP.CI"
     printf '%s\n' "disk $_dir/boot.img" "extfs $_sh" "screen win/512/384" "rom $_rom" \
         "bootdrive 0" "bootdriver 0" "ramsize 33554432" "modelid 14" "cpu 4" "fpu true" \

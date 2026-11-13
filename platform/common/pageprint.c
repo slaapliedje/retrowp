@@ -27,11 +27,44 @@ static void mark_all_dirty(wp_document *doc)
 typedef struct {
     const wp_page_device *dev;
     i32 off_x, off_y;   /* device pixels from the paper's corner to the printable area's */
+    i32 org_x, org_y;   /* where the paper's corner is on the device (a page on a screen) */
+    i32 zoom;           /* percent: a screen's page view at its zoom; 100 on paper */
+    wp_bool screen;     /* a screen's page view (wp_pageprint_page): text in its colours */
+    i32 clip_y0, clip_y1;   /* a screen's: only what lies wholly inside is drawn */
 } page_frame;
+
+/* The zoom in force, for the conversions handed to the border and
+   drawing painters, which take a bare twips->pixels function. One page
+   is drawn at a time, so one zoom at a time. */
+static const wp_page_device *g_zdev;
+static i32 g_zoom = 100;
+static i32 zx(i32 twips) { return g_zdev->x_px(g_zoom == 100 ? twips : (i32)(((long)twips * g_zoom) / 100L)); }
+static i32 zy(i32 twips) { return g_zdev->y_px(g_zoom == 100 ? twips : (i32)(((long)twips * g_zoom) / 100L)); }
+
+/* A face at the zoom: the style's size scaled, so a word drawn in it is
+   about as wide on screen as the layout made it. Its measures, in
+   twips at that size, come back through unzoom. */
+static wp_status open_zoomed(wp_document *doc, const wp_char_style *cs, plat_font **out)
+{
+    wp_char_style z;
+    if (g_zoom == 100) return wp_cstyle_font_open(doc, cs, out);
+    z = *cs;
+    z.size_twips = (i32)(((long)cs->size_twips * g_zoom) / 100L);
+    if (z.size_twips < 20) z.size_twips = 20;
+    return wp_cstyle_font_open(doc, &z, out);
+}
+static i32 unzoom(i32 twips) { return g_zoom == 100 ? twips : (i32)(((long)twips * 100L) / g_zoom); }
 
 static void frame_for(page_frame *fr, const wp_page_device *dev, const wp_section *sec)
 {
     fr->dev = dev;
+    fr->org_x = fr->org_y = 0;
+    fr->zoom = 100;
+    fr->screen = WP_FALSE;
+    fr->clip_y0 = -32000;
+    fr->clip_y1 = 32000;
+    g_zdev = dev;
+    g_zoom = 100;
     fr->off_x = 0;
     fr->off_y = 0;
     if (dev->device_w_px > 0) {
@@ -44,8 +77,8 @@ static void frame_for(page_frame *fr, const wp_page_device *dev, const wp_sectio
     }
 }
 
-static i32 at_x(const page_frame *fr, i32 twips) { return fr->dev->x_px(twips) - fr->off_x; }
-static i32 at_y(const page_frame *fr, i32 twips) { return fr->dev->y_px(twips) - fr->off_y; }
+static i32 at_x(const page_frame *fr, i32 twips) { return fr->org_x + zx(twips) - fr->off_x; }
+static i32 at_y(const page_frame *fr, i32 twips) { return fr->org_y + zy(twips) - fr->off_y; }
 
 /* One '|' part of a header or footer, '#' replaced by the page number. */
 static u32 header_part(const u8 *text, u32 len, u32 *pos, wp_bool last, u32 page_no,
@@ -84,12 +117,18 @@ static void draw_margin_text(wp_document *doc, const page_frame *fr, const wp_se
     cs = wp_document_cstyle_get(doc, doc->default_cstyle);
     if (text == NULL || cs == NULL) return;
     for (i = 0; i < span.length && parts < 3; i++) if (text[i] == '|') parts++;
-    if (wp_cstyle_font_open(doc, cs, &font) != WP_OK) return;
+    if (open_zoomed(doc, cs, &font) != WP_OK) return;
     if (plat_font_metrics_get(font, &fm) != WP_OK) { plat_font_close(font); return; }
+    fm.ascent = unzoom(fm.ascent);
+    fm.descent = unzoom(fm.descent);
 
     left = sec->margin_left;
     right = sec->page_width - sec->margin_right;
     baseline = mid_twips - (fm.ascent + fm.descent) / 2 + fm.ascent;
+    if (at_y(fr, baseline - fm.ascent) < fr->clip_y0 || at_y(fr, baseline + fm.descent) > fr->clip_y1) {
+        plat_font_close(font);   /* off a screen's view */
+        return;
+    }
     for (i = 0; i < parts; i++) {
         u8 buf[256];
         u32 n = header_part(text, span.length, &pos, (wp_bool)(i == 2), page_no, buf, sizeof(buf));
@@ -99,6 +138,7 @@ static void draw_margin_text(wp_document *doc, const page_frame *fr, const wp_se
 
         if (n == 0) continue;
         (void)plat_measure_text(font, buf, n, &w);
+        w = unzoom(w);
         x = (where == 0) ? left : (where == 2) ? right - w : left + (right - left - w) / 2;
         (void)wp_dev_text(fr->dev->gc, font, doc, cs, at_x(fr, x), at_y(fr, baseline),
                           at_x(fr, x + w) - at_x(fr, x),
@@ -262,10 +302,10 @@ static void draw_line(wp_document *doc, const page_frame *fr, wp_paragraph *para
                 *font = NULL;
             }
             *have_font = WP_FALSE;
-            if (cs != NULL && wp_cstyle_font_open(doc, cs, font) == WP_OK) {
+            if (cs != NULL && open_zoomed(doc, cs, font) == WP_OK) {
                 if (plat_font_metrics_get(*font, &fm) == WP_OK) {
-                    *ascent = fm.ascent;
-                    *descent = fm.descent;
+                    *ascent = unzoom(fm.ascent);
+                    *descent = unzoom(fm.descent);
                     *cached = run->style;
                     *have_font = WP_TRUE;
                 } else {
@@ -276,14 +316,84 @@ static void draw_line(wp_document *doc, const page_frame *fr, wp_paragraph *para
         }
         if (len == 0 || *font == NULL) continue;
         (void)plat_measure_text(*font, bytes + frag.byte_start, len, &w);
+        w = unzoom(w);
+        if (fr->screen && *ascent + *descent > (line->text_height_twips * 5) / 4) {
+            /* Greeked: the screen has no face this small (the ST's own
+               bitmap fonts stop at a size a page fitted to the window
+               is well under), so a word that would overrun its line is
+               a grey bar its laid-out width -- what DTP programs show
+               for text too small to read. Paper is never greeked. */
+            w = (i32)(((long)w * line->text_height_twips) / (*ascent + *descent));
+            if (!frag.is_space) {
+                i32 by = text_top + (line->text_height_twips * 2) / 5;
+                i32 bh = at_y(fr, by + line->text_height_twips / 3) - at_y(fr, by);
+                (void)wp_dev_fill_shade(fr->dev->gc, at_x(fr, x), at_y(fr, by), at_x(fr, x + w) - at_x(fr, x),
+                                        bh > 0 ? bh : 1, 50);
+            }
+            x += w;
+            if (frag.is_space) x += extra;
+            continue;
+        }
         if (!frag.is_space) {
-            (void)wp_dev_text(fr->dev->gc, *font, doc, wp_document_cstyle_get(doc, run->style),
+            /* Black on paper (a mono printer would lose light text); the
+               text's own colour on a screen's page view. */
+            const wp_char_style *tcs = wp_document_cstyle_get(doc, run->style);
+            u8 r = 0, g = 0, b = 0;
+            if (fr->screen && tcs != NULL) { r = tcs->color_r; g = tcs->color_g; b = tcs->color_b; }
+            (void)wp_dev_text(fr->dev->gc, *font, doc, tcs,
                               at_x(fr, x), at_y(fr, text_top + *ascent), at_x(fr, x + w) - at_x(fr, x),
                               at_y(fr, text_top + *ascent + *descent) - at_y(fr, text_top),
-                              bytes + frag.byte_start, len, 0, 0, 0);
+                              bytes + frag.byte_start, len, r, g, b);
         }
         x += w;
         if (frag.is_space) x += extra;
+    }
+}
+
+/* One line of page drawn: its row's rules, its border and shading, its
+   picture or its text. Twips here; the device's conversion (and a
+   screen's zoom) comes after. A table line sits at its row's top plus
+   its offset, its cell's left edge in from the column's. */
+static void draw_one(wp_document *doc, const page_frame *fr, wp_section *sec, u32 pi,
+                     wp_paragraph *para, wp_paragraph_layout *layout, u32 li, i32 y,
+                     plat_font **font, wp_cstyle *cached, wp_bool *have_font, i32 *ascent, i32 *descent)
+{
+    const wp_line *line = &layout->lines[li];
+    i32 left = sec->margin_left + line->cell_x0;
+
+    if (line->flags & WP_LINE_ROW_FIRST) {
+        wp_border_draw_row(fr->dev->gc, wp_document_trow_get(doc, para->trow), line->row_h_twips,
+                           (wp_bool)(pi > 0 && sec->paras[pi - 1].trow != 0 && !line->page_start),
+                           at_x(fr, sec->margin_left), at_y(fr, y),
+                           zx, zy, -32000, 32000);
+    }
+    {   /* the paragraph's border and shading, under its text */
+        wp_border_slice bs;
+        if (wp_line_border_slice(doc, para, line, (wp_bool)(li == 0),
+                                 (wp_bool)(li == layout->line_count - 1),
+                                 layout->wrap_twips, &bs)) {
+            wp_border_draw_slice(fr->dev->gc, &bs, at_x(fr, left), at_y(fr, y),
+                                 zx, zy, -32000, 32000);
+        }
+    }
+    if (para->kind == (u8)WP_PARA_IMAGE) {
+        const wp_image_desc *img = wp_document_image_get(doc, para->image);
+        i32 px = left + line->x_twips, py = y + line->text_top_twips;
+
+        /* A drawing at the printer's own resolution; a bitmap
+           dithered to it; an outline where neither can be. */
+        if (img != NULL && WP_IMAGE_IS_DRAWING(img)) {
+            (void)wp_paint_drawing(fr->dev->gc, doc, img, at_x(fr, px), at_y(fr, py),
+                                   at_x(fr, px + line->width_twips) - at_x(fr, px),
+                                   at_y(fr, py + line->text_height_twips) - at_y(fr, py));
+        } else if (img == NULL ||
+            !draw_picture(doc, fr, img, px, py, line->width_twips,
+                          line->text_height_twips)) {
+            draw_frame(fr, px, py, line->width_twips, line->text_height_twips);
+        }
+    } else {
+        draw_line(doc, fr, para, line, (wp_bool)(li == layout->line_count - 1),
+                  left, y, font, cached, have_font, ascent, descent);
     }
 }
 
@@ -293,7 +403,7 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
 {
     u32 si, pi, li;
     u32 cur_page = 0, pages = 0;
-    i32 y = 0, left = 0;
+    i32 y = 0;
     wp_line_walk walk;
     page_frame fr;
     plat_font *font = NULL;
@@ -335,45 +445,8 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
                     wp_line_walk_start(&walk, sec->margin_top);
                     walk.paper = WP_TRUE;
                 }
-                /* Twips here; the device's conversion comes after. A table
-                   line sits at its row's top plus its offset, its cell's
-                   left edge in from the column's. */
                 y = wp_line_walk_next(&walk, line, same_twips);
-                left = sec->margin_left + line->cell_x0;
-                if (line->flags & WP_LINE_ROW_FIRST) {
-                    wp_border_draw_row(dev->gc, wp_document_trow_get(doc, para->trow), line->row_h_twips,
-                                       (wp_bool)(pi > 0 && sec->paras[pi - 1].trow != 0 && !line->page_start),
-                                       at_x(&fr, sec->margin_left), at_y(&fr, y),
-                                       dev->x_px, dev->y_px, -32000, 32000);
-                }
-                {   /* the paragraph's border and shading, under its text */
-                    wp_border_slice bs;
-                    if (wp_line_border_slice(doc, para, line, (wp_bool)(li == 0),
-                                             (wp_bool)(li == layout->line_count - 1),
-                                             layout->wrap_twips, &bs)) {
-                        wp_border_draw_slice(dev->gc, &bs, at_x(&fr, left), at_y(&fr, y),
-                                             dev->x_px, dev->y_px, -32000, 32000);
-                    }
-                }
-                if (para->kind == (u8)WP_PARA_IMAGE) {
-                    const wp_image_desc *img = wp_document_image_get(doc, para->image);
-                    i32 px = left + line->x_twips, py = y + line->text_top_twips;
-
-                    /* A drawing at the printer's own resolution; a bitmap
-                       dithered to it; an outline where neither can be. */
-                    if (img != NULL && WP_IMAGE_IS_DRAWING(img)) {
-                        (void)wp_paint_drawing(dev->gc, doc, img, at_x(&fr, px), at_y(&fr, py),
-                                               at_x(&fr, px + line->width_twips) - at_x(&fr, px),
-                                               at_y(&fr, py + line->text_height_twips) - at_y(&fr, py));
-                    } else if (img == NULL ||
-                        !draw_picture(doc, &fr, img, px, py, line->width_twips,
-                                      line->text_height_twips)) {
-                        draw_frame(&fr, px, py, line->width_twips, line->text_height_twips);
-                    }
-                } else {
-                    draw_line(doc, &fr, para, line, (wp_bool)(li == layout->line_count - 1),
-                              left, y, &font, &cached, &have_font, &ascent, &descent);
-                }
+                draw_one(doc, &fr, sec, pi, para, layout, li, y, &font, &cached, &have_font, &ascent, &descent);
             }
         }
     }
@@ -383,4 +456,67 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
     mark_all_dirty(doc);
     if (pages_out != NULL) *pages_out = pages;
     return st;
+}
+
+wp_status wp_pageprint_page(wp_document *doc, const wp_page_device *dev, u32 page,
+                            i32 x, i32 y0, i32 zoom, i32 clip_y0, i32 clip_y1)
+{
+    u32 si, pi, li;
+    wp_bool started = WP_FALSE;
+    wp_line_walk walk;
+    page_frame fr;
+    plat_font *font = NULL;
+    wp_cstyle cached = 0;
+    wp_bool have_font = WP_FALSE;
+    i32 ascent = 0, descent = 0;
+
+    if (doc == NULL || dev == NULL || dev->gc == NULL || zoom <= 0) return WP_ERR;
+    for (si = 0; si < doc->section_count; si++) {
+        wp_section *sec = wp_document_section_get(doc, si);
+
+        for (pi = 0; pi < sec->para_count; pi++) {
+            wp_paragraph *para = wp_section_paragraph_get(sec, pi);
+            wp_paragraph_layout *layout = (wp_paragraph_layout *)para->layout;
+
+            if (layout == NULL) continue;
+            for (li = 0; li < layout->line_count; li++) {
+                const wp_line *line = &layout->lines[li];
+
+                /* A page's lines are together in reading order: a frame's
+                   and a note's carry the page of the text before them. */
+                if (line->page < page) continue;
+                if (line->page > page) goto done;
+                if (!started) {
+                    started = WP_TRUE;
+                    frame_for(&fr, dev, sec);
+                    fr.org_x = x;
+                    fr.org_y = y0;
+                    fr.zoom = zoom;
+                    fr.screen = WP_TRUE;
+                    fr.clip_y0 = clip_y0;
+                    fr.clip_y1 = clip_y1;
+                    g_zoom = zoom;
+                    begin_page(doc, &fr, sec, page + 1);
+                    wp_line_walk_start(&walk, sec->margin_top);
+                    walk.paper = WP_TRUE;
+                }
+                {
+                    /* Walked whatever; drawn only where it lies wholly
+                       inside the view (a toolkit that gives no clip --
+                       MUI's -- would have it over the status line). A
+                       row is the height of its rule, its tallest cell. */
+                    i32 ly = wp_line_walk_next(&walk, line, same_twips);
+                    i32 lh = (line->flags & WP_LINE_ROW_FIRST) ? line->row_h_twips : line->height_twips;
+                    if (at_y(&fr, ly) >= clip_y0 && at_y(&fr, ly + lh) <= clip_y1) {
+                        draw_one(doc, &fr, sec, pi, para, layout, li, ly,
+                                 &font, &cached, &have_font, &ascent, &descent);
+                    }
+                }
+            }
+        }
+    }
+done:
+    if (font != NULL) plat_font_close(font);
+    g_zoom = 100;
+    return WP_OK;
 }

@@ -2448,7 +2448,47 @@ the list").
       and orphans; page foot on one page and two; RTF both ways and
       Word's form; typing beside a reference. Each shown to fail when
       its mechanism is broken.
-- [ ] T19.3 Columns.
+- [x] T19.3 Page View, with a layout grid.
+      Why: the screen shows the text as one continuous scroll with page
+      breaks ruled across it, which cannot show where things sit on the
+      page -- footnotes drew over later pages until they were moved into
+      the flow (e58bf73), and columns side by side are impossible in it.
+      NeXT's WYSIWYG came from drawing the screen with the printer's own
+      imaging model (Display PostScript); RetroWP takes the principle, not
+      the interpreter (the user, 2026-11-12): the screen becomes one more
+      device for the page printer (pageprint through devout), so what is
+      on screen is what prints because the same code draws both. GUI ports
+      only; DOS keeps its text view.
+      Parts:
+      a. platform/common: page geometry on a scrolling canvas (pages
+         stacked with a gap, centred), zoom (fit width, 100%, fit page),
+         pixel scrolling; pageprint split so one page draws at any zoom,
+         each word placed at its laid-out position (a font opened at the
+         zoomed size, its width scaled back); hit-testing and the caret's
+         place in page coordinates; selection drawn over the page.
+      b. The grid (the user, 2026-11-12: DTP belongs in the word
+         processor now): View > Grid -- show it, its spacing, snap to it;
+         drawn on the page in page view; frames and pictures moved by the
+         mouse snap to it.
+      c. A View menu on every GUI port (Page View, Zoom, Grid); the ST's
+         hand-built tree gains the title in order, self-check updated.
+      d. Each shell -- ST (and gem4xe), Amiga, Mac -- paints, clicks,
+         scrolls and follows the caret in page view.
+      AC: page view shows each page whole at its size and zoom, margins,
+      header, footer, footnotes at the foot, frames where they print;
+      clicking and typing work in it; the grid draws and snaps; every gate
+      green; screenshots on each GUI machine checked by eye.
+      Done: as above; printing proven byte-identical across the page
+      printer's refactor; greeking where a screen has no face small
+      enough (the ST at fit-width); the ST window gained a horizontal
+      slider, the Amiga and Mac follow the caret (they have no scroll
+      bars); View, zoom and grid saved in the config file. Snapping
+      applies to the ruler's markers -- nothing drags frames with the
+      mouse yet. Tests: fit and stacking, words drawn where laid out,
+      click and caret agreeing, a note at the paper's foot, following
+      the caret, selection strips, snapping, the view's clip, the config
+      keys; each shown to fail when broken.
+- [ ] T19.4 Columns (in page view, side by side; DOS one after another).
 
 ---
 

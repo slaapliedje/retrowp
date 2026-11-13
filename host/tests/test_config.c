@@ -182,3 +182,33 @@ void test_config_save_printer(void)
     ASSERT_EQ_U32(cfg.keymap_id, WP_KEYMAP_EMACS);
     ASSERT_EQ_U32(cfg.printer_driver, WP_PRN_POSTSCRIPT);
 }
+
+/* The View menu's keys: read, defaulted, and applied only where the
+   shell can show page view. */
+void test_config_view_keys(void)
+{
+    static const char text[] = "keymap=emacs\nview=page\nzoom=150\ngrid=snap\ngridsize=567\n";
+    wp_config cfg;
+    wp_app_ctx ctx;
+
+    ASSERT_TRUE(wp_config_parse((const u8 *)text, (u32)strlen(text), &cfg) == WP_OK);
+    ASSERT_EQ_U32(cfg.page_view, 1);
+    ASSERT_EQ_U32(cfg.zoom_fit, WP_ZOOM_FIXED);
+    ASSERT_EQ_U32(cfg.zoom, 150);
+    ASSERT_EQ_U32(cfg.grid, 2);
+    ASSERT_EQ_U32(cfg.grid_twips, 567);
+    ASSERT_TRUE(wp_config_parse((const u8 *)"keymap=vim\n", 11, &cfg) == WP_OK);
+    ASSERT_EQ_U32(cfg.page_view, 0);
+    ASSERT_EQ_U32(cfg.zoom_fit, WP_ZOOM_FIT_WIDTH);
+    ASSERT_EQ_U32(cfg.grid_twips, 360);
+
+    memset(&ctx, 0, sizeof(ctx));
+    cfg.page_view = 1;
+    cfg.grid = 1;
+    wp_config_view_apply(&cfg, &ctx);
+    ASSERT_TRUE(!ctx.page_view);   /* no graphics screen */
+    ASSERT_TRUE(ctx.canvas.grid_on && !ctx.canvas.snap_on);
+    ctx.page_view_able = WP_TRUE;
+    wp_config_view_apply(&cfg, &ctx);
+    ASSERT_TRUE(ctx.page_view);
+}
