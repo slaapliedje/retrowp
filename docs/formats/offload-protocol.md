@@ -492,6 +492,17 @@ something else picks up. Without either the bit is clear and a request
 anyway is `OFFLOAD_UNSUPPORTED`. Payloads past one frame go in request
 parts, as for `CONVERT_EXPORT`.
 
+With `--disc-printer NAME[@HOST]` as well, a CD/DVD label -- a document
+whose first page is the disc's 120 mm square (the engine's paper.h) --
+prints on that printer's disc tray instead: `lp -h HOST -d NAME` with its
+CD feed, a 5-inch disc page and a disc media type as that queue's own
+`lpoptions -l` names them (a Gutenprint Canon PIXMA queue's
+`InputSlot=CD`, `PageSize=CD5Inch`, `MediaType=DiscCompat`), the writer's
+copies kept and their other choices -- the main printer's -- left out.
+The reply says which tray: "Printed 1 page on the disc tray of NAME"; a
+printer with no disc feed refuses, saying so. Nothing on the program's
+side changes: it prints a disc label as it prints anything.
+
 ### `OFFLOAD_PRINT_OPTIONS` (op 9)
 
 What the gateway's printer lets a writer choose, for File > Print's

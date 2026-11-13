@@ -1897,7 +1897,8 @@ def handle_convert_export(payload):
 # printer through the print command (CUPS's lp), or a directory each
 # printout is written into as a PDF -- for tests, and for a Pi whose
 # "printer" is a folder shared out to something else.
-PRINT_TO = {'dir': None, 'command': 'lp', 'printer': None, 'options_command': 'lpoptions'}
+PRINT_TO = {'dir': None, 'command': 'lp', 'printer': None, 'options_command': 'lpoptions',
+            'disc_printer': None, 'disc_host': None}
 
 COPIES_CHOICES = ('1', '2', '3', '4', '5', '10')
 
@@ -1911,14 +1912,20 @@ def _pretty_choice(name):
     return ' '.join([words[0]] + [w.lower() if w.isalpha() else w for w in words[1:]])
 
 
-def _queue_options():
-    """The printer queue's own options, from lpoptions -l: {key: (label,
-    default, [choices])}; {} when there is no printer to ask."""
-    if PRINT_TO['printer'] is None:
+def _queue_options(printer=None, host=None):
+    """A printer queue's own options, from lpoptions -l: {key: (label,
+    default, [choices])}; {} when there is no printer to ask. The
+    gateway's printer unless another (and its CUPS host) is named."""
+    if printer is None:
+        printer = PRINT_TO['printer']
+    if printer is None:
         return {}
-    cmd = [PRINT_TO['options_command'], '-l']
-    if PRINT_TO['printer']:
-        cmd += ['-p', PRINT_TO['printer']]
+    cmd = [PRINT_TO['options_command']]
+    if host:
+        cmd += ['-h', host]
+    cmd += ['-l']
+    if printer:
+        cmd += ['-p', printer]
     try:
         done = subprocess.run(cmd, capture_output=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
@@ -2005,6 +2012,48 @@ def _reply(text):
     return text.encode('utf-8')[:200]
 
 
+# A printable CD/DVD's page: the disc's 120 mm square, in points (the
+# engine's paper.h CD/DVD label), within a few points either way.
+DISC_POINTS = 120 * 72 / 25.4
+
+
+def is_disc_page(page):
+    return abs(page[0] - DISC_POINTS) < 3 and abs(page[1] - DISC_POINTS) < 3
+
+
+def disc_print_args():
+    """lp arguments that print on the disc printer's tray: its CD feed, a
+    5-inch disc page and a disc media type, each as that queue names it
+    (Gutenprint's Canon PIXMA queues: InputSlot=CD, PageSize=CD5Inch,
+    MediaType=DiscCompat); None and the reason when it has no tray."""
+    q = _queue_options(PRINT_TO['disc_printer'], PRINT_TO['disc_host'])
+    if not q:
+        return None, 'The disc printer did not answer'
+
+    def pick(key, *wants):
+        names = q.get(key, (None, None, []))[2]
+        for want in wants:
+            for n in names:
+                if n.lower() == want.lower():
+                    return n
+        for want in wants:
+            for n in names:
+                if want.lower() in n.lower():
+                    return n
+        return None
+    slot = pick('InputSlot', 'CD', 'Disc')
+    if slot is None:
+        return None, 'The disc printer has no disc tray'
+    args = ['-o', 'InputSlot=' + slot]
+    size = pick('PageSize', 'CD5Inch', 'CD', 'Disc')
+    if size:
+        args += ['-o', 'PageSize=' + size]
+    media = pick('MediaType', 'DiscCompat', 'Disc', 'CD')
+    if media:
+        args += ['-o', 'MediaType=' + media]
+    return args, None
+
+
 def handle_print(payload):
     """OFFLOAD_PRINT: a copy count then the document's RTF; or, with a 0
     first byte, the writer's options (key=value lines) between them. Printed
@@ -2026,12 +2075,6 @@ def handle_print(payload):
     else:
         chosen['copies'] = str(max(1, min(payload[0], 99)))
         rtf_bytes = payload[1:]
-    if PRINT_TO['dir']:
-        copies = int(chosen['copies']) if chosen['copies'].isdigit() else 1
-    else:
-        lp_args, why = _print_args(chosen)
-        if lp_args is None:
-            return STATUS_ERR, _reply(why)
     try:
         paragraphs = rtf_bytes_to_paragraphs(rtf_bytes)
         sections = rtf_sections(rtf_bytes)
@@ -2039,6 +2082,20 @@ def handle_print(payload):
         pdf = paragraphs_to_pdf_bytes(paragraphs, page, header, footer, sections)
     except Exception:
         return STATUS_ERR, _reply('The gateway could not lay that out')
+    # A disc label goes to the disc printer's tray, the writer's copies
+    # kept; its other choices are the main printer's and do not apply.
+    disc = bool(PRINT_TO['disc_printer']) and not PRINT_TO['dir'] and is_disc_page(page)
+    if PRINT_TO['dir']:
+        copies = int(chosen['copies']) if chosen['copies'].isdigit() else 1
+    elif disc:
+        lp_args, why = disc_print_args()
+        if lp_args is None:
+            return STATUS_ERR, _reply(why)
+        lp_args = ['-n', chosen['copies'] if chosen['copies'].isdigit() else '1'] + lp_args
+    else:
+        lp_args, why = _print_args(chosen)
+        if lp_args is None:
+            return STATUS_ERR, _reply(why)
     pages = pdf.count(b'/Type /Page ')
     what = '1 page' if pages == 1 else '%d pages' % pages
 
@@ -2058,7 +2115,11 @@ def handle_print(payload):
             return STATUS_ERR, _reply('The gateway could not save the printout')
 
     cmd = [PRINT_TO['command'], '-t', 'RetroWP'] + lp_args
-    if PRINT_TO['printer']:
+    if disc:
+        if PRINT_TO['disc_host']:
+            cmd += ['-h', PRINT_TO['disc_host']]
+        cmd += ['-d', PRINT_TO['disc_printer']]
+    elif PRINT_TO['printer']:
         cmd += ['-d', PRINT_TO['printer']]
     try:
         done = subprocess.run(cmd, input=pdf, capture_output=True, timeout=60)
@@ -2067,6 +2128,8 @@ def handle_print(payload):
     if done.returncode != 0:
         err = done.stderr.decode('utf-8', 'replace').strip().splitlines()
         return STATUS_ERR, _reply(err[-1] if err else 'The printer refused the document')
+    if disc:
+        return STATUS_OK, _reply('Printed %s on the disc tray of %s' % (what, PRINT_TO['disc_printer']))
     where = (' on ' + PRINT_TO['printer']) if PRINT_TO['printer'] else ''
     return STATUS_OK, _reply('Printed %s%s' % (what, where))
 
@@ -2094,6 +2157,9 @@ def main():
         (('--print-options-command',), {'default': 'lpoptions',
                                         'help': 'what lists the printer\'s options, '
                                                 'lpoptions\' -l and -p (default: lpoptions)'}),
+        (('--disc-printer',), {'default': None, 'metavar': 'NAME[@HOST]',
+                               'help': 'print CD/DVD labels (a 120 mm square page) on this '
+                                       'CUPS printer\'s disc tray, on HOST\'s CUPS if given'}),
         (('--print-dir',), {'default': None, 'metavar': 'DIR',
                             'help': 'answer OFFLOAD_PRINT by writing each printout '
                                     'into DIR as print-NNNN.pdf instead'}),
@@ -2107,6 +2173,10 @@ def main():
                   file=sys.stderr, flush=True)
         else:
             PRINT_TO['printer'] = args.printer
+    if args.disc_printer and not args.print_dir and PRINT_TO['printer'] is not None:
+        name, _, host = args.disc_printer.partition('@')
+        PRINT_TO['disc_printer'] = name
+        PRINT_TO['disc_host'] = host or None
     ops_supported = (1 << OP_CONVERT_IMPORT) | (1 << OP_CONVERT_EXPORT)
     if PRINT_TO['dir'] or PRINT_TO['printer'] is not None:
         ops_supported |= (1 << OP_PRINT) | (1 << OP_PRINT_OPTIONS)

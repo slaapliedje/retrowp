@@ -731,10 +731,13 @@ static void print_dir_fresh(void)
 
 /* "Alpha", a one-page document, as the action sends it: a copy count,
    then its RTF. */
+/* The document submit_print sends; a test may point it elsewhere. */
+static const char *g_print_rtf = "{\\rtf1\\ansi{\\fonttbl{\\f0 Helvetica;}}\\f0\\fs24 Alpha\\par}";
+
 static u32 print_payload(u8 *buf, u32 cap, u8 copies)
 {
-    static const char rtf[] = "{\\rtf1\\ansi{\\fonttbl{\\f0 Helvetica;}}\\f0\\fs24 Alpha\\par}";
-    u32 n = (u32)sizeof(rtf) - 1;
+    const char *rtf = g_print_rtf;
+    u32 n = (u32)strlen(rtf);
 
     if (n + 1 > cap) return 0;
     buf[0] = copies;
@@ -1042,4 +1045,46 @@ void test_convert_print_option_refused(void)
     offload_response_free(&resp);
     offload_shutdown();
     gateway_stop(&gw);
+}
+
+/* --disc-printer: a CD/DVD label (the disc's 120 mm square page) goes to
+   the disc printer, on its host's CUPS, with the tray, the disc page size
+   and a disc media type as that queue names them -- the Canon PIXMA
+   iP7220's Gutenprint queue here; anything else still goes to --printer. */
+void test_convert_print_disc_to_its_tray(void)
+{
+    static const char *const args[] = { "--printer", "Office",
+                                        "--print-command", "host/tests/fake_lp.sh",
+                                        "--print-options-command", "host/tests/fake_lpoptions_two.sh",
+                                        "--disc-printer", "iP7200-series@skint.local", NULL };
+    static const char *const no_tray[] = { "--printer", "Office",
+                                           "--print-command", "host/tests/fake_lp.sh",
+                                           "--print-options-command", "host/tests/fake_lpoptions_two.sh",
+                                           "--disc-printer", "Office", NULL };
+    static const char disc[] = "{\\rtf1\\ansi\\paperw6803\\paperh6803\\margl567\\margr567\\margt567\\margb567"
+                               "{\\fonttbl{\\f0 Helvetica;}}\\f0\\fs24 Mix\\par}";
+    const char *plain = g_print_rtf;
+    char got[256];
+    plat_file *f;
+    u32 n = 0;
+
+    print_dir_fresh();
+    g_print_rtf = disc;
+    submit_print(args, OFFLOAD_OK, "Printed 1 page on the disc tray of iP7200-series");
+    ASSERT_TRUE(plat_file_open(PRINT_DIR "/lp.args", PLAT_FILE_READ, &f) == WP_OK);
+    ASSERT_TRUE(plat_file_read(f, (u8 *)got, sizeof(got) - 1, &n) == WP_OK);
+    plat_file_close(f);
+    got[n] = '\0';
+    ASSERT_EQ_STR(got, "-t\nRetroWP\n-n\n2\n-o\nInputSlot=CD\n-o\nPageSize=CD5Inch\n-o\nMediaType=DiscCompat\n"
+                       "-h\nskint.local\n-d\niP7200-series\n");
+    /* A printer with no tray refuses, saying so. */
+    submit_print(no_tray, OFFLOAD_ERR, "The disc printer has no disc tray");
+
+    g_print_rtf = plain;
+    submit_print(args, OFFLOAD_OK, "Printed 1 page on Office");
+    ASSERT_TRUE(plat_file_open(PRINT_DIR "/lp.args", PLAT_FILE_READ, &f) == WP_OK);
+    ASSERT_TRUE(plat_file_read(f, (u8 *)got, sizeof(got) - 1, &n) == WP_OK);
+    plat_file_close(f);
+    got[n] = '\0';
+    ASSERT_EQ_STR(got, "-t\nRetroWP\n-n\n2\n-d\nOffice\n");
 }
