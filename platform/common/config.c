@@ -47,6 +47,7 @@ static void view_defaults(wp_config *out)
     out->zoom = 100;
     out->grid = 0;
     out->grid_twips = 360;
+    out->paper_metrics = 1;
 }
 
 static void parse_line(const u8 *bytes, u32 len, wp_config *out)
@@ -99,6 +100,11 @@ static void parse_line(const u8 *bytes, u32 len, wp_config *out)
         if (ascii_ieq(v, val_len, "off")) out->grid = 0;
         else if (ascii_ieq(v, val_len, "show")) out->grid = 1;
         else if (ascii_ieq(v, val_len, "snap")) out->grid = 2;
+        return;
+    }
+    if (ascii_ieq(bytes + key_start, key_len, "metrics")) {
+        if (ascii_ieq(bytes + val_start, val_len, "paper")) out->paper_metrics = 1;
+        else if (ascii_ieq(bytes + val_start, val_len, "screen")) out->paper_metrics = 0;
         return;
     }
     if (ascii_ieq(bytes + key_start, key_len, "gridsize")) {

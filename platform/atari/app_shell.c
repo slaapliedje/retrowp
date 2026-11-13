@@ -5470,6 +5470,10 @@ void app_shell_run(void)
         g_ctx.canvas.y_tw = atari_px_to_twips_y;
         g_ctx.page_view_able = WP_TRUE;
         wp_config_view_apply(&cfg, &g_ctx);   /* View's settings from RETROWP.CFG */
+        /* Text measured as it will print (papermetrics.h): GEM sizes its
+           faces to the system cell, not to points, so a layout measured
+           with them holds too much on a page and prints small. */
+        plat_metrics_set_paper((wp_bool)(cfg.paper_metrics != 0));
 #ifndef GEM4XE_APP_GEM_H
         /* GEMDOS's printer, the Centronics port: an Epson-style printer
            takes the PC character set, which the ST's own largely is.

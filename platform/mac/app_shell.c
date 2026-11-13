@@ -1907,6 +1907,7 @@ void app_shell_run(void)
     g_ctx.page_view_able = WP_TRUE;
     g_ctx.config_path = WP_MAC_CONFIG_PATH;
     wp_config_view_apply(&cfg, &g_ctx);
+    plat_metrics_set_paper((wp_bool)(cfg.paper_metrics != 0));   /* measured as it will print */
     load_sample_document();
 
     /* Phase 5: parsed ONCE at startup from the generated

@@ -2146,6 +2146,9 @@ void app_shell_run(void)
     g_ctx.page_view_able = WP_TRUE;
     g_ctx.config_path = WP_AMIGA_CONFIG_PATH;
     wp_config_view_apply(&cfg, &g_ctx);
+    /* Measured as it will print (papermetrics.h): the Amiga's faces are
+       sized in pixels, not points. */
+    plat_metrics_set_paper((wp_bool)(cfg.paper_metrics != 0));
     /* PRT:, through printer.device and the writer's Printer prefs, which
        take the Amiga's own ISO 8859-1. */
     g_ctx.printer_path = "PRT:";

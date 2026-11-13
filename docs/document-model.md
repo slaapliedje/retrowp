@@ -589,16 +589,35 @@ column it is met in, its height kept clear in that column alone.
 Frames are placed on the page, not in a column.
 
 Found while checking columns on target (2026-11-12): the ST and the
-Amiga lay text out with their screen fonts, which GEM and Topaz size to
-the system font rather than to points, so their lines come out shorter
-than the type's size -- 10-point text at about 6-7 points of line
-height -- and a page holds more than it will on another machine. The
-ST's PostScript printing inherits those measures (only its GDOS path
-measures with the printer), so its printout sets the text smaller than
-asked. The page view shows that faithfully; the fix is measuring in
-true point metrics where layout is meant for paper -- the job of the
-outline-font tier discussed for the bigger machines, or of AFM-style
-widths for the PostScript faces. Recorded, not yet fixed.
+Amiga laid text out with their screen fonts, which GEM and Topaz size to
+the system font rather than to points, so 10-point text got about 6-7
+points of line height, a page held too much, and the ST's PostScript
+printed small. Fixed by paper metrics (T19.5, below).
+
+## Paper metrics (M19)
+
+Layout measures text as it will print, on every graphics screen
+(retroplat's papermetrics.h; `metrics=paper`, the default, or
+`metrics=screen` in the config file). With the mode on, a backend
+answers plat_measure_text and plat_font_metrics_get as the nearest of
+the twelve standard PostScript text faces -- Times, Helvetica, Courier,
+each roman, italic, bold and bold italic, chosen by the face's name,
+else its family -- from their published widths (Adobe's Core 14
+metrics, generated from the URW metric clones by retroplat's
+tools/gen_papermetrics.py: numbers only, about 5 KB), with a line of 1.2
+em. Its own fonts then only draw, each word at its printed place: the
+plain view, page view and paper all have the same line breaks and page
+breaks, and a page holds what it will print. DOS's text screen measures
+in cells and ignores the mode.
+
+The cost is the era's WYSIWYG trade: where a screen's glyphs are wider
+or narrower than the type they stand for (the ST's system font), words
+sit a little apart or close together in the plain view; in page view a
+face too big for its line greeks -- judged by the drawing face's own
+size, asked with paper metrics off. GDOS printing measures the same way
+as the screen, so its printout matches what was laid out. The
+outline-font display tier planned for the bigger machines would replace
+the drawing with real glyphs and keep these measures.
 
 RTF: `\colsN` and `\colsxN`, document-wide for the first section and
 after `\sectd` for the others; `\sectd` resets to one column. Known

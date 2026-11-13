@@ -32,6 +32,10 @@ typedef struct {
     u16 zoom;          /* percent, for WP_ZOOM_FIXED */
     u8  grid;          /* 0 off, 1 shown, 2 shown and snapped to */
     u16 grid_twips;
+    /* "metrics=paper|screen" (paper): measure text as it will print
+       (plat_metrics_set_paper; retroplat's papermetrics.h) or with the
+       screen's own fonts. A text screen ignores it. */
+    u8  paper_metrics;
 } wp_config;
 
 /* Line-based `key=value` text, `#`/`;` comment lines, blank lines

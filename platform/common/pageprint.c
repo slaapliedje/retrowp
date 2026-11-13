@@ -325,7 +325,15 @@ static void draw_line(wp_document *doc, const page_frame *fr, wp_paragraph *para
             }
             *have_font = WP_FALSE;
             if (cs != NULL && open_zoomed(doc, cs, font) == WP_OK) {
-                if (plat_font_metrics_get(*font, &fm) == WP_OK) {
+                /* On a screen, how big the drawing face really is -- with
+                   paper metrics on (papermetrics.h) every face answers in
+                   paper sizes, and greeking needs the glyphs' own. */
+                wp_bool paper = plat_metrics_paper();
+                wp_status mst;
+                if (fr->screen) plat_metrics_set_paper(WP_FALSE);
+                mst = plat_font_metrics_get(*font, &fm);
+                if (fr->screen) plat_metrics_set_paper(paper);
+                if (mst == WP_OK) {
                     *ascent = unzoom(fm.ascent);
                     *descent = unzoom(fm.descent);
                     *cached = run->style;

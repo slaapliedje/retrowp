@@ -2501,6 +2501,20 @@ the list").
       it, RTF; each shown to fail when broken. Not yet: balancing at a
       section's end, a column break, the ruler showing every column.
 
+- [x] T19.5 Paper metrics.
+      Found checking columns on target: the ST and Amiga measured with
+      screen fonts sized to the system cell, so pages held too much and
+      the ST's PostScript printed small. Layout now measures as it will
+      print on every graphics screen: retroplat papermetrics (Adobe Core
+      14 widths for Times, Helvetica, Courier x 4 styles, 1.2 em lines,
+      generated from the URW clones), each backend answering from it
+      when plat_metrics_paper(); config metrics=paper|screen (paper).
+      Page view greeks by the drawing face's own size. On target: the
+      ST and Amiga page views match the Mac's, and the ST's PostScript
+      prints true 10-point Times in two columns. Tests: published widths,
+      faces by name and family, Windows-1252 and missing characters,
+      line height, layout under the mode, the config key; the backend
+      hook shown to fail when broken.
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)

@@ -480,6 +480,8 @@ void test_columns_flow(void);
 void test_columns_page_view(void);
 void test_columns_note_and_break(void);
 void test_columns_rtf(void);
+void test_papermetrics_widths(void);
+void test_papermetrics_layout_and_config(void);
 void test_config_view_keys(void);
 void test_pagecanvas_fit_and_stack(void);
 void test_pagecanvas_paint_caret_hit(void);
@@ -1222,6 +1224,8 @@ static const test_case g_cases[] = {
     { "columns_page_view", test_columns_page_view },
     { "columns_note_and_break", test_columns_note_and_break },
     { "columns_rtf", test_columns_rtf },
+    { "papermetrics_widths", test_papermetrics_widths },
+    { "papermetrics_layout_and_config", test_papermetrics_layout_and_config },
     { "config_view_keys", test_config_view_keys },
     { "pagecanvas_fit_and_stack", test_pagecanvas_fit_and_stack },
     { "pagecanvas_paint_caret_hit", test_pagecanvas_paint_caret_hit },
