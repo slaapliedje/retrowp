@@ -483,6 +483,8 @@ void test_notes_rtf_round_trip(void);
 void test_notes_rtf_from_word(void);
 void test_notes_typing_beside_reference(void);
 void test_notes_two_pages(void);
+void test_notes_screen_and_paper(void);
+void test_notes_rtf_face(void);
 void test_merge_finds_fields(void);
 void test_merge_reads_csv(void);
 void test_merge_reads_tabs(void);
@@ -1212,6 +1214,8 @@ static const test_case g_cases[] = {
     { "notes_rtf_from_word", test_notes_rtf_from_word },
     { "notes_typing_beside_reference", test_notes_typing_beside_reference },
     { "notes_two_pages", test_notes_two_pages },
+    { "notes_screen_and_paper", test_notes_screen_and_paper },
+    { "notes_rtf_face", test_notes_rtf_face },
     { "merge_finds_fields", test_merge_finds_fields },
     { "merge_reads_csv", test_merge_reads_csv },
     { "merge_reads_tabs", test_merge_reads_tabs },

@@ -333,6 +333,7 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
                     }
                     begin_page(doc, &fr, sec, pages);
                     wp_line_walk_start(&walk, sec->margin_top);
+                    walk.paper = WP_TRUE;
                 }
                 /* Twips here; the device's conversion comes after. A table
                    line sits at its row's top plus its offset, its cell's

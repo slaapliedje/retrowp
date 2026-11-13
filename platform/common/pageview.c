@@ -80,6 +80,7 @@ void wp_line_walk_start(wp_line_walk *w, i32 y)
     w->row_top = w->row_bottom = w->cell_y = y;
     w->in_row = WP_FALSE;
     w->page_top = w->frame_y = y;
+    w->paper = WP_FALSE;
 }
 
 i32 wp_line_walk_next(wp_line_walk *w, const wp_line *line, wp_line_walk_px_fn px)
@@ -114,6 +115,16 @@ i32 wp_line_walk_next(wp_line_walk *w, const wp_line *line, wp_line_walk_px_fn p
     if (w->in_row) {
         w->y = w->row_bottom;
         w->in_row = WP_FALSE;
+    }
+    if (line->flags & WP_LINE_NOTE) {
+        /* A footnote: on paper at its page's foot, taking no room; on
+           screen in the flow, under the paragraph that cites it, where
+           it can be read and edited -- a screen page is only as tall as
+           its text, so the foot is not a place on it. */
+        if (w->paper) return w->page_top + px(line->page_y_twips);
+        top = w->y;
+        w->y += px(line->height_twips);
+        return top;
     }
     top = w->y;
     w->page_top = top - px(line->page_y_twips);

@@ -112,7 +112,7 @@ wp_status wp_document_paginate(wp_document *doc, wp_pagination *out)
                                                content_height ||
                                                (l_idx == 0 && para_breaks_page(doc, para))) &&
                                               current_page_used_height > 0 &&
-                                              !(line->flags & WP_LINE_FRAME));   /* as page marking */
+                                              !(line->flags & (WP_LINE_FRAME | WP_LINE_NOTE)));   /* as page marking */
 
                 if (!have_current_page || overflow) {
                     st = pagination_add_page(out);
@@ -123,7 +123,7 @@ wp_status wp_document_paginate(wp_document *doc, wp_pagination *out)
 
                 st = pagination_page_add_line(out, s_idx, p_idx, l_idx);
                 if (st != WP_OK) { wp_pagination_free(out); return st; }
-                current_page_used_height += line->advance_twips;
+                if (!(line->flags & WP_LINE_NOTE)) current_page_used_height += line->advance_twips;   /* a note: at the foot */
             }
         }
     }
@@ -232,14 +232,6 @@ static void place_table_lines(wp_document *doc, wp_section *sec)
                 }
                 frame_first = (wp_bool)(q == pi);
             }
-            if (fr == NULL && para->note != 0) {
-                /* A footnote's paragraph: placed like a frame -- no room
-                   in the text, the column's width -- at its page's foot
-                   (wp_document_mark_pages). */
-                fx0 = 0;
-                fx1 = wp_section_column_twips(sec);
-                frame_first = WP_TRUE;
-            }
             if (l != NULL) {
                 for (j = 0; j < l->line_count; j++) {
                     wp_line *ln = &l->lines[j];
@@ -247,7 +239,11 @@ static void place_table_lines(wp_document *doc, wp_section *sec)
                     ln->advance_twips = ln->height_twips;
                     ln->cell_x0 = ln->cell_x1 = 0;
                     ln->row_dy_twips = ln->row_h_twips = 0;
-                    if (fr != NULL || para->note != 0) {
+                    if (fr == NULL && para->note != 0) {
+                        /* A footnote's: an ordinary line on screen; its
+                           place on paper set when its page closes. */
+                        ln->flags = WP_LINE_NOTE;
+                    } else if (fr != NULL) {
                         ln->flags = (u8)(WP_LINE_FRAME | ((frame_first && j == 0) ? WP_LINE_FRAME_FIRST : 0));
                         ln->advance_twips = 0;
                         ln->cell_x0 = fx0;
@@ -321,8 +317,8 @@ static void place_table_lines(wp_document *doc, wp_section *sec)
 #define MARK_NOTES_MAX 64
 
 /* A page's footnotes, stacked up from its foot in the order they were
-   met: each paragraph's lines a frame whose top is the notes' block top
-   plus the notes before it. */
+   met: each line's page_y_twips its place there, which is where a
+   printing walk puts it (WP_LINE_NOTE). */
 static void place_notes(wp_section *sec, const u32 *note_para, u32 notes, i32 notes_h, i32 content_height)
 {
     u32 k, j;
@@ -333,10 +329,9 @@ static void place_notes(wp_section *sec, const u32 *note_para, u32 notes, i32 no
         wp_paragraph_layout *l = (wp_paragraph_layout *)sec->paras[note_para[k]].layout;
         if (l == NULL) continue;
         for (j = 0; j < l->line_count; j++) {
-            l->lines[j].frame_top_twips = top;
-            l->lines[j].page_y_twips = top + l->lines[j].row_dy_twips;
+            l->lines[j].page_y_twips = top;
+            top += l->lines[j].height_twips;
         }
-        for (j = 0; j < l->line_count; j++) top += l->lines[j].height_twips;
     }
 }
 
@@ -383,7 +378,7 @@ u32 wp_document_mark_pages(wp_document *doc)
 
                 /* A footnote's line: on the page of the text it follows,
                    collected to go at that page's foot. */
-                if ((line->flags & WP_LINE_FRAME) && sec->paras[p_idx].note != 0) {
+                if (line->flags & WP_LINE_NOTE) {
                     line->page = page;
                     line->page_start = WP_FALSE;
                     if (l_idx == 0) {

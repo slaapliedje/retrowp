@@ -62,6 +62,9 @@ typedef struct {
 #define WP_LINE_ROW_FIRST   0x01   /* the first line of a table row */
 #define WP_LINE_FRAME       0x02   /* a line in a frame: placed by frame_top + row_dy, no advance */
 #define WP_LINE_FRAME_FIRST 0x04   /* the first line of a frame */
+#define WP_LINE_NOTE        0x08   /* a footnote's line (notes.h): in the text's flow on screen,
+                                      under the paragraph citing it; on paper at page_y_twips, the
+                                      page's foot, taking no room (wp_line_walk.paper) */
 
 /* The width a paragraph wraps at: its frame's width in a frame, its
    cell's text width in a table (the cell less the row's gap each side),

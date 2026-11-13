@@ -309,8 +309,19 @@ static void rtf_flush_notes(rtf_parser *p)
     u32 k;
     u16 fts = 0;
 
+    wp_font face = 0;
+    wp_bool have_face = WP_FALSE;
+
     if (p->pend_count == 0) return;
     (void)wp_style_ensure(p->doc, (const u8 *)"Footnote Text", 13, &fts);
+    {
+        /* The notes in the face of the paragraph that cites them. */
+        wp_paragraph *anchor = wp_section_paragraph_get(wp_document_section_get(p->doc, p->section_idx), p->para_idx);
+        if (anchor != NULL && anchor->run_count > 0) {
+            const wp_char_style *acs = wp_document_cstyle_get(p->doc, wp_paragraph_run_get(anchor, 0)->style);
+            if (acs != NULL) { face = acs->font; have_face = WP_TRUE; }
+        }
+    }
     for (k = 0; k < p->pend_count && p->error == WP_OK; k++) {
         wp_section *sec = wp_document_section_get(p->doc, p->section_idx);
         wp_paragraph *np;
@@ -326,6 +337,10 @@ static void rtf_flush_notes(rtf_parser *p)
         wp_paragraph_pstyle_set(np, fts != 0 ? p->doc->named[fts].para : p->doc->default_pstyle);
         plain = fts != 0 ? p->doc->named[fts].chars : p->doc->default_cstyle;
         cs = *wp_document_cstyle_get(p->doc, plain);
+        if (have_face && cs.font != face) {
+            cs.font = face;
+            if (wp_document_cstyle_find_or_add(p->doc, &cs, &plain) != WP_OK) { p->error = WP_NOMEM; return; }
+        }
         cs.flags = (u16)(cs.flags | WP_STYLE_SUPER);
         cs.note = p->pend[k].id;
         while (a < b && p->fn_text.bytes[a] == ' ') a++;

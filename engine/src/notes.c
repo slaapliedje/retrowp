@@ -141,7 +141,7 @@ wp_status wp_notes_insert(wp_document *doc, wp_undo_journal *journal, wp_pos pos
     wp_pos after, end;
     wp_section *sec;
     wp_paragraph *para;
-    wp_cstyle refstyle;
+    wp_cstyle refstyle, base_style;
     u32 last;
     wp_status st;
 
@@ -155,7 +155,8 @@ wp_status wp_notes_insert(wp_document *doc, wp_undo_journal *journal, wp_pos pos
     if (st != WP_OK) return st;
     sec = wp_document_section_get(doc, pos.section);
     para = wp_section_paragraph_get(sec, after.paragraph);
-    st = ref_cstyle(doc, wp_paragraph_run_get(para, (u16)after.run)->style, id, &refstyle);
+    base_style = wp_paragraph_run_get(para, (u16)after.run)->style;
+    st = ref_cstyle(doc, base_style, id, &refstyle);
     if (st != WP_OK) return st;
     wp_run_cstyle_set(para, (u16)after.run, refstyle);
     para->layout_dirty = WP_TRUE;
@@ -191,7 +192,25 @@ wp_status wp_notes_insert(wp_document *doc, wp_undo_journal *journal, wp_pos pos
     if (st != WP_OK) return st;
     para = wp_section_paragraph_get(wp_document_section_get(doc, pos.section), end.paragraph);
     if (para->run_count < 2) return WP_ERR;
-    st = ref_cstyle(doc, wp_paragraph_run_get(para, 0)->style, id, &refstyle);
+    {
+        /* The note in the face of the text that cites it (the style's
+           is the document's default, which a document's own text may
+           not use): its space, and so what is typed after it. */
+        const wp_char_style *face = wp_document_cstyle_get(doc, base_style);
+        const wp_char_style *sp = wp_document_cstyle_get(doc, wp_paragraph_run_get(para, 1)->style);
+        wp_char_style cs;
+        wp_cstyle h;
+        if (face != NULL && sp != NULL && sp->font != face->font) {
+            cs = *sp;
+            cs.font = face->font;
+            if (wp_document_cstyle_find_or_add(doc, &cs, &h) == WP_OK) {
+                para = wp_section_paragraph_get(wp_document_section_get(doc, pos.section), end.paragraph);
+                wp_run_cstyle_set(para, 1, h);
+            }
+        }
+    }
+    para = wp_section_paragraph_get(wp_document_section_get(doc, pos.section), end.paragraph);
+    st = ref_cstyle(doc, wp_paragraph_run_get(para, 1)->style, id, &refstyle);
     if (st != WP_OK) return st;
     wp_run_cstyle_set(para, 0, refstyle);
     para->layout_dirty = WP_TRUE;

@@ -534,15 +534,22 @@ paragraph that refers to it, the first starting with a run of its own
 that names the note too -- its number in the note. A split copies
 `note`, so Enter in a note continues it.
 
-Layout places a note the way it places a frame (paginate.c): its lines
-are frame lines, no room in the text, the column's width; marking
-pages collects the notes met on each page, keeps their height free of
-text, and when the page closes stacks them up from its foot in the
-order met. Every painter and the printer already draw frame lines, so
-none draws a note with code of its own. A note is never split across
-pages and never moves its reference on: one met when its page is
-nearly full -- its paragraph's lines already placed -- stays on that
-page and may cover the last of them. Known gap.
+A note's lines are WP_LINE_NOTE (paginate.c), and where one goes
+depends on what is being drawn. On SCREEN it is an ordinary line in the
+flow, right under the paragraph citing it, in its smaller type: a
+screen page is only as tall as its text, so its foot is no place on it,
+and placing notes there (as frames are) drew them over later pages
+wherever a page ended short. On PAPER (`wp_line_walk.paper`, set by the
+page printer) it is at its page's foot and takes no room: marking pages
+collects the notes met on each page, keeps their height free of text,
+and when the page closes stacks them up from the foot in the order met,
+each line's `page_y_twips` its place. Page marking and page numbers are
+the paper's on screen too. A note is never split across pages and never
+moves its reference on: one met when its page is nearly full -- its
+paragraph's lines already placed -- stays on that page and may cover
+the last of them. Known gap. A note takes the face of the paragraph
+citing it, not its style's (the document's default, which a document's
+own text may not use).
 
 Numbers are text, set by `wp_notes_renumber` before every layout
 (`wp_pageview_relayout`): references in reading order, 1 up; each

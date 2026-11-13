@@ -135,8 +135,7 @@ void test_notes_at_page_foot(void)
     l = (const wp_paragraph_layout *)para_at(&doc, 1)->layout;
     ASSERT_TRUE(l != NULL && l->line_count > 0);
     if (l != NULL && l->line_count > 0) {
-        ASSERT_TRUE((l->lines[0].flags & WP_LINE_FRAME) != 0);
-        ASSERT_EQ_U32(l->lines[0].advance_twips, 0);
+        ASSERT_TRUE((l->lines[0].flags & WP_LINE_NOTE) != 0);
         ASSERT_EQ_U32((u32)(l->lines[0].page_y_twips + l->lines[0].height_twips), (u32)content);
     }
     /* "More" follows the text, not the note. */
@@ -283,5 +282,70 @@ void test_notes_two_pages(void)
         }
     }
     wp_undo_journal_free(&j);
+    wp_document_free(&doc);
+}
+
+static i32 px_same(i32 t) { return t; }
+
+/* Walked for the screen, a note is in the flow, under the paragraph
+   citing it, and the text after it follows it; walked for paper, it is
+   at the page's foot and the text closes up. A short page -- a note on
+   the last page -- is where the two differ. */
+void test_notes_screen_and_paper(void)
+{
+    wp_document doc;
+    wp_undo_journal j;
+    wp_pos at, note;
+    wp_line_walk w;
+    const wp_line *a, *n, *b;
+    i32 ya, yn, yb;
+    wp_section *sec;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)"Cited\nAfter\n", 12, &doc) == WP_OK);
+    wp_undo_journal_init(&j);
+    memset(&at, 0, sizeof(at));
+    at.offset = 5;
+    ASSERT_TRUE(wp_notes_insert(&doc, &j, at, &note) == WP_OK);
+    (void)wp_pageview_relayout(&doc, 0);
+    sec = wp_document_section_get(&doc, 0);
+    a = &((const wp_paragraph_layout *)para_at(&doc, 0)->layout)->lines[0];
+    n = &((const wp_paragraph_layout *)para_at(&doc, 1)->layout)->lines[0];
+    b = &((const wp_paragraph_layout *)para_at(&doc, 2)->layout)->lines[0];
+
+    wp_line_walk_start(&w, 0);
+    ya = wp_line_walk_next(&w, a, px_same);
+    yn = wp_line_walk_next(&w, n, px_same);
+    yb = wp_line_walk_next(&w, b, px_same);
+    ASSERT_EQ_U32((u32)yn, (u32)(ya + a->height_twips));
+    ASSERT_EQ_U32((u32)yb, (u32)(yn + n->height_twips));
+
+    wp_line_walk_start(&w, 0);
+    w.paper = WP_TRUE;
+    ya = wp_line_walk_next(&w, a, px_same);
+    yn = wp_line_walk_next(&w, n, px_same);
+    yb = wp_line_walk_next(&w, b, px_same);
+    ASSERT_EQ_U32((u32)yb, (u32)(ya + a->height_twips));
+    ASSERT_EQ_U32((u32)(yn + n->height_twips), (u32)(sec->page_height - sec->margin_top - sec->margin_bottom));
+    wp_undo_journal_free(&j);
+    wp_document_free(&doc);
+}
+
+/* A note read from RTF is in the face of the paragraph citing it, not
+   the document's default. */
+void test_notes_rtf_face(void)
+{
+    static const char rtf[] =
+        "{\\rtf1\\ansi{\\fonttbl{\\f0 Helvetica;}{\\f1\\froman Times;}}"
+        "\\pard\\f1 Cited{\\super\\chftn}{\\footnote\\pard\\plain {\\super\\chftn} Note.} here.\\par}";
+    wp_document doc;
+    const wp_char_style *a, *n;
+    wp_paragraph *np;
+
+    ASSERT_TRUE(format_rtf_import((const u8 *)rtf, (u32)strlen(rtf), &doc) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 2);
+    np = para_at(&doc, 1);
+    a = wp_document_cstyle_get(&doc, wp_paragraph_run_get(para_at(&doc, 0), 0)->style);
+    n = wp_document_cstyle_get(&doc, wp_paragraph_run_get(np, (u16)(np->run_count - 1))->style);
+    ASSERT_TRUE(a != NULL && n != NULL && a->font != 0 && n->font == a->font);
     wp_document_free(&doc);
 }
