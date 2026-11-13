@@ -29,12 +29,15 @@ static void font_cache_close_all(font_cache *cache)
 wp_status wp_cstyle_font_open(const wp_document *doc, const wp_char_style *cs, plat_font **out)
 {
     const wp_font_desc *fd = wp_document_font_get(doc, cs->font);
-    u16 flags = cs->flags;
+    u16 flags = (u16)(cs->flags & (PLAT_STYLE_BOLD | PLAT_STYLE_ITALIC | PLAT_STYLE_UNDERLINE | PLAT_STYLE_STRIKE));
+    /* Raised or lowered text (a footnote's mark) is set two thirds the
+       size: a painter puts a run's baseline its own ascent below the
+       line's top, so the smaller face sits high on the line. */
+    i32 size = (cs->flags & (WP_STYLE_SUPER | WP_STYLE_SUB)) ? (cs->size_twips * 2) / 3 : cs->size_twips;
 
-    if (fd == NULL) return plat_font_open((const u8 *)"", 0, cs->size_twips, flags, out);
+    if (fd == NULL) return plat_font_open((const u8 *)"", 0, size, flags, out);
     flags = (u16)(flags | ((u16)(fd->family & 7u) << PLAT_FAMILY_SHIFT));
-    return plat_font_open(wp_strpool_get(&doc->strings, fd->name), fd->name.length,
-                          cs->size_twips, flags, out);
+    return plat_font_open(wp_strpool_get(&doc->strings, fd->name), fd->name.length, size, flags, out);
 }
 
 /* Measures bytes[0..len) under cstyle `handle`'s font, returning both

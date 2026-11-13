@@ -4,6 +4,7 @@
 #include "format_stw.h"
 #include "merge.h"
 #include "styles.h"
+#include "notes.h"
 #include "actions.h"
 #include "app_ctx.h"
 #include "format_txt.h"
@@ -1850,6 +1851,28 @@ static wp_status act_define_style(wp_app_ctx *ctx)
     return WP_OK;
 }
 
+/* ---- Footnotes (M19; notes.h) ---------------------------------------- */
+
+/* Tools > Insert Footnote: a reference at the caret, its note at the
+   foot of the page, the caret in the note to type it. */
+static wp_status act_insert_footnote(wp_app_ctx *ctx)
+{
+    wp_pos *cur, at;
+    wp_status st;
+
+    if (!ctx->doc_loaded) return WP_OK;
+    cur = wp_keymap_cursor(ctx);
+    st = wp_notes_insert(ctx->doc, ctx->journal, *cur, &at);
+    if (st == WP_UNSUPPORTED) {
+        wp_action_tell(ctx, "A footnote can't have a footnote of its own");
+        return WP_OK;
+    }
+    if (st != WP_OK) return st;
+    *cur = at;
+    wp_document_mark_modified(ctx->doc);
+    return WP_OK;
+}
+
 /* ---- Mail merge (M18; merge.h) --------------------------------------- */
 
 static void field_done(wp_app_ctx *ctx, const u8 *text, u32 len)
@@ -2134,7 +2157,8 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_FILE_MERGE,        WP_MENU_FILE,   "Mail Merge...",  0,        0,    act_file_merge, NULL },
     { WP_ACT_TOOLS_INSERTFIELD, WP_MENU_TOOLS,  "Insert Field...", 0,       0,    act_insert_field, NULL },
     { WP_ACT_FORMAT_STYLE,      WP_MENU_FORMAT, "Style...",       0,        0,    act_format_style, NULL },
-    { WP_ACT_FORMAT_DEFINESTYLE, WP_MENU_FORMAT, "Define Style...", 0,      0,    act_define_style, NULL }
+    { WP_ACT_FORMAT_DEFINESTYLE, WP_MENU_FORMAT, "Define Style...", 0,      0,    act_define_style, NULL },
+    { WP_ACT_TOOLS_INSERTFOOTNOTE, WP_MENU_TOOLS, "Insert Footnote", 0,     0,    act_insert_footnote, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)

@@ -116,6 +116,9 @@ typedef enum {
        look kept as one. */
     WP_ACT_FORMAT_STYLE,
     WP_ACT_FORMAT_DEFINESTYLE,
+    /* M19: Tools > Insert Footnote -- a reference at the caret and its
+       note at the foot of the page, the caret moved into it (notes.h). */
+    WP_ACT_TOOLS_INSERTFOOTNOTE,
     WP_ACT_COUNT
 } wp_action_id;
 

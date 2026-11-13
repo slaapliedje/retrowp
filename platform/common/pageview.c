@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <stddef.h>
 #include "pageview.h"
+#include "notes.h"
 #include "layout.h"
 #include "viewport.h"
 #include "platform.h"
@@ -18,6 +19,10 @@ i32 wp_pageview_wrap_twips(const wp_document *doc, u32 section, i32 window_twips
 u32 wp_pageview_relayout(wp_document *doc, i32 window_twips)
 {
     u32 si, pi;
+
+    /* Footnotes numbered by where their references stand now (notes.h);
+       a document without any is not touched. */
+    (void)wp_notes_renumber(doc);
 
     for (si = 0; si < doc->section_count; si++) {
         wp_section *sec = wp_document_section_get(doc, si);

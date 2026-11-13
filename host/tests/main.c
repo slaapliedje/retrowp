@@ -476,6 +476,13 @@ void test_styles_define_and_redefine(void);
 void test_styles_next_style_and_typing(void);
 void test_styles_rtf_round_trip(void);
 void test_styles_rtf_from_word(void);
+void test_notes_insert_and_type(void);
+void test_notes_renumber(void);
+void test_notes_at_page_foot(void);
+void test_notes_rtf_round_trip(void);
+void test_notes_rtf_from_word(void);
+void test_notes_typing_beside_reference(void);
+void test_notes_two_pages(void);
 void test_merge_finds_fields(void);
 void test_merge_reads_csv(void);
 void test_merge_reads_tabs(void);
@@ -1198,6 +1205,13 @@ static const test_case g_cases[] = {
     { "styles_next_style_and_typing", test_styles_next_style_and_typing },
     { "styles_rtf_round_trip", test_styles_rtf_round_trip },
     { "styles_rtf_from_word", test_styles_rtf_from_word },
+    { "notes_insert_and_type", test_notes_insert_and_type },
+    { "notes_renumber", test_notes_renumber },
+    { "notes_at_page_foot", test_notes_at_page_foot },
+    { "notes_rtf_round_trip", test_notes_rtf_round_trip },
+    { "notes_rtf_from_word", test_notes_rtf_from_word },
+    { "notes_typing_beside_reference", test_notes_typing_beside_reference },
+    { "notes_two_pages", test_notes_two_pages },
     { "merge_finds_fields", test_merge_finds_fields },
     { "merge_reads_csv", test_merge_reads_csv },
     { "merge_reads_tabs", test_merge_reads_tabs },

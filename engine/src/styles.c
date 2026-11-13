@@ -22,7 +22,8 @@ static const builtin_style g_builtin[] = {
     { "Heading 1", 320, WP_STYLE_BOLD,                    WP_ALIGN_LEFT,    0,   0,   240, 120 },
     { "Heading 2", 280, WP_STYLE_BOLD,                    WP_ALIGN_LEFT,    0,   0,   200, 80  },
     { "Heading 3", 0,   WP_STYLE_BOLD | WP_STYLE_ITALIC,  WP_ALIGN_LEFT,    0,   0,   160, 60  },
-    { "Quotation", 0,   WP_STYLE_ITALIC,                  WP_ALIGN_LEFT,    720, 720, 120, 120 }
+    { "Quotation", 0,   WP_STYLE_ITALIC,                  WP_ALIGN_LEFT,    720, 720, 120, 120 },
+    { "Footnote Text", 200, 0,                            WP_ALIGN_LEFT,    0,   0,   0,   0   }
 };
 #define BUILTINS ((u32)(sizeof(g_builtin) / sizeof(g_builtin[0])))
 

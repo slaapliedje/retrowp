@@ -2432,7 +2432,22 @@ the list").
       had lacked. Tests: built-ins, define and redefine, next style and
       typing, RTF both ways and Word's stylesheet, the actions; next
       style and \sN import shown to fail when broken.
-- [ ] T19.2 Footnotes.
+- [x] T19.2 Footnotes.
+      AC: a reference is a raised run naming its note (the char
+      format's spare field); a note is paragraphs naming it, kept after
+      the paragraph that refers to it and laid out as frame lines at
+      the foot of that page, its height kept clear of text -- so every
+      painter and the printer draw notes with no code of their own.
+      Notes number by where their references stand, renumbered before
+      every layout; an orphaned note shows "*". Tools > Insert Footnote
+      (journaled: Undo takes it back) moves the caret into the note;
+      typing beside a reference stays plain. Superscript and subscript
+      now draw at two thirds size. RTF writes Word's \chftn/\footnote
+      and reads it. ST Tools menu item appended (self-check and leaf
+      count updated); DOS Alt+N. Tests: insert, type, undo; renumbering
+      and orphans; page foot on one page and two; RTF both ways and
+      Word's form; typing beside a reference. Each shown to fail when
+      its mechanism is broken.
 - [ ] T19.3 Columns.
 
 ---

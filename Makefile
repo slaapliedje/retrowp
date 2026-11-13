@@ -930,12 +930,13 @@ GEM4XE_INCLUDES = -I engine/include -I $(RETROPLAT)/include \
 # 2026-10-28; fonts, the ruler bar's drags, sections and Page Setup
 # since), borders, tables and frames (M16) filled the fifth by
 # 2026-11-10, and drawings, pictures and the PostScript page writer the
-# sixth by 2026-11-11 (14 KB short).  A bank holds just under 64 KB.  app-layout-n is
+# sixth by 2026-11-11 (14 KB short), and Atari Works, mail merge,
+# styles and footnotes the seventh by 2026-11-12 (8 KB short).  A bank holds just under 64 KB.  app-layout-n is
 # gemapp.scm's own mechanism for that, and gem4xe's loader has been
 # exercised on a spilled link (its test-m6).  STACK is raised from the
 # kit's 256: the shell's own frames are small, but the engine's call
 # chains are not the kit's example programs'.
-GEM4XE_CBANKS ?= 7
+GEM4XE_CBANKS ?= 8
 GEM4XE_FBANKS ?= 1
 # Raised from the kit's 2048/256: WP_AES_NEAR puts the menu tree and its
 # strings in bank $00 (they are handed to the AES, which reads only that

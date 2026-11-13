@@ -506,7 +506,8 @@ and formatting it directly (centring a heading) keeps it in its style.
 format from the style; `wp_style_define` adds a style or gives an
 existing one new formats, every paragraph in it restyled.
 
-RetroWP's own styles (Normal, Title, Heading 1-3, Quotation, as offsets
+RetroWP's own styles (Normal, Title, Heading 1-3, Quotation, and
+Footnote Text for notes (M19), as offsets
 from the document's default) live in code and come into a document
 the first time one is used, so a document that uses none has no
 stylesheet and saves exactly as before. Enter at the end of a Title or
@@ -521,6 +522,50 @@ paragraphs); character, section and table styles (\cs \ds \ts) are not
 paragraph styles and are passed over. Format > Style (eight to a page,
 "More..."), Format > Define Style (the status line, the current
 style's name offered); on DOS, Alt+S and Alt+Y.
+
+## Footnotes (M19)
+
+A footnote is two things in the model, both existing kinds with one
+field each (engine/include/notes.h). The REFERENCE is a run whose
+character format names the note (`wp_char_style.note`, in the
+padding it replaced): raised, its text the note's number. The NOTE is
+one or more paragraphs with `wp_paragraph.note` set, kept after the
+paragraph that refers to it, the first starting with a run of its own
+that names the note too -- its number in the note. A split copies
+`note`, so Enter in a note continues it.
+
+Layout places a note the way it places a frame (paginate.c): its lines
+are frame lines, no room in the text, the column's width; marking
+pages collects the notes met on each page, keeps their height free of
+text, and when the page closes stacks them up from its foot in the
+order met. Every painter and the printer already draw frame lines, so
+none draws a note with code of its own. A note is never split across
+pages and never moves its reference on: one met when its page is
+nearly full -- its paragraph's lines already placed -- stays on that
+page and may cover the last of them. Known gap.
+
+Numbers are text, set by `wp_notes_renumber` before every layout
+(`wp_pageview_relayout`): references in reading order, 1 up; each
+note's own mark the same; a note no reference names shows "*". The
+digits are rewritten in place where the width is the same, so a run
+keeps the span Undo finds it by. Text typed beside a reference never
+takes its format (edit.c, `unreference`): it would name the note and
+be renumbered away; a caret inside a reference types after it.
+
+Insert Footnote (`wp_notes_insert`) is made of journaled edits -- the
+reference, a split after the paragraph and its notes, the mark and a
+space -- so Undo takes it back. Raised and lowered text is opened at
+two thirds of its size (`wp_cstyle_font_open`), which is what sets a
+reference high on its line: a painter puts each run's baseline its own
+ascent below the line's top.
+
+RTF: Word's form, `{\super\chftn}{\footnote\pard\plain {\super\chftn}
+...\par}` at the reference, the note's paragraphs written there and not
+in the main flow. Read back, `\chftn` makes a reference and the
+`\footnote` group's text -- plain, its paragraph breaks spaces -- a note
+paragraph after the paragraph that refers to it. Known gaps: a pasted
+reference names the same note as the one copied; a note's own
+formatting is not read from RTF.
 
 ## Mail merge (M18)
 

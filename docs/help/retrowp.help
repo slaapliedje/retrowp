@@ -241,6 +241,15 @@ paragraph in that style changes to match. Enter at the end of a
 title or heading starts a Normal paragraph. Styles are saved in
 the RTF, which Word reads as its own.
 
+Insert Footnote (Tools menu; Alt+N on DOS) puts a raised number
+at the caret and takes you to the note, at the foot of the page,
+to type it; Enter there starts another paragraph of the same
+note. Notes number themselves in the order their numbers stand
+in the text, so a note added earlier in the document makes the
+later ones move up one. Delete a note's number from the text and
+the note shows * until you delete it too. Footnotes are saved in
+the RTF as Word's own.
+
 Mail merge makes one letter, label or form for every line of a
 list. Put fields where the names go: Insert Field (Tools menu;
 Alt+I on DOS) asks for a name and types it as «Name» between guillemets --

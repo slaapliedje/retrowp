@@ -227,7 +227,9 @@
 /* Format > Style... and Define Style... (M19), appended the same way. */
 #define WP_MENU_OBJ_FORMAT_STYLE         51
 #define WP_MENU_OBJ_FORMAT_DEFINESTYLE   52
-#define WP_MENU_OBJ_COUNT        53
+/* Tools > Insert Footnote (M19), appended likewise. */
+#define WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE 53
+#define WP_MENU_OBJ_COUNT        54
 
 extern WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 

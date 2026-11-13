@@ -101,6 +101,7 @@ wp_status wp_document_cstyle_find_or_add(wp_document *doc, const wp_char_style *
     for (i = 1; i < doc->cstyle_count; i++) {
         const wp_char_style *existing = &doc->cstyles[i];
         if (existing->font == style->font &&
+            existing->note == style->note &&
             existing->size_twips == style->size_twips &&
             existing->flags == style->flags &&
             existing->color_r == style->color_r &&

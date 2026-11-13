@@ -232,6 +232,14 @@ static void place_table_lines(wp_document *doc, wp_section *sec)
                 }
                 frame_first = (wp_bool)(q == pi);
             }
+            if (fr == NULL && para->note != 0) {
+                /* A footnote's paragraph: placed like a frame -- no room
+                   in the text, the column's width -- at its page's foot
+                   (wp_document_mark_pages). */
+                fx0 = 0;
+                fx1 = wp_section_column_twips(sec);
+                frame_first = WP_TRUE;
+            }
             if (l != NULL) {
                 for (j = 0; j < l->line_count; j++) {
                     wp_line *ln = &l->lines[j];
@@ -239,7 +247,7 @@ static void place_table_lines(wp_document *doc, wp_section *sec)
                     ln->advance_twips = ln->height_twips;
                     ln->cell_x0 = ln->cell_x1 = 0;
                     ln->row_dy_twips = ln->row_h_twips = 0;
-                    if (fr != NULL) {
+                    if (fr != NULL || para->note != 0) {
                         ln->flags = (u8)(WP_LINE_FRAME | ((frame_first && j == 0) ? WP_LINE_FRAME_FIRST : 0));
                         ln->advance_twips = 0;
                         ln->cell_x0 = fx0;
@@ -310,12 +318,39 @@ static void place_table_lines(wp_document *doc, wp_section *sec)
     }
 }
 
+#define MARK_NOTES_MAX 64
+
+/* A page's footnotes, stacked up from its foot in the order they were
+   met: each paragraph's lines a frame whose top is the notes' block top
+   plus the notes before it. */
+static void place_notes(wp_section *sec, const u32 *note_para, u32 notes, i32 notes_h, i32 content_height)
+{
+    u32 k, j;
+    i32 top = content_height - notes_h;
+
+    if (top < 0) top = 0;
+    for (k = 0; k < notes; k++) {
+        wp_paragraph_layout *l = (wp_paragraph_layout *)sec->paras[note_para[k]].layout;
+        if (l == NULL) continue;
+        for (j = 0; j < l->line_count; j++) {
+            l->lines[j].frame_top_twips = top;
+            l->lines[j].page_y_twips = top + l->lines[j].row_dy_twips;
+        }
+        for (j = 0; j < l->line_count; j++) top += l->lines[j].height_twips;
+    }
+}
+
 u32 wp_document_mark_pages(wp_document *doc)
 {
     u32 s_idx;
     u32 page = 0;
     wp_bool have_page = WP_FALSE;
     i32 used = 0, row_top = 0, frame_top = 0;
+    /* The footnotes met on the page being filled: placed at its foot
+       when it closes (place_notes), their height kept free of text. */
+    u32 note_para[MARK_NOTES_MAX];
+    u32 notes = 0;
+    i32 notes_h = 0;
 
     for (s_idx = 0; s_idx < doc->section_count; s_idx++) {
         wp_section *sec = &doc->sections[s_idx];
@@ -325,6 +360,10 @@ u32 wp_document_mark_pages(wp_document *doc)
         place_table_lines(doc, sec);
         /* A new section starts a new page, as in wp_document_paginate. */
         if (have_page && s_idx > 0) {
+            place_notes(&doc->sections[s_idx - 1], note_para, notes, notes_h,
+                        doc->sections[s_idx - 1].page_height - doc->sections[s_idx - 1].margin_top -
+                        doc->sections[s_idx - 1].margin_bottom);
+            notes = 0; notes_h = 0;
             page++;
             used = 0;
             have_page = WP_FALSE;
@@ -342,6 +381,18 @@ u32 wp_document_mark_pages(wp_document *doc)
                 i32 need = (line->flags & WP_LINE_ROW_FIRST) ? line->row_h_twips :
                            (line->cell_x1 != 0 ? 0 : line->height_twips);
 
+                /* A footnote's line: on the page of the text it follows,
+                   collected to go at that page's foot. */
+                if ((line->flags & WP_LINE_FRAME) && sec->paras[p_idx].note != 0) {
+                    line->page = page;
+                    line->page_start = WP_FALSE;
+                    if (l_idx == 0) {
+                        u32 k2;
+                        if (notes < MARK_NOTES_MAX) note_para[notes++] = p_idx;
+                        for (k2 = 0; k2 < layout->line_count; k2++) notes_h += layout->lines[k2].height_twips;
+                    }
+                    continue;
+                }
                 /* A frame line takes no room: it goes on the page of the
                    text it follows, at its frame's place on that page. */
                 if (line->flags & WP_LINE_FRAME) {
@@ -362,8 +413,10 @@ u32 wp_document_mark_pages(wp_document *doc)
                     have_page = WP_TRUE;
                     starts = WP_TRUE;
                 } else if (used > 0 &&
-                           (used + need > content_height ||
+                           (used + need > content_height - notes_h ||
                             (l_idx == 0 && para_breaks_page(doc, &sec->paras[p_idx])))) {
+                    place_notes(sec, note_para, notes, notes_h, content_height);
+                    notes = 0; notes_h = 0;
                     page++;
                     used = 0;
                     starts = WP_TRUE;
@@ -375,6 +428,11 @@ u32 wp_document_mark_pages(wp_document *doc)
                 used += line->advance_twips;
             }
         }
+    }
+    if (doc->section_count > 0) {
+        wp_section *last = &doc->sections[doc->section_count - 1];
+        place_notes(last, note_para, notes, notes_h,
+                    last->page_height - last->margin_top - last->margin_bottom);
     }
     return page + 1;
 }

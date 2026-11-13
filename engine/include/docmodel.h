@@ -56,7 +56,7 @@ typedef struct {
 
 typedef struct {
     wp_font font;      /* 0 = the target's default face */
-    u16    _pad0;
+    u16    note;       /* a footnote reference's note (notes.h): the run's text is its number; 0 none */
     i32    size_twips;
     u16    flags;      /* wp_style_flags bitfield */
     u8     color_r;
@@ -244,6 +244,10 @@ typedef struct {
     /* Frames (M16; docs/document-model.md, "Frames"): the frame this
        paragraph's text sits in (0: in the text's flow). */
     wp_frame  frame;
+    /* Footnotes (M19; notes.h): the note this paragraph is the text of
+       (0: not a note). A note's paragraphs follow the paragraph that
+       refers to it; layout puts them at the foot of its page. */
+    u16       note;
 } wp_paragraph;
 
 typedef struct {

@@ -564,6 +564,24 @@ static void rtf_emit_char_props(rtf_writer *w, const wp_char_style *cs, const rt
 static void rtf_emit_row_shape(rtf_writer *w, const wp_table_row *row);
 
 static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_paragraph *para,
+                                const rtf_color_table *ct, const wp_image_source *src);
+
+/* Note `id`'s paragraphs, wherever they are, as a \footnote group. */
+static void rtf_emit_footnote(rtf_writer *w, const wp_document *doc, u16 id,
+                              const rtf_color_table *ct, const wp_image_source *src)
+{
+    u32 si, pi;
+    rtf_write_str(w, "{\\footnote");
+    for (si = 0; si < doc->section_count; si++) {
+        const wp_section *sec = &doc->sections[si];
+        for (pi = 0; pi < sec->para_count; pi++) {
+            if (sec->paras[pi].note == id) rtf_emit_paragraph(w, doc, &sec->paras[pi], ct, src);
+        }
+    }
+    rtf_write_str(w, "}");
+}
+
+static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_paragraph *para,
                                 const rtf_color_table *ct, const wp_image_source *src)
 {
     const wp_para_style *ps = wp_document_pstyle_get(doc, para->style);
@@ -592,6 +610,15 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
         rtf_emit_image(w, doc, para, src);
     } else {
         for (ri = 0; ri < para->run_count; ri++) {
+            const wp_char_style *rcs = wp_document_cstyle_get(doc, para->runs[ri].style);
+            if (rcs != NULL && rcs->note != 0) {
+                /* A footnote reference (notes.h): Word's own form, the
+                   note's paragraphs following in their \footnote group;
+                   in the note itself, just the mark. */
+                rtf_write_str(w, "{\\super\\chftn}");
+                if (para->note == 0) rtf_emit_footnote(w, doc, rcs->note, ct, src);
+                continue;
+            }
             rtf_emit_run(w, doc, &para->runs[ri], ct);
         }
     }
@@ -694,6 +721,7 @@ static void rtf_emit_document(rtf_writer *w, const wp_document *doc, const rtf_c
         }
         for (pi = 0; pi < sec->para_count; pi++) {
             const wp_paragraph *para = &sec->paras[pi];
+            if (para->note != 0) continue;   /* written where it is referred to */
             if (para->trow != 0 &&
                 (pi == 0 || sec->paras[pi - 1].trow == 0 || (sec->paras[pi - 1].tflags & WP_TROW_END))) {
                 rtf_emit_row_shape(w, wp_document_trow_get(doc, para->trow));

@@ -46,6 +46,22 @@ void run_remove_at(wp_paragraph *para, u16 index)
     para->layout_dirty = WP_TRUE;
 }
 
+/* Text typed beside a footnote reference (notes.h) is the text's own,
+   not the reference's: were it to take the reference's format it would
+   name the note, and renumbering would make it the number. *style is
+   given the reference's format without the note and the raising. */
+static wp_status unreference(wp_document *doc, wp_cstyle *style)
+{
+    const wp_char_style *cs = wp_document_cstyle_get(doc, *style);
+    wp_char_style plain;
+
+    if (cs == NULL || cs->note == 0) return WP_OK;
+    plain = *cs;
+    plain.note = 0;
+    plain.flags = (u16)(plain.flags & ~WP_STYLE_SUPER);
+    return wp_document_cstyle_find_or_add(doc, &plain, style);
+}
+
 wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos *out_pos)
 {
     wp_status st;
@@ -81,6 +97,11 @@ wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos 
         run = &para->runs[pos.run];
         if (pos.offset > run->text.length) return WP_RANGE;
         style = run->style;
+        {
+            /* Inside a reference's number: typed after it, never splitting it. */
+            const wp_char_style *rcs = wp_document_cstyle_get(doc, style);
+            if (rcs != NULL && rcs->note != 0) pos.offset = run->text.length;
+        }
 
         if (pos.offset == run->text.length) {
             /* end of this run: inherit its style, insert right after it */
@@ -117,6 +138,9 @@ wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos 
         }
     }
 
+    st = unreference(doc, &style);
+    if (st != WP_OK) return st;
+    para = &doc->sections[pos.section].paras[pos.paragraph];
     st = run_insert_at(para, insert_index, span, style);
     if (st != WP_OK) return st;
 
@@ -278,6 +302,7 @@ wp_status wp_document_split_paragraph_raw(wp_document *doc, wp_pos pos, wp_pos *
     new_para->tflags = para->tflags;
     para->tflags = 0;
     new_para->frame = para->frame;   /* the new half stays in the frame */
+    new_para->note = para->note;     /* and in the note (a note of two paragraphs) */
     {
         /* A page break belongs before the paragraph's first line, so the
            half that moves down does not inherit it -- or every Enter at

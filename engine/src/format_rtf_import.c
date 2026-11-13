@@ -25,6 +25,7 @@ typedef enum {
     RTF_DEST_FLDINST,    /* a field's instruction inside one of those: is it PAGE? */
     RTF_DEST_FONTTBL,    /* \fonttbl: each entry's name becomes a document font */
     RTF_DEST_STYLESHEET, /* \stylesheet: each paragraph style's number and name */
+    RTF_DEST_FOOTNOTE,   /* \footnote: a note's text, kept for the paragraph after its reference's */
     RTF_DEST_GENERATOR   /* \*\generator: which program wrote the file */
 } rtf_dest;
 
@@ -56,6 +57,7 @@ typedef struct {
     u8  fidx;           /* \fN: its fmap entry + 1; 0 = the target default */
     u16 cp;             /* that font's \fcharset as a code page; 0 = the document's */
     u16 style_num;      /* \sN: N + 1, the paragraph's named style; 0 none */
+    u16 note;           /* a footnote reference's run being made: its note */
     rtf_dest dest;
 } rtf_state;
 
@@ -148,6 +150,13 @@ typedef struct {
        repeats a style's formatting on its paragraphs anyway). */
     struct { i32 num; char name[48]; u16 id; } smap[RTF_MAX_STYLES];
     u32 smap_count;
+    /* Footnotes (notes.h): each \chftn a reference and a new note; each
+       \footnote's text kept until the paragraph that refers to it ends,
+       then made a note paragraph after it. */
+    u16 note_next, note_last;
+    struct { u16 id; u32 off, len; } pend[32];
+    u32 pend_count;
+    rtf_buf fn_text;
     i32 ss_num;          /* the entry being read: its \sN, -1 for a character or other style */
     char ss_name[48];
     u32 ss_len;
@@ -269,6 +278,7 @@ static void rtf_flush_run(rtf_parser *p)
 
     memset(&cs, 0, sizeof(cs));
     cs.flags = st->char_flags;
+    cs.note = st->note;
     cs.size_twips = st->size_twips;
     cs.color_r = st->color_r;
     cs.color_g = st->color_g;
@@ -289,6 +299,52 @@ static void rtf_flush_run(rtf_parser *p)
     sec = wp_document_section_get(p->doc, p->section_idx);
     para = wp_section_paragraph_get(sec, p->para_idx);
     if (wp_paragraph_run_add(para, span, cstyle, &run_idx) != WP_OK) { p->error = WP_NOMEM; return; }
+}
+
+/* The notes the paragraph just ended refers to, each a paragraph after
+   it in the Footnote Text style: its number (renumbered at layout), a
+   space, its text. */
+static void rtf_flush_notes(rtf_parser *p)
+{
+    u32 k;
+    u16 fts = 0;
+
+    if (p->pend_count == 0) return;
+    (void)wp_style_ensure(p->doc, (const u8 *)"Footnote Text", 13, &fts);
+    for (k = 0; k < p->pend_count && p->error == WP_OK; k++) {
+        wp_section *sec = wp_document_section_get(p->doc, p->section_idx);
+        wp_paragraph *np;
+        wp_char_style cs;
+        wp_cstyle mark, plain;
+        wp_span sp;
+        u32 idx, a = p->pend[k].off, b = p->pend[k].off + p->pend[k].len;
+        u16 dummy;
+
+        if (wp_section_paragraph_add(sec, &idx) != WP_OK) { p->error = WP_NOMEM; return; }
+        np = wp_section_paragraph_get(sec, idx);
+        np->note = p->pend[k].id;
+        wp_paragraph_pstyle_set(np, fts != 0 ? p->doc->named[fts].para : p->doc->default_pstyle);
+        plain = fts != 0 ? p->doc->named[fts].chars : p->doc->default_cstyle;
+        cs = *wp_document_cstyle_get(p->doc, plain);
+        cs.flags = (u16)(cs.flags | WP_STYLE_SUPER);
+        cs.note = p->pend[k].id;
+        while (a < b && p->fn_text.bytes[a] == ' ') a++;
+        while (b > a && p->fn_text.bytes[b - 1] == ' ') b--;
+        if (wp_document_cstyle_find_or_add(p->doc, &cs, &mark) != WP_OK ||
+            wp_strpool_append(&p->doc->strings, (const u8 *)"0", 1, &sp) != WP_OK ||
+            wp_paragraph_run_add(np, sp, mark, &dummy) != WP_OK) { p->error = WP_NOMEM; return; }
+        np = wp_section_paragraph_get(wp_document_section_get(p->doc, p->section_idx), idx);
+        if (wp_strpool_append(&p->doc->strings, (const u8 *)" ", 1, &sp) != WP_OK ||
+            wp_paragraph_run_add(np, sp, plain, &dummy) != WP_OK) { p->error = WP_NOMEM; return; }
+        if (b > a) {
+            if (wp_strpool_append(&p->doc->strings, p->fn_text.bytes + a, b - a, &sp) != WP_OK ||
+                wp_paragraph_run_add(np, sp, plain, &dummy) != WP_OK) { p->error = WP_NOMEM; return; }
+        }
+        np->layout_dirty = WP_TRUE;
+        p->para_idx = idx;   /* the last paragraph, for whatever follows */
+    }
+    p->pend_count = 0;
+    p->fn_text.length = 0;
 }
 
 /* A \stylesheet entry read: kept where it is a paragraph style. */
@@ -425,6 +481,7 @@ static void rtf_end_paragraph(rtf_parser *p)
 
     rtf_apply_pstyle_to_current_paragraph(p);
     if (p->error != WP_OK) return;
+    rtf_flush_notes(p);
 
     p->para_pending = WP_TRUE;
 }
@@ -543,6 +600,13 @@ static void rtf_emit_bytes(rtf_parser *p, const u8 *bytes, u32 n)
 
     if (st->dest == RTF_DEST_GENERATOR) {
         for (i = 0; i < n && p->gen_len + 1 < sizeof(p->gen); i++) p->gen[p->gen_len++] = (char)bytes[i];
+        return;
+    }
+
+    if (st->dest == RTF_DEST_FOOTNOTE) {
+        for (i = 0; i < n; i++) {
+            if (rtf_buf_append_byte(&p->fn_text, bytes[i]) != WP_OK) { p->error = WP_NOMEM; return; }
+        }
         return;
     }
 
@@ -843,6 +907,11 @@ static void rtf_pop(rtf_parser *p)
         }
         p->margin_buf.length = 0;
     }
+    /* A \footnote group ends: its text is the pending note's. */
+    if (p->stack[p->depth].dest == RTF_DEST_FOOTNOTE && p->depth > 0 &&
+        p->stack[p->depth - 1].dest != RTF_DEST_FOOTNOTE && p->pend_count > 0) {
+        p->pend[p->pend_count - 1].len = p->fn_text.length - p->pend[p->pend_count - 1].off;
+    }
     /* So may a \stylesheet entry. */
     if (p->stack[p->depth].dest == RTF_DEST_STYLESHEET && p->ss_len > 0) rtf_stylesheet_commit(p);
     /* A \fonttbl entry in its own group may omit its ';'. */
@@ -1011,6 +1080,41 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         p->ft_name.length = 0;
         return;
     }
+    if (strcmp(name, "footnote") == 0) {
+        st->dest = RTF_DEST_FOOTNOTE;
+        if (p->pend_count < 32) {
+            if (p->note_last == 0) p->note_last = ++p->note_next;   /* a note with no mark of its own */
+            p->pend[p->pend_count].id = p->note_last;
+            p->pend[p->pend_count].off = p->fn_text.length;
+            p->pend[p->pend_count].len = 0;
+            p->pend_count++;
+        }
+        p->note_last = 0;
+        return;
+    }
+    if (st->dest == RTF_DEST_FOOTNOTE) {
+        /* A note's text is read plain: a paragraph or line break a space,
+           everything else -- its mark, its formatting -- passed over. */
+        if ((strcmp(name, "par") == 0 || strcmp(name, "line") == 0 || strcmp(name, "tab") == 0) &&
+            p->fn_text.length > p->pend[p->pend_count > 0 ? p->pend_count - 1 : 0].off) {
+            (void)rtf_buf_append_byte(&p->fn_text, ' ');
+        }
+        return;
+    }
+    if (strcmp(name, "chftn") == 0) {
+        /* A footnote's mark in the text: a run of its own, raised, naming
+           the note that the \footnote after it holds. */
+        u16 saved = st->char_flags;
+        rtf_flush_run(p);
+        st->char_flags = (u16)(st->char_flags | WP_STYLE_SUPER);
+        st->note = ++p->note_next;
+        p->note_last = st->note;
+        rtf_emit_char(p, '0');
+        rtf_flush_run(p);
+        st->char_flags = saved;
+        st->note = 0;
+        return;
+    }
     if (strcmp(name, "stylesheet") == 0) {
         st->dest = RTF_DEST_STYLESHEET;
         p->ss_len = 0;
@@ -1018,7 +1122,7 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
         return;
     }
     if (strcmp(name, "info") == 0 ||
-        strcmp(name, "object") == 0 || strcmp(name, "footnote") == 0 ||
+        strcmp(name, "object") == 0 ||
         strcmp(name, "headerl") == 0 ||
         strcmp(name, "headerf") == 0 || strcmp(name, "footerl") == 0 ||
         strcmp(name, "footerf") == 0 ||
@@ -1457,6 +1561,7 @@ static void rtf_finish(rtf_parser *p)
     if (p->error != WP_OK) return;
     if (p->para_pending) return; /* last thing was a closing \par -- no phantom trailing paragraph */
     rtf_apply_pstyle_to_current_paragraph(p);
+    rtf_flush_notes(p);   /* a last paragraph with no \par still has its notes */
 }
 
 /* Word draws consecutive paragraphs with the same borders and indents as
@@ -1590,6 +1695,7 @@ wp_status format_rtf_import_images(const u8 *bytes, u32 len, wp_document *doc,
     rtf_buf_free(&p->margin_buf);
     rtf_buf_free(&p->fld_buf);
     rtf_buf_free(&p->ft_name);
+    rtf_buf_free(&p->fn_text);
     rtf_buf_free(&p->ft_names);
     rtf_buf_free(&p->pict_buf);
 
