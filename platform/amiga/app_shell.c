@@ -606,6 +606,21 @@ static u32 amiga_screen_color_count(void)
     return (u32)(1uL << (u32)scr->BitMap.Depth);
 }
 
+/* The UI scale (rulerbar.h): from config's uiscale, or the window's
+   screen's width -- worked out once the window is open (until then 1). */
+static u8  g_ui_scale_setting = 0;
+static i32 g_ui_scale = 0;
+
+static i32 amiga_ui_scale(void)
+{
+    struct Screen *scr = NULL;
+    if (g_ui_scale > 0) return g_ui_scale;
+    if (g_win != NULL) GetAttr(MUIA_Window_Screen, g_win, (ULONG *)&scr);
+    if (scr == NULL) return 1;
+    g_ui_scale = wp_rulerbar_ui_scale((i32)scr->Width, g_ui_scale_setting);
+    return g_ui_scale;
+}
+
 static void do_insert_image(void)
 {
     char fullpath[256];
@@ -1141,7 +1156,21 @@ static i32 amiga_font_line_height_px(i32 size_twips)
    resolves to the window's own DrawInfo pens -- 0xC0 (luminance 576)
    gives BACKGROUNDPEN and the black text gives TEXTPEN. Real theme
    pens, no dither, legible by construction at any screen depth. */
-#define WP_AMIGA_STATUSLINE_SIZE_TWIPS 160
+/* The status line in the Workbench screen's own font size (8 points at
+   this screen's low vertical resolution came out four pixels high), and
+   bigger with a UI scale. */
+static i32 amiga_status_twips(void)
+{
+    struct Screen *scr = NULL;
+    i32 t = 160;
+    if (g_win != NULL) GetAttr(MUIA_Window_Screen, g_win, (ULONG *)&scr);
+    if (scr != NULL && scr->Font != NULL) {
+        i32 s = amiga_px_to_twips_y((i32)scr->Font->ta_YSize);
+        if (s > t) t = s;
+    }
+    return t * amiga_ui_scale();
+}
+#define WP_AMIGA_STATUSLINE_SIZE_TWIPS (amiga_status_twips())
 
 /* The ruler bar along the top of the editor object (rulerbar.h). A
    PAL/NTSC hires screen's pixels are about twice as tall as wide, so the
@@ -1162,9 +1191,11 @@ static wp_bool amiga_rulerbar(Object *obj, wp_rulerbar *rb)
     rb->icon_rows = tall ? 8 : 16;
     /* A 16-colour screen or deeper gets the panel look (rulerbar.h). */
     rb->colors = (i32)amiga_screen_color_count();
-    rb->button_w = (rb->colors >= 16) ? 22 : 20;
-    rb->button_h = rb->icon_rows + ((rb->colors >= 16) ? 4 : 2);
-    rb->scale_h = amiga_font_line_height_px(WP_AMIGA_STATUSLINE_SIZE_TWIPS) + 4;
+    rb->bevel = WP_TRUE;   /* raised buttons in the Workbench's own pens */
+    rb->scale = amiga_ui_scale();
+    rb->button_w = ((rb->colors >= 16) ? 22 : 20) * rb->scale;
+    rb->button_h = (rb->icon_rows + ((rb->colors >= 16) ? 4 : 2)) * rb->scale;
+    rb->scale_h = amiga_font_line_height_px(WP_AMIGA_STATUSLINE_SIZE_TWIPS) + 4 * rb->scale;
     rb->origin_x = _mleft(obj) + WP_EDITOR_LEFT_MARGIN_PX;
     rb->twips_to_x = amiga_twips_to_px_x;
     rb->x_to_twips = amiga_px_to_twips_x;
@@ -1461,6 +1492,14 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
         }
     }
     y = amiga_doc_top(obj);
+    {
+        /* The page white below the ruler, as Amiga word processors show
+           it, the toolbar and ruler keeping the Workbench's grey. */
+        wp_rulerbar rb;
+        i32 wt = amiga_rulerbar(obj, &rb) ? rb.y + wp_rulerbar_height(&rb) + 1 : (i32)_mtop(obj);
+        if (doc_bottom > wt) (void)plat_fill_rect((plat_gc *)&gc, _mleft(obj), wt, _mright(obj) - _mleft(obj) + 1,
+                                                  doc_bottom - wt + 1, 0xFF, 0xFF, 0xFF);
+    }
 
     /* The view follows the caret before anything is painted: a
        keystroke that moved it below the object's bottom scrolls the
@@ -1517,6 +1556,15 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                 /* A frame line outside the view is not drawn: it may sit
                    above the text, under the bar, or below it. */
                 if ((line->flags & WP_LINE_FRAME) && ((i32)y < view_top || (i32)y > (i32)doc_bottom)) continue;
+                /* Nothing past the status line: MUI gives Draw no clip, so a
+                   line -- or a table row, whose cells hang below its first
+                   line -- that will not fit above the bar is left for the
+                   next scroll rather than drawn over the bar and the
+                   window's edge. */
+                if ((i32)y + ((line->flags & WP_LINE_ROW_FIRST) ? wp_table_row_extent(sec, pi, amiga_twips_to_px_y)
+                                                                : amiga_twips_to_px_y(line->height_twips)) > doc_bottom + 1) {
+                    if (!(line->flags & WP_LINE_FRAME)) continue;
+                }
                 if (line->flags & WP_LINE_ROW_FIRST) {
                     wp_border_draw_row((plat_gc *)&gc, wp_document_trow_get(&g_amiga_doc, para->trow),
                                        line->row_h_twips,
@@ -2149,6 +2197,7 @@ void app_shell_run(void)
     /* Measured as it will print (papermetrics.h): the Amiga's faces are
        sized in pixels, not points. */
     plat_metrics_set_paper((wp_bool)(cfg.paper_metrics != 0));
+    g_ui_scale_setting = cfg.ui_scale;
     /* PRT:, through printer.device and the writer's Printer prefs, which
        take the Amiga's own ISO 8859-1. */
     g_ctx.printer_path = "PRT:";

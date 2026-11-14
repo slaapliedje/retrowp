@@ -166,7 +166,7 @@ static i32 gap_w(const wp_rulerbar *rb)
 static i32 row_gap(const wp_rulerbar *rb) { return text_mode(rb) ? 0 : 2; }
 
 /* The panel look (rulerbar.h): enough colours for real greys. */
-static wp_bool panel(const wp_rulerbar *rb) { return (wp_bool)(!text_mode(rb) && rb->colors >= 16); }
+static wp_bool panel(const wp_rulerbar *rb) { return (wp_bool)(!text_mode(rb) && (rb->colors >= 16 || rb->bevel)); }
 
 #define RB_FACE   0xC0   /* panel and button face */
 #define RB_LIGHT  0xFF   /* the lit edge */
@@ -258,10 +258,128 @@ static wp_bool button_active(wp_app_ctx *ctx, const wp_para_style *ps, wp_action
 /* One icon, in one call: the platform blits it where it can (an 8 MHz
    ST's toolbar is otherwise hundreds of fills), run by run where it
    cannot. At 8 rows the 8-row set is used. */
-static void draw_icon(plat_gc *gc, i32 x, i32 y, u8 icon, i32 rows, u8 c)
+static i32 scl(const wp_rulerbar *rb) { return rb->scale > 1 ? (rb->scale > 3 ? 3 : rb->scale) : 1; }
+
+i32 wp_rulerbar_ui_scale(i32 screen_w_px, u8 setting)
 {
-    if (rows >= 16) (void)plat_draw_mono(gc, x, y, 16, 16, g_icon_bits[icon], 1, c, c, c);
-    else            (void)plat_draw_mono(gc, x, y, 16, 8, g_icon_bits8[icon], 1, c, c, c);
+    if (setting >= 1 && setting <= 3) return (i32)setting;
+    if (screen_w_px >= 1800) return 3;
+    if (screen_w_px >= 1200) return 2;
+    return 1;
+}
+
+/* A 16-wide bitmap of h rows, each of its pixels drawn s x s (a scaled
+   UI), in colour (r, g, b). */
+static void draw_bits(plat_gc *gc, i32 x, i32 y, const u16 *bits, i32 h, i32 s, u8 cr, u8 cg, u8 cb)
+{
+    static u16 big[48 * 3];
+    i32 r, k, b;
+
+    if (s <= 1) { (void)plat_draw_mono(gc, x, y, 16, h, bits, 1, cr, cg, cb); return; }
+    /* Each source row spread s times wider (16 s pixels: up to three
+       words) and repeated s times down. */
+    for (r = 0; r < h; r++) {
+        u16 out[3] = { 0, 0, 0 };
+        for (b = 0; b < 16; b++) {
+            if (!(bits[r] & (u16)(0x8000u >> b))) continue;
+            for (k = 0; k < s; k++) {
+                i32 p = b * s + k;
+                out[p / 16] = (u16)(out[p / 16] | (0x8000u >> (p % 16)));
+            }
+        }
+        for (k = 0; k < s; k++) {
+            big[(r * s + k) * 3 + 0] = out[0];
+            big[(r * s + k) * 3 + 1] = out[1];
+            big[(r * s + k) * 3 + 2] = out[2];
+        }
+    }
+    (void)plat_draw_mono(gc, x, y, 16 * s, h * s, big, 3, cr, cg, cb);
+}
+
+/* Colour (M19), where the bar is a panel (16 colours and more): an icon's
+   inside filled -- the pixels its outline closes off from its edge, found
+   once by a flood fill -- and its lines inked. Black lines and no fill for
+   the ones whose meaning is their shape (letters, alignment). */
+typedef struct { u8 icon; u8 fill[3]; u8 ink[3]; wp_bool filled; } rb_colour;
+static const rb_colour g_colours[] = {
+    { WP_ICON_NEW,         { 255, 255, 255 }, {   0,   0,   0 }, WP_TRUE },
+    { WP_ICON_OPEN,        { 255, 204,  32 }, {  96,  64,   0 }, WP_TRUE },
+    { WP_ICON_SAVE,        {  64, 112, 224 }, {   0,   0,  96 }, WP_TRUE },
+    { WP_ICON_CUT,         { 224,  32,  32 }, { 192,   0,   0 }, WP_TRUE },
+    { WP_ICON_COPY,        { 255, 255, 255 }, {   0,   0,   0 }, WP_TRUE },
+    { WP_ICON_PASTE,       { 255, 255, 255 }, {  96,  64,   0 }, WP_TRUE },   /* paper: a 16-colour palette has no tan */
+    { WP_ICON_UNDO,        {  32,  96, 224 }, {   0,  48, 160 }, WP_TRUE },
+    { WP_ICON_INDENT_LESS, {   0,   0,   0 }, {   0, 128,   0 }, WP_FALSE },
+    { WP_ICON_INDENT_MORE, {   0,   0,   0 }, {   0, 128,   0 }, WP_FALSE },
+    { WP_ICON_PAGE_BREAK,  { 255, 255, 255 }, {   0,   0,   0 }, WP_TRUE },
+    { WP_ICON_HEADER,      { 255, 255, 255 }, {   0,   0,   0 }, WP_TRUE },
+    { WP_ICON_FOOTER,      { 255, 255, 255 }, {   0,   0,   0 }, WP_TRUE },
+    { WP_ICON_PAGESETUP,   { 255, 255, 255 }, {   0,   0,   0 }, WP_TRUE },
+    { WP_ICON_SECTION,     { 255, 255, 255 }, {   0,   0,   0 }, WP_TRUE },
+    { WP_ICON_TABLE,       { 200, 232, 255 }, {   0,   0,  96 }, WP_TRUE },
+    { WP_ICON_CLIPART,     { 255, 240, 192 }, { 192, 128,   0 }, WP_TRUE }
+};
+#define RB_COLOURS ((u32)(sizeof(g_colours) / sizeof(g_colours[0])))
+
+static const rb_colour *colour_of(u8 icon)
+{
+    u32 i;
+    for (i = 0; i < RB_COLOURS; i++) if (g_colours[i].icon == icon) return &g_colours[i];
+    return NULL;
+}
+
+/* An icon's inside: every clear pixel no path of clear pixels joins to
+   its edge. */
+static void icon_fill(u8 icon, u16 *out)
+{
+    u8 seen[16][16];
+    i32 stack[256][2], sp = 0, r, c;
+    const u16 *bits = g_icon_bits[icon];
+
+    memset(seen, 0, sizeof(seen));
+    for (r = 0; r < 16; r++) {
+        for (c = 0; c < 16; c++) {
+            if ((r == 0 || r == 15 || c == 0 || c == 15) && !(bits[r] & (0x8000u >> c)) && !seen[r][c]) {
+                seen[r][c] = 1;
+                stack[sp][0] = r; stack[sp][1] = c; sp++;
+                while (sp > 0) {
+                    i32 y, x, d;
+                    sp--;
+                    y = stack[sp][0]; x = stack[sp][1];
+                    for (d = 0; d < 4; d++) {
+                        i32 ny = y + (d == 0 ? -1 : d == 1 ? 1 : 0), nx = x + (d == 2 ? -1 : d == 3 ? 1 : 0);
+                        if (ny < 0 || ny > 15 || nx < 0 || nx > 15 || seen[ny][nx]) continue;
+                        if (bits[ny] & (0x8000u >> nx)) continue;
+                        seen[ny][nx] = 1;
+                        if (sp < 256) { stack[sp][0] = ny; stack[sp][1] = nx; sp++; }
+                    }
+                }
+            }
+        }
+    }
+    for (r = 0; r < 16; r++) {
+        u16 m = 0;
+        for (c = 0; c < 16; c++) if (!seen[r][c] && !(bits[r] & (0x8000u >> c))) m = (u16)(m | (0x8000u >> c));
+        out[r] = m;
+    }
+}
+
+/* An icon as the bar draws it: in colour on a panel's full-height icons,
+   else in black (or white, inverted, c 0xFF). */
+static void draw_icon(plat_gc *gc, i32 x, i32 y, u8 icon, i32 rows, u8 c, i32 s, wp_bool colour)
+{
+    const rb_colour *k = (colour && rows >= 16 && c == 0) ? colour_of(icon) : NULL;
+    if (k != NULL) {
+        if (k->filled) {
+            u16 fill[16];
+            icon_fill(icon, fill);
+            draw_bits(gc, x, y, fill, 16, s, k->fill[0], k->fill[1], k->fill[2]);
+        }
+        draw_bits(gc, x, y, g_icon_bits[icon], 16, s, k->ink[0], k->ink[1], k->ink[2]);
+        return;
+    }
+    if (rows >= 16) draw_bits(gc, x, y, g_icon_bits[icon], 16, s, c, c, c);
+    else draw_bits(gc, x, y, g_icon_bits8[icon], 8, s, c, c, c);
 }
 
 static void paint_buttons(plat_gc *gc, plat_font *font, i32 ascent,
@@ -287,27 +405,28 @@ static void paint_buttons(plat_gc *gc, plat_font *font, i32 ascent,
             if (on) (void)plat_draw_text(gc, font, x, rb->y, (const u8 *)label, 3, 0xFF, 0xFF, 0xFF);
             else    (void)plat_draw_text(gc, font, x, rb->y, (const u8 *)label, 3, 0x80, 0x80, 0x80);
         } else {
-            i32 ix = x + (rb->button_w - 16) / 2;
-            i32 iy = rb->y + (rb->button_h - rb->icon_rows) / 2;
+            i32 ix = x + (rb->button_w - 16 * scl(rb)) / 2;
+            i32 iy = rb->y + (rb->button_h - rb->icon_rows * scl(rb)) / 2;
 
             if (panel(rb)) {
                 /* Raised, or pressed in with its icon nudged a pixel
                    down and right, the way a pushed button moves. */
                 bevel(gc, x, rb->y, rb->button_w - 1, rb->button_h, on);
-                draw_icon(gc, ix + (on ? 1 : 0), iy + (on ? 1 : 0), b->icon, rb->icon_rows, 0);
+                draw_icon(gc, ix + (on ? 1 : 0), iy + (on ? 1 : 0), b->icon, rb->icon_rows, 0, scl(rb),
+                          (wp_bool)(rb->colors >= 16));
                 x += rb->button_w;
                 continue;
             }
             /* An "on" button is drawn inverted; every button gets a frame. */
             if (on) {
                 (void)plat_fill_rect(gc, x, rb->y, rb->button_w - 1, rb->button_h, 0, 0, 0);
-                draw_icon(gc, ix, iy, b->icon, rb->icon_rows, 0xFF);
+                draw_icon(gc, ix, iy, b->icon, rb->icon_rows, 0xFF, scl(rb), WP_FALSE);
             } else {
                 (void)plat_fill_rect(gc, x, rb->y, rb->button_w - 1, 1, 0x60, 0x60, 0x60);
                 (void)plat_fill_rect(gc, x, rb->y + rb->button_h - 1, rb->button_w - 1, 1, 0x60, 0x60, 0x60);
                 (void)plat_fill_rect(gc, x, rb->y, 1, rb->button_h, 0x60, 0x60, 0x60);
                 (void)plat_fill_rect(gc, x + rb->button_w - 2, rb->y, 1, rb->button_h, 0x60, 0x60, 0x60);
-                draw_icon(gc, ix, iy, b->icon, rb->icon_rows, 0);
+                draw_icon(gc, ix, iy, b->icon, rb->icon_rows, 0, scl(rb), WP_FALSE);
             }
         }
         x += rb->button_w;
@@ -339,6 +458,7 @@ static void paint_ruler_px(plat_gc *gc, plat_font *font, i32 ascent,
     i32 x0 = rb->origin_x;
     i32 x1 = rb->origin_x + rb->twips_to_x(wrap);
     i32 eighth_px = rb->twips_to_x(180);
+    i32 s = scl(rb);
     i32 t;
     u8 i;
 
@@ -379,9 +499,9 @@ static void paint_ruler_px(plat_gc *gc, plat_font *font, i32 ascent,
 
     /* Indents: first line above, left and right below, as on every ruler
        since Word 1.0 and Atari Works. */
-    triangle(gc, x0 + rb->twips_to_x(ps->indent_left + ps->indent_first), top, 7, WP_TRUE);
-    triangle(gc, x0 + rb->twips_to_x(ps->indent_left), base - 4, 7, WP_FALSE);
-    triangle(gc, x0 + rb->twips_to_x(wrap - ps->indent_right), base - 4, 7, WP_FALSE);
+    triangle(gc, x0 + rb->twips_to_x(ps->indent_left + ps->indent_first), top, 7 * s, WP_TRUE);
+    triangle(gc, x0 + rb->twips_to_x(ps->indent_left), base - 4 * s, 7 * s, WP_FALSE);
+    triangle(gc, x0 + rb->twips_to_x(wrap - ps->indent_right), base - 4 * s, 7 * s, WP_FALSE);
 
     /* Tab stops: an L for a left tab, mirrored for right, an inverted T
        for centre, the T with a dot for decimal. */
@@ -389,15 +509,15 @@ static void paint_ruler_px(plat_gc *gc, plat_font *font, i32 ascent,
         /* Two pixels thick, so a stop reads at a glance next to the
            one-pixel ticks it sits among. */
         i32 x = x0 + rb->twips_to_x(ps->tab_pos[i]);
-        i32 th = (h > 10) ? 7 : 5;
+        i32 th = ((h > 10 * s) ? 7 : 5) * s;
         i32 sy = base - th;
-        (void)plat_fill_rect(gc, x, sy, 2, th, 0, 0, 0);
+        (void)plat_fill_rect(gc, x, sy, 2 * s, th, 0, 0, 0);
         switch (ps->tab_kind[i]) {
-        case WP_TAB_RIGHT:   (void)plat_fill_rect(gc, x - 4, base - 2, 6, 2, 0, 0, 0); break;
-        case WP_TAB_CENTER:  (void)plat_fill_rect(gc, x - 3, base - 2, 8, 2, 0, 0, 0); break;
-        case WP_TAB_DECIMAL: (void)plat_fill_rect(gc, x - 3, base - 2, 8, 2, 0, 0, 0);
-                             (void)plat_fill_rect(gc, x + 4, sy, 2, 2, 0, 0, 0); break;
-        default:             (void)plat_fill_rect(gc, x, base - 2, 6, 2, 0, 0, 0); break;
+        case WP_TAB_RIGHT:   (void)plat_fill_rect(gc, x - 4 * s, base - 2 * s, 6 * s, 2 * s, 0, 0, 0); break;
+        case WP_TAB_CENTER:  (void)plat_fill_rect(gc, x - 3 * s, base - 2 * s, 8 * s, 2 * s, 0, 0, 0); break;
+        case WP_TAB_DECIMAL: (void)plat_fill_rect(gc, x - 3 * s, base - 2 * s, 8 * s, 2 * s, 0, 0, 0);
+                             (void)plat_fill_rect(gc, x + 4 * s, sy, 2 * s, 2 * s, 0, 0, 0); break;
+        default:             (void)plat_fill_rect(gc, x, base - 2 * s, 6 * s, 2 * s, 0, 0, 0); break;
         }
     }
 }
@@ -508,7 +628,7 @@ wp_bool wp_rulerbar_drag_begin(const wp_rulerbar *rb, wp_app_ctx *ctx,
     /* Within a few pixels (the same cell on DOS) of a marker picks it
        up; the nearest wins. On a pixel ruler the upper half is the
        first-line marker's, the lower half the others'. */
-    tol = text_mode(rb) ? 0 : 5;
+    tol = text_mode(rb) ? 0 : 5 * scl(rb);   /* a scaled UI's markers are bigger targets */
     mid = top + h / 2;
     {
         i32 first = ps->indent_left + ps->indent_first;

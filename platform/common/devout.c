@@ -79,6 +79,7 @@ wp_status wp_dev_draw_text(plat_gc *gc, i32 x, i32 y, i32 height, i32 size_twips
     plat_font *f = NULL;
     plat_font_metrics fm;
     i32 asc, desc, a = (i32)(angle % 3600u);
+    wp_bool paper;
     u16 flags = (u16)((style & (PLAT_STYLE_BOLD | PLAT_STYLE_ITALIC | PLAT_STYLE_UNDERLINE)) |
                       ((u16)(family & 7u) << PLAT_FAMILY_SHIFT));
 
@@ -90,8 +91,14 @@ wp_status wp_dev_draw_text(plat_gc *gc, i32 x, i32 y, i32 height, i32 size_twips
         return WP_OK;
     }
     if (height <= 0 || size_twips <= 0 || len == 0) return WP_OK;
-    if (plat_font_open((const u8 *)"", 0, size_twips, flags, &f) != WP_OK) return WP_ERR;
-    if (plat_font_metrics_get(f, &fm) != WP_OK) { plat_font_close(f); return WP_ERR; }
+    /* A drawing's text is placed by the face that draws it: paper metrics
+       (papermetrics.h) are for laying a document out for print, and a
+       label centred by paper widths but drawn in a screen face sits off
+       its mark -- two words of a heading run into each other or apart. */
+    paper = plat_metrics_paper();
+    plat_metrics_set_paper(WP_FALSE);
+    if (plat_font_open((const u8 *)"", 0, size_twips, flags, &f) != WP_OK) { plat_metrics_set_paper(paper); return WP_ERR; }
+    if (plat_font_metrics_get(f, &fm) != WP_OK) { plat_font_close(f); plat_metrics_set_paper(paper); return WP_ERR; }
     asc = (fm.ascent * height + size_twips / 2) / size_twips;      /* device units */
     desc = (fm.descent * height + size_twips / 2) / size_twips;
     if ((a > 450 && a < 1350) || (a > 2250 && a < 3150)) {
@@ -122,5 +129,6 @@ wp_status wp_dev_draw_text(plat_gc *gc, i32 x, i32 y, i32 height, i32 size_twips
         (void)plat_draw_text(gc, f, x, y, utf8, len, rgb[0], rgb[1], rgb[2]);
     }
     plat_font_close(f);
+    plat_metrics_set_paper(paper);
     return WP_OK;
 }

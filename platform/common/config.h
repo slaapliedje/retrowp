@@ -39,6 +39,10 @@ typedef struct {
     /* "return=Name|Street|Town": the envelope's return address, its
        lines split by '|' (Tools > Envelope keeps the last one used). */
     char return_addr[128];
+    /* "uiscale=auto|1|2|3" (auto): the toolbar, ruler and status line
+       drawn this much bigger (rulerbar.h, wp_rulerbar_ui_scale); 0 auto,
+       from the screen's width. */
+    u8  ui_scale;
 } wp_config;
 
 /* Line-based `key=value` text, `#`/`;` comment lines, blank lines

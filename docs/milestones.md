@@ -2536,6 +2536,24 @@ the list").
       broken. Next: printing to the Canon's disc tray through the
       gateway once its CUPS queue is set up (its InputSlot and media),
       and label-sheet templates.
+- [x] T19.7 UI scale, colour toolbar, Amiga polish.
+      AC: the toolbar, ruler and status line at 1x, 2x or 3x -- config
+      uiscale, auto from the screen's width (2 from 1200 pixels, 3 from
+      1800): icons pixel-doubled, the ruler's marks and grab tolerance
+      scaled. On 16 colours and more the icons are coloured by rule --
+      closed shapes filled (their inside found by a flood fill), some
+      inked -- seen on a TT in TT-medium. The Amiga: white paper (the
+      backend's white is the Workbench's SHINEPEN, not its grey
+      background, and its four pens are chosen by brightness), outline
+      faces shaped for the screen's pixels (TA_DeviceDPI: they came out
+      half as wide on 640x256), the status line in the screen's own font
+      size, the toolbar's raised buttons in the Workbench's pens (a new
+      bevel option), and nothing drawn past the status line (MUI gives
+      Draw no clip). Found along the way: a drawing's text placed by
+      paper metrics but drawn in a screen face ran its words together or
+      apart -- it is measured in its own face again. Tests: the scale
+      choice, the panel's icon count with colour, drawing text under
+      paper metrics; the last shown to fail when broken.
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)

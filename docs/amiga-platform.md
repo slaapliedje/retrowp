@@ -1604,3 +1604,17 @@ filled each character's background and punched holes in shading, and
 MUI clears the object's background before every full redraw anyway.
 `RETROWP SHEET.RTF` from the Shell opens SHEET.RTF at start-up; from
 Workbench there are no arguments.
+
+## The look (M19, 2026-11-13)
+
+The page is white: draw_amiga.c maps pure white to the theme's SHINEPEN
+(it was BACKGROUNDPEN, the Workbench's grey, so the page was grey), and
+on screens under 16 colours chooses among the theme's pens by brightness
+-- under 400 the text pen, to 650 the background grey, above that white --
+which makes the toolbar's panel the Workbench's own 3D look (grey face,
+white highlight, black shadow; the app sets wp_rulerbar.bevel). Outline
+faces open with TA_DeviceDPI, the screen's resolution each way, so on a
+640x256 screen (pixels twice as tall as wide) CGTimes and kin come out as
+wide as their type instead of half as wide. The status line uses the
+screen's own font size. MUI gives a Draw method no clip, so the plain
+view draws no line or table row that would not fit above the status line.

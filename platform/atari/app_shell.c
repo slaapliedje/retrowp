@@ -3790,7 +3790,12 @@ wp_bool wp_atari_chat_selfcheck(void)
    current cstyle (which changes per run, per toggle) so the reserved
    strip's height never shifts underneath the document as the user
    types. 8pt (160 twips), the smallest step in g_font_sizes_twips. */
-#define WP_ATARI_STATUSLINE_SIZE_TWIPS 160
+/* The UI scale (rulerbar.h): 1, or 2 or 3 on a graphics card's wide
+   screen, from config's uiscale -- the status line's face and the
+   toolbar sized by it. Set once the screen is open. */
+static i32 g_ui_scale = 1;
+static u8  g_ui_scale_setting = 0;
+#define WP_ATARI_STATUSLINE_SIZE_TWIPS (160 * g_ui_scale)
 
 /* Shared by the vi-mode status bar and the help hint bar/body text
    below -- both need "how tall is one line of some font, in pixels"
@@ -3834,9 +3839,11 @@ static wp_bool atari_rulerbar(GRECT work, wp_rulerbar *rb)
     /* 16 colours or more draw the bar as a panel of raised buttons,
        which want a little more room round the icon than a flat frame. */
     rb->colors = atari_screen_max_colors();
-    rb->button_w = (rb->colors >= 16) ? 22 : 20;
-    rb->button_h = rb->icon_rows + ((rb->colors >= 16) ? 4 : 2);
-    rb->scale_h = statusline_height_px() + (tall ? 2 : 4);
+    rb->bevel = WP_FALSE;
+    rb->scale = g_ui_scale;
+    rb->button_w = ((rb->colors >= 16) ? 22 : 20) * g_ui_scale;
+    rb->button_h = (rb->icon_rows + ((rb->colors >= 16) ? 4 : 2)) * g_ui_scale;
+    rb->scale_h = statusline_height_px() + (tall ? 2 : 4) * g_ui_scale;
     rb->origin_x = work.g_x;
     rb->twips_to_x = atari_twips_to_px_x;
     rb->x_to_twips = atari_px_to_twips_x;
@@ -5483,6 +5490,7 @@ void app_shell_run(void)
            faces to the system cell, not to points, so a layout measured
            with them holds too much on a page and prints small. */
         plat_metrics_set_paper((wp_bool)(cfg.paper_metrics != 0));
+        g_ui_scale_setting = cfg.ui_scale;
 #ifndef GEM4XE_APP_GEM_H
         /* GEMDOS's printer, the Centronics port: an Epson-style printer
            takes the PC character set, which the ST's own largely is.
@@ -5559,6 +5567,7 @@ void app_shell_run(void)
         form_alert(1, FA_ERROR "[Screen is under 80 columns.|Text and menus may be cramped|at this resolution.][ OK ]");
     }
 
+    g_ui_scale = wp_rulerbar_ui_scale((i32)work_out[0] + 1, g_ui_scale_setting);
     wp_menu_tree_init(wcell, hcell,
                       (short)(work_out[0] + 1), (short)(work_out[1] + 1));
     menu_bar(wp_menu_tree, MENU_INSTALL);

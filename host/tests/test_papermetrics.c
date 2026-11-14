@@ -7,6 +7,9 @@
 #include "layout.h"
 #include "pageview.h"
 #include "config.h"
+#include "devout.h"
+#include "drawing.h"
+#include "draw_host.h"
 
 /* Paper metrics (retroplat papermetrics.h): text measured as it prints. */
 
@@ -66,4 +69,22 @@ void test_papermetrics_layout_and_config(void)
     ASSERT_EQ_U32(cfg.paper_metrics, 1);
     ASSERT_TRUE(wp_config_parse((const u8 *)"metrics=screen\n", 15, &cfg) == WP_OK);
     ASSERT_EQ_U32(cfg.paper_metrics, 0);
+}
+
+/* A drawing's text is placed by the face that draws it, paper metrics or
+   not: "AB" centred on 1000 in the host's face (cells of half the size)
+   starts at 992, where Times' paper widths would put it at 989. */
+void test_papermetrics_drawing_text_uses_its_face(void)
+{
+    static const u8 black[3] = { 0, 0, 0 };
+    i32 x, y;
+
+    plat_metrics_set_paper(WP_TRUE);
+    draw_host_reset_text();
+    (void)wp_dev_draw_text((plat_gc *)&x, 1000, 100, 16, 240, 0, WP_DRAW_TEXT_CENTER, 0, 0,
+                           black, (const u8 *)"AB", 2);
+    plat_metrics_set_paper(WP_FALSE);
+    ASSERT_TRUE(draw_host_text_at(0, &x, &y) != NULL);
+    ASSERT_EQ_U32((u32)x, 992);
+    ASSERT_TRUE(!plat_metrics_paper());
 }

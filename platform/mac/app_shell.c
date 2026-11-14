@@ -180,7 +180,10 @@ static wp_bool            g_help_active = WP_FALSE;
    Matches platform/atari/app_shell.c's/platform/amiga/app_shell.c's own
    WP_ATARI_STATUSLINE_SIZE_TWIPS/WP_AMIGA_HINT_BAR_SIZE_TWIPS choice of
    160 (8pt) exactly, same reasoning. */
-#define WP_MAC_STATUSLINE_SIZE_TWIPS 160
+/* The UI scale (rulerbar.h): from config's uiscale, or the screen's
+   width (a big Mac's 1152 stays 1; a card driving 1280 and more, 2). */
+static i32 g_ui_scale = 1;
+#define WP_MAC_STATUSLINE_SIZE_TWIPS (160 * g_ui_scale)
 #define WP_MAC_HELP_BODY_SIZE_TWIPS  200
 
 /* Phase 5: the config file path -- a bare filename (no volume prefix)
@@ -1042,9 +1045,11 @@ static wp_bool mac_rulerbar(Rect r, wp_rulerbar *rb)
     rb->w = (i32)(r.right - r.left) - 4;
     rb->icon_rows = 16;
     rb->colors = 2;   /* a plain GrafPort: black and white (draw_mac.c) */
-    rb->button_w = 20;
-    rb->button_h = 18;
-    rb->scale_h = statusline_height_px() + 4;
+    rb->bevel = WP_FALSE;
+    rb->scale = g_ui_scale;
+    rb->button_w = 20 * g_ui_scale;
+    rb->button_h = 18 * g_ui_scale;
+    rb->scale_h = statusline_height_px() + 4 * g_ui_scale;
     rb->origin_x = r.left + WP_DOC_LEFT_MARGIN_PX;
     rb->twips_to_x = mac_twips_to_px;
     rb->x_to_twips = mac_px_to_twips;
@@ -1908,6 +1913,7 @@ void app_shell_run(void)
     g_ctx.config_path = WP_MAC_CONFIG_PATH;
     wp_config_view_apply(&cfg, &g_ctx);
     plat_metrics_set_paper((wp_bool)(cfg.paper_metrics != 0));   /* measured as it will print */
+    g_ui_scale = wp_rulerbar_ui_scale((i32)(qd.screenBits.bounds.right - qd.screenBits.bounds.left), cfg.ui_scale);
     load_sample_document();
 
     /* Phase 5: parsed ONCE at startup from the generated

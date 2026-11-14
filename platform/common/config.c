@@ -49,6 +49,7 @@ static void view_defaults(wp_config *out)
     out->grid_twips = 360;
     out->paper_metrics = 1;
     out->return_addr[0] = '\0';
+    out->ui_scale = 0;
 }
 
 static void parse_line(const u8 *bytes, u32 len, wp_config *out)
@@ -101,6 +102,12 @@ static void parse_line(const u8 *bytes, u32 len, wp_config *out)
         if (ascii_ieq(v, val_len, "off")) out->grid = 0;
         else if (ascii_ieq(v, val_len, "show")) out->grid = 1;
         else if (ascii_ieq(v, val_len, "snap")) out->grid = 2;
+        return;
+    }
+    if (ascii_ieq(bytes + key_start, key_len, "uiscale")) {
+        const u8 *v = bytes + val_start;
+        if (ascii_ieq(v, val_len, "auto")) out->ui_scale = 0;
+        else if (val_len == 1 && v[0] >= '1' && v[0] <= '3') out->ui_scale = (u8)(v[0] - '0');
         return;
     }
     if (ascii_ieq(bytes + key_start, key_len, "return")) {

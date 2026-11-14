@@ -1298,6 +1298,7 @@ void test_rulerbar_hit_test_finds_buttons_gaps_and_the_ruler(void)
     rb.twips_to_x = half;
     rb.x_to_twips = twice;
     rb.colors = 2;
+    rb.scale = 1; rb.bevel = WP_FALSE;
     ASSERT_EQ_U32((u32)wp_rulerbar_height(&rb), 18 + 2 + 12);
 
     ASSERT_TRUE(wp_rulerbar_hit_test(&rb, 10, 25, &hit));               /* first button: New */
@@ -1325,7 +1326,7 @@ void test_rulerbar_signature_follows_what_the_bar_shows(void)
     ctx_setup_imported(&doc, &journal, &ctx, "x\n");
     rb.x = 0; rb.y = 0; rb.w = 600; rb.button_w = 20; rb.button_h = 18;
     rb.icon_rows = 16; rb.scale_h = 12; rb.origin_x = 0;
-    rb.twips_to_x = half; rb.x_to_twips = twice; rb.colors = 2;
+    rb.twips_to_x = half; rb.x_to_twips = twice; rb.colors = 2; rb.scale = 1; rb.bevel = WP_FALSE;
 
     a = wp_rulerbar_signature(&rb, &ctx);
     ASSERT_EQ_U32(wp_rulerbar_signature(&rb, &ctx), a);                 /* stable */
@@ -1539,7 +1540,7 @@ void test_rulerbar_panel_look_follows_the_colour_count(void)
     ctx_setup_imported(&doc, &journal, &ctx, "x\n");
     rb.x = 0; rb.y = 0; rb.w = 640; rb.button_w = 22; rb.button_h = 20;
     rb.icon_rows = 16; rb.scale_h = 12; rb.origin_x = 0;
-    rb.twips_to_x = half; rb.x_to_twips = twice;
+    rb.twips_to_x = half; rb.x_to_twips = twice; rb.scale = 1; rb.bevel = WP_FALSE;
 
     rb.colors = 4;
     draw_host_reset_fills();
@@ -1555,8 +1556,10 @@ void test_rulerbar_panel_look_follows_the_colour_count(void)
     ASSERT_TRUE(draw_host_grey_fills(0x80) > 20);       /* every button's shadow */
     ASSERT_EQ_U32(draw_host_grey_fills(0xE0), 2);       /* the two pressed: Align Left, Single */
     /* One blit per icon, not a fill per run -- and every button: at 22
-       pixels on 640 the gaps close so all 29 fit (638 pixels). */
-    ASSERT_EQ_U32(draw_host_mono_calls(), 29);
+       pixels on 640 the gaps close so all 29 fit (638 pixels) -- and, in
+       colour, one more for each of the 14 icons whose inside is filled
+       (rulerbar.c's g_colours). */
+    ASSERT_EQ_U32(draw_host_mono_calls(), 29 + 14);
     ASSERT_TRUE(wp_rulerbar_signature(&rb, &ctx) != sig2);   /* a repaint when it changes */
 
     ctx_teardown(&doc, &journal, &ctx);
@@ -1569,7 +1572,7 @@ static void drag_bar(wp_rulerbar *rb)
 {
     rb->x = 0; rb->y = 0; rb->w = 640; rb->button_w = 20; rb->button_h = 18;
     rb->icon_rows = 16; rb->scale_h = 12; rb->origin_x = 0;
-    rb->twips_to_x = half; rb->x_to_twips = twice; rb->colors = 2;
+    rb->twips_to_x = half; rb->x_to_twips = twice; rb->colors = 2; rb->scale = 1; rb->bevel = WP_FALSE;
 }
 
 static void drag(wp_app_ctx *ctx, const wp_rulerbar *rb, i32 x0, i32 y0, i32 x1, i32 y1)

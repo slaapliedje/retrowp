@@ -3,6 +3,7 @@
 #include "test.h"
 #include "config.h"
 #include "format_prn.h"
+#include "rulerbar.h"
 
 static wp_keymap_id parse(const char *src)
 {
@@ -211,4 +212,21 @@ void test_config_view_keys(void)
     ctx.page_view_able = WP_TRUE;
     wp_config_view_apply(&cfg, &ctx);
     ASSERT_TRUE(ctx.page_view);
+}
+
+/* The UI scale: as set, or for auto from the screen's width -- 1 for an
+   ST's or Amiga's 640, 2 for a graphics card's 1280, 3 from 1800. */
+void test_config_ui_scale(void)
+{
+    wp_config cfg;
+
+    ASSERT_TRUE(wp_config_parse((const u8 *)"uiscale=2\n", 10, &cfg) == WP_OK);
+    ASSERT_EQ_U32(cfg.ui_scale, 2);
+    ASSERT_TRUE(wp_config_parse((const u8 *)"uiscale=auto\n", 13, &cfg) == WP_OK);
+    ASSERT_EQ_U32(cfg.ui_scale, 0);
+    ASSERT_EQ_U32((u32)wp_rulerbar_ui_scale(640, 0), 1);
+    ASSERT_EQ_U32((u32)wp_rulerbar_ui_scale(1280, 0), 2);
+    ASSERT_EQ_U32((u32)wp_rulerbar_ui_scale(1920, 0), 3);
+    ASSERT_EQ_U32((u32)wp_rulerbar_ui_scale(1280, 1), 1);
+    ASSERT_EQ_U32((u32)wp_rulerbar_ui_scale(640, 3), 3);
 }

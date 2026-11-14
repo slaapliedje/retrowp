@@ -268,6 +268,13 @@ snap to grid" also makes the ruler's markers move in grid steps.
 RetroWP remembers these choices. Page view needs a graphics
 screen, so DOS keeps its own view.
 
+On a big screen -- a graphics card's 1280 pixels across or more --
+RetroWP draws its toolbar, ruler and status line twice the size (three
+times from 1800), so they stay easy to see and to click. Put
+uiscale=1, 2 or 3 in the configuration file to choose for yourself
+(uiscale=auto is the default). On a screen of 16 colours or more the
+toolbar's icons are in colour.
+
 Columns... (Format menu; Alt+L on DOS) sets the text of the
 section the caret is in in one to four newspaper columns, half an
 inch apart. The text wraps to a column straight away; in page

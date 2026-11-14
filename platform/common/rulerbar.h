@@ -41,6 +41,14 @@ typedef struct {
     i32 origin_x;           /* screen x of the text column's left edge */
     wp_rulerbar_conv_fn twips_to_x;   /* the shell's own x-axis conversions */
     wp_rulerbar_conv_fn x_to_twips;
+    i32 scale;              /* UI scale (M19): icons drawn pixel-doubled this many
+                               times, the ruler's marks this much bigger; 0 or 1
+                               for none. The shell sizes button_w/h and scale_h
+                               to match (wp_rulerbar_ui_scale picks it). */
+    wp_bool bevel;          /* the panel's raised buttons whatever the colours --
+                               the Amiga's 3D look in its Workbench's four pens
+                               (grey face, white highlight, black shadow);
+                               colour icons still want 16 colours */
     i32 colors;             /* the screen's colours: from 16 up the bar is a
                                grey panel of raised buttons (a pressed one
                                sunken) with the text column white on the
@@ -51,6 +59,12 @@ typedef struct {
 
 /* The bar's whole height: the button row, a gap, and the ruler. */
 i32 wp_rulerbar_height(const wp_rulerbar *rb);
+
+/* The UI scale for a screen this many pixels wide, as config's
+   uiscale asks: 1, 2 or 3 as set, or for "auto" (0) 2 from 1200 pixels
+   across and 3 from 1800 -- a graphics card's 1280x1024, where 16-pixel
+   icons and an 8x16 font are too small to use. */
+i32 wp_rulerbar_ui_scale(i32 screen_w_px, u8 setting);
 
 /* Paints the whole bar. font/ascent are for the ruler's inch numbers
    and DOS's labels (ascent in the bar's own vertical unit: pixels, or

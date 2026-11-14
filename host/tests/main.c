@@ -487,6 +487,8 @@ void test_convert_print_disc_to_its_tray(void);
 void test_pagecanvas_disc_guides(void);
 void test_pagecanvas_disc_guides_tall_pixels(void);
 void test_config_view_keys(void);
+void test_config_ui_scale(void);
+void test_papermetrics_drawing_text_uses_its_face(void);
 void test_pagecanvas_fit_and_stack(void);
 void test_pagecanvas_paint_caret_hit(void);
 void test_pagecanvas_note_at_foot(void);
@@ -1235,6 +1237,8 @@ static const test_case g_cases[] = {
     { "pagecanvas_disc_guides", test_pagecanvas_disc_guides },
     { "pagecanvas_disc_guides_tall_pixels", test_pagecanvas_disc_guides_tall_pixels },
     { "config_view_keys", test_config_view_keys },
+    { "config_ui_scale", test_config_ui_scale },
+    { "papermetrics_drawing_text_uses_its_face", test_papermetrics_drawing_text_uses_its_face },
     { "pagecanvas_fit_and_stack", test_pagecanvas_fit_and_stack },
     { "pagecanvas_paint_caret_hit", test_pagecanvas_paint_caret_hit },
     { "pagecanvas_note_at_foot", test_pagecanvas_note_at_foot },
