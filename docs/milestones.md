@@ -2554,6 +2554,21 @@ the list").
       apart -- it is measured in its own face again. Tests: the scale
       choice, the panel's icon count with colour, drawing text under
       paper metrics; the last shown to fail when broken.
+- [x] T19.8 Label sheets.
+      AC: Mail Merge's Labels offers named sheets -- Avery Letter
+      (5160, 5161, 5162, 5163, 5164, 5167, 5371) and A4 (L7160, L7161,
+      L7162, L7163, L7165, L7173, L7651) -- from engine labels.h, each
+      the maker's figures (US in exact thirty-seconds of an inch); the
+      section takes the sheet's paper and margins, the table's cells a
+      pitch apart from the first label, each label's text a twelfth of
+      an inch in from its own edges (the gap between labels split
+      either side of a cell's boundary). "Across x down" stays for
+      sheets not listed. A document with no fields makes a sheet of
+      copies of its text (return addresses). Tests: every sheet inside
+      its paper with even margins and an exact pitch once applied; 5160
+      merged -- paper, margins, cells, gap, 30 to a page and the 31st
+      on the next; a sheet of copies on L7163; the first two shown to
+      fail when the gap is broken.
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)

@@ -2,6 +2,7 @@
 #include <string.h>
 #include "test.h"
 #include "merge.h"
+#include "labels.h"
 #include "format_txt.h"
 #include "format_rtf.h"
 #include "layout.h"
@@ -146,7 +147,7 @@ void test_merge_labels(void)
     sec->margin_left = sec->margin_right = 1800;
     sec->margin_top = sec->margin_bottom = 1440;
     ASSERT_TRUE(wp_merge_data_read((const u8 *)csv, (u32)strlen(csv), &d) == WP_OK);
-    ASSERT_TRUE(wp_merge_labels(&doc, &d, 2, 3, &copies) == WP_OK);
+    ASSERT_TRUE(wp_merge_labels(&doc, &d, 2, 3, 0, &copies) == WP_OK);
     ASSERT_EQ_U32(copies, 5);
     sec = wp_document_section_get(&doc, 0);
     ASSERT_EQ_U32(sec->para_count, 5 * 2 + 1);   /* five labels of two lines, one empty */
@@ -199,9 +200,9 @@ void test_merge_labels(void)
     /* A label holding a table is refused, nothing changed; so are 17 across. */
     ASSERT_TRUE(format_txt_import((const u8 *)tmpl, (u32)strlen(tmpl), &doc) == WP_OK);
     ASSERT_TRUE(wp_merge_data_read((const u8 *)csv, (u32)strlen(csv), &d) == WP_OK);
-    ASSERT_TRUE(wp_merge_labels(&doc, &d, 17, 3, &copies) == WP_RANGE);
+    ASSERT_TRUE(wp_merge_labels(&doc, &d, 17, 3, 0, &copies) == WP_RANGE);
     wp_section_paragraph_get(wp_document_section_get(&doc, 0), 0)->trow = 1;
-    ASSERT_TRUE(wp_merge_labels(&doc, &d, 2, 3, &copies) == WP_UNSUPPORTED);
+    ASSERT_TRUE(wp_merge_labels(&doc, &d, 2, 3, 0, &copies) == WP_UNSUPPORTED);
     ASSERT_EQ_U32(wp_document_section_get(&doc, 0)->para_count, 2);
     wp_merge_data_free(&d);
     wp_document_free(&doc);
@@ -219,7 +220,7 @@ void test_merge_row_height_in_rtf(void)
 
     ASSERT_TRUE(format_txt_import((const u8 *)tmpl, (u32)strlen(tmpl), &doc) == WP_OK);
     ASSERT_TRUE(wp_merge_data_read((const u8 *)csv, (u32)strlen(csv), &d) == WP_OK);
-    ASSERT_TRUE(wp_merge_labels(&doc, &d, 3, 10, &copies) == WP_OK);
+    ASSERT_TRUE(wp_merge_labels(&doc, &d, 3, 10, 0, &copies) == WP_OK);
     ASSERT_TRUE(format_rtf_export(&doc, rtf, sizeof(rtf) - 1, &n) == WP_OK);
     rtf[n] = '\0';
     ASSERT_TRUE(strstr((const char *)rtf, "\\trrh-") != NULL);
@@ -264,4 +265,32 @@ void test_merge_apply_and_restore(void)
     wp_merge_restore(&doc, &m);
     wp_merge_data_free(&d);
     wp_document_free(&doc);
+}
+
+/* Every label sheet as its maker gives it: the labels inside the sheet,
+   the space either side even (within a millimetre), and applied, the
+   text column exactly a pitch a label each way. */
+void test_label_sheets_fit(void)
+{
+    u32 i;
+    ASSERT_TRUE(wp_label_sheet_count() >= 14);
+    ASSERT_TRUE(wp_label_sheet_get(wp_label_sheet_count()) == NULL);
+    for (i = 0; i < wp_label_sheet_count(); i++) {
+        const wp_label_sheet *t = wp_label_sheet_get(i);
+        wp_section sec;
+        i32 right = t->sheet_w - t->left - (t->across - 1) * t->pitch_x - t->label_w;
+        i32 bottom = t->sheet_h - t->top - (t->down - 1) * t->pitch_y - t->label_h;
+        i32 gap;
+
+        ASSERT_TRUE(t->label_w <= t->pitch_x && t->label_h <= t->pitch_y);
+        ASSERT_TRUE(right >= 0 && bottom >= 0);
+        ASSERT_TRUE(right - t->left <= 57 && t->left - right <= 57);
+        ASSERT_TRUE(bottom - t->top <= 57 && t->top - bottom <= 57);
+        memset(&sec, 0, sizeof(sec));
+        gap = wp_label_sheet_apply(&sec, t);
+        ASSERT_EQ_U32((u32)(sec.page_width - sec.margin_left - sec.margin_right), (u32)(t->across * t->pitch_x));
+        ASSERT_EQ_U32((u32)(sec.page_height - sec.margin_top - sec.margin_bottom), (u32)(t->down * t->pitch_y));
+        /* label k's left edge, inset by the gap, is where its text starts */
+        ASSERT_EQ_U32((u32)(sec.margin_left + gap), (u32)(t->left + WP_LABEL_INSET));
+    }
 }

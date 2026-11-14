@@ -6,6 +6,7 @@
 #include "styles.h"
 #include "notes.h"
 #include "paper.h"
+#include "labels.h"
 #include "actions.h"
 #include "app_ctx.h"
 #include "format_txt.h"
@@ -2279,53 +2280,72 @@ static wp_bool has_field(wp_document *doc)
     return WP_FALSE;
 }
 
-/* The data file chosen, read and merged -- as letters, a copy of the
-   document a record, or as labels, `across` by `down` to a page; the
-   result replaces the template on screen as a new document with no
-   file, so Save asks for a name and the template on disk is never
-   written over. */
-static wp_status merge_with(wp_app_ctx *ctx, wp_bool labels, u32 across, u32 down)
+/* A data file chosen and read into *data; WP_FALSE (told why) for none. */
+static wp_bool read_merge_data(wp_app_ctx *ctx, wp_merge_data *data)
 {
     char path[WP_APP_PATH_MAX];
     plat_file *f;
-    u32 size = 0, got = 0, copies = 0;
+    u32 size = 0, got = 0;
     u8 *buf;
-    wp_merge_data data;
-    wp_document merged;
     wp_status st;
 
-    if (ctx->pick_path == NULL || !ctx->pick_path(ctx, WP_FALSE, path, (u32)sizeof(path))) return WP_OK;
+    if (ctx->pick_path == NULL || !ctx->pick_path(ctx, WP_FALSE, path, (u32)sizeof(path))) return WP_FALSE;
     if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) {
         wp_action_tell(ctx, "Couldn't open that file");
-        return WP_ERR;
+        return WP_FALSE;
     }
     if (plat_file_size(f, &size) != WP_OK || (buf = (u8 *)mem_alloc(size + 1u)) == NULL) {
         plat_file_close(f);
         wp_action_tell(ctx, "Not enough memory to read that file");
-        return WP_NOMEM;
+        return WP_FALSE;
     }
     st = plat_file_read(f, buf, size, &got);
     plat_file_close(f);
-    if (st == WP_OK) st = wp_merge_data_read(buf, got, &data);
+    if (st == WP_OK) st = wp_merge_data_read(buf, got, data);
     mem_free(buf);
     if (st != WP_OK) {
         wp_action_tell(ctx, st == WP_NOMEM ? "Not enough memory to read that file"
                                            : "That file has no field names on its first line");
-        return st;
+        return WP_FALSE;
     }
-    if (data.records == 0) {
-        wp_merge_data_free(&data);
+    if (data->records == 0) {
+        wp_merge_data_free(data);
         wp_action_tell(ctx, "That file has field names but no records");
-        return WP_OK;
+        return WP_FALSE;
     }
+    return WP_TRUE;
+}
+
+/* Merged -- as letters, a copy of the document a record, or as labels,
+   `across` by `down` to a page (on `sheet`'s paper when one was chosen)
+   -- and the result put on screen as a new document with no file, so
+   Save asks for a name and the template on disk is never written over.
+   data is freed. */
+static wp_status merge_data(wp_app_ctx *ctx, wp_merge_data *data, wp_bool labels, u32 across,
+                            u32 down, const wp_label_sheet *sheet)
+{
+    u32 copies = 0;
+    wp_document merged;
+    wp_section *s0 = wp_document_section_get(ctx->doc, 0), before;
+    i32 gap = 0;
+    u32 fields = data->fields;   /* 0: copies of the label as it is */
+    wp_status st;
+
     /* Merged in place -- every picture, style and frame shared -- then
        handed over as a fresh document: its undo history is the
        template's no longer. */
     merged = *ctx->doc;
-    st = labels ? wp_merge_labels(&merged, &data, across, down, &copies)
-                : wp_merge_document(&merged, &data, &copies);
-    wp_merge_data_free(&data);
+    if (labels && sheet != NULL && s0 != NULL) {
+        before = *s0;
+        gap = wp_label_sheet_apply(s0, sheet);
+        across = sheet->across;
+        down = sheet->down;
+    }
+    st = labels ? wp_merge_labels(&merged, data, across, down, gap, &copies)
+                : wp_merge_document(&merged, data, &copies);
+    wp_merge_data_free(data);
     if (st == WP_UNSUPPORTED || st == WP_RANGE) {   /* refused before anything changed */
+        if (labels && sheet != NULL && s0 != NULL) *s0 = before;
         wp_action_tell(ctx, st == WP_RANGE ? "Labels: 1 to 16 across, 1 to 60 down"
                                            : "A label can't hold a table or a frame");
         return WP_OK;
@@ -2339,15 +2359,45 @@ static wp_status merge_with(wp_app_ctx *ctx, wp_bool labels, u32 across, u32 dow
         return st;
     }
     {
-        char msg[48] = "Merged ";
+        char msg[48];
         char digits[12];
-        u32 pos = 7, n = 0, v = copies;
+        const char *what = fields == 0 ? (copies == 1 ? " label" : " labels")
+                                             : (copies == 1 ? " record" : " records");
+        u32 pos, n = 0, v = copies;
+        strcpy(msg, fields == 0 ? "Made " : "Merged ");
+        pos = (u32)strlen(msg);
         do { digits[n++] = (char)('0' + v % 10u); v /= 10u; } while (v > 0 && n < 11);
         while (n > 0) msg[pos++] = digits[--n];
-        strcpy(msg + pos, copies == 1 ? " record" : " records");
+        strcpy(msg + pos, what);
         wp_action_tell(ctx, msg);
     }
     return WP_OK;
+}
+
+/* Labels from the data file (or, with `copies`, a sheet of the text as
+   it is: no file, a label for every place on the sheet). */
+static wp_bool g_label_copies;
+
+static wp_status merge_labels_now(wp_app_ctx *ctx, u32 across, u32 down, const wp_label_sheet *sheet)
+{
+    wp_merge_data data;
+
+    if (g_label_copies) {
+        memset(&data, 0, sizeof(data));
+        data.records = sheet != NULL ? (u32)sheet->across * sheet->down : across * down;
+    } else if (!read_merge_data(ctx, &data)) {
+        return WP_OK;
+    }
+    return merge_data(ctx, &data, WP_TRUE, across, down, sheet);
+}
+
+static wp_status merge_with(wp_app_ctx *ctx, wp_bool labels, u32 across, u32 down)
+{
+    wp_merge_data data;
+
+    if (labels) return merge_labels_now(ctx, across, down, NULL);
+    if (!read_merge_data(ctx, &data)) return WP_OK;
+    return merge_data(ctx, &data, WP_FALSE, 0, 0, NULL);
 }
 
 /* A mail merge straight to the printer: the data read, then File >
@@ -2355,38 +2405,11 @@ static wp_status merge_with(wp_app_ctx *ctx, wp_bool labels, u32 across, u32 dow
    the document on screen stays the template throughout. */
 static wp_status merge_print_now(wp_app_ctx *ctx)
 {
-    char path[WP_APP_PATH_MAX];
-    plat_file *f;
-    u32 size = 0, got = 0;
-    u8 *buf;
     merge_print mp;
     wp_merge_data data;
     wp_status st;
 
-    if (ctx->pick_path == NULL || !ctx->pick_path(ctx, WP_FALSE, path, (u32)sizeof(path))) return WP_OK;
-    if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) {
-        wp_action_tell(ctx, "Couldn't open that file");
-        return WP_ERR;
-    }
-    if (plat_file_size(f, &size) != WP_OK || (buf = (u8 *)mem_alloc(size + 1u)) == NULL) {
-        plat_file_close(f);
-        wp_action_tell(ctx, "Not enough memory to read that file");
-        return WP_NOMEM;
-    }
-    st = plat_file_read(f, buf, size, &got);
-    plat_file_close(f);
-    if (st == WP_OK) st = wp_merge_data_read(buf, got, &data);
-    mem_free(buf);
-    if (st != WP_OK) {
-        wp_action_tell(ctx, st == WP_NOMEM ? "Not enough memory to read that file"
-                                           : "That file has no field names on its first line");
-        return st;
-    }
-    if (data.records == 0) {
-        wp_merge_data_free(&data);
-        wp_action_tell(ctx, "That file has field names but no records");
-        return WP_OK;
-    }
+    if (!read_merge_data(ctx, &data)) return WP_OK;
     memset(&mp, 0, sizeof(mp));
     mp.data = &data;
     g_merge_print = &mp;
@@ -2412,22 +2435,56 @@ static void labels_done(wp_app_ctx *ctx, const u8 *text, u32 len)
     (void)merge_with(ctx, WP_TRUE, a, d);
 }
 
+/* Labels: a sheet by name -- Letter's or A4's -- or across x down typed,
+   on the page as it is set up. */
+static wp_status choose_label_sheet(wp_app_ctx *ctx)
+{
+    static const char *const top[] = { "Letter sheets...", "A4 sheets...", "Across x down..." };
+    const char *names[9];
+    const wp_label_sheet *sheets[9];
+    u32 chosen = 0, picked = 0, i, n = 0;
+
+    if (!choose_one(ctx, "Labels", top, 3, 0, &chosen)) return WP_OK;
+    if (chosen == 2) {
+        wp_prompt_begin(ctx, "Labels across x down (the page's margins are the sheet's):",
+                        (const u8 *)"3x8", 3, labels_done);
+        return WP_OK;
+    }
+    for (i = 0; i < wp_label_sheet_count() && n < 9; i++) {
+        const wp_label_sheet *t = wp_label_sheet_get(i);
+        if ((t->sheet_w == 12240) != (chosen == 0)) continue;
+        names[n] = t->name;
+        sheets[n++] = t;
+    }
+    if (n == 0 || !choose_one(ctx, chosen == 0 ? "Letter labels" : "A4 labels", names, n, 0, &picked)) {
+        return WP_OK;
+    }
+    return merge_labels_now(ctx, 0, 0, sheets[picked]);
+}
+
 /* File > Mail Merge: letters (a copy a record, a page each) or labels
-   (a grid of them to a page, the page's margins the sheet's). */
+   (a grid of them to a sheet). A document with no fields can still make
+   a sheet of labels, every one its text. */
 static wp_status act_file_merge(wp_app_ctx *ctx)
 {
     static const char *const kinds[] = { "Letters (one to a page)", "Labels (several to a page)",
                                          "Letters, printed one at a time" };
+    static const char *const sheet_only[] = { "A sheet of labels", "Cancel" };
     const u8 *ptrs[3];
     u32 lens[3], picked = 0;
     wp_bool cancelled = WP_TRUE;
 
     if (!ctx->doc_loaded) return WP_OK;
-    if (!has_field(ctx->doc)) {
-        wp_action_tell(ctx, "No fields to fill: Tools > Insert Field adds one");
-        return WP_OK;
-    }
     if (!wp_action_confirm_discard(ctx)) return WP_OK;
+    g_label_copies = WP_FALSE;
+    if (!has_field(ctx->doc)) {
+        /* Tools > Insert Field adds one; without, the text is the label. */
+        if (!choose_one(ctx, "No fields: copies of this text?", sheet_only, 2, 0, &picked) || picked != 0) {
+            return WP_OK;
+        }
+        g_label_copies = WP_TRUE;
+        return choose_label_sheet(ctx);
+    }
     ptrs[0] = (const u8 *)kinds[0]; lens[0] = (u32)strlen(kinds[0]);
     ptrs[1] = (const u8 *)kinds[1]; lens[1] = (u32)strlen(kinds[1]);
     ptrs[2] = (const u8 *)kinds[2]; lens[2] = (u32)strlen(kinds[2]);
@@ -2437,9 +2494,7 @@ static wp_status act_file_merge(wp_app_ctx *ctx)
     }
     if (picked == 0) return merge_with(ctx, WP_FALSE, 0, 0);
     if (picked == 2) return merge_print_now(ctx);
-    wp_prompt_begin(ctx, "Labels across x down (the page's margins are the sheet's):",
-                    (const u8 *)"3x8", 3, labels_done);
-    return WP_OK;
+    return choose_label_sheet(ctx);
 }
 
 const wp_action g_wp_actions[WP_ACT_COUNT] = {

@@ -317,6 +317,9 @@ void test_actions_load_file_without_extension_goes_by_content(void);
 void test_actions_load_file_opens_atari_works_and_saves_rtf_beside_it(void);
 void test_actions_mail_merge(void);
 void test_actions_mail_merge_labels(void);
+void test_actions_mail_merge_label_sheet(void);
+void test_actions_label_sheet_of_copies(void);
+void test_label_sheets_fit(void);
 void test_actions_mail_merge_printed(void);
 void test_actions_format_style_and_define(void);
 void test_actions_odt_and_pdf_go_through_the_gateway(void);
@@ -1088,6 +1091,9 @@ static const test_case g_cases[] = {
     { "actions_load_file_opens_atari_works_and_saves_rtf_beside_it", test_actions_load_file_opens_atari_works_and_saves_rtf_beside_it },
     { "actions_mail_merge", test_actions_mail_merge },
     { "actions_mail_merge_labels", test_actions_mail_merge_labels },
+    { "actions_mail_merge_label_sheet", test_actions_mail_merge_label_sheet },
+    { "actions_label_sheet_of_copies", test_actions_label_sheet_of_copies },
+    { "label_sheets_fit", test_label_sheets_fit },
     { "actions_mail_merge_printed", test_actions_mail_merge_printed },
     { "actions_format_style_and_define", test_actions_format_style_and_define },
     { "actions_odt_and_pdf_go_through_the_gateway", test_actions_odt_and_pdf_go_through_the_gateway },

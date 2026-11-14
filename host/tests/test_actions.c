@@ -2,6 +2,8 @@
 #include <string.h>
 #include "test.h"
 #include "styles.h"
+#include "pageview.h"
+#include "layout.h"
 #include "format_prn.h"
 #include "drawing.h"
 #include "actions.h"
@@ -1088,6 +1090,7 @@ void test_actions_mail_merge(void)
 
     ctx_setup_imported(&doc, &journal, &ctx, "Nothing to fill\n");
     ctx.pick_path = NULL;   /* would crash if it were reached */
+    window_host_next_choice(1);   /* no fields: not a sheet of copies either */
     ASSERT_TRUE(wp_action_find(WP_ACT_FILE_MERGE)->handler(&ctx) == WP_OK);
     doc_text(&doc, text, sizeof(text));
     ASSERT_EQ_STR(text, "Nothing to fill\n");
@@ -2273,8 +2276,9 @@ void test_actions_insert_clipart(void)
     ctx_teardown(&doc, &journal, &ctx);
 }
 
-/* Mail Merge as labels: the choice, then the grid in the status line
-   (its "3x8" taken as offered), then the data -- a table of labels. */
+/* Mail Merge as labels: the choice, "Across x down", then the grid in
+   the status line (its "3x8" taken as offered), then the data -- a
+   table of labels. */
 void test_actions_mail_merge_labels(void)
 {
     wp_document doc;
@@ -2289,6 +2293,7 @@ void test_actions_mail_merge_labels(void)
     ctx_setup_imported(&doc, &journal, &ctx, "\xc2\xabName\xc2\xbb\n");
     ctx.pick_path = pick_merge_data;
     window_host_next_choice(1);   /* Labels */
+    window_host_next_choice(2);   /* Across x down... */
     ASSERT_TRUE(wp_action_find(WP_ACT_FILE_MERGE)->handler(&ctx) == WP_OK);
     ASSERT_TRUE(ctx.prompt.active);
     (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
@@ -2298,6 +2303,83 @@ void test_actions_mail_merge_labels(void)
     ASSERT_EQ_STR(ctx.doc_path, "");
     ctx_teardown(&doc, &journal, &ctx);
     (void)remove("build/test_actions_merge.csv");
+}
+
+/* Labels on a named sheet: Avery 5160 chosen, the section takes the
+   sheet's paper and margins, and the table's cells fall where the
+   labels are -- 30 to the page, the 31st on the next. */
+void test_actions_mail_merge_label_sheet(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_section *sec;
+    const wp_table_row *row;
+    u32 i, pi, last_page = 0, first_page = 99;
+    FILE *f = fopen("build/test_actions_merge.csv", "wb");
+
+    ASSERT_TRUE(f != NULL);
+    if (f == NULL) return;
+    fputs("Name\n", f);
+    for (i = 0; i < 31; i++) fputs("Someone\n", f);
+    fclose(f);
+    ctx_setup_imported(&doc, &journal, &ctx, "\xc2\xabName\xc2\xbb\n");
+    ctx.pick_path = pick_merge_data;
+    window_host_next_choice(1);   /* Labels */
+    window_host_next_choice(0);   /* Letter sheets... */
+    window_host_next_choice(0);   /* 5160 Address (30) */
+    ASSERT_TRUE(wp_action_find(WP_ACT_FILE_MERGE)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "Merged 31 records");
+    sec = wp_document_section_get(&doc, 0);
+    ASSERT_EQ_U32((u32)sec->page_width, 12240);
+    ASSERT_EQ_U32((u32)sec->page_height, 15840);
+    ASSERT_EQ_U32((u32)sec->margin_left, 270 - 90);    /* 3/16" less half the 1/8" between */
+    ASSERT_EQ_U32((u32)sec->margin_top, 720);
+    ASSERT_EQ_U32((u32)(sec->page_width - sec->margin_left - sec->margin_right), 3 * 3960);
+    ASSERT_EQ_U32((u32)(sec->page_height - sec->margin_top - sec->margin_bottom), 10 * 1440);
+    row = wp_document_trow_get(&doc, sec->paras[0].trow);
+    ASSERT_TRUE(row != NULL);
+    if (row != NULL) {
+        ASSERT_EQ_U32(row->cell_count, 3);
+        ASSERT_EQ_U32((u32)row->cell_right[0], 3960);
+        ASSERT_EQ_U32((u32)-row->height, 1440);
+        ASSERT_EQ_U32((u32)row->gap, 115 + 90);   /* the text 1/12" in from the label's edge */
+    }
+    for (pi = 0; pi < sec->para_count; pi++) sec->paras[pi].layout_dirty = WP_TRUE;
+    (void)wp_pageview_relayout(&doc, 0);
+    for (pi = 0; pi < sec->para_count; pi++) {
+        const wp_paragraph_layout *l = (const wp_paragraph_layout *)sec->paras[pi].layout;
+        if (l == NULL || l->line_count == 0) continue;
+        if (pi == 29) last_page = l->lines[0].page;    /* the 30th label */
+        if (pi == 30) first_page = l->lines[0].page;   /* the 31st */
+    }
+    ASSERT_EQ_U32(last_page, 0);
+    ASSERT_EQ_U32(first_page, 1);
+    ctx_teardown(&doc, &journal, &ctx);
+    (void)remove("build/test_actions_merge.csv");
+}
+
+/* No fields: a sheet of the text as it is -- every place on an A4
+   L7163 sheet a copy, and no data file asked for. */
+void test_actions_label_sheet_of_copies(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[512];
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Ann\n");
+    ctx.pick_path = NULL;   /* would crash if it were reached */
+    window_host_next_choice(0);   /* A sheet of labels */
+    window_host_next_choice(1);   /* A4 sheets... */
+    window_host_next_choice(3);   /* L7163 Address (14) */
+    ASSERT_TRUE(wp_action_find(WP_ACT_FILE_MERGE)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_STR(window_host_last_title(), "Made 14 labels");
+    ASSERT_EQ_U32(doc.sections[0].para_count, 14);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Ann\nAnn\nAnn\nAnn\nAnn\nAnn\nAnn\nAnn\nAnn\nAnn\nAnn\nAnn\nAnn\nAnn\n");
+    ASSERT_EQ_U32((u32)doc.sections[0].page_width, 11906);   /* A4 */
+    ctx_teardown(&doc, &journal, &ctx);
 }
 
 /* Mail Merge straight to the printer: every record printed in turn on

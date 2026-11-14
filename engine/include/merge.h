@@ -55,11 +55,15 @@ wp_status wp_merge_document(wp_document *doc, const wp_merge_data *d, u32 *copie
    becomes a table of `across` labels a row, each row exactly the text
    height over `down` tall and each label the column over `across` wide
    (the page's margins are the sheet's), a record a label, the last row
-   filled out with empty labels. WP_UNSUPPORTED when the label holds a
-   table or a frame of its own, WP_RANGE for across outside 1..16 or
-   down outside 1..60. *copies_out as above. */
+   filled out with empty labels. Each label's text keeps `gap` twips
+   from its cell's sides (0: WP_LABEL_INSET, a twelfth of an inch;
+   wp_label_sheet_apply answers a real sheet's). WP_UNSUPPORTED when
+   the label holds a table or a frame of its own, WP_RANGE for across
+   outside 1..16 or down outside 1..60. *copies_out as above. A data
+   set with no fields and N records makes N copies of the label as it
+   is -- a sheet of return addresses. */
 wp_status wp_merge_labels(wp_document *doc, const wp_merge_data *d, u32 across, u32 down,
-                          u32 *copies_out);
+                          i32 gap, u32 *copies_out);
 
 /* One record filled into the document itself, to print it and put the
    document back -- a long list printed a record at a time, never the

@@ -726,7 +726,19 @@ with empty labels; the page's margins are the sheet's. A row's height
 is applied where rows are laid out (paginate.c), walked
 (`wp_line_walk_next`) and measured (`wp_table_row_extent`), so screens,
 the page printer and PostScript keep the pitch. File > Mail Merge asks
-Letters or Labels, and for labels "across x down" in the status line.
+Letters or Labels, and for labels a named sheet or "across x down" in
+the status line.
+
+Label sheets (`labels.h`, M19 T19.8): the common Avery sheets, Letter
+and A4, as the maker's template gives them -- the first label's corner,
+the label's size, the pitch across and down, the count each way.
+`wp_label_sheet_apply` sets a section's paper and margins so the text
+column is exactly `across` pitches wide and `down` tall, starting half
+the space between two labels left of the first; the cell gap it answers
+(passed to `wp_merge_labels`) is that half plus `WP_LABEL_INSET`, so
+each label's text sits a twelfth of an inch in from its own edges. A
+merge data set with no fields and N records makes N copies of the label
+as it is, which is how a document with no fields fills a sheet.
 
 Printed a record at a time ("Letters, printed one at a time"):
 `wp_merge_apply` fills one record into the document itself, keeping

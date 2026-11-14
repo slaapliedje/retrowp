@@ -44,6 +44,7 @@ mismatched pair does not fail, it answers plausible nonsense.
 """
 import os
 import re
+import signal
 import struct
 import sys
 
@@ -259,14 +260,18 @@ def main():
                                 f"{MIN_WORK_INK}: the document did not lay out "
                                 f"or did not paint")
     finally:
+        # The launcher's own stop: QUIT over the bridge, a wait, then a
+        # kill and a wait -- so no emulator outlives the gate, nor lingers
+        # unreaped.  A bare kill without the wait left one running per
+        # interrupted run.
         try:
-            b.close()
+            emu.stop()
         except Exception:
-            pass
-        try:
-            emu.proc.kill()
-        except Exception:
-            pass
+            try:
+                emu.proc.kill()
+                emu.proc.wait(timeout=5)
+            except Exception:
+                pass
 
 
     if problems:
@@ -278,5 +283,14 @@ def main():
     return 0
 
 
+def _exit_on_signal(signum, _frame):
+    # SIGTERM/SIGHUP (a timeout, a closed terminal) end Python without
+    # running `finally`, which would leave the emulator running; as an
+    # exit, they stop it like any other way out.
+    raise SystemExit(128 + signum)
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _exit_on_signal)
+    signal.signal(signal.SIGHUP, _exit_on_signal)
     sys.exit(main())

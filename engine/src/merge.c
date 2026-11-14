@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include "merge.h"
+#include "labels.h"
 #include "strpool.h"
 #include "utf8.h"
 #include "platform.h"
@@ -265,7 +266,7 @@ static wp_status copy_para(wp_document *doc, u32 from, u32 pi, u32 to, const wp_
 }
 
 wp_status wp_merge_labels(wp_document *doc, const wp_merge_data *d, u32 across, u32 down,
-                          u32 *copies_out)
+                          i32 gap, u32 *copies_out)
 {
     wp_section *sec;
     wp_table_row row;
@@ -287,7 +288,7 @@ wp_status wp_merge_labels(wp_document *doc, const wp_merge_data *d, u32 across, 
     column = sec->page_width - sec->margin_left - sec->margin_right;
     text_h = sec->page_height - sec->margin_top - sec->margin_bottom;
     memset(&row, 0, sizeof(row));
-    row.gap = 115;   /* a twelfth of an inch in from each label's edge */
+    row.gap = gap > 0 ? gap : WP_LABEL_INSET;   /* in from each label's edge */
     row.cell_count = (u8)across;
     for (k = 0; k < across; k++) row.cell_right[k] = (i32)(((u32)column * (k + 1u)) / across);
     row.height = -(text_h / (i32)down);

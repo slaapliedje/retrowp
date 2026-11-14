@@ -300,10 +300,15 @@ Alt+M on DOS) asks for the list: a text file with the field names on its first
 line and one record a line, separated by commas, semicolons or
 tabs -- what any spreadsheet saves as CSV. Choose Letters and
 RetroWP makes the document once for each record, each on a new
-page. Choose Labels and the document is one label: give the
-labels across and down (3x8, say) and RetroWP fills the page with
-them, one record a label -- set Page Setup's margins to the
-label sheet's first. Either way the result is a new document:
+page. Choose Labels and the document is one label: pick the
+sheet -- Avery's Letter sheets (5160 address, 5163 shipping, 5167
+return, business cards ...) or A4 ones (L7160, L7163, L7651 ...)
+-- and RetroWP sets the page to it and fills it, one record a
+label. For a sheet not listed, choose "Across x down" (3x8, say)
+after setting Page Setup's margins to the sheet's. A document with
+no fields can still make a sheet of labels: Mail Merge offers a
+copy of the text on every label -- a sheet of return addresses.
+Either way the result is a new document:
 Save asks for a name, so the original is kept. Choose "Letters,
 printed one at a time" to print a long list without making the
 whole merged document: Print's usual choices, then a letter a
