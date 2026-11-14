@@ -189,3 +189,65 @@ void test_columns_rtf(void)
     wp_document_free(&back);
     wp_document_free(&doc);
 }
+
+/* A column break (WP_BREAK_COLUMN): the paragraph starts column two at
+   its top, the page unchanged; past the last column, or with one, a new
+   page. Word's \column, both ways, and Format > Columns' "Break to next
+   column" at the caret, one undo step. */
+void test_columns_break(void)
+{
+    static u8 out[16384];
+    static const char word[] = "{\\rtf1\\ansi\\cols2 First.\\column Second.\\par}";
+    wp_document doc, back;
+    wp_section *sec;
+    wp_para_style ps;
+    wp_pstyle h;
+    u32 n = 0;
+
+    doc_lines(&doc, 10);
+    sec = wp_document_section_get(&doc, 0);
+    sec->columns = 2;
+    ps = *wp_document_pstyle_get(&doc, sec->paras[3].style);
+    ps.page_break_before = WP_BREAK_COLUMN;
+    ASSERT_TRUE(wp_document_pstyle_find_or_add(&doc, &ps, &h) == WP_OK);
+    sec = wp_document_section_get(&doc, 0);
+    wp_paragraph_pstyle_set(&sec->paras[3], h);
+    (void)wp_pageview_relayout(&doc, 0);
+    ASSERT_EQ_U32(line_of(&doc, 2)->column, 0);
+    ASSERT_EQ_U32(line_of(&doc, 3)->column, 1);
+    ASSERT_EQ_U32(line_of(&doc, 3)->page, 0);
+    ASSERT_EQ_U32((u32)line_of(&doc, 3)->page_y_twips, 0);
+    ASSERT_TRUE(!line_of(&doc, 3)->page_start);
+    ASSERT_EQ_U32(line_of(&doc, 9)->column, 1);   /* the rest follow it */
+
+    /* With one column it is a new page. */
+    sec->columns = 1;
+    {
+        u32 pi;
+        for (pi = 0; pi < sec->para_count; pi++) sec->paras[pi].layout_dirty = WP_TRUE;
+    }
+    (void)wp_pageview_relayout(&doc, 0);
+    ASSERT_EQ_U32(line_of(&doc, 3)->page, 1);
+    ASSERT_TRUE(line_of(&doc, 3)->page_start);
+
+    /* RTF: written as Word's \column, read back as the break. */
+    sec->columns = 2;
+    ASSERT_TRUE(format_rtf_export(&doc, out, sizeof(out) - 1, &n) == WP_OK);
+    out[n] = '\0';
+    ASSERT_TRUE(strstr((const char *)out, "\\column") != NULL);
+    ASSERT_TRUE(strstr((const char *)out, "\\pagebb") == NULL);
+    ASSERT_TRUE(format_rtf_import(out, n, &back) == WP_OK);
+    ASSERT_EQ_U32(back.sections[0].para_count, 10);
+    ASSERT_EQ_U32(wp_document_pstyle_get(&back, back.sections[0].paras[3].style)->page_break_before, WP_BREAK_COLUMN);
+    ASSERT_EQ_U32(wp_document_pstyle_get(&back, back.sections[0].paras[2].style)->page_break_before, 0);
+    wp_document_free(&back);
+    wp_document_free(&doc);
+
+    /* Word's own: a break inside a paragraph's text. */
+    ASSERT_TRUE(format_rtf_import((const u8 *)word, (u32)strlen(word), &doc) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 2);
+    ASSERT_EQ_U32(wp_document_pstyle_get(&doc, doc.sections[0].paras[1].style)->page_break_before, WP_BREAK_COLUMN);
+    (void)wp_pageview_relayout(&doc, 0);
+    ASSERT_EQ_U32(line_of(&doc, 1)->column, 1);
+    wp_document_free(&doc);
+}

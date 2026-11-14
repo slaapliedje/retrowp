@@ -586,7 +586,13 @@ column at the top of the page. The plain view ignores both and shows
 the columns one after another, at a column's width -- which is also
 all DOS's text screen can do. A footnote goes at the foot of the
 column it is met in, its height kept clear in that column alone.
-Frames are placed on the page, not in a column.
+Frames are placed on the page, not in a column. A column break is a
+paragraph's `page_break_before` set to `WP_BREAK_COLUMN` (a page break
+is `WP_BREAK_PAGE`): the paragraph starts the next column, or past the
+last a new page; RTF writes it as Word's `\column` before the paragraph
+and reads `\column` anywhere, ending the paragraph there. Columns are
+not balanced at a section's end -- every section starts a page, and
+Word balances only above a continuous break, which this model has not.
 
 Found while checking columns on target (2026-11-12): the ST and the
 Amiga laid text out with their screen fonts, which GEM and Topaz size to
@@ -603,8 +609,13 @@ name. Page view draws a disc label's edge and hole (WP_DISC_TWIPS, the
 41 mm clear centre) as guides -- never on paper. Tools > Envelope adds
 the envelope as section 0 by journaled edits and a section split; the
 split now remembers the section's page setup and its undo gives it
-back, so the letter is not left envelope-sized. Redo re-splits but does
-not re-apply the envelope's page (page setup is not journaled).
+back, so the letter is not left envelope-sized. The envelope's page and
+its address block's paragraph styles are journaled too, in the same
+undo step (`wp_edit_set_section`, WP_OP_SET_SECTION, which keeps the
+setup before and after; `wp_edit_set_pstyle`, WP_OP_SET_PSTYLE), so
+Redo brings the envelope back whole. Page Setup (paper, margins),
+Format > Columns and the header and footer go through
+`wp_edit_set_section` as well: each is one undo step.
 
 ## Paper metrics (M19)
 

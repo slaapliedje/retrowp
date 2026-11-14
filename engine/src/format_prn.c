@@ -881,7 +881,7 @@ static void print_paragraph(prn_state *s, const wp_paragraph *para, u8 *buf, u8 
     u32 n = 0;
     u16 ri;
 
-    if (ps != NULL && ps->page_break_before && s->page_open && s->row > 0 && !s->capturing) {
+    if (ps != NULL && ps->page_break_before == WP_BREAK_PAGE && s->page_open && s->row > 0 && !s->capturing) {
         end_page(s);
     }
     if (ps != NULL && s->page_open && s->row > 0) add_space(s, ps->space_before);

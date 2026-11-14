@@ -99,10 +99,15 @@ typedef enum {
     WP_BORDER_THICK  = 2    /* one rule, twice border_width (\brdrth) */
 } wp_border_kind;
 
+#define WP_BREAK_PAGE   1
+#define WP_BREAK_COLUMN 2
+
 typedef struct {
     u8  align;          /* wp_align */
     u8  tab_count;      /* explicit stops in tab_pos/tab_kind, sorted by position */
-    u8  page_break_before;  /* start this paragraph on a new page (RTF \pagebb) */
+    u8  page_break_before;  /* WP_BREAK_PAGE: start this paragraph on a new page
+                               (RTF \pagebb); WP_BREAK_COLUMN: in the next
+                               column (RTF \column), a new page past the last */
     u8  border_sides;   /* WP_BORDER_* bits; 0 = none */
     i32 indent_left;
     i32 indent_right;
@@ -373,8 +378,8 @@ typedef enum {
     /* A section break: section at.section was split before paragraph
        at.paragraph, the paragraphs from there on moving into a new
        section at.section + 1 (wp_edit_split_section). Undo merges that
-       section back (its own page setup with it -- page setup is not
-       journaled); redo splits again at the same place. Every later op
+       section back, giving it the page setup it had before the split
+       (kept in op->extra); redo splits again at the same place. Every later op
        names positions in the split document, and undo runs them first,
        so their indices stay true. */
     WP_OP_SPLIT_SECTION,
@@ -398,7 +403,13 @@ typedef enum {
        so wp_edit_undo/redo treats them as one user-facing step. Carry no
        payload (at/text/style_before/style_after all unused). See
        docs/editing.md's "Undo Grouping" section. */
-    WP_OP_GROUP_BEGIN, WP_OP_GROUP_END
+    WP_OP_GROUP_BEGIN, WP_OP_GROUP_END,
+    /* M19: a section's page setup changed (wp_edit_set_section) --
+       paper, margins, header and footer, columns. at.section names it;
+       op->extra holds two wp_sections with no paragraphs, the setup
+       before and after. (WP_OP_SET_PSTYLE, above, is a paragraph's
+       style changed, wp_edit_set_pstyle: style_before, style_after.) */
+    WP_OP_SET_SECTION
 } wp_op_kind;
 
 typedef struct wp_op {
@@ -408,7 +419,7 @@ typedef struct wp_op {
     u16      style_before;
     u16      style_after;
     void    *extra;         /* an op's own saved state, freed with it; NULL
-                               for every kind but WP_OP_MERGE_SECTION */
+                               for every kind but the section ones */
     struct wp_op *next;     /* journal linkage */
 } wp_op;
 

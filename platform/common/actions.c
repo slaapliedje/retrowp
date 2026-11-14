@@ -784,7 +784,7 @@ static wp_status act_format_table(wp_app_ctx *ctx)
 static void toggle_page_break(wp_para_style *ps, i32 unused)
 {
     (void)unused;
-    ps->page_break_before = (u8)!ps->page_break_before;
+    ps->page_break_before = (u8)(ps->page_break_before == WP_BREAK_PAGE ? 0 : WP_BREAK_PAGE);
 }
 
 static wp_status act_para_page_break(wp_app_ctx *ctx)
@@ -813,7 +813,7 @@ static wp_status act_para_page_break(wp_app_ctx *ctx)
     ps = wp_document_pstyle_get(ctx->doc, para->style);
     if (ps == NULL) return WP_OK;
     style = *ps;
-    style.page_break_before = 1;
+    style.page_break_before = WP_BREAK_PAGE;
     if (wp_document_pstyle_find_or_add(ctx->doc, &style, &h) != WP_OK) return WP_NOMEM;
     wp_paragraph_pstyle_set(para, h);
     return WP_OK;
@@ -824,6 +824,17 @@ static wp_bool same_text(const wp_document *doc, wp_span a, wp_span b)
     if (a.length != b.length) return WP_FALSE;
     if (a.length == 0) return WP_TRUE;
     return (wp_bool)(memcmp(wp_strpool_get(&doc->strings, a), wp_strpool_get(&doc->strings, b), a.length) == 0);
+}
+
+/* A page change: `setup` (a copy of sec, changed) made sec's, journaled
+   -- Undo takes it back -- and every paragraph of the section wraps
+   afresh. */
+static void section_changed(wp_app_ctx *ctx, wp_section *sec, const wp_section *setup)
+{
+    u32 si = (u32)(sec - ctx->doc->sections);
+    if (wp_edit_set_section(ctx->doc, ctx->journal, si, setup) != WP_OK) {
+        wp_action_tell(ctx, "Not enough memory for that");
+    }
 }
 
 /* Header and footer: the prompt's answer goes to the caret's section and
@@ -845,12 +856,16 @@ static void set_margin_text(wp_app_ctx *ctx, const u8 *text, u32 len, wp_bool he
     }
     sec = wp_document_section_get(ctx->doc, si);
     old = header ? sec->header : sec->footer;
+    wp_undo_group_begin(ctx->journal);   /* every section it is set in, one step */
     for (; si < ctx->doc->section_count; si++) {
+        wp_section setup;
         sec = wp_document_section_get(ctx->doc, si);
         if (!same_text(ctx->doc, header ? sec->header : sec->footer, old)) break;
-        if (header) sec->header = span; else sec->footer = span;
+        setup = *sec;
+        if (header) setup.header = span; else setup.footer = span;
+        section_changed(ctx, sec, &setup);
     }
-    wp_document_mark_modified(ctx->doc);
+    wp_undo_group_end(ctx->journal);
 }
 
 static void header_done(wp_app_ctx *ctx, const u8 *text, u32 len) { set_margin_text(ctx, text, len, WP_TRUE); }
@@ -893,14 +908,6 @@ static wp_section *caret_section(wp_app_ctx *ctx)
 {
     u32 si = wp_keymap_cursor(ctx)->section;
     return (ctx->doc_loaded && si < ctx->doc->section_count) ? wp_document_section_get(ctx->doc, si) : NULL;
-}
-
-/* A page change: every paragraph of the section wraps afresh. */
-static void section_changed(wp_app_ctx *ctx, wp_section *sec)
-{
-    u32 pi;
-    for (pi = 0; pi < sec->para_count; pi++) sec->paras[pi].layout_dirty = WP_TRUE;
-    wp_document_mark_modified(ctx->doc);
 }
 
 /* twips as inches, to two places with the zeros dropped: "1", "0.75". */
@@ -982,11 +989,14 @@ static void margins_done(wp_app_ctx *ctx, const u8 *text, u32 len)
         wp_action_tell(ctx, "Those margins leave no room on the page");
         return;
     }
-    sec->margin_left = m[0];
-    sec->margin_right = m[1];
-    sec->margin_top = m[2];
-    sec->margin_bottom = m[3];
-    section_changed(ctx, sec);
+    {
+        wp_section setup = *sec;
+        setup.margin_left = m[0];
+        setup.margin_right = m[1];
+        setup.margin_top = m[2];
+        setup.margin_bottom = m[3];
+        section_changed(ctx, sec, &setup);
+    }
 }
 
 /* The section given paper of w x h twips; margins that would leave less
@@ -994,14 +1004,15 @@ static void margins_done(wp_app_ctx *ctx, const u8 *text, u32 len)
    disc's to a centimetre round its edge. */
 static void apply_paper(wp_app_ctx *ctx, wp_section *sec, i32 w, i32 h, u8 kind)
 {
-    sec->page_width = w;
-    sec->page_height = h;
+    wp_section setup = *sec;
+    setup.page_width = w;
+    setup.page_height = h;
     if (kind == (u8)WP_PAPER_DISC) {
-        sec->margin_left = sec->margin_right = sec->margin_top = sec->margin_bottom = 567;
-    } else if (w - sec->margin_left - sec->margin_right < 1440 || h - sec->margin_top - sec->margin_bottom < 1440) {
-        sec->margin_left = sec->margin_right = sec->margin_top = sec->margin_bottom = 720;
+        setup.margin_left = setup.margin_right = setup.margin_top = setup.margin_bottom = 567;
+    } else if (w - setup.margin_left - setup.margin_right < 1440 || h - setup.margin_top - setup.margin_bottom < 1440) {
+        setup.margin_left = setup.margin_right = setup.margin_top = setup.margin_bottom = 720;
     }
-    section_changed(ctx, sec);
+    section_changed(ctx, sec, &setup);
 }
 
 /* A named size chosen: turned as asked (an envelope addressed across its
@@ -2039,25 +2050,64 @@ static wp_status act_view_grid(wp_app_ctx *ctx)
 
 /* ---- Columns (M19; docmodel.h) ---------------------------------------- */
 
+/* The caret's paragraph made to start the next column, or a column
+   break there taken away -- mid-paragraph, the part after the caret
+   starts it, as Page Break does. One undo step. */
+static wp_status column_break_here(wp_app_ctx *ctx)
+{
+    wp_pos *cur = wp_keymap_cursor(ctx), after;
+    wp_section *sec;
+    wp_paragraph *para;
+    const wp_para_style *ps;
+    wp_para_style style;
+    wp_pstyle h;
+    wp_status st;
+
+    wp_undo_group_begin(ctx->journal);
+    if (cur->run != 0 || cur->offset != 0) {
+        st = wp_edit_split_paragraph(ctx->doc, ctx->journal, *cur, &after);
+        if (st != WP_OK) { wp_undo_group_end(ctx->journal); return st; }
+        *cur = after;
+    }
+    sec = wp_document_section_get(ctx->doc, cur->section);
+    para = wp_section_paragraph_get(sec, cur->paragraph);
+    ps = para != NULL ? wp_document_pstyle_get(ctx->doc, para->style) : NULL;
+    st = WP_OK;
+    if (ps != NULL) {
+        style = *ps;
+        style.page_break_before = (u8)(ps->page_break_before == WP_BREAK_COLUMN ? 0 : WP_BREAK_COLUMN);
+        st = wp_document_pstyle_find_or_add(ctx->doc, &style, &h);
+        if (st == WP_OK) st = wp_edit_set_pstyle(ctx->doc, ctx->journal, cur->section, cur->paragraph, h);
+    }
+    wp_undo_group_end(ctx->journal);
+    if (st == WP_OK && sec != NULL && sec->columns <= 1)
+        wp_action_tell(ctx, "One column here: a column break starts a new page");
+    return st;
+}
+
 /* Format > Columns: the caret's section in one to four columns, half an
-   inch apart. The text wraps to a column at once; on paper and in page
-   view a full column goes on in the next. */
+   inch apart, or a column break at the caret. The text wraps to a column
+   at once; on paper and in page view a full column goes on in the next. */
 static wp_status act_format_columns(wp_app_ctx *ctx)
 {
-    static const char *labels[] = { "One column", "Two columns", "Three columns", "Four columns" };
+    static const char *labels[] = { "One column", "Two columns", "Three columns", "Four columns",
+                                    "Break to next column" };
     wp_pos *cur;
     wp_section *sec;
-    u32 picked = 0, pi;
+    u32 picked = 0;
 
     if (!ctx->doc_loaded) return WP_OK;
     cur = wp_keymap_cursor(ctx);
     if (cur->section >= ctx->doc->section_count) return WP_OK;
     sec = wp_document_section_get(ctx->doc, cur->section);
-    if (!choose_one(ctx, "Columns", labels, 4, sec->columns > 1 ? (u32)sec->columns - 1u : 0u, &picked)) return WP_OK;
-    sec->columns = (u8)(picked + 1u);
-    if (sec->col_gap <= 0) sec->col_gap = 720;
-    for (pi = 0; pi < sec->para_count; pi++) wp_section_paragraph_get(sec, pi)->layout_dirty = WP_TRUE;
-    wp_document_mark_modified(ctx->doc);
+    if (!choose_one(ctx, "Columns", labels, 5, sec->columns > 1 ? (u32)sec->columns - 1u : 0u, &picked)) return WP_OK;
+    if (picked == 4) return column_break_here(ctx);
+    {
+        wp_section setup = *sec;
+        setup.columns = (u8)(picked + 1u);
+        if (setup.col_gap <= 0) setup.col_gap = 720;
+        section_changed(ctx, sec, &setup);
+    }
     if (picked > 0 && ctx->page_view_able && !ctx->page_view)
         wp_action_tell(ctx, "Columns show side by side in page view and on paper");
     return WP_OK;
@@ -2139,43 +2189,48 @@ static void env_return_done(wp_app_ctx *ctx, const u8 *text, u32 len)
     memset(&at, 0, sizeof(at));
     at.paragraph = nret + nto;
     if (st == WP_OK && nret + nto > 0) st = wp_edit_split_section(ctx->doc, ctx->journal, at, NULL);
+
+    /* The envelope's page: landscape, half-inch margins, no header or
+       footer; its lines plain, the recipient's block from the middle,
+       a little left of centre, as a postal service reads it. All of it
+       journaled in the same step, so Redo brings the envelope back
+       whole, not just its break. */
+    if (st == WP_OK && nret + nto > 0) {
+        wp_section setup = *wp_document_section_get(ctx->doc, 0);
+        w = pp->h;
+        h = pp->w;
+        setup.page_width = w;
+        setup.page_height = h;
+        setup.margin_left = setup.margin_right = setup.margin_top = setup.margin_bottom = 720;
+        setup.header.length = 0;
+        setup.footer.length = 0;
+        setup.columns = 0;
+        st = wp_edit_set_section(ctx->doc, ctx->journal, 0, &setup);
+        sec = wp_document_section_get(ctx->doc, 0);
+        for (k = 0; st == WP_OK && k < sec->para_count; k++) {
+            const wp_para_style *base = wp_document_pstyle_get(ctx->doc, ctx->doc->default_pstyle);
+            wp_para_style ps;
+            wp_pstyle hs;
+            if (base == NULL) break;
+            ps = *base;
+            ps.space_before = ps.space_after = 0;
+            ps.indent_left = ps.indent_right = ps.indent_first = 0;
+            ps.align = WP_ALIGN_LEFT;
+            if (k >= nret) {
+                ps.indent_left = (w * 2) / 5 - setup.margin_left;
+                if (k == nret) ps.space_before = h / 2 - setup.margin_top - (i32)nret * 280;
+                if (ps.space_before < 0) ps.space_before = 0;
+            }
+            if (wp_document_pstyle_find_or_add(ctx->doc, &ps, &hs) == WP_OK) {
+                st = wp_edit_set_pstyle(ctx->doc, ctx->journal, 0, k, hs);
+            }
+            sec = wp_document_section_get(ctx->doc, 0);
+        }
+    }
     wp_undo_group_end(ctx->journal);
     if (st != WP_OK || nret + nto == 0) {
         wp_action_tell(ctx, nret + nto == 0 ? "No address to put on the envelope" : "Couldn't add the envelope");
         return;
-    }
-
-    /* The envelope's page: landscape, half-inch margins, no header or
-       footer; its lines plain, the recipient's block from the middle,
-       a little left of centre, as a postal service reads it. */
-    sec = wp_document_section_get(ctx->doc, 0);
-    w = pp->h;
-    h = pp->w;
-    sec->page_width = w;
-    sec->page_height = h;
-    sec->margin_left = sec->margin_right = sec->margin_top = sec->margin_bottom = 720;
-    sec->header.length = 0;
-    sec->footer.length = 0;
-    sec->columns = 0;
-    for (k = 0; k < sec->para_count; k++) {
-        const wp_para_style *base = wp_document_pstyle_get(ctx->doc, ctx->doc->default_pstyle);
-        wp_para_style ps;
-        wp_pstyle hs;
-        if (base == NULL) break;
-        ps = *base;
-        ps.space_before = ps.space_after = 0;
-        ps.indent_left = ps.indent_right = ps.indent_first = 0;
-        ps.align = WP_ALIGN_LEFT;
-        if (k >= nret) {
-            ps.indent_left = (w * 2) / 5 - sec->margin_left;
-            if (k == nret) ps.space_before = h / 2 - sec->margin_top - (i32)nret * 280;
-            if (ps.space_before < 0) ps.space_before = 0;
-        }
-        if (wp_document_pstyle_find_or_add(ctx->doc, &ps, &hs) == WP_OK) {
-            sec = wp_document_section_get(ctx->doc, 0);
-            wp_paragraph_pstyle_set(wp_section_paragraph_get(sec, k), hs);
-        }
-        wp_section_paragraph_get(sec, k)->layout_dirty = WP_TRUE;
     }
     memset(wp_keymap_cursor(ctx), 0, sizeof(wp_pos));
     wp_document_mark_modified(ctx->doc);

@@ -431,7 +431,7 @@ static void rtf_apply_pstyle_to_current_paragraph(rtf_parser *p)
         if (st->slmult && st->sl > 0) ps.line_spacing = (st->sl == 240) ? 0 : st->sl;
         else ps.line_spacing = -(st->sl < 0 ? -st->sl : st->sl);
     }
-    ps.page_break_before = (u8)(st->pagebb || p->break_this);
+    ps.page_break_before = (u8)(st->pagebb ? WP_BREAK_PAGE : p->break_this);
     ps.border_sides = st->border_sides;
     if (st->border_sides != 0) {
         ps.border_kind = st->border_kind;
@@ -1387,13 +1387,15 @@ static void rtf_dispatch_control_word(rtf_parser *p, const char *name, wp_bool h
        one starts a page (page_break_before); after \sect it starts the
        next section, which starts a page of its own (\sbkpage, the
        default and the only kind this model has). */
-    if (strcmp(name, "page") == 0 || strcmp(name, "sect") == 0) {
+    if (strcmp(name, "page") == 0 || strcmp(name, "sect") == 0 || strcmp(name, "column") == 0) {
         /* Straight after a \par (Word's usual "\par\page") there is no
            paragraph to end -- ending one would add an empty paragraph at
            every break. */
         if (!p->para_pending || p->run_buf.length > 0) rtf_end_paragraph(p);
         if (name[0] == 'p') {
-            p->break_next = 1;
+            p->break_next = WP_BREAK_PAGE;
+        } else if (name[0] == 'c') {
+            p->break_next = WP_BREAK_COLUMN;   /* \column: the next starts a column */
         } else {
             p->sect_pending = 1;      /* two in a row are one: no section without a paragraph */
         }

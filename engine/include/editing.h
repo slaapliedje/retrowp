@@ -272,6 +272,16 @@ wp_status wp_edit_merge_section(wp_document *doc, wp_undo_journal *journal,
    else -- the scheme's own backspace applies. */
 wp_bool wp_edit_backspace_section(wp_document *doc, wp_undo_journal *journal, wp_pos *cursor);
 
+/* A section's page setup -- paper, margins, header, footer, columns --
+   set from `setup` (its paragraphs ignored), journaled as one
+   WP_OP_SET_SECTION, so Undo and Redo both take it. */
+wp_status wp_edit_set_section(wp_document *doc, wp_undo_journal *journal,
+                              u32 section, const wp_section *setup);
+
+/* A paragraph's style set, journaled (WP_OP_SET_PSTYLE). */
+wp_status wp_edit_set_pstyle(wp_document *doc, wp_undo_journal *journal,
+                             u32 section, u32 paragraph, wp_pstyle style);
+
 /* A paragraph's table fields (docs/document-model.md, "Tables"): its row
    shape and its cell and row ends. Journaled, one WP_OP_SET_TABLE. */
 wp_status wp_edit_set_table(wp_document *doc, wp_undo_journal *journal,

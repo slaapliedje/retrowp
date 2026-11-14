@@ -9,7 +9,14 @@
 static wp_bool para_breaks_page(const wp_document *doc, const wp_paragraph *para)
 {
     const wp_para_style *ps = wp_document_pstyle_get(doc, para->style);
-    return (wp_bool)(ps != NULL && ps->page_break_before);
+    return (wp_bool)(ps != NULL && ps->page_break_before == WP_BREAK_PAGE);
+}
+
+/* One asking to start the next column (M19). */
+static wp_bool para_breaks_column(const wp_document *doc, const wp_paragraph *para)
+{
+    const wp_para_style *ps = wp_document_pstyle_get(doc, para->style);
+    return (wp_bool)(ps != NULL && ps->page_break_before == WP_BREAK_COLUMN);
 }
 
 static wp_status pagination_add_page(wp_pagination *pagination)
@@ -440,9 +447,10 @@ u32 wp_document_mark_pages(wp_document *doc)
                     col = 0;
                     col_x = 0;
                     starts = WP_TRUE;
-                } else if (used > 0 && used + need > content_height - notes_h) {
-                    /* The column is full: the next column, or past the
-                       last, a new page. */
+                } else if (used > 0 && ((l_idx == 0 && para_breaks_column(doc, &sec->paras[p_idx])) ||
+                                        used + need > content_height - notes_h)) {
+                    /* The column is full, or a column break: the next
+                       column, or past the last, a new page. */
                     place_notes(sec, note_para, notes, notes_h, content_height, col, col_x);
                     notes = 0; notes_h = 0;
                     used = 0;

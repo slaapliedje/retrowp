@@ -329,6 +329,7 @@ void test_actions_file_print_choose_printer(void);
 void test_actions_format_borders(void);
 void test_config_printer_keys(void);
 void test_pageprint_pages(void);
+void test_pageprint_page_baseline_at_zoom(void);
 void test_pageprint_printable_area(void);
 void test_pageprint_picture(void);
 void test_pageprint_picture_postscript(void);
@@ -482,6 +483,8 @@ void test_styles_rtf_from_word(void);
 void test_columns_flow(void);
 void test_columns_page_view(void);
 void test_columns_note_and_break(void);
+void test_columns_break(void);
+void test_actions_column_break(void);
 void test_columns_rtf(void);
 void test_papermetrics_widths(void);
 void test_papermetrics_layout_and_config(void);
@@ -1103,6 +1106,7 @@ static const test_case g_cases[] = {
     { "actions_format_borders", test_actions_format_borders },
     { "config_printer_keys", test_config_printer_keys },
     { "pageprint_pages", test_pageprint_pages },
+    { "pageprint_page_baseline_at_zoom", test_pageprint_page_baseline_at_zoom },
     { "pageprint_printable_area", test_pageprint_printable_area },
     { "pageprint_picture", test_pageprint_picture },
     { "pageprint_picture_postscript", test_pageprint_picture_postscript },
@@ -1235,6 +1239,8 @@ static const test_case g_cases[] = {
     { "columns_flow", test_columns_flow },
     { "columns_page_view", test_columns_page_view },
     { "columns_note_and_break", test_columns_note_and_break },
+    { "columns_break", test_columns_break },
+    { "actions_column_break", test_actions_column_break },
     { "columns_rtf", test_columns_rtf },
     { "papermetrics_widths", test_papermetrics_widths },
     { "papermetrics_layout_and_config", test_papermetrics_layout_and_config },

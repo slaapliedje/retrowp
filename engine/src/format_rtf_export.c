@@ -520,7 +520,7 @@ static void rtf_emit_para_props(rtf_writer *w, const wp_para_style *ps)
         if (ps->indent_first != 0)  { rtf_write_str(w, "\\fi"); rtf_write_i32(w, ps->indent_first); }
         if (ps->space_before != 0)  { rtf_write_str(w, "\\sb"); rtf_write_i32(w, ps->space_before); }
         if (ps->space_after != 0)   { rtf_write_str(w, "\\sa"); rtf_write_i32(w, ps->space_after); }
-        if (ps->page_break_before)  rtf_write_str(w, "\\pagebb");
+        if (ps->page_break_before == WP_BREAK_PAGE) rtf_write_str(w, "\\pagebb");
         if (ps->border_sides != 0) {
             /* \box for all four, else each side; every side carries the
                one kind, width and spacing the model keeps. */
@@ -597,6 +597,9 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
     const wp_para_style *ps = wp_document_pstyle_get(doc, para->style);
     u16 ri;
 
+    /* A column break is a character in Word, not a paragraph property:
+       written before the paragraph, as Word's "\column" between two. */
+    if (ps != NULL && ps->page_break_before == WP_BREAK_COLUMN) rtf_write_str(w, "\\column\r\n");
     rtf_write_str(w, "\\pard");
     if (para->trow != 0) rtf_write_str(w, "\\intbl");
     {

@@ -2569,6 +2569,34 @@ the list").
       merged -- paper, margins, cells, gap, 30 to a page and the 31st
       on the next; a sheet of copies on L7163; the first two shown to
       fail when the gap is broken.
+- [x] T19.9 Undo for page setup; column breaks.
+      Found: Redo after Tools > Envelope brought back the break but not
+      the envelope's page or its address block -- page setup and
+      paragraph styles were set outside the journal. Now journaled:
+      wp_edit_set_section (WP_OP_SET_SECTION, the setup before and
+      after) and wp_edit_set_pstyle (WP_OP_SET_PSTYLE, defined since M0
+      and never used); the envelope, Page Setup's paper and margins,
+      Format > Columns and the header and footer go through them, each
+      one undo step. Column break: page_break_before WP_BREAK_COLUMN,
+      the paragraph starting the next column (past the last, or with
+      one, a new page; the character printer, whose columns run one
+      after another, ignores it); Format > Columns' "Break to next
+      column" at the caret (mid-paragraph, the part after it), no menu
+      tree change; RTF writes Word's \column and reads it, inside a
+      paragraph too. Balancing columns at a section's end is not done:
+      every section here starts a page, and Word balances only above a
+      continuous section break. Tests: envelope redo and undo, Page
+      Setup undo and redo, the break in two columns and one, RTF both
+      ways and Word's form, the action and its undo; envelope redo and
+      the column break shown to fail when broken.
+      Page view's baseline: a run is placed by the ascent of the face
+      the layout measured it in, not the drawing face's, which is bigger
+      where a screen has no face as small as the zoom asks and hung the
+      text low (retroplat's host backend gained a smallest-face knob to
+      show it; the test fails without the fix). On the ST's character
+      sheet at fit width the two render alike: there the table labels
+      fill their rows because the ST's smallest face is nearly a row
+      tall -- its size, not its place.
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)

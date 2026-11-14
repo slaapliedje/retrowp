@@ -62,19 +62,39 @@ static i32 unzoom(i32 twips) { return g_zoom == 100 ? twips : (i32)(((long)twips
    a time, so one cached face. */
 static plat_font *g_base_font;
 static wp_cstyle g_base_style;
+static i32 g_base_ascent;
+
+static wp_bool base_open(wp_document *doc, wp_cstyle style)
+{
+    if (g_base_font == NULL || g_base_style != style) {
+        const wp_char_style *cs = wp_document_cstyle_get(doc, style);
+        plat_font_metrics fm;
+        if (g_base_font != NULL) plat_font_close(g_base_font);
+        g_base_font = NULL;
+        if (cs == NULL || wp_cstyle_font_open(doc, cs, &g_base_font) != WP_OK) { g_base_font = NULL; return WP_FALSE; }
+        g_base_style = style;
+        g_base_ascent = plat_font_metrics_get(g_base_font, &fm) == WP_OK ? fm.ascent : -1;
+    }
+    return WP_TRUE;
+}
 
 static i32 base_width(wp_document *doc, wp_cstyle style, const u8 *bytes, u32 len)
 {
     i32 w = 0;
-    if (g_base_font == NULL || g_base_style != style) {
-        const wp_char_style *cs = wp_document_cstyle_get(doc, style);
-        if (g_base_font != NULL) plat_font_close(g_base_font);
-        g_base_font = NULL;
-        if (cs == NULL || wp_cstyle_font_open(doc, cs, &g_base_font) != WP_OK) { g_base_font = NULL; return 0; }
-        g_base_style = style;
-    }
+    if (!base_open(doc, style)) return 0;
     (void)plat_measure_text(g_base_font, bytes, len, &w);
     return w;
+}
+
+/* Where a run's baseline goes below its text's top on a screen's page
+   view: the ascent of the face the layout measured it in, so the text
+   sits where the layout made room for it. The face drawing it may be
+   bigger (a screen with no face as small as the zoom asks -- the ST at
+   fit width) and its own ascent would hang the text low in its line, a
+   table's labels low in their rows. -1: not known (draw by the face's). */
+static i32 base_ascent(wp_document *doc, wp_cstyle style)
+{
+    return base_open(doc, style) ? g_base_ascent : -1;
 }
 
 static void frame_for(page_frame *fr, const wp_page_device *dev, const wp_section *sec)
@@ -371,10 +391,15 @@ static void draw_line(wp_document *doc, const page_frame *fr, wp_paragraph *para
                text's own colour on a screen's page view. */
             const wp_char_style *tcs = wp_document_cstyle_get(doc, run->style);
             u8 r = 0, g = 0, b = 0;
+            i32 asc = *ascent;
             if (fr->screen && tcs != NULL) { r = tcs->color_r; g = tcs->color_g; b = tcs->color_b; }
+            if (fr->screen) {
+                i32 ba = base_ascent(doc, run->style);
+                if (ba >= 0) asc = ba;
+            }
             (void)wp_dev_text(fr->dev->gc, *font, doc, tcs,
-                              at_x(fr, x), at_y(fr, text_top + *ascent), at_x(fr, x + w) - at_x(fr, x),
-                              at_y(fr, text_top + *ascent + *descent) - at_y(fr, text_top),
+                              at_x(fr, x), at_y(fr, text_top + asc), at_x(fr, x + w) - at_x(fr, x),
+                              at_y(fr, text_top + asc + *descent) - at_y(fr, text_top),
                               bytes + frag.byte_start, len, r, g, b);
         }
         x += w;

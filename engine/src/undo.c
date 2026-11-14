@@ -289,6 +289,79 @@ wp_status wp_edit_remove_empty_paragraph(wp_document *doc, wp_undo_journal *jour
     return push_para_op(doc, journal, WP_OP_REMOVE_PARA, section, paragraph, style, trow, tflags);
 }
 
+/* A section's page setup, everything but its paragraphs. */
+static void copy_setup(wp_section *dst, const wp_section *src)
+{
+    dst->page_width = src->page_width;
+    dst->page_height = src->page_height;
+    dst->margin_left = src->margin_left;
+    dst->margin_right = src->margin_right;
+    dst->margin_top = src->margin_top;
+    dst->margin_bottom = src->margin_bottom;
+    dst->header = src->header;
+    dst->footer = src->footer;
+    dst->columns = src->columns;
+    dst->col_gap = src->col_gap;
+}
+
+static void section_dirty(wp_section *sec)
+{
+    u32 pi;
+    for (pi = 0; pi < sec->para_count; pi++) sec->paras[pi].layout_dirty = WP_TRUE;
+}
+
+wp_status wp_edit_set_section(wp_document *doc, wp_undo_journal *journal,
+                              u32 section, const wp_section *setup)
+{
+    wp_section *sec = wp_document_section_get(doc, section), *pair;
+    wp_op *op;
+
+    if (sec == NULL || setup == NULL) return WP_RANGE;
+    op = op_new();
+    pair = (wp_section *)mem_alloc((u32)(2u * sizeof(wp_section)));
+    if (op == NULL || pair == NULL) {
+        mem_free(op);
+        mem_free(pair);
+        return WP_NOMEM;
+    }
+    memset(pair, 0, 2u * sizeof(wp_section));
+    copy_setup(&pair[0], sec);
+    copy_setup(&pair[1], setup);
+    copy_setup(sec, setup);
+    section_dirty(sec);
+    op->kind = (u8)WP_OP_SET_SECTION;
+    op->at.section = section;
+    op->extra = pair;
+    commit_edit(doc, journal);
+    op->next = journal->undo_top;
+    journal->undo_top = op;
+    return WP_OK;
+}
+
+wp_status wp_edit_set_pstyle(wp_document *doc, wp_undo_journal *journal,
+                             u32 section, u32 paragraph, wp_pstyle style)
+{
+    wp_section *sec = wp_document_section_get(doc, section);
+    wp_paragraph *para = sec != NULL ? wp_section_paragraph_get(sec, paragraph) : NULL;
+    wp_op *op;
+
+    if (para == NULL) return WP_RANGE;
+    if (para->style == style) return WP_OK;
+    op = op_new();
+    if (op == NULL) return WP_NOMEM;
+    op->kind = (u8)WP_OP_SET_PSTYLE;
+    op->at.section = section;
+    op->at.paragraph = paragraph;
+    op->style_before = (u16)para->style;
+    op->style_after = (u16)style;
+    wp_paragraph_pstyle_set(para, style);
+    para->layout_dirty = WP_TRUE;
+    commit_edit(doc, journal);
+    op->next = journal->undo_top;
+    journal->undo_top = op;
+    return WP_OK;
+}
+
 wp_status wp_edit_set_table(wp_document *doc, wp_undo_journal *journal,
                             u32 section, u32 paragraph, wp_trow trow, u8 tflags)
 {
@@ -852,16 +925,15 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
         if (wp_document_merge_section_raw(doc, op->at.section) == WP_OK && op->extra != NULL) {
             wp_section *back = &doc->sections[op->at.section];
             const wp_section *was = (const wp_section *)op->extra;
-            back->page_width = was->page_width;
-            back->page_height = was->page_height;
-            back->margin_left = was->margin_left;
-            back->margin_right = was->margin_right;
-            back->margin_top = was->margin_top;
-            back->margin_bottom = was->margin_bottom;
-            back->header = was->header;
-            back->footer = was->footer;
-            back->columns = was->columns;
-            back->col_gap = was->col_gap;
+            copy_setup(back, was);
+        }
+        return;
+    }
+    if (op->kind == (u8)WP_OP_SET_SECTION) {
+        sec = wp_document_section_get(doc, op->at.section);
+        if (sec != NULL && op->extra != NULL) {
+            copy_setup(sec, &((const wp_section *)op->extra)[0]);
+            section_dirty(sec);
         }
         return;
     }
@@ -872,16 +944,7 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
             op->extra != NULL) {
             wp_section *back = &doc->sections[op->at.section + 1];
             const wp_section *was = (const wp_section *)op->extra;
-            back->page_width = was->page_width;
-            back->page_height = was->page_height;
-            back->margin_left = was->margin_left;
-            back->margin_right = was->margin_right;
-            back->margin_top = was->margin_top;
-            back->margin_bottom = was->margin_bottom;
-            back->header = was->header;
-            back->footer = was->footer;
-            back->columns = was->columns;
-            back->col_gap = was->col_gap;
+            copy_setup(back, was);
         }
         return;
     }
@@ -895,6 +958,13 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
     if (op->kind == (u8)WP_OP_REMOVE_PARA) {
         (void)put_empty_paragraph(doc, op->at.section, op->at.paragraph, (wp_pstyle)op->style_before,
                                   (wp_trow)op->style_after, (u8)op->at.run);
+        return;
+    }
+    if (op->kind == (u8)WP_OP_SET_PSTYLE) {
+        if (para != NULL) {
+            wp_paragraph_pstyle_set(para, (wp_pstyle)op->style_before);
+            para->layout_dirty = WP_TRUE;
+        }
         return;
     }
     if (op->kind == (u8)WP_OP_SET_TABLE) {
@@ -988,6 +1058,13 @@ static wp_status apply_single_redo_op(wp_document *doc, wp_op *op)
     if (op->kind == (u8)WP_OP_MERGE_SECTION) {
         return wp_document_merge_section_raw(doc, op->at.section);
     }
+    if (op->kind == (u8)WP_OP_SET_SECTION) {
+        sec = wp_document_section_get(doc, op->at.section);
+        if (sec == NULL || op->extra == NULL) return WP_RANGE;
+        copy_setup(sec, &((const wp_section *)op->extra)[1]);
+        section_dirty(sec);
+        return WP_OK;
+    }
     if (op->kind == (u8)WP_OP_INSERT_PARA) {
         return put_empty_paragraph(doc, op->at.section, op->at.paragraph, (wp_pstyle)op->style_before,
                                    (wp_trow)op->style_after, (u8)op->at.run);
@@ -1039,6 +1116,9 @@ static wp_status apply_single_redo_op(wp_document *doc, wp_op *op)
         }
     } else if (op->kind == (u8)WP_OP_SET_CSTYLE) {
         wp_run_cstyle_set(para, (u16)op->at.run, (wp_cstyle)op->style_after);
+        para->layout_dirty = WP_TRUE;
+    } else if (op->kind == (u8)WP_OP_SET_PSTYLE && para != NULL) {
+        wp_paragraph_pstyle_set(para, (wp_pstyle)op->style_after);
         para->layout_dirty = WP_TRUE;
     } else if (op->kind == (u8)WP_OP_SET_TABLE && para != NULL) {
         para->trow = (wp_trow)op->style_after;

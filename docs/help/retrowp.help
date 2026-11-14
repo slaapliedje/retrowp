@@ -125,7 +125,9 @@ Search:
 
 A whole Insert-mode session, or a compound command like "cw",
 undoes as one step -- you do not need to press "u" once per
-keystroke to get back to where you started.
+keystroke to get back to where you started. Page Setup (paper and
+margins), Columns, the header and footer, and Tools > Envelope
+each undo as one step too.
 
 {Back to Main|Main}
 @endnode
@@ -280,8 +282,11 @@ section the caret is in in one to four newspaper columns, half an
 inch apart. The text wraps to a column straight away; in page
 view and on paper a full column carries on at the top of the next,
 and the last onto a new page. The plain view shows the columns one
-after another. A footnote goes at the foot of its column. Columns
-are saved in the RTF.
+after another. A footnote goes at the foot of its column. "Break
+to next column" in the same list starts the next column at the
+caret (with one column, a new page); choose it again at the start
+of that paragraph to take the break away. Columns and column
+breaks are saved in the RTF.
 
 Insert Footnote (Tools menu; Alt+N on DOS) puts a raised number
 at the caret and takes you to the note, at the foot of the page,

@@ -7,6 +7,8 @@
 #include "strpool.h"
 #include "draw_host.h"
 #include "psdev.h"
+#include "pageview.h"
+#include "metrics_host.h"
 
 /* wp_pageprint against the host backend: device pixels are twips, and
    the host font is 12 pt = 240 twips ascent, 60 descent, 120 a
@@ -232,5 +234,38 @@ void test_pageprint_picture_postscript(void)
     ASSERT_TRUE(strstr(g_sink.buf, "true DPX") != NULL);   /* two-sided, short edge */
     ASSERT_TRUE(strstr(g_sink.buf, " R\n") != NULL);       /* the frame */
     ASSERT_EQ_U32(draw_host_grey_fills(0), 0);
+    wp_document_free(&doc);
+}
+
+/* Page view at a zoom the screen has no face for -- asked 7.2 pt, the
+   smallest face 8 pt, as the ST's bitmap fonts stop -- keeps each line's
+   baseline where the layout put it (its own face's ascent below the
+   text's top), not the bigger face's ascent lower down, which hung a
+   table's labels low in their rows. */
+void test_pageprint_page_baseline_at_zoom(void)
+{
+    wp_page_device dev;
+    wp_document doc;
+    u32 i, n;
+    i32 gx = 0, gy = -1;
+
+    make_doc(&doc);
+    wp_document_section_get(&doc, 0)->header.length = 0;
+    (void)wp_pageview_relayout(&doc, 0);
+    memset(&dev, 0, sizeof(dev));
+    dev.gc = (plat_gc *)&dev;
+    dev.x_px = same;
+    dev.y_px = same;
+    metrics_host_set_min_size(160);
+    draw_host_reset_text();
+    ASSERT_TRUE(wp_pageprint_page(&doc, &dev, 0, 0, 0, 60, -32000, 32000) == WP_OK);
+    metrics_host_set_min_size(0);
+    n = draw_host_text_count();
+    for (i = 0; i < n; i++) {
+        const char *t = draw_host_text_at(i, &gx, &gy);
+        if (t != NULL && strcmp(t, "One") == 0) break;
+    }
+    ASSERT_TRUE(i < n);
+    ASSERT_EQ_U32((u32)gy, (u32)(((600 + 240) * 60) / 100));   /* 504, not the 8 pt face's 519 */
     wp_document_free(&doc);
 }

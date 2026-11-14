@@ -1786,6 +1786,17 @@ void test_actions_page_setup_paper_and_margins(void)
     (void)wp_keymap_feed_key(&ctx, key_special(WP_KEY_ENTER), 0);
     ASSERT_EQ_U32((u32)sec->page_width, 8504);
     ASSERT_EQ_U32((u32)sec->page_height, 6690);
+
+    /* Each change is an undo step: Undo goes back to the disc label,
+       then the card, and Redo forward again. */
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_UNDO)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32((u32)sec->page_width, 6803);
+    ASSERT_EQ_U32((u32)sec->margin_top, 567);
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_UNDO)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32((u32)sec->page_width, 7200);
+    ASSERT_EQ_U32((u32)sec->margin_top, 720);
+    ASSERT_TRUE(wp_edit_redo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32((u32)sec->page_width, 6803);
     ctx_teardown(&doc, &journal, &ctx);
 }
 
@@ -2525,5 +2536,49 @@ void test_actions_envelope(void)
     ASSERT_EQ_U32((u32)doc.sections[0].page_width, 12240);
     ASSERT_EQ_U32((u32)doc.sections[0].page_height, 15840);
     ASSERT_EQ_U32(doc.sections[0].para_count, 4);
+
+    /* Redo brings the envelope back whole: its page and its address
+       block, not just the break. */
+    ASSERT_TRUE(wp_edit_redo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 2);
+    ASSERT_EQ_U32((u32)doc.sections[0].page_width, 13680);
+    ASSERT_EQ_U32((u32)doc.sections[0].page_height, 5940);
+    ASSERT_EQ_U32((u32)doc.sections[0].margin_left, 720);
+    ASSERT_EQ_U32((u32)doc.sections[1].page_width, 12240);
+    ps = wp_document_pstyle_get(&doc, doc.sections[0].paras[2].style);
+    ASSERT_TRUE(ps != NULL && ps->indent_left > 3000 && ps->space_before > 0);
+    /* and Undo again gives the letter its page and its own styles back */
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(doc.section_count, 1);
+    ASSERT_EQ_U32((u32)doc.sections[0].page_width, 12240);
+    ps = wp_document_pstyle_get(&doc, doc.sections[0].paras[0].style);
+    ASSERT_TRUE(ps != NULL && ps->indent_left == 0 && ps->space_before == wp_document_pstyle_get(&doc, doc.default_pstyle)->space_before);
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* Format > Columns, "Break to next column", mid-paragraph: the part
+   after the caret starts the next column; one Undo puts the paragraph
+   back whole with no break. */
+void test_actions_column_break(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[64];
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Left side. Right side\n");
+    doc.sections[0].columns = 2;
+    wp_keymap_cursor(&ctx)->offset = 11;   /* before "Right side" */
+    window_host_next_choice(4);            /* Break to next column */
+    ASSERT_TRUE(wp_action_find(WP_ACT_FORMAT_COLUMNS)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 2);
+    ASSERT_EQ_U32(caret_pstyle(&ctx, 0)->page_break_before, 0);
+    ASSERT_EQ_U32(caret_pstyle(&ctx, 1)->page_break_before, WP_BREAK_COLUMN);
+    ASSERT_EQ_U32(doc.sections[0].columns, 2);   /* the section's columns as they were */
+    ASSERT_TRUE(wp_action_find(WP_ACT_EDIT_UNDO)->handler(&ctx) == WP_OK);
+    ASSERT_EQ_U32(doc.sections[0].para_count, 1);
+    ASSERT_EQ_U32(caret_pstyle(&ctx, 0)->page_break_before, 0);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Left side. Right side\n");
     ctx_teardown(&doc, &journal, &ctx);
 }
