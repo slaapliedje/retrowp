@@ -500,6 +500,16 @@ void test_papermetrics_mode_per_view(void);
 void test_screenline_alignments(void);
 void test_screenline_mapping(void);
 void test_screenline_tabs_identity_and_cap(void);
+/* test_recovery.c */
+void test_recovery_term_clean_leaves_without_a_copy(void);
+void test_recovery_term_modified_writes_the_copy_and_leaves(void);
+void test_recovery_term_stays_when_the_copy_cannot_be_written(void);
+void test_recovery_offer_restores_the_changes(void);
+void test_recovery_untitled_comes_back_untitled(void);
+void test_recovery_save_removes_the_documents_copy(void);
+void test_recovery_save_keeps_a_copy_it_does_not_own(void);
+void test_recovery_drop_and_the_saved_name(void);
+void test_recovery_ignores_a_file_that_is_not_one(void);
 void test_pagecanvas_fit_and_stack(void);
 void test_pagecanvas_paint_caret_hit(void);
 void test_pagecanvas_note_at_foot(void);
@@ -1263,6 +1273,15 @@ static const test_case g_cases[] = {
     { "screenline_alignments", test_screenline_alignments },
     { "screenline_mapping", test_screenline_mapping },
     { "screenline_tabs_identity_and_cap", test_screenline_tabs_identity_and_cap },
+    { "recovery_term_clean_leaves_without_a_copy", test_recovery_term_clean_leaves_without_a_copy },
+    { "recovery_term_modified_writes_the_copy_and_leaves", test_recovery_term_modified_writes_the_copy_and_leaves },
+    { "recovery_term_stays_when_the_copy_cannot_be_written", test_recovery_term_stays_when_the_copy_cannot_be_written },
+    { "recovery_offer_restores_the_changes", test_recovery_offer_restores_the_changes },
+    { "recovery_untitled_comes_back_untitled", test_recovery_untitled_comes_back_untitled },
+    { "recovery_save_removes_the_documents_copy", test_recovery_save_removes_the_documents_copy },
+    { "recovery_save_keeps_a_copy_it_does_not_own", test_recovery_save_keeps_a_copy_it_does_not_own },
+    { "recovery_drop_and_the_saved_name", test_recovery_drop_and_the_saved_name },
+    { "recovery_ignores_a_file_that_is_not_one", test_recovery_ignores_a_file_that_is_not_one },
     { "pagecanvas_fit_and_stack", test_pagecanvas_fit_and_stack },
     { "pagecanvas_paint_caret_hit", test_pagecanvas_paint_caret_hit },
     { "pagecanvas_note_at_foot", test_pagecanvas_note_at_foot },

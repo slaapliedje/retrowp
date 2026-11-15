@@ -32,6 +32,8 @@ void wp_app_ctx_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
     ctx->printer_sides = 0;
     ctx->printer_choosable = WP_FALSE;
     ctx->config_path = NULL;
+    ctx->recovery_path = NULL;
+    ctx->recovery_owned = WP_FALSE;
     ctx->print_pages = NULL;
     ctx->print_pages_name = NULL;
     memset(&ctx->prompt, 0, sizeof(ctx->prompt));

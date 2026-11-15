@@ -2269,6 +2269,52 @@ round trip that this gate does not perform. The single-TOS matrix
 cannot see it at all: there `nplanes` is 1/2/4 and genuinely matches
 the device.
 
+## Shutdown: AP_TERM and the recovery file
+
+A multitasking AES asks a program to leave with `AP_TERM`. XaAES, MagiC
+and N.AES send it from their task managers and at shutdown; gem4xe's
+desktop Quit and `shel_write(SWM_SHUTDOWN)` send it too (its phase 123).
+The AES only asks a program that has registered for it with
+`shel_write(SWM_NEWMSG, NM_APTERM)`. RetroWP registers right after
+`appl_init`: on AES 3.99 and up, and always on gem4xe.
+
+**When asked, RetroWP asks the writer nothing.** It used to put
+up the same "Unsaved changes will be lost" alert as File > Quit. But an
+alert blocks the program while the shutdown's timeout runs (XaAES's is
+a few seconds), and the AES then calls the program unresponsive and
+kills it, work and all. So now:
+
+- **No unsaved changes:** leave at once.
+- **Unsaved changes:** write the document, with its pictures, to
+  `C:\RETROWP.REC`, without marking it saved, and leave.
+- **The copy cannot be written** (disk full, no C:): answer `AP_TFAIL`
+  (error `EWRITF`), which stops the shutdown. Only then does an alert
+  say why, since by then nothing is waiting on the program.
+
+**The next start** finds the file before anything else is opened and
+says "Unsaved changes to NAME". The writer
+chooses **Recover** (the default) or **Use saved**; for an untitled
+document the second button is **Discard**. Recover loads the changes
+under the document's old name and format, still marked unsaved, and
+takes precedence over a file named on the command line. Use saved
+deletes the copy and opens the file as it was last saved.
+
+**When the file goes.** It belongs to the document it was written from
+or recovered into, and is deleted when that document is saved, or when
+the writer answers "Discard changes" for it. A recovery file this run
+did not write and has not offered is never deleted except by the
+writer's answer to the offer.
+
+The file is a three-line header (magic, `path=`, `rtf=`), an empty
+line, then RTF; `platform/common/recovery.h` describes it. One slot
+beside the config file, rather than a copy beside each document, works
+for an untitled document and one from a write-protected floppy.
+
+Tested by `host/tests/test_recovery.c` (the rules, each one broken once
+to see a test fail) and on the machine by `wp_atari_recovery_selfcheck`
+in `SMOKE.PRG`: AP_TERM through the real dispatch and real GEMDOS
+files, on every TOS image in the matrix and under XaAES.
+
 ## Help menu, and menu dispatch through the action registry
 
 Two long-standing gaps in one change, both flagged in this file already:

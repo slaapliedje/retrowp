@@ -49,6 +49,7 @@
 #include "screenline.h"
 #include "menucheck.h"
 #include "statusline.h"
+#include "recovery.h"
 #include "help_doc.h"
 #include "help_view.h"
 #include "help_retrowp.h"
@@ -2149,6 +2150,10 @@ static void do_file_save(wp_bool save_as)
    config" is the expected common case, not a feature the user opted
    into and might be missing an asset for. */
 #define WP_ATARI_CONFIG_PATH "C:\\RETROWP.CFG"
+
+/* The unsaved document, when the AES ends RetroWP (recovery.h): beside
+   the configuration, one slot, offered back at the next start. */
+#define WP_ATARI_RECOVERY_PATH "C:\\RETROWP.REC"
 
 static spell_dict *g_spell_dict = NULL;
 static wp_bool g_spell_dict_open_attempted = WP_FALSE;
@@ -4602,6 +4607,58 @@ wp_bool wp_atari_config_selfcheck(void)
     return ok;
 }
 
+/* The AES's AP_TERM, through the real dispatch, writing and reading the
+   real recovery file at WP_ATARI_RECOVERY_PATH (recovery.h): a clean
+   document leaves and writes nothing; a modified one leaves and leaves
+   its work behind, which reads back as the same text, still unsaved; and
+   settling it removes the file. host/tests/test_recovery.c proves the
+   rules; this proves GEMDOS's file calls and the dispatch on the machine,
+   under single TOS and XaAES alike. No dialog is reached on any of it --
+   the point of the design -- so it cannot wait on a key. Leaves no file
+   and no document behind. */
+wp_bool wp_atari_recovery_selfcheck(void)
+{
+    static const char text[] = "Unsaved work\n";
+    short msg[8];
+    char path[WP_APP_PATH_MAX];
+    u8 out[32];
+    u32 len = 0;
+    wp_bool ok = WP_TRUE;
+
+    if (format_txt_import((const u8 *)text, (u32)strlen(text), &g_doc) != WP_OK) return WP_FALSE;
+    wp_undo_journal_init(&g_journal);
+    wp_app_ctx_init(&g_ctx, WP_KEYMAP_VI, &g_doc, &g_journal);
+    g_ctx.doc_loaded = WP_TRUE;
+    g_ctx.recovery_path = WP_ATARI_RECOVERY_PATH;
+    wp_recovery_drop(&g_ctx);
+
+    memset(msg, 0, sizeof(msg));
+    msg[0] = AP_TERM; msg[5] = AP_TERM;
+    if (wp_dispatch_message(0, 0, msg) != WP_TRUE) ok = WP_FALSE;
+    if (wp_recovery_pending(&g_ctx, NULL, 0, NULL)) ok = WP_FALSE;      /* clean: nothing */
+
+    g_ctx.quit_requested = WP_FALSE;
+    wp_document_mark_modified(&g_doc);
+    if (wp_dispatch_message(0, 0, msg) != WP_TRUE) ok = WP_FALSE;
+    if (!wp_document_is_modified(&g_doc)) ok = WP_FALSE;                 /* not "saved" */
+    if (!wp_recovery_pending(&g_ctx, path, (u32)sizeof(path), NULL) || path[0] != '\0') ok = WP_FALSE;
+
+    if (wp_recovery_restore(&g_ctx, NULL) != WP_OK) ok = WP_FALSE;
+    if (format_txt_export(g_ctx.doc, out, (u32)sizeof(out), &len) != WP_OK ||
+        len != (u32)strlen(text) || memcmp(out, text, len) != 0) ok = WP_FALSE;
+    if (!wp_document_is_modified(g_ctx.doc) || !g_ctx.recovery_owned) ok = WP_FALSE;
+    wp_recovery_settled(&g_ctx);
+    if (wp_recovery_pending(&g_ctx, NULL, 0, NULL)) ok = WP_FALSE;
+
+    wp_recovery_drop(&g_ctx);
+    wp_keymap_free(&g_ctx);
+    wp_undo_journal_free(&g_journal);
+    wp_document_free(&g_doc);
+    g_ctx.doc_loaded = WP_FALSE;
+    g_ctx.quit_requested = WP_FALSE;
+    return ok;
+}
+
 /* Reflects a Bold/Italic/Underline toggle's new state onto its menu
    item's checkmark, regardless of whether it was triggered by a menu
    click or a Ctrl+<letter> keyboard shortcut (both now call the exact
@@ -5188,9 +5245,20 @@ static void atari_click(short window_handle, VdiHdl vdi, short mx, short my, sho
    (SWM_NEWMSG, bit 0 = NM_APTERM), which exists from AES 4.0; MagiC
    reports 3.99 and supports it, which is why the test is 0x0399 rather
    than 0x0400. Plain TOS and EmuTOS report less and never send AP_TERM,
-   so nothing changes there. gem4xe's AES is single-application and sends
-   none of the shutdown handshake (its gem.h says so), so its build skips
-   both halves. */
+   so nothing changes there.
+
+   gem4xe has MultiTOS's shutdown since its phase 123 (src/aes/shel.c):
+   its desktop's Quit and a program's shel_write(SWM_SHUTDOWN) send the
+   running program AP_TERM, and a program that has not registered refuses
+   the whole shutdown. Its kit's gem.h has SWM_NEWMSG, NM_APTERM and
+   SWM_AESMSG, and the call is answered whatever version the AES reports,
+   so there it registers without asking.
+
+   WHAT RETROWP DOES WITH IT (recovery.h): nothing that waits on the
+   writer. An alert would block the program while the AES's shutdown
+   timeout runs -- XaAES's is a few seconds -- and the program is then
+   called unresponsive and killed. So unsaved work is written to the
+   recovery file and the program leaves; the next start offers it back. */
 #ifndef GEM4XE_APP_GEM_H
 #ifndef SWM_NEWMSG
 #define SWM_NEWMSG 9
@@ -5206,38 +5274,48 @@ static void atari_click(short window_handle, VdiHdl vdi, short mx, short my, sho
 
 void atari_register_ap_term(void)
 {
-#ifndef GEM4XE_APP_GEM_H
+#ifdef GEM4XE_APP_GEM_H
+    shel_write(SWM_NEWMSG, NM_APTERM, 0, NULL, NULL);
+#else
     if ((unsigned short)_AESversion >= WP_ATARI_AES_HAS_NEWMSG) {
         shel_write(SWM_NEWMSG, NM_APTERM, 0, NULL, NULL);
     }
 #endif
 }
 
-/* The answer to an AP_TERM the writer declined: the AES stops the
-   shutdown rather than waiting on, or killing, a program that stayed. */
+/* The answer to an AP_TERM RetroWP cannot follow: the AES stops the
+   shutdown rather than waiting on, or killing, a program that stayed.
+   The eight words are on the stack, which is in bank $00 on gem4xe,
+   where the AES reads them. */
 static void atari_refuse_ap_term(void)
 {
-#ifndef GEM4XE_APP_GEM_H
     short reply[8];
 
     memset(reply, 0, sizeof(reply));
     reply[0] = AP_TFAIL;
-    reply[1] = 0;   /* no error: the writer chose to stay */
+    reply[1] = -10;   /* GEMDOS's EWRITF: the copy could not be written */
     shel_write(SWM_AESMSG, 0, 0, (char *)reply, NULL);
-#endif
 }
 
 wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
 {
     switch (msg[0]) {
-    case AP_TERM:
-        /* The AES asking us to leave: the same question as every other
-           way out, and an honest "no" when the writer keeps their work. */
-        wp_action_request_quit(&g_ctx);
-        if (g_ctx.quit_requested) return WP_TRUE;
+    case AP_TERM: {
+        /* The AES asking us to leave, with its shutdown clock running:
+           no question for the writer. Unsaved work goes to the recovery
+           file, and the next start offers it back. Only if that copy
+           cannot be written does RetroWP stay -- refusing FIRST, so the
+           shutdown has stopped before anything waits on the writer. */
+        wp_image_source img_src;
+
+        img_src.read = atari_read_image_row;
+        img_src.user = NULL;
+        if (wp_action_term_request(&g_ctx, &img_src)) return WP_TRUE;
         atari_refuse_ap_term();
+        wp_action_tell(&g_ctx, "Couldn't keep a copy of your changes, so RetroWP did not quit. Save them, then try again.");
         redraw_window(window_handle, vdi);
         return WP_FALSE;
+    }
 
     case MN_SELECTED:
         menu_tnormal(wp_menu_tree, msg[3], UNHIGHLIGHT);
@@ -5583,6 +5661,8 @@ void app_shell_run(void)
         g_metrics_pref = (u8)(cfg.paper_metrics != 0 ? WP_METRICS_PAPER : WP_METRICS_SCREEN);
         wp_pageview_metrics(g_metrics_pref);   /* pageview.h */
         g_ui_scale_setting = cfg.ui_scale;
+        /* Both GEMs: gem4xe's shutdown asks with AP_TERM too. */
+        g_ctx.recovery_path = WP_ATARI_RECOVERY_PATH;
 #ifndef GEM4XE_APP_GEM_H
         /* GEMDOS's printer, the Centronics port: an Epson-style printer
            takes the PC character set, which the ST's own largely is.
@@ -5683,6 +5763,24 @@ void app_shell_run(void)
         GRECT work;
         wind_get_grect(window_handle, WF_WORKXYWH, &work);
         load_sample_document(atari_px_to_twips_x((i32)work.g_w));
+    }
+    /* The last run was ended by the AES with changes unsaved (recovery.h):
+       say so before anything else is opened, and let the writer choose
+       the recovered changes or the file as last saved. Recovering wins
+       over a file named on the command line -- it is what they chose. */
+    {
+        wp_image_sink sink;
+        char saved[WP_APP_PATH_MAX];
+        wp_recovery_answer ans;
+
+        atari_image_sink_init(&sink);
+        ans = wp_recovery_offer(&g_ctx, &sink, saved, (u32)sizeof(saved));
+        if (ans == WP_RECOVERY_RECOVERED) {
+            g_start_file = NULL;
+        } else if (ans == WP_RECOVERY_USE_SAVED && saved[0] != '\0' &&
+                   (g_start_file == NULL || g_start_file[0] == '\0')) {
+            (void)wp_action_load_file(&g_ctx, saved, &sink);
+        }
     }
     /* A file from the command line replaces the sample, through the same
        loader File > Open uses; a file that will not load leaves the

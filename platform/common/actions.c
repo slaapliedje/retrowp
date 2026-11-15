@@ -8,6 +8,7 @@
 #include "paper.h"
 #include "labels.h"
 #include "actions.h"
+#include "recovery.h"
 #include "app_ctx.h"
 #include "format_txt.h"
 #include "format_rtf.h"
@@ -120,7 +121,11 @@ wp_bool wp_action_confirm_discard(wp_app_ctx *ctx)
         return WP_FALSE;
     }
     if (cancelled) return WP_FALSE;
-    return (chosen == 0u) ? WP_TRUE : WP_FALSE;
+    if (chosen != 0u) return WP_FALSE;
+    /* The writer threw the changes away: a recovery copy of them, if this
+       document has one, goes with them (recovery.h). */
+    wp_recovery_settled(ctx);
+    return WP_TRUE;
 }
 
 /* File > New: replace the document with a single empty paragraph.
@@ -1501,7 +1506,10 @@ wp_status wp_action_write_file(wp_app_ctx *ctx, const char *native_path,
         wp_action_tell(ctx, "Couldn't save that file");
         return st;
     }
-    if (marks_saved) wp_document_mark_saved(ctx->doc);
+    if (marks_saved) {
+        wp_document_mark_saved(ctx->doc);
+        wp_recovery_settled(ctx);      /* the work is on disk: the copy is not needed */
+    }
     return WP_OK;
 }
 

@@ -306,13 +306,14 @@ wp_bool wp_atari_menu_selfcheck(void);
    is the message type; the rest depend on type -- see the AES message
    layout in gem.h/mt_gem.h). Returns WP_TRUE if the app should quit
    (Quit menu item selected, the window was closed, or the AES sent
-   AP_TERM and the writer agreed). vdi is needed because WM_REDRAW
+   AP_TERM -- which asks the writer nothing: unsaved work goes to the
+   recovery file, recovery.h). vdi is needed because WM_REDRAW
    repaints through the VDI clip/fill seam. */
 wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8]);
 
 /* Tells an AES 4.0+ (XaAES, MagiC, N.AES) that this program understands
    AP_TERM, so its task manager and shutdown ask instead of killing.
-   Does nothing on an older AES, and nothing in the gem4xe build. Call
+   Does nothing on an older AES; on gem4xe it always registers. Call
    once, right after appl_init. */
 void atari_register_ap_term(void);
 
@@ -496,5 +497,9 @@ wp_bool wp_atari_help_selfcheck(void);
    app_shell.c's own comment on wp_atari_config_selfcheck for what it
    checks and why. */
 wp_bool wp_atari_config_selfcheck(void);
+
+/* AP_TERM writes the unsaved document to the recovery file and reads it
+   back, through the real dispatch and real GEMDOS files (recovery.h). */
+wp_bool wp_atari_recovery_selfcheck(void);
 
 #endif /* WP_ATARI_APP_SHELL_INTERNAL_H */

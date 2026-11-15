@@ -189,6 +189,8 @@ int main(void)
 
     check(wp_atari_config_selfcheck(),
           "wp_config_load resolves all five real keymap= values through real Atari file I/O");
+    check(wp_atari_recovery_selfcheck(),
+          "AP_TERM keeps unsaved work in C:\\RETROWP.REC, asks nothing, and reads it back");
 
     {
         long free_before = 0, free_after_load = 0, free_after_free = 0;

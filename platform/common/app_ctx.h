@@ -130,6 +130,13 @@ typedef struct wp_app_ctx {
     wp_status (*print_pages)(struct wp_app_ctx *ctx, u32 *pages_out);
     const char *print_pages_name;
     const char *config_path;
+    /* Where the unsaved document goes when the system ends the program
+       (recovery.h): beside config_path, C:\RETROWP.REC on the ST. NULL:
+       this shell has no recovery. recovery_owned: the file there is the
+       current document's -- written from it, or it was recovered from it
+       -- and goes when the document is saved or its changes discarded. */
+    const char *recovery_path;
+    wp_bool     recovery_owned;
 
     wp_prompt prompt;   /* the status line's one-line text prompt (prompt.h) */
 
