@@ -11,7 +11,17 @@
 #define A4     MM(21000), MM(29700)
 
 /* Each sheet's figures are the maker's template's; the margins they
-   leave come out even either side. */
+   leave come out even either side.
+
+   Checked 2026-11-15. The Letter sheets' label sizes, counts and
+   pitches match Microsoft's table of Avery products (KB Q146892, for
+   Word 95; 5167 through its equivalents 5267 and 8167), and their
+   margins are what centres those on the sheet. gLabels' templates
+   agree, except that they give 5160 a 2.781-inch pitch to Microsoft's
+   2.75. The A4 sheets' label sizes and counts match gLabels' too, but
+   it puts the gap between columns up to 0.9 mm wider on L7160-L7163
+   and L7651, with the margins uneven, and neither could be checked
+   against Avery's own pages. L7173 has no second source yet. */
 static const wp_label_sheet g_sheets[] = {
     /* Letter (Avery US); a third of an inch is 480 twips */
     { "5160 Address (30)",  LETTER, IN32(6), IN32(16), IN32(84),  IN32(32), IN32(88),  IN32(32), 3, 10 },
