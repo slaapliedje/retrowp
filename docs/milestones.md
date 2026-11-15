@@ -2646,6 +2646,16 @@ the list").
       gates' `xdotool search --name -i` -- this xdotool has no -i (its
       search ignores case anyway) and 2>/dev/null hid the error, so the
       window focus never ran; the gates passed on their title-bar click.
+- [x] T19.12 Fitted words in pieces, not characters.
+      Timed on an A500 (amiberry, a G/gg repaint of a long Times
+      document, polled until the screen settled; four each): 16.6 s
+      before T19.11, 18.8 s drawing an overrunning word a character at a
+      time -- for the one word a line ("document") that overran there.
+      A draw call is what the slow machines pay for, so a word is now
+      drawn in as many pieces as it overruns by pixels, plus one, each
+      joint taking up about a pixel: 17.2 s, inside the run-to-run spread
+      of about 1.5 s, and the gaps between words kept. A word far too wide
+      (the ST's banner at fit width) still comes out a character a piece.
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)

@@ -92,8 +92,9 @@ void test_papermetrics_drawing_text_uses_its_face(void)
 /* A word whose screen face is wider than its printed width is set a
    character at a time inside that width (devout.h): "iiii" in Helvetica
    12 is 4 x 53 twips on paper, but the host's face gives each character
-   120. Held to 20 pixels, the four go 5 apart from x = 100; a word that
-   fits, or paper metrics off, is drawn whole. */
+   120. Held to 20 pixels, the four go 5 apart from x = 100; a pixel too
+   wide, it is drawn in two halves; a word that fits, or paper metrics
+   off, is drawn whole. */
 void test_papermetrics_fitted_words(void)
 {
     plat_font *f = NULL;
@@ -114,6 +115,14 @@ void test_papermetrics_fitted_words(void)
     ASSERT_EQ_U32((u32)x, 115);
     ASSERT_EQ_U32((u32)y, 50);
     ASSERT_TRUE(plat_metrics_paper());   /* put back as it was */
+
+    /* One pixel over: two pieces, the second where half the ink falls. */
+    draw_host_reset_text();
+    ASSERT_TRUE(wp_dev_text_fit(gc, f, NULL, NULL, 100, 50, 40, 10, 41, (const u8 *)"iiii", 4, 0, 0, 0) == WP_OK);
+    ASSERT_EQ_U32(draw_host_text_count(), 2);
+    t = draw_host_text_at(1, &x, &y);
+    ASSERT_TRUE(t != NULL && strcmp(t, "ii") == 0);
+    ASSERT_EQ_U32((u32)x, 120);
 
     draw_host_reset_text();
     ASSERT_TRUE(wp_dev_text_fit(gc, f, NULL, NULL, 100, 50, 60, 10, 48, (const u8 *)"iiii", 4, 0, 0, 0) == WP_OK);

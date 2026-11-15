@@ -42,8 +42,8 @@ wp_status wp_dev_text_fit(plat_gc *gc, plat_font *f, const wp_document *doc, con
                           i32 x, i32 y, i32 w, i32 h, i32 ink_px, const u8 *utf8, u32 len,
                           u8 r, u8 g, u8 b)
 {
-    i32 total = 0, acc = 0, cw;
-    u32 at, next;
+    i32 total = 0, acc = 0, from_acc = 0, cw, pieces, piece = 0;
+    u32 at, next, from = 0;
     wp_bool paper;
 
     if (OURS(gc) || ink_px <= w || w <= 0 || len == 0 || utf8_next(utf8, len, 0) >= len)
@@ -55,11 +55,22 @@ wp_status wp_dev_text_fit(plat_gc *gc, plat_font *f, const wp_document *doc, con
         next = utf8_next(utf8, len, at);
         if (plat_measure_text(f, utf8 + at, next - at, &cw) == WP_OK) total += cw;
     }
+    /* In as many pieces as the word is pixels too wide, plus one, each
+       joint taking up about a pixel: a draw call is what a slow machine
+       pays for (an A500's paint went 13% slower drawing every character
+       of the few words that overran), and a pixel a joint does not show.
+       A word far too wide comes out a character a piece. */
+    pieces = ink_px - w + 1;
     for (at = 0; total > 0 && at < len; at = next) {
         next = utf8_next(utf8, len, at);
-        (void)plat_draw_text(gc, f, x + (i32)(((long)w * (long)acc) / (long)total), y,
-                             utf8 + at, next - at, r, g, b);
         if (plat_measure_text(f, utf8 + at, next - at, &cw) == WP_OK) acc += cw;
+        if (next >= len || (long)acc * (long)pieces >= (long)total * (long)(piece + 1)) {
+            (void)plat_draw_text(gc, f, x + (i32)(((long)w * (long)from_acc) / (long)total), y,
+                                 utf8 + from, next - from, r, g, b);
+            piece++;
+            from = next;
+            from_acc = acc;
+        }
     }
     plat_metrics_set_paper(paper);
     return total > 0 ? WP_OK : wp_dev_text(gc, f, doc, cs, x, y, w, h, utf8, len, r, g, b);

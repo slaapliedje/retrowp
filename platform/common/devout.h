@@ -47,10 +47,11 @@ wp_status wp_dev_text(plat_gc *gc, plat_font *f, const wp_document *doc, const w
    the screen face's own width of the text (paper metrics off for the
    measure), or -1 when paper metrics are off and the layout's width is
    already the face's. wp_dev_text_fit draws as wp_dev_text, except that
-   on a platform gc a word whose ink_px is wider than its w is set a
-   character at a time, each at its share of w: where the face's own
-   advance up to it falls, scaled into w. A word that fits is drawn
-   whole, as is one character. */
+   on a platform gc a word whose ink_px is wider than its w is drawn in
+   pieces, one more than the pixels it overruns by (at most a character
+   each), each at its share of w: where the face's own advance up to it
+   falls, scaled into w. A word that fits is drawn whole, as is one
+   character. */
 i32 wp_dev_ink_twips(plat_font *f, const u8 *utf8, u32 len);
 wp_status wp_dev_text_fit(plat_gc *gc, plat_font *f, const wp_document *doc, const wp_char_style *cs,
                           i32 x, i32 y, i32 w, i32 h, i32 ink_px, const u8 *utf8, u32 len,
