@@ -2308,7 +2308,7 @@ void app_shell_run(void)
     wp_config_view_apply(&cfg, &g_ctx);
     /* Measured as it will print (papermetrics.h): the Amiga's faces are
        sized in pixels, not points. */
-    plat_metrics_set_paper((wp_bool)(cfg.paper_metrics != 0));
+    wp_pageview_metrics(cfg.paper_metrics != 0 ? WP_METRICS_PAPER : WP_METRICS_SCREEN);   /* pageview.h */
     g_ui_scale_setting = cfg.ui_scale;
     /* PRT:, through printer.device and the writer's Printer prefs, which
        take the Amiga's own ISO 8859-1. */

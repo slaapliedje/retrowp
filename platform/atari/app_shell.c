@@ -1902,6 +1902,10 @@ static wp_bool g_offload_init_attempted = WP_FALSE;
    a multi-second stall on every single offload-backed action thereafter
    (Thesaurus, Grammar Check, Chat, Insert Image). The shared file flow
    reaches it through g_ctx.ensure_offload for ODT/PDF; see actions.h. */
+/* How layout measures, as the config chose it (pageview.h's
+   wp_pageview_metrics); a GDOS printout sets it aside while it prints. */
+static u8 g_metrics_pref = WP_METRICS_PAPER;
+
 #ifndef GEM4XE_APP_GEM_H
 /* GEMDOS's printer status (Cprnos): -1 when PRN: will take a character.
    With nothing on the Centronics port TOS would otherwise wait on every
@@ -1992,7 +1996,14 @@ static wp_status atari_print_pages(wp_app_ctx *ctx, u32 *pages_out)
     gc.polys_by_spans = (short)!atari_gdos_takes_raster_copy();
     dev.end_page = gdos_end_page;
     dev.user = &h;
+    /* GDOS's printer prints in its own fonts, so the page is measured in
+       them: paper metrics (Times' widths) laid a heading out for a
+       narrower face than SpeedoGDOS's, and its words printed run into
+       each other ("ADVENTURER'RECORD"). wp_pageprint lays every line
+       out again before and after, so the screen gets its own back. */
+    wp_pageview_metrics(WP_METRICS_SCREEN);
     st = wp_pageprint(ctx->doc, &dev, pages_out);
+    wp_pageview_metrics(g_metrics_pref);
     atari_metrics_screen();
     vst_unload_fonts(h, 0);
     v_clswk(h);
@@ -5569,7 +5580,8 @@ void app_shell_run(void)
         /* Text measured as it will print (papermetrics.h): GEM sizes its
            faces to the system cell, not to points, so a layout measured
            with them holds too much on a page and prints small. */
-        plat_metrics_set_paper((wp_bool)(cfg.paper_metrics != 0));
+        g_metrics_pref = (u8)(cfg.paper_metrics != 0 ? WP_METRICS_PAPER : WP_METRICS_SCREEN);
+        wp_pageview_metrics(g_metrics_pref);   /* pageview.h */
         g_ui_scale_setting = cfg.ui_scale;
 #ifndef GEM4XE_APP_GEM_H
         /* GEMDOS's printer, the Centronics port: an Epson-style printer

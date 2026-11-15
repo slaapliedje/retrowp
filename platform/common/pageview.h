@@ -33,6 +33,34 @@ i32 wp_pageview_wrap_twips(const wp_document *doc, u32 section, i32 window_twips
    every shell runs before it paints. Returns the page count. */
 u32 wp_pageview_relayout(wp_document *doc, i32 window_twips);
 
+/* How layout measures (papermetrics.h), chosen at each relayout.
+
+   WP_METRICS_AS_SET, the default: left as plat_metrics_set_paper has it
+   (the host tests, and any caller that sets it itself).
+
+   WP_METRICS_SCREEN: always the screen's own faces.
+
+   WP_METRICS_PAPER: the page's column (window_twips 0: page view and
+   printing) as it will print; a window too, unless the screen's body
+   face is plainly wider than the paper's -- the ST's 8x16 system font
+   is about a fifth wider than Times at 12 point, and words held to
+   their printed widths were squeezed together in normal view. There the
+   screen's own face reads as an ST editor always has, and only page
+   view and the printout keep the paper's line breaks. A narrower face
+   (the Amiga's, the ST's in medium resolution) or a matching one (the
+   Mac's) keeps paper metrics in normal view too, and its words are
+   closed up (screenline.h).
+
+   A change of mode lays every paragraph out again. */
+#define WP_METRICS_AS_SET 0u
+#define WP_METRICS_SCREEN 1u
+#define WP_METRICS_PAPER  2u
+void wp_pageview_metrics(u8 mode);
+
+/* Whether the screen's body face is plainly wider than the paper's (the
+   test WP_METRICS_PAPER makes, measured once a mode is set). */
+wp_bool wp_pageview_screen_face_wider(void);
+
 /* The 1-based page the cursor's line is on, and (page_count_out, may be
    NULL) how many pages the document has. Needs the layouts current and
    the pages marked (wp_pageview_relayout). 1 and 1 for an empty

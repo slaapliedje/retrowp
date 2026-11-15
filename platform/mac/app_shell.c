@@ -2087,7 +2087,7 @@ void app_shell_run(void)
     g_ctx.page_view_able = WP_TRUE;
     g_ctx.config_path = WP_MAC_CONFIG_PATH;
     wp_config_view_apply(&cfg, &g_ctx);
-    plat_metrics_set_paper((wp_bool)(cfg.paper_metrics != 0));   /* measured as it will print */
+    wp_pageview_metrics(cfg.paper_metrics != 0 ? WP_METRICS_PAPER : WP_METRICS_SCREEN);   /* pageview.h */
     g_ui_scale = wp_rulerbar_ui_scale((i32)(qd.screenBits.bounds.right - qd.screenBits.bounds.left), cfg.ui_scale);
     load_sample_document();
 

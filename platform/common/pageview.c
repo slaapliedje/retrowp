@@ -16,9 +16,51 @@ i32 wp_pageview_wrap_twips(const wp_document *doc, u32 section, i32 window_twips
     return column;
 }
 
+static u8 g_metrics_mode = WP_METRICS_AS_SET;
+static i16 g_screen_wider = -1;   /* not measured yet */
+
+void wp_pageview_metrics(u8 mode)
+{
+    g_metrics_mode = mode;
+    g_screen_wider = -1;
+}
+
+wp_bool wp_pageview_screen_face_wider(void)
+{
+    if (g_screen_wider < 0) {
+        static const u8 sample[] = "the quick brown fox jumps over a lazy dog";
+        wp_bool paper = plat_metrics_paper();
+        plat_font *f = NULL;
+        i32 pw = 0, sw = 0;
+
+        g_screen_wider = 0;
+        if (plat_font_open((const u8 *)"", 0, 240, 0, &f) == WP_OK && f != NULL) {
+            plat_metrics_set_paper(WP_TRUE);
+            (void)plat_measure_text(f, sample, (u32)(sizeof(sample) - 1), &pw);
+            plat_metrics_set_paper(WP_FALSE);
+            (void)plat_measure_text(f, sample, (u32)(sizeof(sample) - 1), &sw);
+            plat_font_close(f);
+            /* Plainly: a tenth wider. */
+            if (pw > 0 && sw * 10 > pw * 11) g_screen_wider = 1;
+        }
+        plat_metrics_set_paper(paper);
+    }
+    return (wp_bool)(g_screen_wider > 0);
+}
+
 u32 wp_pageview_relayout(wp_document *doc, i32 window_twips)
 {
     u32 si, pi;
+    wp_bool all = WP_FALSE;
+
+    if (g_metrics_mode != WP_METRICS_AS_SET) {
+        wp_bool want = (wp_bool)(g_metrics_mode == WP_METRICS_PAPER &&
+                                 (window_twips <= 0 || !wp_pageview_screen_face_wider()));
+        if (want != plat_metrics_paper()) {
+            plat_metrics_set_paper(want);
+            all = WP_TRUE;   /* every line was measured the other way */
+        }
+    }
 
     /* Footnotes numbered by where their references stand now (notes.h);
        a document without any is not touched. */
@@ -34,7 +76,7 @@ u32 wp_pageview_relayout(wp_document *doc, i32 window_twips)
 
             i32 w = wp_paragraph_wrap_twips(doc, sec, pi, wrap);   /* a cell's, a frame's, or wrap */
 
-            if (layout != NULL && !para->layout_dirty && layout->wrap_twips == w) continue;
+            if (!all && layout != NULL && !para->layout_dirty && layout->wrap_twips == w) continue;
             (void)wp_paragraph_relayout(doc, para, w);
         }
     }

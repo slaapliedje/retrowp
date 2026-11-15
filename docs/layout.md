@@ -390,3 +390,14 @@ word wider on screen than on paper is still held to its paper width by
 `wp_dev_text_fit`. Paper, and any screen with paper metrics off, is
 unchanged: the mapping is the identity. A line of more than 64 words is
 drawn as laid out.
+
+### Which views measure with paper metrics (T19.14)
+
+`wp_pageview_metrics` (pageview.h) chooses at each relayout. Page view and
+printing (the page's column) measure as configured -- paper by default.
+Normal view does too, unless the screen's body face is plainly wider than
+the paper's (the ST's system font in high resolution): squeezing every
+word to its printed width there made text cramped, so normal view uses
+the screen's own face and its own line breaks, and page view keeps the
+paper's. A GDOS printout is measured in the printer's own fonts, which
+are what reach the paper.

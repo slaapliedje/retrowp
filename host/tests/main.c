@@ -496,6 +496,7 @@ void test_config_view_keys(void);
 void test_config_ui_scale(void);
 void test_papermetrics_drawing_text_uses_its_face(void);
 void test_papermetrics_fitted_words(void);
+void test_papermetrics_mode_per_view(void);
 void test_screenline_alignments(void);
 void test_screenline_mapping(void);
 void test_screenline_tabs_identity_and_cap(void);
@@ -1258,6 +1259,7 @@ static const test_case g_cases[] = {
     { "config_ui_scale", test_config_ui_scale },
     { "papermetrics_drawing_text_uses_its_face", test_papermetrics_drawing_text_uses_its_face },
     { "papermetrics_fitted_words", test_papermetrics_fitted_words },
+    { "papermetrics_mode_per_view", test_papermetrics_mode_per_view },
     { "screenline_alignments", test_screenline_alignments },
     { "screenline_mapping", test_screenline_mapping },
     { "screenline_tabs_identity_and_cap", test_screenline_tabs_identity_and_cap },

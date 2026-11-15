@@ -132,3 +132,46 @@ void test_papermetrics_fitted_words(void)
     ASSERT_TRUE(wp_dev_ink_twips(f, (const u8 *)"iiii", 4) == -1);
     plat_font_close(f);
 }
+
+/* The mode chosen at each relayout (pageview.h): paper for the page's
+   column, and for a window unless the screen's face is plainly wider --
+   the host's is (cells of 120 twips at 12 point against Times' ~53-111),
+   so a window measures with it, and going back to the column lays every
+   line out again on paper. Left as set until a mode is chosen. */
+void test_papermetrics_mode_per_view(void)
+{
+    wp_document doc;
+    const wp_paragraph_layout *l;
+
+    ASSERT_TRUE(format_txt_import((const u8 *)"Some words here.\n", 17, &doc) == WP_OK);
+    plat_metrics_set_paper(WP_FALSE);
+    (void)wp_pageview_relayout(&doc, 0);
+    ASSERT_TRUE(!plat_metrics_paper());   /* WP_METRICS_AS_SET: untouched */
+
+    wp_pageview_metrics(WP_METRICS_PAPER);
+    ASSERT_TRUE(wp_pageview_screen_face_wider());
+    (void)wp_pageview_relayout(&doc, 0);
+    ASSERT_TRUE(plat_metrics_paper());
+    l = (const wp_paragraph_layout *)doc.sections[0].paras[0].layout;
+    ASSERT_TRUE(l != NULL);
+    if (l != NULL) ASSERT_EQ_U32((u32)l->lines[0].text_height_twips, 288);   /* 12 pt x 1.2 */
+
+    (void)wp_pageview_relayout(&doc, 9000);   /* a window: the screen's face */
+    ASSERT_TRUE(!plat_metrics_paper());
+    l = (const wp_paragraph_layout *)doc.sections[0].paras[0].layout;
+    ASSERT_TRUE(l != NULL);
+    if (l != NULL) ASSERT_TRUE(l->lines[0].text_height_twips != 288);   /* laid out again */
+
+    (void)wp_pageview_relayout(&doc, 0);
+    ASSERT_TRUE(plat_metrics_paper());
+    l = (const wp_paragraph_layout *)doc.sections[0].paras[0].layout;
+    if (l != NULL) ASSERT_EQ_U32((u32)l->lines[0].text_height_twips, 288);
+
+    wp_pageview_metrics(WP_METRICS_SCREEN);
+    (void)wp_pageview_relayout(&doc, 0);
+    ASSERT_TRUE(!plat_metrics_paper());
+
+    wp_pageview_metrics(WP_METRICS_AS_SET);
+    plat_metrics_set_paper(WP_FALSE);
+    wp_document_free(&doc);
+}

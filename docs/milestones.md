@@ -2670,6 +2670,23 @@ the list").
       text off. The Amiga now runs on a 16 KB stack of its own
       (StackSwap): page view's deeper walk crashed it on the 4 KB a RUN
       gives (docs/amiga-platform.md).
+- [x] T19.14 Normal view in the screen's face where it is wider; GDOS
+      prints in its own.
+      The ST's 8x16 system font is about a fifth wider than Times at
+      12 pt, so in ST High's normal view (which wraps at the page's
+      column, the window being wide enough) every word was squeezed to
+      its printed width. pageview.h's wp_pageview_metrics now chooses
+      the measuring mode at each relayout: paper for the page's column
+      (page view, printing), and for a window too unless the screen's
+      body face measures plainly (a tenth) wider than the paper's -- then
+      the screen's own, read as an ST editor always has, its line breaks
+      its own. The Amiga, the ST in medium and the Mac keep paper metrics
+      in normal view. A change of mode lays every line out again. The
+      GDOS printout is measured in GDOS's own fonts, as it was before
+      T19.5: Times' widths laid the sheet's heading out for a narrower
+      face than SpeedoGDOS's and it printed "ADVENTURER'RECORD"; on TOS
+      2.06 + SpeedoGDOS + FX80 it prints whole again. Test: the mode per
+      view, left alone until chosen, the relayout on a change.
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)
