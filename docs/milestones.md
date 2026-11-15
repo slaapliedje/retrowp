@@ -2656,6 +2656,20 @@ the list").
       joint taking up about a pixel: 17.2 s, inside the run-to-run spread
       of about 1.5 s, and the gaps between words kept. A word far too wide
       (the ST's banner at fit width) still comes out a character a piece.
+- [x] T19.13 Words closed up on a narrow screen; furniture in the screen's face.
+      A word drawn at its paper x on a screen whose face is narrower
+      left its whole shortfall as one gap ("ADVENTURER'S     RECORD" on
+      the ST and Amiga). platform/common/screenline.c draws a line's words
+      at their screen widths and puts the spare room where the
+      alignment says (docs/layout.md); the caret, selection and clicks
+      follow, in normal and page view, on the ST, Amiga and Mac. Tests:
+      each alignment, tabs, the mapping's round trip and monotony, the
+      identity, the 64-word cap. The ST's status line, ruler and help
+      pager are measured in the screen's face, not the paper's: in ST
+      High the status bar was sized for a printed 8 pt line and cut its
+      text off. The Amiga now runs on a 16 KB stack of its own
+      (StackSwap): page view's deeper walk crashed it on the 4 KB a RUN
+      gives (docs/amiga-platform.md).
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)

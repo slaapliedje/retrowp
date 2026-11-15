@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <stddef.h>
+#include "screenline.h"
 #include "viewport.h"
 #include "layout.h"
 
@@ -381,6 +382,21 @@ wp_bool wp_viewport_hit_test(const wp_viewport *vp, wp_document *doc, i32 conten
     extra_twips = wp_justify_space_extra_twips(doc, para, line, align,
                                                (wp_bool)(li == layout->line_count - 1),
                                                line->avail_twips);
+    {
+        /* The click is on the words as drawn (screenline.h): back to
+           where the layout has them. */
+        static wp_screenline sl;
+        wp_screen_fonts fonts;
+
+        fonts.font = NULL;
+        fonts.have = WP_FALSE;
+        fonts.style = 0;
+        wp_screenline_build(&sl, doc, para, line, align, extra_twips,
+                            wp_screenline_measure_screen, &fonts);
+        wp_screen_fonts_close(&fonts);
+        x_twips = wp_screenline_paper_x(&sl, x_twips);
+        if (x_twips < 0) x_twips = 0;
+    }
     (void)wp_line_pos_at_x_twips(doc, para, line, x_twips, extra_twips, &run, &offset);
 
     out->section = si;

@@ -368,3 +368,25 @@ ratio. On a backend whose ratio is not exact (Amiga's is
 the total once can differ by about a pixel from summing per-fragment
 pixel widths -- below the width of the caret itself, and not worth
 threading a conversion callback through the engine to avoid.
+
+## Words on a screen narrower than the paper (T19.13, screenline.h)
+
+With paper metrics on, a line is laid out as it will print and every word
+has its printed width. A screen's face is often narrower -- the ST's and
+the Amiga's bitmap fonts against Times -- and a word drawn at its paper x
+left all of its shortfall as one gap after it ("ADVENTURER'S     RECORD").
+`platform/common/screenline.c` draws a line's words at their screen widths,
+closed up, and puts the room left over where the paragraph's alignment
+says: after a line ranged left, before one ranged right, half each side of
+a centred one, shared between the gaps of a justified one (its last line
+ranged left). A tab starts a part of the line that keeps its own start,
+so tab stops still line up. Line breaks do not move: they are the paper's.
+
+The caret, the selection and a click go through the same mapping
+(`wp_screenline_x`, `wp_screenline_paper_x`: piecewise straight lines over
+each word and each gap, monotonic both ways), in normal view (the three
+painters, `viewport.c`) and page view (`pageprint.c`, `pagecanvas.c`). A
+word wider on screen than on paper is still held to its paper width by
+`wp_dev_text_fit`. Paper, and any screen with paper metrics off, is
+unchanged: the mapping is the identity. A line of more than 64 words is
+drawn as laid out.

@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <string.h>
 #include "pagecanvas.h"
+#include "pageprint.h"
 #include "pageview.h"
 #include "layout.h"
 #include "selspan.h"
@@ -194,6 +195,18 @@ static i32 line_left(const wp_section *sec, const wp_line *line)
     return sec->margin_left + line->col_x_twips + line->cell_x0 + line->x_twips;
 }
 
+/* A line's words as the page view draws them (screenline.h). */
+static wp_screenline g_canvas_sl;
+
+static const wp_screenline *line_screen(const wp_pagecanvas *c, wp_document *doc, wp_paragraph *para,
+                                        const wp_line *line, u32 li)
+{
+    const wp_paragraph_layout *l = (const wp_paragraph_layout *)para->layout;
+
+    wp_pageprint_screenline(doc, c->zoom, para, line, (wp_bool)(li + 1 == l->line_count), &g_canvas_sl);
+    return &g_canvas_sl;
+}
+
 static void fill(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, i32 cx, i32 cy, i32 cw, i32 ch, u8 v)
 {
     i32 x1 = x + w, y1 = y + h;
@@ -331,7 +344,7 @@ wp_bool wp_pagecanvas_hit(const wp_pagecanvas *c, wp_document *doc, i32 cx, i32 
     sec = wp_document_section_get(doc, bsi);
     para = wp_section_paragraph_get(sec, bpi);
     {
-        i32 lx = x - line_left(sec, bline);
+        i32 lx = wp_screenline_paper_x(line_screen(c, doc, para, bline, bli), x - line_left(sec, bline));
         (void)wp_line_pos_at_x_twips(doc, para, bline, lx > 0 ? lx : 0, line_extra(doc, para, bline, bli),
                                      &run, &offset);
     }
@@ -399,7 +412,8 @@ wp_bool wp_pagecanvas_caret(const wp_pagecanvas *c, wp_document *doc, const wp_p
     line = &((const wp_paragraph_layout *)para->layout)->lines[li];
     (void)wp_pagecanvas_page_rect(c, line->page, &px, &py, &pw, &ph);
     x = line_left(sec, line) +
-        wp_line_cursor_x_twips(doc, para, line, pos->run, pos->offset, line_extra(doc, para, line, li));
+        wp_screenline_x(line_screen(c, doc, para, line, li),
+                        wp_line_cursor_x_twips(doc, para, line, pos->run, pos->offset, line_extra(doc, para, line, li)));
     *cx = px + wp_pagecanvas_zx(c, x);
     *cy = py + wp_pagecanvas_zy(c, top + line->text_top_twips);
     *ch = wp_pagecanvas_zy(c, line->text_height_twips);
@@ -431,8 +445,11 @@ void wp_pagecanvas_selection(const wp_pagecanvas *c, wp_document *doc, wp_select
             sec = wp_document_section_get(doc, si);
             para = wp_section_paragraph_get(sec, pi);
             extra = line_extra(doc, para, line, li);
-            x0 = line_left(sec, line) + wp_line_cursor_x_twips(doc, para, line, from.run, from.offset, extra);
-            x1 = line_left(sec, line) + wp_line_cursor_x_twips(doc, para, line, to.run, to.offset, extra);
+            {
+                const wp_screenline *sl = line_screen(c, doc, para, line, li);
+                x0 = line_left(sec, line) + wp_screenline_x(sl, wp_line_cursor_x_twips(doc, para, line, from.run, from.offset, extra));
+                x1 = line_left(sec, line) + wp_screenline_x(sl, wp_line_cursor_x_twips(doc, para, line, to.run, to.offset, extra));
+            }
             x0 = px + wp_pagecanvas_zx(c, x0);
             x1 = px + wp_pagecanvas_zx(c, x1);
             if (x1 > x0) {

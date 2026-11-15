@@ -5,6 +5,7 @@
 #include "types.h"
 #include "docmodel.h"
 #include "platform.h"
+#include "screenline.h"
 
 /* The document drawn page by page onto a printer's own drawing surface
    -- the ST's GDOS printer workstation, and any other machine whose
@@ -74,5 +75,11 @@ wp_status wp_pageprint(wp_document *doc, const wp_page_device *dev, u32 *pages_o
    clip_y0 and clip_y1 is drawn (a toolkit may give no clip of its own). */
 wp_status wp_pageprint_page(wp_document *doc, const wp_page_device *dev, u32 page,
                             i32 x, i32 y, i32 zoom, i32 clip_y0, i32 clip_y1);
+
+/* Where a line's words fall on a screen's page view at `zoom` percent
+   (screenline.h), measured as wp_pageprint_page draws them -- for the
+   caret, the selection and a click (pagecanvas.c). */
+void wp_pageprint_screenline(wp_document *doc, i32 zoom, wp_paragraph *para, const wp_line *line,
+                             wp_bool last_line, wp_screenline *sl);
 
 #endif /* WP_PAGEPRINT_H */

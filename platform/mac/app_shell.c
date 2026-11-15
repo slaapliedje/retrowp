@@ -34,6 +34,7 @@
 #include "paraborder.h"
 #include "rulerbar.h"
 #include "selspan.h"
+#include "screenline.h"
 #include "tools.h"
 #include "menucheck.h"
 #include "metrics_mac_internal.h"
@@ -1253,8 +1254,14 @@ static void draw_page_view(WindowPtr w, mac_gc *gc, Rect r, short doc_bottom)
     if (wp_keymap_selection(&g_ctx, &sel)) wp_pagecanvas_selection(c, &g_mac_doc, sel, pv_invert, &origin);
 }
 
+/* The line being drawn, placed for this screen (screenline.h); static,
+   as it is 2 KB. */
+static wp_screenline g_mac_sl;
+static wp_screen_fonts g_mac_sfonts;
+
 static void draw_content(WindowPtr w)
 {
+    u16 sl_k = 0;   /* the next screenline word to look for */
     mac_gc gc;
     Rect r;
     short y;
@@ -1489,6 +1496,10 @@ static void draw_content(WindowPtr w)
                 extra_twips = wp_justify_space_extra_twips(
                     &g_mac_doc, para, line, align, (wp_bool)(li == layout->line_count - 1),
                     line->avail_twips);
+                /* Where the words go on this screen (screenline.h). */
+                wp_screenline_build(&g_mac_sl, &g_mac_doc, para, line, align, extra_twips,
+                                    wp_screenline_measure_screen, &g_mac_sfonts);
+                sl_k = 0;
 
                 wp_line_fragment_iter_init(&iter, line);
                 while (wp_line_next_fragment(&g_mac_doc, para, line, &iter, &frag)) {
@@ -1554,10 +1565,14 @@ static void draw_content(WindowPtr w)
                     plat_measure_text(font, bytes + frag.byte_start, frag_len, &frag_width_twips);
 
                     if (!frag.is_space) {
-                        /* The word held to its laid-out width (devout.h). */
-                        i32 ink_tw = wp_dev_ink_twips(font, bytes + frag.byte_start, frag_len);
+                        /* The word held to its laid-out width (devout.h),
+                           where screenline placed it. */
+                        const wp_screen_word *sw = wp_screenline_word(&g_mac_sl, &sl_k,
+                                                                      frag.run_index, frag.byte_start);
+                        i32 ink_tw = sw != NULL ? sw->ink_full : wp_dev_ink_twips(font, bytes + frag.byte_start, frag_len);
                         g_mac_painted_frags++;
-                        wp_dev_text_fit((plat_gc *)&gc, font, NULL, NULL, x_px,
+                        wp_dev_text_fit((plat_gc *)&gc, font, NULL, NULL,
+                                        sw != NULL ? line_origin_px + mac_twips_to_px(sw->screen_x) : x_px,
                                         text_y + mac_twips_to_px(wp_run_baseline_twips(line, run_flags, own_ascent_tw)),
                                         mac_twips_to_px(frag_width_twips), 0, ink_tw >= 0 ? mac_twips_to_px(ink_tw) : 0,
                                         bytes + frag.byte_start, frag_len, text_r, text_g, text_b);
@@ -1583,10 +1598,10 @@ static void draw_content(WindowPtr w)
                 if (is_cursor_para && li == cursor_line_index) {
                     Rect mark;
                     i32 caret_px = line_origin_px + mac_twips_to_px(
-                        wp_line_cursor_x_twips(&g_mac_doc, para, line,
+                        wp_screenline_x(&g_mac_sl, wp_line_cursor_x_twips(&g_mac_doc, para, line,
                                                 wp_keymap_cursor(&g_ctx)->run,
                                                 wp_keymap_cursor(&g_ctx)->offset,
-                                                extra_twips));
+                                                extra_twips)));
 
                     /* y is the line's TOP -- the draw loop above derives
                        its baseline as y + the line's ascent. The old rect spanned
@@ -1606,9 +1621,9 @@ static void draw_content(WindowPtr w)
                    the caret, so a caret inside it shows inverted. */
                 if (have_sel && wp_selspan_for_line(sel, si, pi, line, &sel_from, &sel_to)) {
                     i32 hx0 = line_origin_px + mac_twips_to_px(
-                        wp_line_cursor_x_twips(&g_mac_doc, para, line, sel_from.run, sel_from.offset, extra_twips));
+                        wp_screenline_x(&g_mac_sl, wp_line_cursor_x_twips(&g_mac_doc, para, line, sel_from.run, sel_from.offset, extra_twips)));
                     i32 hx1 = line_origin_px + mac_twips_to_px(
-                        wp_line_cursor_x_twips(&g_mac_doc, para, line, sel_to.run, sel_to.offset, extra_twips));
+                        wp_screenline_x(&g_mac_sl, wp_line_cursor_x_twips(&g_mac_doc, para, line, sel_to.run, sel_to.offset, extra_twips)));
                     Rect hl;
 
                     if (hx1 > hx0) {
@@ -1623,6 +1638,7 @@ static void draw_content(WindowPtr w)
     }
 
     if (font != NULL) plat_font_close(font);
+    wp_screen_fonts_close(&g_mac_sfonts);
 
     paint_status_line_mac(w, r, bar_h_px);
 

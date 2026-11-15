@@ -1017,6 +1017,17 @@ the shared engine, so this was never Amiga-specific — the ST and Mac
 survive it only because their toolchains hand out a far larger stack.
 An image paragraph never tokenizes, so it now pays no allocation at all.
 
+**2026-11-15: RetroWP now brings its own stack.** Page view's walk (page,
+line, word, then diskfont opening a face) went past the 4096 bytes again
+once T19.13 added a measuring pass to it: the character sheet in page
+view crashed the machine (two illegal instructions), normal view did
+not, and the same binary with nothing but the stack changed passed.
+`platform/amiga/main.c` now moves the task onto a 16 KB block of its own
+with exec's `StackSwap` (V37; every Kickstart RetroWP supports is 2.04
+or later) before `app_shell_run`, and back after. Keeping big buffers off
+the stack is still the rule -- the ST, the Mac and gem4xe have their own
+limits -- but the Amiga no longer runs a hair from the edge.
+
 ### Reading amiberry's "Illegal instruction" lines
 
 **One per boot is normal and appears on completely clean boots:**

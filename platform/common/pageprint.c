@@ -54,6 +54,7 @@ static wp_status open_zoomed(wp_document *doc, const wp_char_style *cs, plat_fon
     return wp_cstyle_font_open(doc, &z, out);
 }
 static i32 unzoom(i32 twips) { return g_zoom == 100 ? twips : (i32)(((long)twips * 100L) / g_zoom); }
+static i32 unzoom_ink(i32 ink) { return ink < 0 ? ink : unzoom(ink); }
 
 /* At a zoom, where a word goes is measured in the face the layout
    measured it in, the style's own size: a screen without a face as small
@@ -96,6 +97,79 @@ static i32 base_ascent(wp_document *doc, wp_cstyle style)
 {
     return base_open(doc, style) ? g_base_ascent : -1;
 }
+
+/* A screen's page view measures its words for screenline.h as draw_line
+   draws them: the layout's width in the base face, the screen's in the
+   face at the zoom (unzoomed back to twips). A greeked line's words are
+   bars their laid-out width, so they keep it. */
+typedef struct {
+    plat_font *font;
+    wp_cstyle style;
+    wp_bool have, greek;
+    i32 text_height;   /* the line's (greeking is the drawing face's ascent + descent past 5/4 of it) */
+} page_measure_fonts;
+
+static wp_bool page_measure(void *user, wp_document *doc, u16 style, const u8 *utf8, u32 len,
+                            i32 *paper_w, i32 *ink_w)
+{
+    page_measure_fonts *pf = (page_measure_fonts *)user;
+
+    if (!pf->have || pf->style != style) {
+        const wp_char_style *cs = wp_document_cstyle_get(doc, style);
+        plat_font_metrics fm;
+        wp_bool paper = plat_metrics_paper();
+
+        if (pf->font != NULL) plat_font_close(pf->font);
+        pf->font = NULL;
+        pf->have = WP_FALSE;
+        if (cs == NULL || open_zoomed(doc, cs, &pf->font) != WP_OK) { pf->font = NULL; return WP_FALSE; }
+        plat_metrics_set_paper(WP_FALSE);
+        pf->greek = (wp_bool)(plat_font_metrics_get(pf->font, &fm) == WP_OK &&
+                              unzoom(fm.ascent) + unzoom(fm.descent) > (pf->text_height * 5) / 4);
+        plat_metrics_set_paper(paper);
+        pf->style = style;
+        pf->have = WP_TRUE;
+    }
+    *paper_w = 0;
+    if (g_zoom != 100) *paper_w = base_width(doc, style, utf8, len);
+    else (void)plat_measure_text(pf->font, utf8, len, paper_w);
+    *ink_w = -1;
+    if (!pf->greek) {
+        i32 ink = wp_dev_ink_twips(pf->font, utf8, len);
+        if (ink >= 0) *ink_w = unzoom(ink);
+    }
+    return WP_TRUE;
+}
+
+static void page_screenline(wp_screenline *sl, wp_document *doc, wp_paragraph *para,
+                            const wp_line *line, u8 align, i32 extra)
+{
+    page_measure_fonts pf;
+
+    pf.font = NULL;
+    pf.style = 0;
+    pf.have = WP_FALSE;
+    pf.greek = WP_FALSE;
+    pf.text_height = line->text_height_twips;
+    wp_screenline_build(sl, doc, para, line, align, extra, page_measure, &pf);
+    if (pf.font != NULL) plat_font_close(pf.font);
+}
+
+void wp_pageprint_screenline(wp_document *doc, i32 zoom, wp_paragraph *para, const wp_line *line,
+                             wp_bool last_line, wp_screenline *sl)
+{
+    const wp_para_style *pstyle = wp_document_pstyle_get(doc, para->style);
+    u8 align = (pstyle != NULL) ? pstyle->align : WP_ALIGN_LEFT;
+    i32 saved = g_zoom;
+
+    g_zoom = zoom > 0 ? zoom : 100;
+    page_screenline(sl, doc, para, line, align,
+                    wp_justify_space_extra_twips(doc, para, line, align, last_line, line->avail_twips));
+    g_zoom = saved;
+}
+
+/* The line draw_line is drawing, placed for a screen. */
+static wp_screenline g_page_sl;
 
 static void frame_for(page_frame *fr, const wp_page_device *dev, const wp_section *sec)
 {
@@ -318,9 +392,15 @@ static void draw_line(wp_document *doc, const page_frame *fr, wp_paragraph *para
     i32 x = left_twips + line->x_twips;
     i32 text_top = top_twips + line->text_top_twips;
     i32 extra = wp_justify_space_extra_twips(doc, para, line, align, last_line, line->avail_twips);
+    i32 x0 = x;   /* the line's origin, where screenline's x count from */
+    u16 sl_k = 0;
     wp_line_fragment_iter iter;
     wp_line_fragment frag;
 
+    /* On a screen, where its words go (screenline.h); on paper, where
+       the layout put them. */
+    if (fr->screen) page_screenline(&g_page_sl, doc, para, line, align, extra);
+    else wp_screenline_reset(&g_page_sl);
     wp_line_fragment_iter_init(&iter, line);
     while (wp_line_next_fragment(doc, para, line, &iter, &frag)) {
         wp_run *run = wp_paragraph_run_get(para, (u16)frag.run_index);
@@ -399,13 +479,20 @@ static void draw_line(wp_document *doc, const page_frame *fr, wp_paragraph *para
             }
             /* The line's one baseline (layout.h), whatever this run's size. */
             asc = wp_run_baseline_twips(line, (u16)(tcs != NULL ? tcs->flags : 0), own);
-            /* On a screen, held to its laid-out width (devout.h). */
-            ink = fr->screen ? wp_dev_ink_twips(*font, bytes + frag.byte_start, len) : -1;
-            (void)wp_dev_text_fit(fr->dev->gc, *font, doc, tcs,
-                                  at_x(fr, x), at_y(fr, text_top + asc), at_x(fr, x + w) - at_x(fr, x),
-                                  at_y(fr, text_top + asc + *descent) - at_y(fr, text_top),
-                                  ink >= 0 ? at_x(fr, x + unzoom(ink)) - at_x(fr, x) : 0,
-                                  bytes + frag.byte_start, len, r, g, b);
+            /* On a screen, held to its laid-out width (devout.h), where
+               screenline placed it. */
+            {
+                const wp_screen_word *sw = fr->screen ? wp_screenline_word(&g_page_sl, &sl_k, frag.run_index,
+                                                                          frag.byte_start) : NULL;
+                i32 dx = sw != NULL ? x0 + sw->screen_x : x;
+                if (sw != NULL) ink = sw->ink_full;
+                else ink = fr->screen ? unzoom_ink(wp_dev_ink_twips(*font, bytes + frag.byte_start, len)) : -1;
+                (void)wp_dev_text_fit(fr->dev->gc, *font, doc, tcs,
+                                      at_x(fr, dx), at_y(fr, text_top + asc), at_x(fr, dx + w) - at_x(fr, dx),
+                                      at_y(fr, text_top + asc + *descent) - at_y(fr, text_top),
+                                      ink >= 0 ? at_x(fr, dx + ink) - at_x(fr, dx) : 0,
+                                      bytes + frag.byte_start, len, r, g, b);
+            }
         }
         x += w;
         if (frag.is_space) x += extra;

@@ -46,6 +46,7 @@
 #include "paraborder.h"
 #include "rulerbar.h"
 #include "selspan.h"
+#include "screenline.h"
 #include "menucheck.h"
 #include "statusline.h"
 #include "help_doc.h"
@@ -1355,9 +1356,15 @@ static void atari_invert_rect(VdiHdl vdi, i32 x, i32 y, i32 w, i32 h)
    Everything below the last line still needs erasing in one go -- that
    is where lines that no longer exist used to be, and nothing draws
    over them. */
+/* The line being drawn, placed for this screen (screenline.h); static,
+   as it is 2 KB. */
+static wp_screenline g_atari_sl;
+static wp_screen_fonts g_atari_sfonts;
+
 static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
 {
     atari_gc gc;
+    u16 sl_k = 0;   /* the next screenline word to look for */
     u32 si, pi, li;
     u32 flat = 0;   /* display-line index, the viewport's unit (viewport.h) */
     i32 y_px = area.g_y;
@@ -1562,6 +1569,10 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                 extra_twips = wp_justify_space_extra_twips(
                     &g_doc, para, line, align, (wp_bool)(li == layout->line_count - 1),
                     line->avail_twips);
+                /* Where the words go on this screen (screenline.h). */
+                wp_screenline_build(&g_atari_sl, &g_doc, para, line, align, extra_twips,
+                                    wp_screenline_measure_screen, &g_atari_sfonts);
+                sl_k = 0;
 
                 wp_line_fragment_iter_init(&iter, line);
                 while (wp_line_next_fragment(&g_doc, para, line, &iter, &frag)) {
@@ -1628,10 +1639,14 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                     plat_measure_text(font, bytes + frag.byte_start, frag_len, &frag_width_twips);
 
                     if (!frag.is_space) {
-                        /* The word held to its laid-out width (devout.h). */
-                        i32 ink_tw = wp_dev_ink_twips(font, bytes + frag.byte_start, frag_len);
+                        /* The word held to its laid-out width (devout.h),
+                           where screenline placed it. */
+                        const wp_screen_word *sw = wp_screenline_word(&g_atari_sl, &sl_k,
+                                                                      frag.run_index, frag.byte_start);
+                        i32 ink_tw = sw != NULL ? sw->ink_full : wp_dev_ink_twips(font, bytes + frag.byte_start, frag_len);
                         g_atari_painted_frags++;
-                        wp_dev_text_fit((plat_gc *)&gc, font, NULL, NULL, x_px,
+                        wp_dev_text_fit((plat_gc *)&gc, font, NULL, NULL,
+                                        sw != NULL ? line_origin_px + atari_twips_to_px_x(sw->screen_x) : x_px,
                                         text_y_px + atari_twips_to_px_y(wp_run_baseline_twips(line, run_flags, own_ascent_tw)),
                                         atari_twips_to_px_x(frag_width_twips), 0, ink_tw >= 0 ? atari_twips_to_px_x(ink_tw) : 0,
                                         bytes + frag.byte_start, frag_len, text_r, text_g, text_b);
@@ -1675,10 +1690,10 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                    save-under buffer (see redraw_window's own comment). */
                 if (is_cursor_para && li == cursor_line_index) {
                     i32 caret_x_px = line_origin_px + atari_twips_to_px_x(
-                        wp_line_cursor_x_twips(&g_doc, para, line,
+                        wp_screenline_x(&g_atari_sl, wp_line_cursor_x_twips(&g_doc, para, line,
                                                 (*wp_keymap_cursor(&g_ctx)).run,
                                                 (*wp_keymap_cursor(&g_ctx)).offset,
-                                                extra_twips));
+                                                extra_twips)));
                     i32 caret_h_px = text_h_px;
 
                     if (caret_h_px < 1) caret_h_px = 1;
@@ -1693,10 +1708,10 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                    inside the selection shows white on black rather
                    than vanishing. */
                 if (have_sel && wp_selspan_for_line(sel, si, pi, line, &sel_from, &sel_to)) {
-                    i32 hx0 = line_origin_px + atari_twips_to_px_x(
-                        wp_line_cursor_x_twips(&g_doc, para, line, sel_from.run, sel_from.offset, extra_twips));
-                    i32 hx1 = line_origin_px + atari_twips_to_px_x(
-                        wp_line_cursor_x_twips(&g_doc, para, line, sel_to.run, sel_to.offset, extra_twips));
+                    i32 hx0 = line_origin_px + atari_twips_to_px_x(wp_screenline_x(&g_atari_sl,
+                        wp_line_cursor_x_twips(&g_doc, para, line, sel_from.run, sel_from.offset, extra_twips)));
+                    i32 hx1 = line_origin_px + atari_twips_to_px_x(wp_screenline_x(&g_atari_sl,
+                        wp_line_cursor_x_twips(&g_doc, para, line, sel_to.run, sel_to.offset, extra_twips)));
 
                     atari_invert_rect(vdi, hx0, text_y_px, hx1 - hx0, text_h_px);
                 }
@@ -1713,6 +1728,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                       (area.g_y + area.g_h) - y_px);
 
     if (font != NULL) plat_font_close(font);
+    wp_screen_fonts_close(&g_atari_sfonts);
 }
 
 /* Format menu actions (Font Size +/-, Alignment Left/Center/Right).
@@ -3809,16 +3825,36 @@ static u8  g_ui_scale_setting = 0;
    from real plat_font_metrics_get, never a hardcoded guess (matters
    concretely given ST Low's own documented "notoriously tight" 40-
    column/200-row budget). */
+/* The window's own furniture -- status line, ruler bar, help pager -- is
+   drawn in the screen's face and must be measured in it. Paper metrics
+   (papermetrics.h, on by default) are for laying a document out as it
+   will print: a status bar sized from a printed 8 pt line was shorter
+   than the system font drawn in it, and ST High cut its text off. */
+static wp_bool ui_metrics_begin(void)
+{
+    wp_bool paper = plat_metrics_paper();
+
+    plat_metrics_set_paper(WP_FALSE);
+    return paper;
+}
+
+static void ui_metrics_end(wp_bool paper)
+{
+    plat_metrics_set_paper(paper);
+}
+
 static i32 font_line_height_px(i32 size_twips)
 {
     plat_font *font;
     plat_font_metrics fm;
     i32 h_px;
+    wp_bool paper = ui_metrics_begin();
 
-    if (plat_font_open((const u8 *)"", 0, size_twips, 0, &font) != WP_OK) return 0;
+    if (plat_font_open((const u8 *)"", 0, size_twips, 0, &font) != WP_OK) { ui_metrics_end(paper); return 0; }
     plat_font_metrics_get(font, &fm);
     h_px = atari_twips_to_px_y(fm.ascent + fm.descent + fm.leading);
     plat_font_close(font);
+    ui_metrics_end(paper);
     return h_px;
 }
 
@@ -3881,7 +3917,7 @@ static u32 g_rulerbar_sig = 0;
 static wp_bool g_rulerbar_damaged = WP_TRUE;
 
 /* Paints the bar; the caller has set the clip. */
-static void paint_rulerbar(short window_handle, VdiHdl vdi, GRECT work, const short *clip)
+static void paint_rulerbar_body(short window_handle, VdiHdl vdi, GRECT work, const short *clip)
 {
     atari_gc gc;
     plat_font *font;
@@ -3903,6 +3939,15 @@ static void paint_rulerbar(short window_handle, VdiHdl vdi, GRECT work, const sh
     plat_font_close(font);
 }
 
+/* paint_rulerbar_body, measured in the screen's own face (ui_metrics_begin). */
+static void paint_rulerbar(short window_handle, VdiHdl vdi, GRECT work, const short *clip)
+{
+    wp_bool paper = ui_metrics_begin();
+
+    paint_rulerbar_body(window_handle, vdi, work, clip);
+    ui_metrics_end(paper);
+}
+
 /* Paints the reserved bottom strip showing vi-mode's current mode (and,
    in Command-line mode, the ':'/'/' buffer being typed) -- see
    platform/common/statusline.h. Always repaints in full (the strip is
@@ -3912,7 +3957,7 @@ static void paint_rulerbar(short window_handle, VdiHdl vdi, GRECT work, const sh
    redraw_window's own per-rectangle document loop has already finished
    and reset clipping. A no-op if no document is loaded (nothing to show
    a vi-mode state for) or the window is too short to fit the bar. */
-static void paint_status_line(short window_handle, VdiHdl vdi, GRECT full_work, i32 bar_h_px)
+static void paint_status_line_body(short window_handle, VdiHdl vdi, GRECT full_work, i32 bar_h_px)
 {
     atari_gc gc;
     plat_font *font;
@@ -3950,6 +3995,15 @@ static void paint_status_line(short window_handle, VdiHdl vdi, GRECT full_work, 
     vs_clip(vdi, 0, pxy);
 }
 
+/* paint_status_line_body, measured in the screen's own face (ui_metrics_begin). */
+static void paint_status_line(short window_handle, VdiHdl vdi, GRECT full_work, i32 bar_h_px)
+{
+    wp_bool paper = ui_metrics_begin();
+
+    paint_status_line_body(window_handle, vdi, full_work, bar_h_px);
+    ui_metrics_end(paper);
+}
+
 /* 10pt -- comfortably readable for help prose, smaller than the
    document's own 12pt default so more of it fits on ST Low's tight
    40-column/200-row screen. */
@@ -3963,7 +4017,7 @@ static void paint_status_line(short window_handle, VdiHdl vdi, GRECT full_work, 
    generic ("usable by anything that wants a labeled status strip, not
    hard-wired to vi-mode specifically", per its own header comment), and
    a static hint string is exactly that. */
-static void paint_help(short window_handle, VdiHdl vdi)
+static void paint_help_body(short window_handle, VdiHdl vdi)
 {
     atari_gc gc;
     GRECT work;
@@ -4033,6 +4087,15 @@ static void paint_help(short window_handle, VdiHdl vdi)
         }
         vs_clip(vdi, 0, pxy);
     }
+}
+
+/* paint_help_body, measured in the screen's own face (ui_metrics_begin). */
+static void paint_help(short window_handle, VdiHdl vdi)
+{
+    wp_bool paper = ui_metrics_begin();
+
+    paint_help_body(window_handle, vdi);
+    ui_metrics_end(paper);
 }
 
 /* Every repaint in this backend funnels through here, so this is the one
@@ -4979,7 +5042,7 @@ static wp_bool menu_action_map_selfcheck(void)
 /* The ruler strip alone, repainted through the window's rectangle list
    (another window may cover part of it) with a dragged marker where it
    is now. The caller holds the screen. */
-static void paint_ruler_scale(short window_handle, VdiHdl vdi, GRECT work,
+static void paint_ruler_scale_body(short window_handle, VdiHdl vdi, GRECT work,
                               const wp_rulerbar *rb, const wp_rulerbar_drag *d)
 {
     atari_gc gc;
@@ -5015,6 +5078,16 @@ static void paint_ruler_scale(short window_handle, VdiHdl vdi, GRECT work,
     }
     vs_clip(vdi, 0, pxy);
     plat_font_close(font);
+}
+
+/* paint_ruler_scale_body, measured in the screen's own face (ui_metrics_begin). */
+static void paint_ruler_scale(short window_handle, VdiHdl vdi, GRECT work,
+                              const wp_rulerbar *rb, const wp_rulerbar_drag *d)
+{
+    wp_bool paper = ui_metrics_begin();
+
+    paint_ruler_scale_body(window_handle, vdi, work, rb, d);
+    ui_metrics_end(paper);
 }
 
 /* A press on the ruler: follow the mouse while the button is down,

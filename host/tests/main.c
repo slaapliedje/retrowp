@@ -496,6 +496,9 @@ void test_config_view_keys(void);
 void test_config_ui_scale(void);
 void test_papermetrics_drawing_text_uses_its_face(void);
 void test_papermetrics_fitted_words(void);
+void test_screenline_alignments(void);
+void test_screenline_mapping(void);
+void test_screenline_tabs_identity_and_cap(void);
 void test_pagecanvas_fit_and_stack(void);
 void test_pagecanvas_paint_caret_hit(void);
 void test_pagecanvas_note_at_foot(void);
@@ -1255,6 +1258,9 @@ static const test_case g_cases[] = {
     { "config_ui_scale", test_config_ui_scale },
     { "papermetrics_drawing_text_uses_its_face", test_papermetrics_drawing_text_uses_its_face },
     { "papermetrics_fitted_words", test_papermetrics_fitted_words },
+    { "screenline_alignments", test_screenline_alignments },
+    { "screenline_mapping", test_screenline_mapping },
+    { "screenline_tabs_identity_and_cap", test_screenline_tabs_identity_and_cap },
     { "pagecanvas_fit_and_stack", test_pagecanvas_fit_and_stack },
     { "pagecanvas_paint_caret_hit", test_pagecanvas_paint_caret_hit },
     { "pagecanvas_note_at_foot", test_pagecanvas_note_at_foot },

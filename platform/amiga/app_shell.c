@@ -46,6 +46,7 @@
 #include "paraborder.h"
 #include "rulerbar.h"
 #include "selspan.h"
+#include "screenline.h"
 #include "tools.h"
 #include "menucheck.h"
 #include "metrics_amiga_internal.h"
@@ -1387,8 +1388,14 @@ static void draw_page_view(Object *obj, amiga_gc *gc, i32 doc_bottom)
     if (wp_keymap_selection(&g_ctx, &sel)) wp_pagecanvas_selection(c, &g_amiga_doc, sel, pv_invert, &k);
 }
 
+/* The line being drawn, placed for this screen (screenline.h); static,
+   as it is 2 KB. */
+static wp_screenline g_amiga_sl;
+static wp_screen_fonts g_amiga_sfonts;
+
 static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
 {
+    u16 sl_k = 0;   /* the next screenline word to look for */
     amiga_gc gc;
     u32 si, pi, li;
     u32 flat = 0;   /* display-line index, the viewport's unit (viewport.h) */
@@ -1663,6 +1670,10 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                 extra_twips = wp_justify_space_extra_twips(
                     &g_amiga_doc, para, line, align, (wp_bool)(li == layout->line_count - 1),
                     line->avail_twips);
+                /* Where the words go on this screen (screenline.h). */
+                wp_screenline_build(&g_amiga_sl, &g_amiga_doc, para, line, align, extra_twips,
+                                    wp_screenline_measure_screen, &g_amiga_sfonts);
+                sl_k = 0;
 
                 wp_line_fragment_iter_init(&iter, line);
                 while (wp_line_next_fragment(&g_amiga_doc, para, line, &iter, &frag)) {
@@ -1733,9 +1744,13 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                     plat_measure_text(font, bytes + frag.byte_start, frag_len, &frag_width_twips);
 
                     if (!frag.is_space) {
-                        /* The word held to its laid-out width (devout.h). */
-                        i32 ink_tw = wp_dev_ink_twips(font, bytes + frag.byte_start, frag_len);
-                        wp_dev_text_fit((plat_gc *)&gc, font, NULL, NULL, x_px,
+                        /* The word held to its laid-out width (devout.h),
+                           where screenline placed it. */
+                        const wp_screen_word *sw = wp_screenline_word(&g_amiga_sl, &sl_k,
+                                                                      frag.run_index, frag.byte_start);
+                        i32 ink_tw = sw != NULL ? sw->ink_full : wp_dev_ink_twips(font, bytes + frag.byte_start, frag_len);
+                        wp_dev_text_fit((plat_gc *)&gc, font, NULL, NULL,
+                                        sw != NULL ? line_origin_px + amiga_twips_to_px_x(sw->screen_x) : x_px,
                                         text_y + amiga_twips_to_px_y(wp_run_baseline_twips(line, run_flags, own_ascent_tw)),
                                         amiga_twips_to_px_x(frag_width_twips), 0, ink_tw >= 0 ? amiga_twips_to_px_x(ink_tw) : 0,
                                         bytes + frag.byte_start, frag_len, text_r, text_g, text_b);
@@ -1772,10 +1787,10 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                    the Mac spans the line's ascent + 2. */
                 if (is_cursor_para && li == cursor_line_index) {
                     i32 caret_x_px = line_origin_px + amiga_twips_to_px_x(
-                        wp_line_cursor_x_twips(&g_amiga_doc, para, line,
+                        wp_screenline_x(&g_amiga_sl, wp_line_cursor_x_twips(&g_amiga_doc, para, line,
                                                 (*wp_keymap_cursor(&g_ctx)).run,
                                                 (*wp_keymap_cursor(&g_ctx)).offset,
-                                                extra_twips));
+                                                extra_twips)));
                     i32 caret_h_px = text_h_px;
 
                     if (caret_h_px < 1) caret_h_px = 1;
@@ -1790,9 +1805,9 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                    inside it shows inverted rather than vanishing. */
                 if (have_sel && wp_selspan_for_line(sel, si, pi, line, &sel_from, &sel_to)) {
                     i32 hx0 = line_origin_px + amiga_twips_to_px_x(
-                        wp_line_cursor_x_twips(&g_amiga_doc, para, line, sel_from.run, sel_from.offset, extra_twips));
+                        wp_screenline_x(&g_amiga_sl, wp_line_cursor_x_twips(&g_amiga_doc, para, line, sel_from.run, sel_from.offset, extra_twips)));
                     i32 hx1 = line_origin_px + amiga_twips_to_px_x(
-                        wp_line_cursor_x_twips(&g_amiga_doc, para, line, sel_to.run, sel_to.offset, extra_twips));
+                        wp_screenline_x(&g_amiga_sl, wp_line_cursor_x_twips(&g_amiga_doc, para, line, sel_to.run, sel_to.offset, extra_twips)));
                     i32 h_px = text_h_px;
 
                     if (hx1 > hx0 && h_px > 0) {
@@ -1807,6 +1822,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     }
 
     if (font != NULL) plat_font_close(font);
+    wp_screen_fonts_close(&g_amiga_sfonts);
 
     paint_status_line_amiga(&gc, obj, bar_h_px);
     return 0;
