@@ -18,15 +18,22 @@ works standalone when nothing is attached.
 ## Screenshots
 
 Real emulator captures of the actual `RETROWP` binary — not a mockup, not
-the smoke-test harness — on all four shipping backends:
+the smoke-test harness — on all four shipping backends, each showing the
+same document: the character sheet in `host/tests/fixtures/CHARSHT.RTF`,
+in Page View fitted to the window's width (DOS shows it in its text-mode
+view).
 
-| Atari ST (Hatari) | Amiga (amiberry) |
+| Atari ST, high resolution (Hatari, TOS 2.06) | Amiga (amiberry) |
 | --- | --- |
 | ![Atari ST](docs/screenshots/atari.png) | ![Amiga](docs/screenshots/amiga.png) |
 
 | Mac Classic (BasiliskII) | DOS (DOSBox) |
 | --- | --- |
 | ![Mac Classic](docs/screenshots/mac.png) | ![DOS](docs/screenshots/dos.png) |
+
+And on paper: the same sheet printed from the ST, as PostScript.
+
+![The character sheet printed from the Atari ST](docs/screenshots/atari_print.png)
 
 ## Why
 
@@ -66,13 +73,27 @@ is structural, not just documented.
 
 ## Status
 
-Every milestone through **M15 (image support)** is complete: document
-model, editing, layout/pagination, all four platform backends, five
-switchable keybinding schemes (vi, Emacs, WordStar, WordPerfect, MS
-Word–style), find & replace, RTF/Markdown/ODT/PDF/TXT import-export, offload
-transport with grammar/spell/thesaurus/chat/image ops, and real (or
-honestly placeholder) image rendering on every backend. See
-[`docs/milestones.md`](docs/milestones.md) for the full history.
+Every milestone through **M19 (paragraph styles, footnotes, columns)** is
+complete: document model, editing, layout/pagination, all four platform
+backends, five switchable keybinding schemes (vi, Emacs, WordStar,
+WordPerfect, MS Word–style), find & replace, RTF/Markdown/ODT/PDF/TXT
+import-export, offload transport with grammar/spell/thesaurus/chat/image
+ops, and pictures on every backend. Since then:
+
+- **M16, page furniture:** paragraph borders and shading, tables, frames,
+  vector drawings (GEM and Windows metafiles read on the machine), bitmaps
+  read on the machine (GEM IMG/XIMG, IFF ILBM/PBM, MacPaint, PCX, BMP) and
+  bundled clipart.
+- **M17, Atari Works:** `.STW` documents open, with their pictures, the
+  text in their drawings, and their headers and footers.
+- **M18, mail merge:** fields from a data file into letters, labels, or
+  straight to the printer a record at a time.
+- **M19, desktop publishing in the word processor:** named paragraph
+  styles, footnotes, Page View with zoom and a layout grid, newspaper
+  columns, layout measured as it will print, 21 paper sizes, envelopes,
+  CD/DVD labels, label sheets, and scroll bars and a UI scale everywhere.
+
+See [`docs/milestones.md`](docs/milestones.md) for the full history.
 
 Released (binaries in the [v0.15.0 release](https://github.com/slaapliedje/retrowp/releases/tag/v0.15.0)):
 the Atari ST, Amiga, Mac Classic and DOS. In progress: the Atari 8-bit,
@@ -87,11 +108,6 @@ the Apple IIGS and the Commodore 900.
 | Atari 8-bit ([gem4xe](https://github.com/slaapliedje/gem4xe)) | 🚧 runs on the machine, not yet released | The ST's GEM shell, on GEM for a 65816-accelerated XL/XE — see [`docs/gem4xe-port.md`](docs/gem4xe-port.md) |
 | Apple IIGS | 🚧 engine compiles (ORCA/C); backend not started | — |
 | Commodore 900 | 🚧 planned; compiler not yet confirmed | — |
-
-The Mac Classic build cannot currently be relinked here: Retro68's `ld`
-was built against an older Boost than the system now has. That is an
-upstream toolchain problem, not this project's; the released binary is
-unaffected.
 
 ## Repository Layout
 
@@ -274,7 +290,7 @@ assumed. Two obligations and two genuine unknowns came out of it.
 | Atari ST | **gemlib** (`-lgem`) | **not stated**: no `COPYING` in the distribution, no licence header in its sources | A real unknown, not an oversight in this audit. Worth asking the FreeMiNT project before a release leans on it. |
 | DOS | **Open Watcom** | Sybase Open Watcom Public License 1.0 | The FSF classes SOWPL as non-free and GPL-incompatible, so this relies on the System Library exception — and **here "or later" earns its keep**: GPLv3 section 1 plainly covers a compiler runtime linked into the executable, where GPLv2 section 3's older wording ("unless that component itself accompanies the executable") is far less comfortable for a statically linked one. |
 | Amiga | **libnix** | **not stated** in the installed tree or upstream's README | The same honest unknown as gemlib. |
-| Mac | Retro68 | **not audited** | Its toolchain does not build on this machine (CLAUDE.md records why), so there is no Mac binary to ship and nothing was checked. |
+| Mac | Retro68 | **not audited** | Its runtime's terms have not been checked yet; worth doing before a Mac binary ships. |
 
 The pattern worth carrying: a compiler's runtime is a System Library in
 the GPL's sense, and that is what makes every one of these workable. It
