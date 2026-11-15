@@ -267,7 +267,8 @@ small for the screen's fonts shows as grey bars; zoom in to read
 it. Grid... shows a dot grid on the page, from the margins'
 corner, at 1/8, 1/4, 1/2 or 1 inch, or 5 mm or 1 cm; "Show and
 snap to grid" also makes the ruler's markers move in grid steps.
-RetroWP remembers these choices. Page view needs a graphics
+The scroll bars move down and across the pages; the view stays
+where you put it until you type. RetroWP remembers these choices. Page view needs a graphics
 screen, so DOS keeps its own view.
 
 On a big screen -- a graphics card's 1280 pixels across or more --

@@ -560,8 +560,13 @@ the selection (`wp_pagecanvas_selection`) walk each page's lines as
 the printer does -- a printing walk, footnotes at the foot -- and use
 the same `wp_line_pos_at_x_twips` and `wp_line_cursor_x_twips` as the
 plain view, so click, caret and highlight agree. The ST scrolls the
-canvas with both its sliders (the window gained a horizontal one); the
-Amiga and the Mac, which have no scroll bars, follow the caret.
+canvas with both its sliders (the window gained a horizontal one), the
+Mac with its window's scroll bar controls, the Amiga with two MUI
+Scrollbars beside and below the editor; a bar moved by hand holds the
+view (`wp_viewport.manual`) until the next keystroke, and otherwise the
+view follows the caret and the bars follow the view. In the plain view
+the vertical bar counts display lines and the horizontal one is dimmed
+(full on the Amiga): lines wrap to the window.
 
 The grid is a view setting: dots from the margins' corner at a chosen
 spacing; with snapping on, the ruler's markers move in grid steps

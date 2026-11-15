@@ -1340,8 +1340,8 @@ static void paint_ruler_scale_amiga(Object *obj)
 
 /* Page view (pagecanvas.h): the pages as they print, drawn by the page
    printer, then the caret and the selection over them; the ruler over
-   the page. The view follows the caret -- this object has no scroll
-   bars. A pure painter, as Draw must be here: the layouts are current
+   the page. The view follows the caret until a scroll bar moves it
+   (amiga_bar_moved). A pure painter, as Draw must be here: the layouts are current
    (amiga_relayout_after_edit), and nothing is measured anew. */
 typedef struct { struct RastPort *rp; i32 x, y; } pv_invert_ctx;
 
@@ -1415,6 +1415,7 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
         return 0;
     }
     if (!(msg->flags & MADF_DRAWOBJECT)) return 0;
+
 
     /* MUI_Redraw()-triggered repaints (as opposed to the window's own
        initial open) do NOT reliably clear stale pixels first -- verified
@@ -1853,6 +1854,8 @@ static wp_bool amiga_click(Object *obj, struct IntuiMessage *imsg)
     return WP_TRUE;
 }
 
+static void amiga_update_bars(void);
+
 static ULONG editor_handleevent(struct IClass *cl, Object *obj, struct MUIP_HandleEvent *msg)
 {
     wp_key_event ev;
@@ -1890,6 +1893,7 @@ static ULONG editor_handleevent(struct IClass *cl, Object *obj, struct MUIP_Hand
     quit = amiga_dispatch_key(ev);
     amiga_relayout_after_edit();
     MUI_Redraw(obj, MADF_DRAWOBJECT);
+    amiga_update_bars();   /* where the key's paint left the view */
     if (quit) {
         DoMethod(_app(obj), MUIM_Application_ReturnID, (LONG)MUIV_Application_ReturnID_Quit);
     }
@@ -1942,6 +1946,92 @@ static WP_DISPATCHER(wp_editor_dispatch)
    checked against in the main loop below. */
 
 #define WP_RETURNID_ACTION_BASE 1000
+
+/* The scroll bars beside and below the editor, MUI Scrollbars: moving
+   one (its arrows, its knob, the space either side) notifies the
+   application with one of these IDs and the main loop scrolls the view
+   to the bar's MUIA_Prop_First. The vertical bar counts display lines
+   in the normal view and canvas pixels in page view; the horizontal one
+   canvas pixels in page view, and is full in the normal view, whose
+   lines wrap to the window. After every pass the loop sets the bars to
+   where the view is (amiga_update_bars) WITHOUT notification, or
+   following the caret would read as a scroll by hand. The key handler
+   sets them too, after its paint: set only from the loop, a key's bar
+   lagged one keystroke behind. Each follows the caret first, as the
+   paint does (the layouts are current: amiga_relayout_after_edit), so
+   whichever runs first, the other finds nothing to move. Draw itself
+   sets nothing outside its own object. */
+#define WP_RETURNID_VBAR 900
+#define WP_RETURNID_HBAR 901
+
+static Object *g_vbar, *g_hbar;
+static LONG    g_vbar_set[4] = { -1, -1, -1, -1 };   /* entries, visible, first, delta */
+static LONG    g_hbar_set[4] = { -1, -1, -1, -1 };
+
+static void amiga_set_bar(Object *bar, LONG *was, LONG entries, LONG visible, LONG first, LONG delta)
+{
+    if (bar == NULL) return;
+    if (visible < 1) visible = 1;
+    if (entries < visible) entries = visible;
+    if (first > entries - visible) first = entries - visible;
+    if (first < 0) first = 0;
+    if (delta < 1) delta = 1;
+    if (was[0] == entries && was[1] == visible && was[2] == first && was[3] == delta) return;
+    SetAttrs(bar, MUIA_NoNotify, TRUE,
+             MUIA_Prop_Entries, entries, MUIA_Prop_Visible, visible,
+             MUIA_Prop_First, first, MUIA_Prop_DeltaFactor, delta, TAG_DONE);
+    was[0] = entries; was[1] = visible; was[2] = first; was[3] = delta;
+}
+
+static void amiga_update_bars(void)
+{
+    if (!g_ctx.doc_loaded || g_help_active) {
+        amiga_set_bar(g_vbar, g_vbar_set, 1, 1, 0, 1);
+        amiga_set_bar(g_hbar, g_hbar_set, 1, 1, 0, 1);
+    } else if (g_ctx.page_view) {
+        wp_pagecanvas *c = &g_ctx.canvas;
+        LONG line = (LONG)amiga_font_line_height_px(WP_AMIGA_STATUSLINE_SIZE_TWIPS);
+        if (c->view_h > 0) {   /* the first paint has sized the view */
+            (void)wp_pagecanvas_update(c, &g_amiga_doc, c->view_w, c->view_h);
+            if (!g_ctx.view.manual) (void)wp_pagecanvas_follow(c, &g_amiga_doc, wp_keymap_cursor(&g_ctx));
+        }
+        amiga_set_bar(g_vbar, g_vbar_set, c->canvas_h, c->view_h, c->scroll_y, line);
+        amiga_set_bar(g_hbar, g_hbar_set, c->canvas_w, c->view_w, c->scroll_x, line);
+    } else {
+        LONG page;
+        if (g_ctx.view.view_h_px > 0) wp_viewport_follow_cursor(&g_ctx.view, &g_amiga_doc, wp_keymap_cursor(&g_ctx));
+        page = (LONG)wp_viewport_page_lines(&g_ctx.view, &g_amiga_doc);
+        amiga_set_bar(g_vbar, g_vbar_set, (LONG)wp_viewport_max_top(&g_ctx.view, &g_amiga_doc) + page,
+                      page, (LONG)g_ctx.view.top_line, 1);
+        amiga_set_bar(g_hbar, g_hbar_set, 1, 1, 0, 1);
+    }
+}
+
+/* A bar moved by hand: the view goes where it says, and stays there
+   until the next keystroke (viewport.h). WP_FALSE when it is already
+   there -- the notification of a set this loop made itself. */
+static wp_bool amiga_bar_moved(Object *bar)
+{
+    LONG first = 0;
+
+    if (bar == NULL || !g_ctx.doc_loaded || g_help_active) return WP_FALSE;
+    get(bar, MUIA_Prop_First, &first);
+    if (g_ctx.page_view) {
+        wp_pagecanvas *c = &g_ctx.canvas;
+        if (bar == g_vbar) {
+            if (first == c->scroll_y) return WP_FALSE;
+            wp_pagecanvas_scroll_to(c, c->scroll_x, (i32)first);
+        } else {
+            if (first == c->scroll_x) return WP_FALSE;
+            wp_pagecanvas_scroll_to(c, (i32)first, c->scroll_y);
+        }
+        g_ctx.view.manual = WP_TRUE;
+        return WP_TRUE;
+    }
+    if (bar != g_vbar || (u32)first == g_ctx.view.top_line) return WP_FALSE;
+    wp_viewport_scroll_to(&g_ctx.view, &g_amiga_doc, (u32)first);
+    return WP_TRUE;
+}
 
 static const char *group_title(wp_menu_group group)
 {
@@ -2268,7 +2358,13 @@ void app_shell_run(void)
                dispatch instead. */
             MUIA_Window_DisableKeys, (IPTR)MUIKEYF_WINDOW_CLOSE,
             WindowContents, VGroup,
-                Child, g_editor = NewObject(g_editor_class->mcc_Class, NULL, TAG_DONE),
+                MUIA_Group_Spacing, 0,
+                Child, HGroup,
+                    MUIA_Group_Spacing, 0,
+                    Child, g_editor = NewObject(g_editor_class->mcc_Class, NULL, TAG_DONE),
+                    Child, g_vbar = ScrollbarObject, End,
+                End,
+                Child, g_hbar = ScrollbarObject, MUIA_Group_Horiz, TRUE, End,
             End,
         End,
     End;
@@ -2286,6 +2382,11 @@ void app_shell_run(void)
              g_app, 2, MUIM_Application_ReturnID,
              (LONG)(WP_RETURNID_ACTION_BASE + WP_ACT_FILE_QUIT));
 
+    DoMethod(g_vbar, MUIM_Notify, MUIA_Prop_First, MUIV_EveryTime,
+             g_app, 2, MUIM_Application_ReturnID, (LONG)WP_RETURNID_VBAR);
+    DoMethod(g_hbar, MUIM_Notify, MUIA_Prop_First, MUIV_EveryTime,
+             g_app, 2, MUIM_Application_ReturnID, (LONG)WP_RETURNID_HBAR);
+
     set(g_win, MUIA_Window_Open, TRUE);
     get(g_win, MUIA_Window_Open, &open);
 
@@ -2301,6 +2402,10 @@ void app_shell_run(void)
         for (;;) {
             id = (LONG)DoMethod(g_app, MUIM_Application_NewInput, &sigs);
             if (id == (LONG)MUIV_Application_ReturnID_Quit) break;
+            if ((id == WP_RETURNID_VBAR && amiga_bar_moved(g_vbar)) ||
+                (id == WP_RETURNID_HBAR && amiga_bar_moved(g_hbar))) {
+                MUI_Redraw(g_editor, MADF_DRAWOBJECT);
+            }
             if (id >= WP_RETURNID_ACTION_BASE && id < WP_RETURNID_ACTION_BASE + WP_ACT_COUNT) {
                 wp_action_id act_id = (wp_action_id)(id - WP_RETURNID_ACTION_BASE);
 
@@ -2328,6 +2433,7 @@ void app_shell_run(void)
                     if (g_ctx.quit_requested) break;
                 }
             }
+            amiga_update_bars();   /* where this pass's paints left the view */
             if (sigs) {
                 sigs = Wait(sigs | SIGBREAKF_CTRL_C);
                 if (sigs & SIGBREAKF_CTRL_C) break;

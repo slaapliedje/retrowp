@@ -140,6 +140,40 @@ static wp_app_ctx        g_ctx;
 static WindowPtr         g_win;
 static wp_bool           g_quit;
 
+/* The window's scroll bars, the Toolbox's own controls along its right
+   and bottom edges with the size box in the corner between them. The
+   vertical one moves through the lines in the normal view and down the
+   canvas in page view; the horizontal one across the canvas in page
+   view, and is dimmed in the normal view, whose lines wrap to the
+   window. A control's value is 16 bits and a long document's canvas is
+   not, so each bar counts in units of g_bar_unit_* pixels (or lines). */
+#define WP_MAC_BAR 16
+static ControlHandle     g_vbar, g_hbar;
+static i32               g_bar_unit_v = 1, g_bar_unit_h = 1;
+
+/* The window's content: its port less the scroll bars' strips (a bar
+   overlaps the window's frame by a pixel, so a strip is a pixel less). */
+static Rect mac_content_rect(WindowPtr w)
+{
+    Rect r = w->portRect;
+    if (g_vbar != NULL && g_hbar != NULL) {
+        r.right -= WP_MAC_BAR - 1;
+        r.bottom -= WP_MAC_BAR - 1;
+    }
+    return r;
+}
+
+/* The bars along the port's edges, after it opens and after a resize. */
+static void mac_place_bars(WindowPtr w)
+{
+    Rect p = w->portRect;
+    if (g_vbar == NULL || g_hbar == NULL) return;
+    MoveControl(g_vbar, (short)(p.right - (WP_MAC_BAR - 1)), (short)(p.top - 1));
+    SizeControl(g_vbar, WP_MAC_BAR, (short)(p.bottom - p.top - (WP_MAC_BAR - 3)));
+    MoveControl(g_hbar, (short)(p.left - 1), (short)(p.bottom - (WP_MAC_BAR - 1)));
+    SizeControl(g_hbar, (short)(p.right - p.left - (WP_MAC_BAR - 3)), WP_MAC_BAR);
+}
+
 /* T169: how many text fragments the paint loop has actually drawn since
    startup. Reported through the CI marker so the gate can require the
    app to have rendered REAL DOCUMENT CONTENT, not merely to be alive --
@@ -203,10 +237,8 @@ static i32 g_ui_scale = 1;
    portRect is already known the moment NewWindow returns, so relayout
    could happen eagerly right after loading a document the way
    platform/atari/app_shell.c's replace_document does -- draw_document
-   still checks on every draw too, cheap insurance against a real
-   resize (this phase doesn't wire up the window's own grow box, a
-   documented gap, but the check costs nothing and stays correct if
-   that's ever added).
+   still checks on every draw too, which is what makes the window's
+   size box (inGrow) relay the document at its new width.
 
    There used to be a companion g_needs_relayout flag meaning "the
    document itself is new". It was removed with the stale-layout fix in
@@ -1175,8 +1207,8 @@ static void paint_help_mac(WindowPtr w, Rect full_rect)
 
 /* Page view (pagecanvas.h): the pages as they print, drawn by the page
    printer, then the caret and the selection over them; the ruler over
-   the page. The view follows the caret -- this window has no scroll
-   bars. */
+   the page. The view follows the caret until a scroll bar moves it
+   (mac_track_bar). */
 static void pv_invert(void *user, i32 cx, i32 cy, i32 w, i32 h)
 {
     const Rect *o = (const Rect *)user;
@@ -1220,7 +1252,7 @@ static void draw_page_view(WindowPtr w, mac_gc *gc, Rect r, short doc_bottom)
     if (wp_keymap_selection(&g_ctx, &sel)) wp_pagecanvas_selection(c, &g_mac_doc, sel, pv_invert, &origin);
 }
 
-static void draw_document(WindowPtr w)
+static void draw_content(WindowPtr w)
 {
     mac_gc gc;
     Rect r;
@@ -1243,20 +1275,15 @@ static void draw_document(WindowPtr w)
     wp_pos sel_from, sel_to;
     wp_bool have_sel = WP_FALSE;
 
-    SetPort(w);
-    BeginUpdate(w);
-
-    r = w->portRect;
+    r = mac_content_rect(w);
     EraseRect(&r);
 
     if (g_help_active) {
         paint_help_mac(w, r);
-        EndUpdate(w);
         return;
     }
 
     if (!g_ctx.doc_loaded) {
-        EndUpdate(w);
         return;
     }
     have_sel = wp_keymap_selection(&g_ctx, &sel);
@@ -1295,7 +1322,6 @@ static void draw_document(WindowPtr w)
     if (g_ctx.page_view) {
         draw_page_view(w, &gc, r, doc_bottom);
         paint_status_line_mac(w, r, bar_h_px);
-        EndUpdate(w);
         return;
     }
 
@@ -1593,7 +1619,131 @@ static void draw_document(WindowPtr w)
 
     paint_status_line_mac(w, r, bar_h_px);
 
+}
+
+/* A bar set to `pos` of `max` (pixels or lines), in units small enough
+   for a control's 16 bits, dimmed when there is nowhere to go; each
+   call changes only what moved, since every change redraws the bar. */
+static void mac_set_bar(ControlHandle c, i32 *unit, i32 pos, i32 max)
+{
+    i32 u = 1;
+    short hilite;
+
+    if (c == NULL) return;
+    if (max < 0) max = 0;
+    if (pos < 0) pos = 0;
+    if (pos > max) pos = max;
+    while (max / u > 32000) u *= 2;
+    *unit = u;
+    if (GetControlMaximum(c) != (short)(max / u)) SetControlMaximum(c, (short)(max / u));
+    if (GetControlValue(c) != (short)(pos / u)) SetControlValue(c, (short)(pos / u));
+    hilite = (short)(max > 0 ? 0 : 255);
+    if ((**c).contrlHilite != hilite) HiliteControl(c, hilite);
+}
+
+/* The bars after a paint, which has just settled the view (draw_content
+   follows the caret first). */
+static void mac_update_bars(void)
+{
+    if (!g_ctx.doc_loaded || g_help_active) {
+        mac_set_bar(g_vbar, &g_bar_unit_v, 0, 0);
+        mac_set_bar(g_hbar, &g_bar_unit_h, 0, 0);
+    } else if (g_ctx.page_view) {
+        const wp_pagecanvas *c = &g_ctx.canvas;
+        mac_set_bar(g_vbar, &g_bar_unit_v, c->scroll_y, c->canvas_h - c->view_h);
+        mac_set_bar(g_hbar, &g_bar_unit_h, c->scroll_x, c->canvas_w - c->view_w);
+    } else {
+        mac_set_bar(g_vbar, &g_bar_unit_v, (i32)g_ctx.view.top_line,
+                    (i32)wp_viewport_max_top(&g_ctx.view, &g_mac_doc));
+        mac_set_bar(g_hbar, &g_bar_unit_h, 0, 0);
+    }
+}
+
+static void draw_document(WindowPtr w)
+{
+    SetPort(w);
+    BeginUpdate(w);
+    draw_content(w);
+    mac_update_bars();
+    DrawControls(w);
+    DrawGrowIcon(w);
     EndUpdate(w);
+}
+
+/* The content painted now, not at the next update event: a bar being
+   held down scrolls as it is held. */
+static void mac_redraw_now(void)
+{
+    Rect r = mac_content_rect(g_win);
+    InvalRect(&r);
+    draw_document(g_win);
+}
+
+/* A press on a bar's arrow or its grey: a line's worth or a window's,
+   as the ST's window arrows (platform/atari/app_shell.c, WM_ARROWED).
+   Scrolled by hand, the view stays put until the next keystroke. */
+static void mac_scroll_part(ControlHandle bar, short part)
+{
+    wp_bool vert = (wp_bool)(bar == g_vbar);
+    i32 d = 0;
+
+    if (!g_ctx.doc_loaded || g_help_active) return;
+    if (g_ctx.page_view) {
+        wp_pagecanvas *c = &g_ctx.canvas;
+        i32 line = statusline_height_px();
+        i32 page = (vert ? c->view_h : c->view_w) - line;
+        switch (part) {
+        case inUpButton:   d = -line; break;
+        case inDownButton: d = line;  break;
+        case inPageUp:     d = -page; break;
+        case inPageDown:   d = page;  break;
+        default: return;
+        }
+        wp_pagecanvas_scroll_by(c, vert ? 0 : d, vert ? d : 0);
+        g_ctx.view.manual = WP_TRUE;
+    } else if (vert) {
+        i32 page = (i32)wp_viewport_page_lines(&g_ctx.view, &g_mac_doc);
+        switch (part) {
+        case inUpButton:   d = -1;    break;
+        case inDownButton: d = 1;     break;
+        case inPageUp:     d = -page; break;
+        case inPageDown:   d = page;  break;
+        default: return;
+        }
+        wp_viewport_scroll_by(&g_ctx.view, &g_mac_doc, d);
+    } else {
+        return;
+    }
+    mac_redraw_now();
+}
+
+static pascal void mac_bar_action(ControlHandle bar, INTEGER part)
+{
+    if (part != 0) mac_scroll_part(bar, (short)part);
+}
+
+/* A press on a bar: the arrows and the grey repeat while held; the
+   thumb is dragged as the Control Manager draws it, and the view goes
+   where it was let go. */
+static void mac_track_bar(ControlHandle bar, short part, Point pt)
+{
+    if (part == inThumb) {
+        if (TrackControl(bar, pt, NULL) == inThumb && g_ctx.doc_loaded && !g_help_active) {
+            if (g_ctx.page_view) {
+                wp_pagecanvas *c = &g_ctx.canvas;
+                if (bar == g_vbar)
+                    wp_pagecanvas_scroll_to(c, c->scroll_x, (i32)GetControlValue(bar) * g_bar_unit_v);
+                else
+                    wp_pagecanvas_scroll_to(c, (i32)GetControlValue(bar) * g_bar_unit_h, c->scroll_y);
+                g_ctx.view.manual = WP_TRUE;
+            } else if (bar == g_vbar) {
+                wp_viewport_scroll_to(&g_ctx.view, &g_mac_doc, (u32)GetControlValue(bar) * (u32)g_bar_unit_v);
+            }
+            mac_redraw_now();
+        }
+    } else {
+        (void)TrackControl(bar, pt, NewControlActionUPP(mac_bar_action));
+    }
 }
 
 /* A click in the content area: the caret goes to the nearest character
@@ -1633,19 +1783,21 @@ static void mac_click(Point where, wp_bool extend)
     Point pt = where;
     wp_pos pos;
     i32 bar_h_px;
+    Rect cr;
 
     if (!g_ctx.doc_loaded || g_help_active || (g_content_width_twips <= 0 && !g_ctx.page_view)) return;
     SetPort(g_win);
     GlobalToLocal(&pt);
+    cr = mac_content_rect(g_win);
     bar_h_px = statusline_height_px();
-    if (pt.v >= g_win->portRect.bottom - bar_h_px) return;   /* the status strip */
+    if (pt.v >= cr.bottom - bar_h_px) return;   /* the status strip */
 
     /* The ruler bar: a button runs its action as the menu would, a press
        on the ruler drags a marker or clicks a tab stop in or out. The caller
        invalidates the window, and the redraw relays out. */
     {
         wp_rulerbar rb;
-        if (mac_rulerbar(g_win->portRect, &rb) && pt.v < rb.y + wp_rulerbar_height(&rb)) {
+        if (mac_rulerbar(cr, &rb) && pt.v < rb.y + wp_rulerbar_height(&rb)) {
             wp_rulerbar_hit hit;
             if (wp_rulerbar_hit_test(&rb, (i32)pt.h, (i32)pt.v, &hit)) {
                 if (hit.kind == (u8)WP_RULERBAR_BUTTON) invoke_action(wp_action_find(hit.action));
@@ -1657,14 +1809,14 @@ static void mac_click(Point where, wp_bool extend)
 
     if (g_ctx.page_view) {
         /* Page view: the click on the canvas, as the pages lie. */
-        if (wp_pagecanvas_hit(&g_ctx.canvas, &g_mac_doc, (i32)pt.h - g_win->portRect.left + g_ctx.canvas.scroll_x,
-                              (i32)pt.v - mac_doc_top(g_win->portRect) + g_ctx.canvas.scroll_y, &pos)) {
+        if (wp_pagecanvas_hit(&g_ctx.canvas, &g_mac_doc, (i32)pt.h - cr.left + g_ctx.canvas.scroll_x,
+                              (i32)pt.v - mac_doc_top(cr) + g_ctx.canvas.scroll_y, &pos)) {
             wp_keymap_click(&g_ctx, pos, extend);
         }
         return;
     }
     if (!wp_viewport_hit_test(&g_ctx.view, &g_mac_doc, g_content_width_twips,
-                              (i32)pt.h - WP_DOC_LEFT_MARGIN_PX, (i32)pt.v - mac_doc_top(g_win->portRect),
+                              (i32)pt.h - WP_DOC_LEFT_MARGIN_PX, (i32)pt.v - mac_doc_top(cr),
                               mac_px_to_twips, mac_twips_to_px, &pos)) return;
     wp_keymap_click(&g_ctx, pos, extend);
 }
@@ -1936,11 +2088,28 @@ void app_shell_run(void)
     build_action_menus();
     DrawMenuBar();
 
-    SetRect(&winRect, 40, 60, 520, 340);
+    /* The screen's width less a little: a fixed (40,60)-(520,340) once
+       ran off a 512-pixel screen's right edge, where the vertical scroll
+       bar now lives. The top stays at 60, the title bar where the Mac
+       gates click to focus the window (host/tools/mac_ci_lib.sh). */
+    winRect = qd.screenBits.bounds;
+    winRect.left += 4;
+    winRect.top += 60;
+    winRect.right -= 4;
+    winRect.bottom -= 4;
+    if (winRect.right - winRect.left > 640) winRect.right = (short)(winRect.left + 640);
+    if (winRect.bottom - winRect.top > 440) winRect.bottom = (short)(winRect.top + 440);
     g_win = NewWindow(NULL, &winRect, (ConstStringPtr) "\pRetroWP", true,
                        documentProc, (WindowPtr) -1L, true, 0);
     if (g_win == NULL) return;
     SetPort(g_win);
+    {
+        Rect br;
+        SetRect(&br, 0, 0, WP_MAC_BAR, WP_MAC_BAR);
+        g_vbar = NewControl(g_win, &br, (ConstStringPtr) "\p", true, 0, 0, 0, scrollBarProc, 0);
+        g_hbar = NewControl(g_win, &br, (ConstStringPtr) "\p", true, 0, 0, 0, scrollBarProc, 0);
+        mac_place_bars(g_win);
+    }
 
     /* Written after the menu bar is drawn and the window is open, so
        its existence really does mean "the app came up". */
@@ -1995,8 +2164,37 @@ void app_shell_run(void)
                     if (whichWindow != FrontWindow()) {
                         SelectWindow(whichWindow);
                     } else if (whichWindow == g_win) {
-                        mac_click(e.where, (wp_bool)((e.modifiers & shiftKey) != 0));
-                        InvalRect(&g_win->portRect);
+                        Point lp = e.where;
+                        ControlHandle bar = NULL;
+                        short part;
+
+                        SetPort(g_win);
+                        GlobalToLocal(&lp);
+                        part = FindControl(lp, g_win, &bar);
+                        if (part != 0 && bar != NULL) {
+                            mac_track_bar(bar, part, lp);
+                        } else {
+                            mac_click(e.where, (wp_bool)((e.modifiers & shiftKey) != 0));
+                            InvalRect(&g_win->portRect);
+                        }
+                    }
+                    break;
+                case inGrow:
+                    /* The size box: the bars move to the new edges and
+                       the whole window repaints, relaid at its width. */
+                    if (whichWindow == g_win) {
+                        Rect lim;
+                        long sz;
+
+                        SetRect(&lim, 200, 120, (short)(qd.screenBits.bounds.right - qd.screenBits.bounds.left),
+                                (short)(qd.screenBits.bounds.bottom - qd.screenBits.bounds.top));
+                        sz = GrowWindow(g_win, e.where, &lim);
+                        if (sz != 0) {
+                            SetPort(g_win);
+                            SizeWindow(g_win, (short)(sz & 0xFFFF), (short)((sz >> 16) & 0xFFFF), true);
+                            mac_place_bars(g_win);
+                            InvalRect(&g_win->portRect);
+                        }
                     }
                     break;
                 default:

@@ -2597,6 +2597,31 @@ the list").
       sheet at fit width the two render alike: there the table labels
       fill their rows because the ST's smallest face is nearly a row
       tall -- its size, not its place.
+- [x] T19.10 Scroll bars on the Mac and the Amiga.
+      Neither had any, in either view: both followed the caret only. Mac:
+      the Toolbox's scroll bar controls along the window's right and
+      bottom edges, the content rect less their strips; the arrows and the
+      grey repeat while held (TrackControl with an action proc), the thumb
+      goes where it is let go; a control's 16 bits count in units of a
+      power of two of pixels when a canvas is taller. The size box works
+      now (GrowWindow/SizeWindow, the bars moved, the window relaid). The
+      window opens to the screen's width -- the fixed (40,60)-(520,340)
+      ran 8 pixels off a 512-pixel screen, where the vertical bar lives --
+      its top kept at 60, the title bar the Mac gates click to focus it.
+      Amiga: MUI Scrollbars beside and below the editor, notifying the
+      application on MUIA_Prop_First; the loop sets them back with
+      MUIA_NoNotify so following the caret is not taken for a hand scroll
+      (DeltaFactor a line of pixels in page view). The bars are set from
+      the key handler after its paint, and from the loop after every pass,
+      each following the caret first as the paint does: set only from the
+      loop, a key's bar lagged one keystroke. Asking for them from inside
+      Draw with MUIM_Application_PushMethod was tried and dropped (a
+      paint looked stalled; later seen to be the A500's slow paint, but
+      a Draw that sets nothing outside its object is the safer rule).
+      Verified under BasiliskII by clicking every part of both bars in
+      both views (an xdotool click is too short for TrackControl to see
+      the button down: hold it 0.2 s), and under amiberry, which takes no
+      clicks, by the knob following G in both views.
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)

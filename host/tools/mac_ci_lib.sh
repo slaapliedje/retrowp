@@ -341,8 +341,8 @@ EOF
         # unlike amiberry -- see T150 and the project memory), so a plain
         # mousemove to a computed coordinate is reliable here. The
         # emulated screen is pinned to 512x384 at the root's top-left by
-        # this prefs file, and the window is opened at a fixed Toolbox
-        # rect (40,60)-(520,340) by app_shell_run, so the title bar sits
+        # this prefs file, and app_shell_run opens the window with its
+        # top at y=60 and its left at x=4, so the title bar sits
         # at a stable spot -- nothing here depends on where a window
         # manager chose to put anything.
         DISPLAY="$_xvfb_display" xdotool mousemove 280 50 2>/dev/null
