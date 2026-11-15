@@ -30,6 +30,26 @@ or the SheepShaver/macemu-mon fork):
   2. Boot. RETROWP.dsk appears as a second floppy on the desktop --
      open it and double-click RETROWP.
 
+What it does
+------------
+Fonts, sizes, bold/italic/underline, superscript and subscript; named
+paragraph styles; footnotes; find and replace; multi-level undo.
+Page View shows the page as it will print, with zoom and a layout grid,
+newspaper columns, tables, borders and shading, frames, vector drawings,
+pictures and the bundled clipart. Paper sizes, envelopes, CD/DVD labels
+and label sheets; mail merge into letters, labels or straight to the
+printer. RTF in and out, Atari Works (.STW), WordStar, Markdown and
+plain text. Printing in PostScript, Epson, PCL or plain text.
+
+Tools > Insert Clipart looks for a CLIPART folder next to the
+application. RETROWP.dsk does not carry one: copy the CLIPART folder
+from this archive onto the same disk as RETROWP (with a tool that
+writes HFS images, or from inside the emulated Mac).
+
+The spelling checker on the machine reads WPSPELL.DIC next to the
+application; the source repo holds only a small sample one, so for
+real checking use the offload gateway's large dictionary.
+
 Notes:
 - Needs a real System 6.x/7-era boot disk to boot INTO -- RETROWP.dsk
   is just the app, not a bootable system. Mini vMac or SheepShaver

@@ -23,6 +23,23 @@ Quickest way to try it, with amiberry (https://github.com/BlitterStudio/amiberry
 
   3. Once booted to Workbench (or a Shell), run RETROWP.
 
+What it does
+------------
+Fonts, sizes, bold/italic/underline, superscript and subscript; named
+paragraph styles; footnotes; find and replace; multi-level undo.
+Page View shows the page as it will print, with zoom and a layout grid,
+newspaper columns, tables, borders and shading, frames, vector drawings,
+pictures and the bundled clipart (Tools > Insert Clipart reads the
+CLIPART folder beside the program -- keep it there). Paper sizes,
+envelopes, CD/DVD labels and label sheets; mail merge into letters,
+labels or straight to the printer. RTF in and out, Atari Works (.STW),
+WordStar, Markdown and plain text. Printing in PostScript, Epson, PCL
+or plain text.
+
+The spelling checker on the machine reads a dictionary file
+(PROGDIR:WPSPELL.DIC, beside the program); the source repo holds only a small sample one, so
+for real checking use the offload gateway's large dictionary.
+
 Notes:
 - Ctrl+Q quits cleanly. F1 opens help. Vi-style keybindings by default
   -- see docs/keymaps.md in the source repo for the other four schemes.

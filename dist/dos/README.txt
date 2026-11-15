@@ -14,6 +14,23 @@ DOSBox Staging):
        C:
        RETROWP.EXE
 
+What it does
+------------
+Fonts, sizes, bold/italic/underline, superscript and subscript; named
+paragraph styles; footnotes; find and replace; multi-level undo.
+Page View shows the page as it will print, with zoom and a layout grid,
+newspaper columns, tables, borders and shading, frames, vector drawings,
+pictures and the bundled clipart (Tools > Insert Clipart reads the
+CLIPART folder beside the program -- keep it there). Paper sizes,
+envelopes, CD/DVD labels and label sheets; mail merge into letters,
+labels or straight to the printer. RTF in and out, Atari Works (.STW),
+WordStar, Markdown and plain text. Printing in PostScript, Epson, PCL
+or plain text (DOS shows the text in its own text-mode view rather than Page View).
+
+The spelling checker on the machine reads a dictionary file
+(C:\WPSPELL.DIC); the source repo holds only a small sample one, so
+for real checking use the offload gateway's large dictionary.
+
 Notes:
 - Plain 80x25 text mode -- no graphics mode switch, works on any
   DOSBox machine profile (cga/ega/svga/vga). Hercules mode is a known,

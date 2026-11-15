@@ -53,6 +53,13 @@ for t in $want; do
     for f in $(echo "$files" | tr ':' ' '); do cp "$f" "$stage/"; done
     cp COPYING "$stage/COPYING"
     cp dist/NOTICE.txt "$stage/NOTICE.txt"
+    # The bundled clipart, which Tools > Insert Clipart looks for in a
+    # CLIPART folder beside the program (gem4xe has no Insert Clipart).
+    if [ "$t" != gem4xe ]; then
+        mkdir -p "$stage/CLIPART"
+        cp clipart/*.WMF clipart/CLIPART.TXT "$stage/CLIPART/"
+        cp clipart/README.txt "$stage/CLIPART/README.TXT"
+    fi
     if [ -f "dist/$t/README.txt" ]; then
         cp "dist/$t/README.txt" "$stage/README.txt"
     else
