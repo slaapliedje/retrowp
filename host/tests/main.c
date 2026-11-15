@@ -495,6 +495,7 @@ void test_pagecanvas_disc_guides_tall_pixels(void);
 void test_config_view_keys(void);
 void test_config_ui_scale(void);
 void test_papermetrics_drawing_text_uses_its_face(void);
+void test_papermetrics_fitted_words(void);
 void test_pagecanvas_fit_and_stack(void);
 void test_pagecanvas_paint_caret_hit(void);
 void test_pagecanvas_note_at_foot(void);
@@ -525,6 +526,8 @@ void test_charsheet_postscript(void);
 void test_actions_insert_svg_through_gateway(void);
 void test_rtf_borders_round_trip(void);
 void test_layout_geometry_border_middle_and_double(void);
+void test_layout_geometry_mixed_sizes_share_a_baseline(void);
+void test_layout_geometry_raised_and_lowered_runs(void);
 void test_layout_geometry_later_lines_use_the_left_indent_only(void);
 void test_layout_geometry_spacing_shapes_the_line_boxes(void);
 void test_layout_geometry_default_tabs_advance_to_half_inches(void);
@@ -1251,6 +1254,7 @@ static const test_case g_cases[] = {
     { "config_view_keys", test_config_view_keys },
     { "config_ui_scale", test_config_ui_scale },
     { "papermetrics_drawing_text_uses_its_face", test_papermetrics_drawing_text_uses_its_face },
+    { "papermetrics_fitted_words", test_papermetrics_fitted_words },
     { "pagecanvas_fit_and_stack", test_pagecanvas_fit_and_stack },
     { "pagecanvas_paint_caret_hit", test_pagecanvas_paint_caret_hit },
     { "pagecanvas_note_at_foot", test_pagecanvas_note_at_foot },
@@ -1281,6 +1285,8 @@ static const test_case g_cases[] = {
     { "actions_insert_svg_through_gateway", test_actions_insert_svg_through_gateway },
     { "rtf_borders_round_trip", test_rtf_borders_round_trip },
     { "layout_geometry_border_middle_and_double", test_layout_geometry_border_middle_and_double },
+    { "layout_geometry_mixed_sizes_share_a_baseline", test_layout_geometry_mixed_sizes_share_a_baseline },
+    { "layout_geometry_raised_and_lowered_runs", test_layout_geometry_raised_and_lowered_runs },
     { "layout_geometry_later_lines_use_the_left_indent_only", test_layout_geometry_later_lines_use_the_left_indent_only },
     { "layout_geometry_spacing_shapes_the_line_boxes", test_layout_geometry_spacing_shapes_the_line_boxes },
     { "layout_geometry_default_tabs_advance_to_half_inches", test_layout_geometry_default_tabs_advance_to_half_inches },

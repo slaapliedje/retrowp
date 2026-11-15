@@ -391,16 +391,21 @@ static void draw_line(wp_document *doc, const page_frame *fr, wp_paragraph *para
                text's own colour on a screen's page view. */
             const wp_char_style *tcs = wp_document_cstyle_get(doc, run->style);
             u8 r = 0, g = 0, b = 0;
-            i32 asc = *ascent;
+            i32 own = *ascent, asc, ink;
             if (fr->screen && tcs != NULL) { r = tcs->color_r; g = tcs->color_g; b = tcs->color_b; }
             if (fr->screen) {
                 i32 ba = base_ascent(doc, run->style);
-                if (ba >= 0) asc = ba;
+                if (ba >= 0) own = ba;
             }
-            (void)wp_dev_text(fr->dev->gc, *font, doc, tcs,
-                              at_x(fr, x), at_y(fr, text_top + asc), at_x(fr, x + w) - at_x(fr, x),
-                              at_y(fr, text_top + asc + *descent) - at_y(fr, text_top),
-                              bytes + frag.byte_start, len, r, g, b);
+            /* The line's one baseline (layout.h), whatever this run's size. */
+            asc = wp_run_baseline_twips(line, (u16)(tcs != NULL ? tcs->flags : 0), own);
+            /* On a screen, held to its laid-out width (devout.h). */
+            ink = fr->screen ? wp_dev_ink_twips(*font, bytes + frag.byte_start, len) : -1;
+            (void)wp_dev_text_fit(fr->dev->gc, *font, doc, tcs,
+                                  at_x(fr, x), at_y(fr, text_top + asc), at_x(fr, x + w) - at_x(fr, x),
+                                  at_y(fr, text_top + asc + *descent) - at_y(fr, text_top),
+                                  ink >= 0 ? at_x(fr, x + unzoom(ink)) - at_x(fr, x) : 0,
+                                  bytes + frag.byte_start, len, r, g, b);
         }
         x += w;
         if (frag.is_space) x += extra;

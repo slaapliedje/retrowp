@@ -18,6 +18,7 @@
 #include "docmodel.h"
 #include "strpool.h"
 #include "layout.h"
+#include "devout.h"
 #include "format_txt.h"
 #include "format_ws.h"
 #include "editing.h"
@@ -1269,7 +1270,8 @@ static void draw_content(WindowPtr w)
     plat_font *font = NULL;
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
-    i32 ascent_px = 0;
+    i32 own_ascent_tw = 0;   /* the run's face's ascent; its baseline is the line's */
+    u16 run_flags = 0;
     u8 text_r = 0, text_g = 0, text_b = 0;
     wp_selection sel;
     wp_pos sel_from, sel_to;
@@ -1531,7 +1533,8 @@ static void draw_content(WindowPtr w)
                             have_font = WP_FALSE;
                             if (wp_cstyle_font_open(&g_mac_doc, cs, &font) == WP_OK &&
                                 plat_font_metrics_get(font, &fm) == WP_OK) {
-                                ascent_px = mac_twips_to_px(fm.ascent);
+                                own_ascent_tw = fm.ascent;
+                                run_flags = cs->flags;
                                 cached_style = run->style;
                                 have_font = WP_TRUE;
                                 /* The run's colour travels with its font:
@@ -1551,8 +1554,12 @@ static void draw_content(WindowPtr w)
                     plat_measure_text(font, bytes + frag.byte_start, frag_len, &frag_width_twips);
 
                     if (!frag.is_space) {
+                        /* The word held to its laid-out width (devout.h). */
+                        i32 ink_tw = wp_dev_ink_twips(font, bytes + frag.byte_start, frag_len);
                         g_mac_painted_frags++;
-                        plat_draw_text((plat_gc *)&gc, font, x_px, text_y + ascent_px,
+                        wp_dev_text_fit((plat_gc *)&gc, font, NULL, NULL, x_px,
+                                        text_y + mac_twips_to_px(wp_run_baseline_twips(line, run_flags, own_ascent_tw)),
+                                        mac_twips_to_px(frag_width_twips), 0, ink_tw >= 0 ? mac_twips_to_px(ink_tw) : 0,
                                         bytes + frag.byte_start, frag_len, text_r, text_g, text_b);
                     }
 
@@ -1582,15 +1589,15 @@ static void draw_content(WindowPtr w)
                                                 extra_twips));
 
                     /* y is the line's TOP -- the draw loop above derives
-                       its baseline as y + ascent_px. The old rect spanned
-                       (y - ascent_px)..(y + 2), which is the correct
+                       its baseline as y + the line's ascent. The old rect spanned
+                       (y - ascent)..(y + 2), which is the correct
                        shape measured from a BASELINE, so the caret was
                        painted one full ascent above the line it marks:
                        visible in this fix's own before/after screenshots
                        as a bar floating in the gap above the text.
                        Same shape, re-anchored to the line top. */
                     SetRect(&mark, (short)caret_px, text_y,
-                                    (short)(caret_px + 3), (short)(text_y + ascent_px + 2));
+                                    (short)(caret_px + 3), (short)(text_y + mac_twips_to_px(line->text_ascent_twips) + 2));
                     PaintRect(&mark);
                 }
 

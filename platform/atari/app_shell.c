@@ -12,6 +12,7 @@
 #include "format_rtf.h"
 #include "format_ws.h"
 #include "layout.h"
+#include "devout.h"
 #include "editing.h"
 #include "app_shell.h"
 #include "app_shell_internal.h"
@@ -1365,7 +1366,8 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     plat_font *font = NULL;
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
-    i32 ascent_px = 0;
+    i32 own_ascent_tw = 0;   /* the run's face's ascent; its baseline is the line's */
+    u16 run_flags = 0;
     u8 text_r = 0, text_g = 0, text_b = 0;
     wp_selection sel;
     wp_pos sel_from, sel_to;
@@ -1605,7 +1607,8 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                             have_font = WP_FALSE;
                             if (wp_cstyle_font_open(&g_doc, cs, &font) == WP_OK &&
                                 plat_font_metrics_get(font, &fm) == WP_OK) {
-                                ascent_px = atari_twips_to_px_y(fm.ascent);
+                                own_ascent_tw = fm.ascent;
+                                run_flags = cs->flags;
                                 cached_style = run->style;
                                 have_font = WP_TRUE;
                                 /* The run's colour travels with its font:
@@ -1625,8 +1628,12 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                     plat_measure_text(font, bytes + frag.byte_start, frag_len, &frag_width_twips);
 
                     if (!frag.is_space) {
+                        /* The word held to its laid-out width (devout.h). */
+                        i32 ink_tw = wp_dev_ink_twips(font, bytes + frag.byte_start, frag_len);
                         g_atari_painted_frags++;
-                        plat_draw_text((plat_gc *)&gc, font, x_px, text_y_px + ascent_px,
+                        wp_dev_text_fit((plat_gc *)&gc, font, NULL, NULL, x_px,
+                                        text_y_px + atari_twips_to_px_y(wp_run_baseline_twips(line, run_flags, own_ascent_tw)),
+                                        atari_twips_to_px_x(frag_width_twips), 0, ink_tw >= 0 ? atari_twips_to_px_x(ink_tw) : 0,
                                         bytes + frag.byte_start, frag_len, text_r, text_g, text_b);
                     }
 
@@ -1650,7 +1657,7 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
                    stretched gaps count identically in both.
 
                    Height comes from the LINE's own height_twips, not
-                   ascent_px: ascent_px is carried across loop iterations
+                   a run's ascent, which is carried across loop iterations
                    from whichever run last opened a font, so on an empty
                    paragraph (a blank line, or a brand-new document)
                    nothing in the fragment walk ever sets it and the

@@ -39,6 +39,22 @@ void wp_dev_bind(plat_gc *gc, const wp_dev_ops *ops, void *user);
    its font's height, which a device of its own draws by. */
 wp_status wp_dev_text(plat_gc *gc, plat_font *f, const wp_document *doc, const wp_char_style *cs,
                       i32 x, i32 y, i32 w, i32 h, const u8 *utf8, u32 len, u8 r, u8 g, u8 b);
+
+/* Text held to its laid-out width on a screen. With paper metrics on
+   (papermetrics.h) a word's room is its printed width, and a screen face
+   is often wider -- Geneva against Helvetica's widths -- so drawn whole
+   it runs into the space after it and words touch. wp_dev_ink_twips is
+   the screen face's own width of the text (paper metrics off for the
+   measure), or -1 when paper metrics are off and the layout's width is
+   already the face's. wp_dev_text_fit draws as wp_dev_text, except that
+   on a platform gc a word whose ink_px is wider than its w is set a
+   character at a time, each at its share of w: where the face's own
+   advance up to it falls, scaled into w. A word that fits is drawn
+   whole, as is one character. */
+i32 wp_dev_ink_twips(plat_font *f, const u8 *utf8, u32 len);
+wp_status wp_dev_text_fit(plat_gc *gc, plat_font *f, const wp_document *doc, const wp_char_style *cs,
+                          i32 x, i32 y, i32 w, i32 h, i32 ink_px, const u8 *utf8, u32 len,
+                          u8 r, u8 g, u8 b);
 wp_status wp_dev_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 r, u8 g, u8 b);
 wp_status wp_dev_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent);
 wp_status wp_dev_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b);

@@ -312,7 +312,7 @@ run_atari_app_once() {
     if [ -n "$_count_before" ]; then
         _alive=1
 
-        _wid="$(DISPLAY="$_xvfb_display" xdotool search --name -i 'hatari' 2>/dev/null | head -1)"
+        _wid="$(DISPLAY="$_xvfb_display" xdotool search --name 'hatari' 2>/dev/null | head -1)"
         [ -n "$_wid" ] && DISPLAY="$_xvfb_display" xdotool windowfocus "$_wid" 2>/dev/null
         sleep 1
 

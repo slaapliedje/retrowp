@@ -27,6 +27,7 @@
 #include "app_shell_internal.h"
 #include "docmodel.h"
 #include "layout.h"
+#include "devout.h"
 #include "format_txt.h"
 #include "format_prn.h"
 #include "format_ws.h"
@@ -1402,7 +1403,8 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     plat_font *font = NULL;
     wp_cstyle cached_style = 0;
     wp_bool have_font = WP_FALSE;
-    i32 ascent_px = 0;
+    i32 own_ascent_tw = 0;   /* the run's face's ascent; its baseline is the line's */
+    u16 run_flags = 0;
     u8 text_r = 0, text_g = 0, text_b = 0;
     wp_selection sel;
     wp_pos sel_from, sel_to;
@@ -1710,7 +1712,8 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                             have_font = WP_FALSE;
                             if (wp_cstyle_font_open(&g_amiga_doc, cs, &font) == WP_OK &&
                                 plat_font_metrics_get(font, &fm) == WP_OK) {
-                                ascent_px = amiga_twips_to_px_y(fm.ascent);
+                                own_ascent_tw = fm.ascent;
+                                run_flags = cs->flags;
                                 cached_style = run->style;
                                 have_font = WP_TRUE;
                                 /* The run's colour travels with its font:
@@ -1730,7 +1733,11 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
                     plat_measure_text(font, bytes + frag.byte_start, frag_len, &frag_width_twips);
 
                     if (!frag.is_space) {
-                        plat_draw_text((plat_gc *)&gc, font, x_px, text_y + ascent_px,
+                        /* The word held to its laid-out width (devout.h). */
+                        i32 ink_tw = wp_dev_ink_twips(font, bytes + frag.byte_start, frag_len);
+                        wp_dev_text_fit((plat_gc *)&gc, font, NULL, NULL, x_px,
+                                        text_y + amiga_twips_to_px_y(wp_run_baseline_twips(line, run_flags, own_ascent_tw)),
+                                        amiga_twips_to_px_x(frag_width_twips), 0, ink_tw >= 0 ? amiga_twips_to_px_x(ink_tw) : 0,
                                         bytes + frag.byte_start, frag_len, text_r, text_g, text_b);
                     }
 
@@ -1753,17 +1760,16 @@ static ULONG editor_draw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
 
                    The VERTICAL ANCHOR was off by an ascent: y is the
                    line's TOP (the draw loop derives its baseline as
-                   y + ascent_px), but (y - ascent_px)..(y + 1) is the
+                   y + the ascent), but (y - ascent)..(y + 1) is the
                    span you want measured from a BASELINE, so the caret
                    was painted a full ascent above the line it marked.
                    Height now comes from the LINE's own height_twips
-                   rather than ascent_px -- ascent_px is carried across
+                   rather than a run's ascent, which was carried across
                    loop iterations from whichever run last opened a font,
                    so on an empty paragraph nothing in the fragment walk
-                   ever sets it and the caret would collapse to a stub.
+                   ever set it and the caret would collapse to a stub.
                    Same choice platform/atari/app_shell.c makes (T162);
-                   Mac still uses ascent + 2 and still carries that
-                   dependency (filed separately). */
+                   the Mac spans the line's ascent + 2. */
                 if (is_cursor_para && li == cursor_line_index) {
                     i32 caret_x_px = line_origin_px + amiga_twips_to_px_x(
                         wp_line_cursor_x_twips(&g_amiga_doc, para, line,

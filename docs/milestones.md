@@ -2622,6 +2622,30 @@ the list").
       both views (an xdotool click is too short for TrackControl to see
       the button down: hold it 0.2 s), and under amiberry, which takes no
       clicks, by the knob following G in both views.
+- [x] T19.11 One baseline a line; words held to their width.
+      Every painter put each run's baseline its own ascent below the
+      line's top, so 12 pt beside 36 pt hung from the line's top instead
+      of standing on the big word's baseline. The layout now keeps a
+      line's tallest ascent (wp_line.text_ascent_twips) and its deepest
+      descent-plus-leading apart, the line as tall as the two together,
+      and wp_run_baseline_twips answers where any run's baseline goes;
+      the Atari, Amiga and Mac views and pageprint (page view and paper)
+      all draw on it. Raised and lowered text, which had only looked
+      raised because a smaller face hung from the top, now moves off the
+      baseline by half / a third of its own ascent, and the layout makes
+      room for it (a subscript deepens its line; a superscript beside
+      text its own size costs nothing). Words held to their width: with
+      paper metrics on (the default) a word's room is its printed width,
+      and the Mac's Geneva is wider than Helvetica's published widths, so
+      every word ran into the space after it ("plainline", the character
+      sheet's "ATTRIBUTESANDSKILLS"). A word whose screen face overruns
+      its room is now set a character at a time inside it
+      (wp_dev_text_fit, devout.h), in the three normal views and on a
+      screen's page view; one that fits is drawn whole, and paper is
+      untouched. Also: the Mac, DOS and Atari
+      gates' `xdotool search --name -i` -- this xdotool has no -i (its
+      search ignores case anyway) and 2>/dev/null hid the error, so the
+      window focus never ran; the gates passed on their title-bar click.
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)

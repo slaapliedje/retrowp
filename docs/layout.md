@@ -25,7 +25,8 @@ typedef struct {
     u32 end_run;       /* line's content ends here (exclusive) */
     u32 end_offset;
     i32 width_twips;   /* measured width of this line's content */
-    i32 height_twips;  /* max (ascent+descent+leading) across the line */
+    i32 height_twips;  /* max ascent + max (descent+leading) across the line */
+    i32 text_ascent_twips; /* the one baseline every run sits on (abridged: see layout.h) */
 } wp_line;
 
 typedef struct {

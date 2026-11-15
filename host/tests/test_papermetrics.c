@@ -88,3 +88,38 @@ void test_papermetrics_drawing_text_uses_its_face(void)
     ASSERT_EQ_U32((u32)x, 992);
     ASSERT_TRUE(!plat_metrics_paper());
 }
+
+/* A word whose screen face is wider than its printed width is set a
+   character at a time inside that width (devout.h): "iiii" in Helvetica
+   12 is 4 x 53 twips on paper, but the host's face gives each character
+   120. Held to 20 pixels, the four go 5 apart from x = 100; a word that
+   fits, or paper metrics off, is drawn whole. */
+void test_papermetrics_fitted_words(void)
+{
+    plat_font *f = NULL;
+    plat_gc *gc = (plat_gc *)&f;   /* the host ignores it; it only must not be NULL */
+    i32 x = 0, y = 0;
+    const char *t;
+
+    plat_metrics_set_paper(WP_TRUE);
+    ASSERT_TRUE(plat_font_open((const u8 *)"Helvetica", 9, 240, 0, &f) == WP_OK);
+    if (f == NULL) { plat_metrics_set_paper(WP_FALSE); return; }
+    ASSERT_EQ_U32((u32)wp_dev_ink_twips(f, (const u8 *)"iiii", 4), 480);
+
+    draw_host_reset_text();
+    ASSERT_TRUE(wp_dev_text_fit(gc, f, NULL, NULL, 100, 50, 20, 10, 48, (const u8 *)"iiii", 4, 0, 0, 0) == WP_OK);
+    ASSERT_EQ_U32(draw_host_text_count(), 4);
+    t = draw_host_text_at(3, &x, &y);
+    ASSERT_TRUE(t != NULL && strcmp(t, "i") == 0);
+    ASSERT_EQ_U32((u32)x, 115);
+    ASSERT_EQ_U32((u32)y, 50);
+    ASSERT_TRUE(plat_metrics_paper());   /* put back as it was */
+
+    draw_host_reset_text();
+    ASSERT_TRUE(wp_dev_text_fit(gc, f, NULL, NULL, 100, 50, 60, 10, 48, (const u8 *)"iiii", 4, 0, 0, 0) == WP_OK);
+    ASSERT_EQ_U32(draw_host_text_count(), 1);
+
+    plat_metrics_set_paper(WP_FALSE);
+    ASSERT_TRUE(wp_dev_ink_twips(f, (const u8 *)"iiii", 4) == -1);
+    plat_font_close(f);
+}

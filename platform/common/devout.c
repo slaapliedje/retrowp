@@ -27,6 +27,44 @@ wp_status wp_dev_text(plat_gc *gc, plat_font *f, const wp_document *doc, const w
     return plat_draw_text(gc, f, x, y, utf8, len, r, g, b);
 }
 
+i32 wp_dev_ink_twips(plat_font *f, const u8 *utf8, u32 len)
+{
+    i32 w = -1;
+
+    if (f == NULL || !plat_metrics_paper()) return -1;
+    plat_metrics_set_paper(WP_FALSE);
+    if (plat_measure_text(f, utf8, len, &w) != WP_OK) w = -1;
+    plat_metrics_set_paper(WP_TRUE);
+    return w;
+}
+
+wp_status wp_dev_text_fit(plat_gc *gc, plat_font *f, const wp_document *doc, const wp_char_style *cs,
+                          i32 x, i32 y, i32 w, i32 h, i32 ink_px, const u8 *utf8, u32 len,
+                          u8 r, u8 g, u8 b)
+{
+    i32 total = 0, acc = 0, cw;
+    u32 at, next;
+    wp_bool paper;
+
+    if (OURS(gc) || ink_px <= w || w <= 0 || len == 0 || utf8_next(utf8, len, 0) >= len)
+        return wp_dev_text(gc, f, doc, cs, x, y, w, h, utf8, len, r, g, b);
+    /* The face's own advances: the paper metrics are what made w. */
+    paper = plat_metrics_paper();
+    plat_metrics_set_paper(WP_FALSE);
+    for (at = 0; at < len; at = next) {
+        next = utf8_next(utf8, len, at);
+        if (plat_measure_text(f, utf8 + at, next - at, &cw) == WP_OK) total += cw;
+    }
+    for (at = 0; total > 0 && at < len; at = next) {
+        next = utf8_next(utf8, len, at);
+        (void)plat_draw_text(gc, f, x + (i32)(((long)w * (long)acc) / (long)total), y,
+                             utf8 + at, next - at, r, g, b);
+        if (plat_measure_text(f, utf8 + at, next - at, &cw) == WP_OK) acc += cw;
+    }
+    plat_metrics_set_paper(paper);
+    return total > 0 ? WP_OK : wp_dev_text(gc, f, doc, cs, x, y, w, h, utf8, len, r, g, b);
+}
+
 wp_status wp_dev_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 r, u8 g, u8 b)
 {
     if (OURS(gc)) {

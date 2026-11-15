@@ -329,7 +329,7 @@ EOF
         # dead-end hit during T157). Without an explicit focus the
         # injected keys reach no window at all under bare Xvfb and the
         # app looks wedged when it is merely deaf.
-        _wid="$(DISPLAY="$_xvfb_display" xdotool search --name -i 'basilisk' 2>/dev/null | head -1)"
+        _wid="$(DISPLAY="$_xvfb_display" xdotool search --name 'basilisk' 2>/dev/null | head -1)"
         [ -n "$_wid" ] && DISPLAY="$_xvfb_display" xdotool windowfocus "$_wid" 2>/dev/null
 
         # X focus alone is not enough: BasiliskII only starts delivering

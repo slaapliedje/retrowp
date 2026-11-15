@@ -11,6 +11,7 @@
 typedef struct {
     wp_cstyle  handle;
     plat_font *font;
+    u16        flags;   /* the style's, for a raised or lowered run's shift */
 } font_cache_entry;
 
 typedef struct {
@@ -31,8 +32,7 @@ wp_status wp_cstyle_font_open(const wp_document *doc, const wp_char_style *cs, p
     const wp_font_desc *fd = wp_document_font_get(doc, cs->font);
     u16 flags = (u16)(cs->flags & (PLAT_STYLE_BOLD | PLAT_STYLE_ITALIC | PLAT_STYLE_UNDERLINE | PLAT_STYLE_STRIKE));
     /* Raised or lowered text (a footnote's mark) is set two thirds the
-       size: a painter puts a run's baseline its own ascent below the
-       line's top, so the smaller face sits high on the line. */
+       size, and moved off the line's baseline by wp_run_baseline_twips. */
     i32 size = (cs->flags & (WP_STYLE_SUPER | WP_STYLE_SUB)) ? (cs->size_twips * 2) / 3 : cs->size_twips;
 
     if (fd == NULL) return plat_font_open((const u8 *)"", 0, size, flags, out);
@@ -40,16 +40,19 @@ wp_status wp_cstyle_font_open(const wp_document *doc, const wp_char_style *cs, p
     return plat_font_open(wp_strpool_get(&doc->strings, fd->name), fd->name.length, size, flags, out);
 }
 
-/* Measures bytes[0..len) under cstyle `handle`'s font, returning both
-   its width and line height (ascent+descent+leading). Opens/reuses a
+/* Measures bytes[0..len) under cstyle `handle`'s font, returning its
+   width and how far it reaches above the line's baseline and below it
+   (descent+leading), a raised or lowered run's shift included. Opens/reuses a
    small per-relayout-call font cache; overflow past FONT_CACHE_SIZE
    distinct styles in one paragraph still works, just without caching
    (a temporary font is opened and closed for that one call). The face
    is the style's own (wp_cstyle_font_open); see docs/layout.md. */
 static wp_status measure_and_height(font_cache *cache, wp_document *doc, wp_cstyle handle,
-                                     const u8 *bytes, u32 len, i32 *width_out, i32 *height_out)
+                                     const u8 *bytes, u32 len, i32 *width_out, i32 *ascent_out,
+                                     i32 *below_out)
 {
     plat_font *f = NULL;
+    u16 flags = 0;
     wp_status st;
     plat_font_metrics metrics;
     wp_bool temp_font = WP_FALSE;
@@ -58,6 +61,7 @@ static wp_status measure_and_height(font_cache *cache, wp_document *doc, wp_csty
     for (i = 0; i < cache->count; i++) {
         if (cache->entries[i].handle == handle) {
             f = cache->entries[i].font;
+            flags = cache->entries[i].flags;
             break;
         }
     }
@@ -68,10 +72,12 @@ static wp_status measure_and_height(font_cache *cache, wp_document *doc, wp_csty
 
         st = wp_cstyle_font_open(doc, style, &f);
         if (st != WP_OK) return st;
+        flags = style->flags;
 
         if (cache->count < FONT_CACHE_SIZE) {
             cache->entries[cache->count].handle = handle;
             cache->entries[cache->count].font = f;
+            cache->entries[cache->count].flags = style->flags;
             cache->count++;
         } else {
             temp_font = WP_TRUE;
@@ -89,10 +95,32 @@ static wp_status measure_and_height(font_cache *cache, wp_document *doc, wp_csty
         if (temp_font) plat_font_close(f);
         return st;
     }
-    *height_out = metrics.ascent + metrics.descent + metrics.leading;
+    {
+        i32 shift = wp_run_baseline_shift_twips(flags, metrics.ascent);
+        *ascent_out = metrics.ascent + (shift > 0 ? shift : 0);
+        *below_out = metrics.descent + metrics.leading + (shift < 0 ? -shift : 0);
+    }
 
     if (temp_font) plat_font_close(f);
     return WP_OK;
+}
+
+/* A raised run is lifted half its own (two-thirds size) ascent, about a
+   third of the full face's; a lowered one dropped a third of it. */
+i32 wp_run_baseline_shift_twips(u16 style_flags, i32 own_ascent_twips)
+{
+    if (style_flags & WP_STYLE_SUPER) return own_ascent_twips / 2;
+    if (style_flags & WP_STYLE_SUB) return -(own_ascent_twips / 3);
+    return 0;
+}
+
+i32 wp_run_baseline_twips(const wp_line *line, u16 style_flags, i32 own_ascent_twips)
+{
+    i32 shift = wp_run_baseline_shift_twips(style_flags, own_ascent_twips);
+    i32 base = (line != NULL) ? line->text_ascent_twips : 0;
+
+    if (base <= 0) base = own_ascent_twips + (shift > 0 ? shift : 0);
+    return base - shift;
 }
 
 /* Three token classes: a word (anything but blank or tab), a run of
@@ -107,7 +135,8 @@ typedef struct {
     u32 start_run, start_offset;
     u32 end_run, end_offset;
     i32 width;
-    i32 height;
+    i32 ascent;   /* above the baseline */
+    i32 below;    /* below it: descent and leading */
 } token_t;
 
 #define MAX_TOKENS 512
@@ -147,7 +176,7 @@ static wp_status tokenize(wp_document *doc, const wp_paragraph *para,
         while (offset < run->text.length && count < MAX_TOKENS) {
             u32 seg_start = offset;
             u8 seg_kind = byte_class(bytes[offset]);
-            i32 width, height;
+            i32 width, asc, below;
             wp_status st;
 
             offset = utf8_next(bytes, run->text.length, offset);
@@ -161,11 +190,11 @@ static wp_status tokenize(wp_document *doc, const wp_paragraph *para,
                 /* Height only: measure a blank so the tab's line is as
                    tall as its font, without asking the font for a
                    control character's glyph. */
-                st = measure_and_height(cache, doc, run->style, (const u8 *)" ", 1, &width, &height);
+                st = measure_and_height(cache, doc, run->style, (const u8 *)" ", 1, &width, &asc, &below);
                 width = 0;
             } else {
                 st = measure_and_height(cache, doc, run->style, bytes + seg_start,
-                                         offset - seg_start, &width, &height);
+                                         offset - seg_start, &width, &asc, &below);
             }
             if (st != WP_OK) return st;
 
@@ -179,7 +208,8 @@ static wp_status tokenize(wp_document *doc, const wp_paragraph *para,
                 tokens[count - 1].end_run = r_idx;
                 tokens[count - 1].end_offset = offset;
                 tokens[count - 1].width += width;
-                if (height > tokens[count - 1].height) tokens[count - 1].height = height;
+                if (asc > tokens[count - 1].ascent) tokens[count - 1].ascent = asc;
+                if (below > tokens[count - 1].below) tokens[count - 1].below = below;
             } else {
                 tokens[count].kind = seg_kind;
                 tokens[count].start_run = r_idx;
@@ -187,7 +217,8 @@ static wp_status tokenize(wp_document *doc, const wp_paragraph *para,
                 tokens[count].end_run = r_idx;
                 tokens[count].end_offset = offset;
                 tokens[count].width = width;
-                tokens[count].height = height;
+                tokens[count].ascent = asc;
+                tokens[count].below = below;
                 count++;
             }
         }
@@ -304,8 +335,9 @@ static void line_place(const para_geom *g, wp_line *line, wp_bool first)
 }
 
 static wp_status emit_line(wp_paragraph_layout *layout, u32 start_run, u32 start_offset,
-                            u32 end_run, u32 end_offset, i32 width, i32 height)
+                            u32 end_run, u32 end_offset, i32 width, i32 ascent, i32 below)
 {
+    i32 height = ascent + below;
     wp_status st;
     wp_line *line;
 
@@ -320,6 +352,7 @@ static wp_status emit_line(wp_paragraph_layout *layout, u32 start_run, u32 start
     line->width_twips = width;
     line->height_twips = height;
     line->text_height_twips = height;
+    line->text_ascent_twips = ascent;
     line->text_top_twips = 0;
     line->x_twips = 0;
     line->avail_twips = width;
@@ -397,7 +430,7 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
     wp_bool have_line_content;
     wp_bool is_first_line;
     u32 line_first_tok = 0, line_last_tok = 0;
-    i32 line_width = 0, line_height = 0;
+    i32 line_width = 0, line_ascent = 0, line_below = 0;
     i32 pending_space_width = 0;
     u32 i;
 
@@ -444,7 +477,7 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
         para_geom ig = g;
 
         ig.line_spacing = 0;   /* a picture is as tall as it is */
-        st = emit_line(layout, 0, 0, 0, 0, w, h);
+        st = emit_line(layout, 0, 0, 0, 0, w, h, 0);
         if (st != WP_OK) return st;
         line_box(&ig, &layout->lines[0], h, WP_TRUE, WP_TRUE);
         line_place(&ig, &layout->lines[0], WP_TRUE);
@@ -478,16 +511,16 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
         /* Empty paragraph: exactly one zero-width line, sized by the
            first run's style if any exists, else the document default. */
         wp_cstyle style = (para->run_count > 0) ? para->runs[0].style : doc->default_cstyle;
-        i32 dummy_width, height;
+        i32 dummy_width, asc, below;
 
-        st = measure_and_height(&cache, doc, style, (const u8 *)"", 0, &dummy_width, &height);
+        st = measure_and_height(&cache, doc, style, (const u8 *)"", 0, &dummy_width, &asc, &below);
         if (st != WP_OK) { font_cache_close_all(&cache); mem_free(tokens); return st; }
 
-        st = emit_line(layout, 0, 0, 0, 0, 0, height);
+        st = emit_line(layout, 0, 0, 0, 0, 0, asc, below);
         font_cache_close_all(&cache);
         mem_free(tokens);
         if (st != WP_OK) return st;
-        line_box(&g, &layout->lines[0], height, WP_TRUE, WP_TRUE);
+        line_box(&g, &layout->lines[0], asc + below, WP_TRUE, WP_TRUE);
         line_place(&g, &layout->lines[0], WP_TRUE);
 
         para->layout_dirty = WP_FALSE;
@@ -522,17 +555,19 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
         if (!have_line_content) {
             line_first_tok = i;
             line_width = t->width;
-            line_height = t->height;
+            line_ascent = t->ascent;
+            line_below = t->below;
             have_line_content = WP_TRUE;
         } else {
             i32 candidate = line_width + pending_space_width + t->width;
             if (candidate <= available) {
                 line_width = candidate;
-                if (t->height > line_height) line_height = t->height;
+                if (t->ascent > line_ascent) line_ascent = t->ascent;
+                if (t->below > line_below) line_below = t->below;
             } else {
                 st = emit_line(layout, tokens[line_first_tok].start_run, tokens[line_first_tok].start_offset,
                                 tokens[line_last_tok].end_run, tokens[line_last_tok].end_offset,
-                                line_width, line_height);
+                                line_width, line_ascent, line_below);
                 if (st == WP_OK) {
                     st = resolve_line_tabs(layout, &layout->lines[layout->line_count - 1], &g,
                                            tokens, line_first_tok, line_last_tok, is_first_line);
@@ -546,7 +581,8 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
                 }
                 line_first_tok = i;
                 line_width = t->width;
-                line_height = t->height;
+                line_ascent = t->ascent;
+                line_below = t->below;
             }
         }
         pending_space_width = 0;
@@ -556,7 +592,7 @@ wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 conten
     if (have_line_content) {
         st = emit_line(layout, tokens[line_first_tok].start_run, tokens[line_first_tok].start_offset,
                         tokens[line_last_tok].end_run, tokens[line_last_tok].end_offset,
-                        line_width, line_height);
+                        line_width, line_ascent, line_below);
         if (st == WP_OK) {
             st = resolve_line_tabs(layout, &layout->lines[layout->line_count - 1], &g,
                                    tokens, line_first_tok, line_last_tok, is_first_line);

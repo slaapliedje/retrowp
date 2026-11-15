@@ -42,6 +42,8 @@ typedef struct {
     i32 avail_twips;        /* width available to this line (justify's target) */
     i32 text_top_twips;     /* box top to text top */
     i32 text_height_twips;  /* the text's own height */
+    i32 text_ascent_twips;  /* text top to the line's one baseline: its tallest run's ascent
+                               (wp_run_baseline_twips places each run on it) */
     u32 first_tab;          /* index into the layout's tab_widths of this line's first tab */
     u32 tab_count;          /* tabs on this line */
     u32 page;               /* 0-based page the line falls on (wp_document_mark_pages) */
@@ -64,6 +66,18 @@ typedef struct {
     u8  column;
     i32 col_x_twips;
 } wp_line;
+
+/* Every run on a line sits on one baseline, its tallest run's ascent
+   below the text's top, whatever size each is set in -- a word in a
+   bigger face does not push its smaller neighbours down to its own top.
+   A raised run (WP_STYLE_SUPER) sits above it and a lowered one
+   (WP_STYLE_SUB) below, by wp_run_baseline_shift_twips: positive is up,
+   and the layout makes room for the shift. own_ascent_twips is the run's
+   face's ascent in the metrics the layout measured in.
+   wp_run_baseline_twips answers where a painter draws the run's
+   baseline, from the text's top. */
+i32 wp_run_baseline_shift_twips(u16 style_flags, i32 own_ascent_twips);
+i32 wp_run_baseline_twips(const wp_line *line, u16 style_flags, i32 own_ascent_twips);
 
 #define WP_LINE_ROW_FIRST   0x01   /* the first line of a table row */
 #define WP_LINE_FRAME       0x02   /* a line in a frame: placed by frame_top + row_dy, no advance */

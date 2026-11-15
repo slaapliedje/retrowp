@@ -336,3 +336,74 @@ void test_layout_geometry_border_middle_and_double(void)
     ASSERT_TRUE(l != NULL && !wp_line_border_slice(&doc, para, &l->lines[0], WP_TRUE, WP_TRUE, 4000, &s));
     wp_document_free(&doc);
 }
+
+static wp_cstyle sized_style(wp_document *doc, i32 size, u16 flags)
+{
+    wp_char_style cs;
+    wp_cstyle h = 0;
+
+    memset(&cs, 0, sizeof(cs));
+    cs.size_twips = size;
+    cs.flags = flags;
+    if (wp_document_cstyle_add(doc, &cs, &h) != WP_OK) return 0;
+    return h;
+}
+
+static void add_run(wp_document *doc, wp_paragraph *para, const char *text, wp_cstyle style)
+{
+    wp_span span;
+    u16 idx;
+
+    ASSERT_TRUE(wp_strpool_append(&doc->strings, (const u8 *)text, (u32)strlen(text), &span) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, span, style, &idx) == WP_OK);
+}
+
+/* One baseline a line: 12 pt beside 24 pt (stub metrics: ascent the
+   size, descent a quarter) is a line the big face's ascent above the
+   baseline and its descent below, and the small run is drawn on that
+   baseline, not hung from the line's top at its own ascent. */
+void test_layout_geometry_mixed_sizes_share_a_baseline(void)
+{
+    wp_document doc;
+    wp_paragraph *para = one_para(&doc, "ab\n");
+    wp_paragraph_layout *l;
+
+    add_run(&doc, para, "CD", sized_style(&doc, 480, 0));
+    l = relayout(&doc, para, 6000);
+    ASSERT_TRUE(l != NULL && l->line_count == 1);
+    if (l == NULL || l->line_count != 1) { wp_document_free(&doc); return; }
+    ASSERT_EQ_U32((u32)l->lines[0].text_ascent_twips, 480);
+    ASSERT_EQ_U32((u32)l->lines[0].text_height_twips, 600);
+    ASSERT_EQ_U32((u32)wp_run_baseline_twips(&l->lines[0], 0, 240), 480);
+    ASSERT_EQ_U32((u32)wp_run_baseline_twips(&l->lines[0], 0, 480), 480);
+    wp_document_free(&doc);
+}
+
+/* A lowered run (two-thirds size: a 160-twip face) drops a third of its
+   ascent below the baseline, and the line grows by what it reaches past
+   the 12 pt descent; a raised one lifts half its ascent and, at the same
+   size as its neighbours, fits under their ascent and costs nothing. */
+void test_layout_geometry_raised_and_lowered_runs(void)
+{
+    wp_document doc;
+    wp_paragraph *para = one_para(&doc, "x\n");
+    wp_paragraph_layout *l;
+
+    add_run(&doc, para, "2", sized_style(&doc, 240, (u16)WP_STYLE_SUB));
+    l = relayout(&doc, para, 6000);
+    ASSERT_TRUE(l != NULL && l->line_count == 1);
+    if (l == NULL || l->line_count != 1) { wp_document_free(&doc); return; }
+    ASSERT_EQ_U32((u32)l->lines[0].text_ascent_twips, 240);
+    ASSERT_EQ_U32((u32)l->lines[0].text_height_twips, 240 + 40 + 53);
+    ASSERT_EQ_U32((u32)wp_run_baseline_twips(&l->lines[0], (u16)WP_STYLE_SUB, 160), 293);
+    wp_document_free(&doc);
+
+    para = one_para(&doc, "x\n");
+    add_run(&doc, para, "2", sized_style(&doc, 240, (u16)WP_STYLE_SUPER));
+    l = relayout(&doc, para, 6000);
+    ASSERT_TRUE(l != NULL && l->line_count == 1);
+    if (l == NULL || l->line_count != 1) { wp_document_free(&doc); return; }
+    ASSERT_EQ_U32((u32)l->lines[0].text_height_twips, 300);
+    ASSERT_EQ_U32((u32)wp_run_baseline_twips(&l->lines[0], (u16)WP_STYLE_SUPER, 160), 160);
+    wp_document_free(&doc);
+}

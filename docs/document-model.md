@@ -691,9 +691,10 @@ be renumbered away; a caret inside a reference types after it.
 Insert Footnote (`wp_notes_insert`) is made of journaled edits -- the
 reference, a split after the paragraph and its notes, the mark and a
 space -- so Undo takes it back. Raised and lowered text is opened at
-two thirds of its size (`wp_cstyle_font_open`), which is what sets a
-reference high on its line: a painter puts each run's baseline its own
-ascent below the line's top.
+two thirds of its size (`wp_cstyle_font_open`) and drawn off the
+line's baseline (`wp_run_baseline_twips`, layout.h): raised by half its
+own ascent, lowered by a third. Every run on a line shares one
+baseline, the tallest run's ascent below the text's top.
 
 RTF: Word's form, `{\super\chftn}{\footnote\pard\plain {\super\chftn}
 ...\par}` at the reference, the note's paragraphs written there and not

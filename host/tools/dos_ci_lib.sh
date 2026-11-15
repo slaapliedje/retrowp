@@ -185,7 +185,7 @@ run_dos_app_once() {
     if [ -n "$_count_before" ]; then
         _alive=1
 
-        _wid="$(DISPLAY="$_xvfb_display" xdotool search --name -i 'dosbox' 2>/dev/null | head -1)"
+        _wid="$(DISPLAY="$_xvfb_display" xdotool search --name 'dosbox' 2>/dev/null | head -1)"
         [ -n "$_wid" ] && DISPLAY="$_xvfb_display" xdotool windowfocus "$_wid" 2>/dev/null
         sleep 1
 
