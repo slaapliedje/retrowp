@@ -18,6 +18,8 @@ i32 wp_pageview_wrap_twips(const wp_document *doc, u32 section, i32 window_twips
 
 static u8 g_metrics_mode = WP_METRICS_AS_SET;
 static wp_bool g_relayout_short = WP_FALSE;   /* the last relayout left a paragraph unlaid */
+static wp_bool g_short_told = WP_FALSE;       /* this shortage was already news */
+static wp_bool g_short_news = WP_FALSE;       /* ...and is waiting to be told */
 static i16 g_screen_wider = -1;   /* not measured yet */
 
 void wp_pageview_metrics(u8 mode)
@@ -82,12 +84,26 @@ u32 wp_pageview_relayout(wp_document *doc, i32 window_twips)
             if (wp_paragraph_relayout(doc, para, w) != WP_OK) g_relayout_short = WP_TRUE;
         }
     }
+    if (!g_relayout_short) {
+        g_short_told = WP_FALSE;
+    } else if (!g_short_told) {
+        g_short_told = WP_TRUE;
+        g_short_news = WP_TRUE;
+    }
     return wp_document_mark_pages(doc);
 }
 
 wp_bool wp_pageview_relayout_short(void)
 {
     return g_relayout_short;
+}
+
+wp_bool wp_pageview_short_news(void)
+{
+    wp_bool news = g_short_news;
+
+    g_short_news = WP_FALSE;
+    return news;
 }
 
 u32 wp_pageview_cursor_page(wp_document *doc, const wp_pos *cursor, u32 *page_count_out)

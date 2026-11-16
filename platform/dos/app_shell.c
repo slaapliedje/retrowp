@@ -446,14 +446,6 @@ static const char g_sample_text[] =
    unconditionally -- see linebreak.c), so without this check the
    relayout-before-every-paint below would re-measure a completely
    unchanged document on every redraw. */
-/* Set when a relayout first leaves a paragraph unlaid (out of memory):
-   the main loop says so once, after the repaint, rather than the
-   document just coming up blank. Cleared when a relayout succeeds, so a
-   second shortage is told about too. */
-static void dos_show_message(const char *msg);
-static wp_bool g_layout_short_told = WP_FALSE;
-static wp_bool g_layout_short_pending = WP_FALSE;
-
 static void relayout_document(i32 content_width_twips)
 {
     /* The page's text column, or the window when that is narrower
@@ -461,21 +453,6 @@ static void relayout_document(i32 content_width_twips)
        breaks are marked. */
     g_content_width_twips = content_width_twips;
     (void)wp_pageview_relayout(&g_doc, content_width_twips);
-    if (!wp_pageview_relayout_short()) {
-        g_layout_short_told = WP_FALSE;
-    } else if (!g_layout_short_told) {
-        g_layout_short_told = WP_TRUE;
-        g_layout_short_pending = WP_TRUE;
-    }
-}
-
-/* Told after a repaint, never from inside one: the prompt row is part of
-   the screen being painted. */
-static void dos_layout_short_take(void)
-{
-    if (!g_layout_short_pending) return;
-    g_layout_short_pending = WP_FALSE;
-    dos_show_message("Out of memory: part of the document can't be shown. Save your work.");
 }
 
 /* Replaces the currently-open document with new_doc (already built and
@@ -1822,8 +1799,8 @@ void app_shell_run(void)
     }
 
     redraw_screen();
-    if (g_layout_short_pending) {
-        dos_layout_short_take();
+    if (wp_pageview_short_news()) {
+        dos_show_message(WP_PAGEVIEW_SHORT_MSG);
         redraw_screen();
     }
 
@@ -1855,8 +1832,10 @@ void app_shell_run(void)
             if (msg != NULL) dos_show_message(msg);
         }
         redraw_screen();
-        if (g_layout_short_pending) {
-            dos_layout_short_take();
+        /* After a repaint, never inside one (pageview.h): a relayout
+           that ran out of memory is told once, not left a blank page. */
+        if (wp_pageview_short_news()) {
+            dos_show_message(WP_PAGEVIEW_SHORT_MSG);
             redraw_screen();
         }
         /* After dispatch and repaint, never before: a dispatch or paint

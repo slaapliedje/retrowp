@@ -40,6 +40,16 @@ u32 wp_pageview_relayout(wp_document *doc, i32 window_twips);
    once, not at every repaint. */
 wp_bool wp_pageview_relayout_short(void);
 
+/* WP_TRUE once when a relayout has newly come up short; then WP_FALSE
+   until a relayout succeeds and a later one falls short again. A shell
+   asks after it has handled an event and repainted -- never from inside
+   a repaint, where a prompt would draw over the screen being painted --
+   and tells the user WP_PAGEVIEW_SHORT_MSG. */
+wp_bool wp_pageview_short_news(void);
+
+/* 68 characters: it fits DOS's prompt row beside "(Enter=OK)". */
+#define WP_PAGEVIEW_SHORT_MSG "Out of memory: part of the document can't be shown. Save your work."
+
 /* How layout measures (papermetrics.h), chosen at each relayout.
 
    WP_METRICS_AS_SET, the default: left as plat_metrics_set_paper has it

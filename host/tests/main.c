@@ -556,6 +556,8 @@ void test_layout_geometry_fragments_caret_and_clicks_agree_on_tabs(void);
 void test_layout_geometry_styles_with_different_tabs_stay_apart(void);
 void test_layout_geometry_page_break_before_starts_a_page(void);
 void test_layout_single_word_wider_than_column_overflows(void);
+void test_layout_failed_relayout_stays_dirty(void);
+void test_pageview_short_news_once_per_shortage(void);
 void test_layout_empty_paragraph_gets_one_zero_width_line(void);
 void test_layout_word_spanning_run_boundary_is_one_token(void);
 void test_layout_editing_one_paragraph_does_not_remeasure_whole_document(void);
@@ -1336,6 +1338,8 @@ static const test_case g_cases[] = {
     { "layout_geometry_styles_with_different_tabs_stay_apart", test_layout_geometry_styles_with_different_tabs_stay_apart },
     { "layout_geometry_page_break_before_starts_a_page", test_layout_geometry_page_break_before_starts_a_page },
     { "layout_single_word_wider_than_column_overflows", test_layout_single_word_wider_than_column_overflows },
+    { "layout_failed_relayout_stays_dirty", test_layout_failed_relayout_stays_dirty },
+    { "pageview_short_news_once_per_shortage", test_pageview_short_news_once_per_shortage },
     { "layout_empty_paragraph_gets_one_zero_width_line", test_layout_empty_paragraph_gets_one_zero_width_line },
     { "layout_word_spanning_run_boundary_is_one_token", test_layout_word_spanning_run_boundary_is_one_token },
     { "layout_editing_one_paragraph_does_not_remeasure_whole_document", test_layout_editing_one_paragraph_does_not_remeasure_whole_document },

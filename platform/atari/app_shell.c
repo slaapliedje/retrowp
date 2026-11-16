@@ -1144,8 +1144,8 @@ static i32 g_content_width_twips = 0;
    paint_document() is a no-op in that case. */
 static wp_app_ctx g_ctx;
 
-/* M8.5 Phase 10: the help system. g_help_doc is parsed ONCE at startup
-   from the generated g_help_source_retrowp array (build/generated/
+/* M8.5 Phase 10: the help system. g_help_doc is parsed when Help opens
+   and freed when it closes (help_doc_ensure, T20.9) from the generated g_help_source_retrowp array (build/generated/
    help_retrowp.h, produced from docs/help/retrowp.help by host/tools/
    gen_help_header.c -- see docs/help.md) -- help content ships compiled
    into RETROWP.PRG, no runtime file dependency the way the optional
@@ -4862,10 +4862,31 @@ static void invoke_backend_action(short window_handle, VdiHdl vdi, wp_action_id 
    menu's "About RetroWP..." item (opens at "About") so both routes
    through the one help system this project already built (M8.5 Phase
    10) rather than a second, ad hoc dialog. */
+/* The manual is parsed when Help opens and freed when it closes: held
+   for the whole run it was ~40 KB of heap, which a 1 MB ST with a
+   document open cannot spare (DOS was found drawing a blank page for the
+   same reason, T20.9). */
+static wp_bool help_doc_ensure(void)
+{
+    if (g_help_doc_loaded) return WP_TRUE;
+    g_help_doc_loaded = (wp_bool)(wp_help_doc_parse(g_help_source_retrowp,
+                                                     (u32)g_help_source_retrowp_len,
+                                                     &g_help_doc) == WP_OK);
+    if (!g_help_doc_loaded) wp_action_tell(&g_ctx, "Not enough memory to open Help.");
+    return g_help_doc_loaded;
+}
+
+static void help_doc_release(void)
+{
+    if (!g_help_doc_loaded) return;
+    wp_help_doc_free(&g_help_doc);
+    g_help_doc_loaded = WP_FALSE;
+}
+
 static void open_help_node(short window_handle, VdiHdl vdi,
                             const char *node_name, u32 node_name_len)
 {
-    if (!g_help_doc_loaded) return;
+    if (!help_doc_ensure()) return;
     {
         u32 node = wp_help_doc_find_node(&g_help_doc, (const u8 *)node_name, node_name_len);
         wp_help_view_init(&g_help_view, &g_help_doc,
@@ -4922,6 +4943,7 @@ wp_bool wp_dispatch_key(short window_handle, VdiHdl vdi, short key, short kstate
     if (g_help_active) {
         if (wp_help_view_feed_key(&g_help_view, ev)) {
             g_help_active = WP_FALSE;
+            help_doc_release();
             g_rulerbar_damaged = WP_TRUE;   /* the manual was drawn over it */
         }
         redraw_window(window_handle, vdi);
@@ -5801,14 +5823,7 @@ void app_shell_run(void)
         g_ctx.view.line_px = atari_twips_to_px_y; /* the conversion paint_document advances y with */
     }
 
-    /* M8.5 Phase 10: parses the compiled-in help content once at
-       startup. WP_NOMEM is the only realistic failure (the source is
-       fixed, already-tested content, not user input) -- if it somehow
-       happens, g_help_doc_loaded stays WP_FALSE and F1 is a silent
-       no-op rather than a crash; see wp_dispatch_key. */
-    g_help_doc_loaded = (wp_bool)(wp_help_doc_parse(g_help_source_retrowp,
-                                                     (u32)g_help_source_retrowp_len,
-                                                     &g_help_doc) == WP_OK);
+    /* The help manual is parsed when Help opens (help_doc_ensure). */
 
     vdi_handle = graf_handle(&wcell, &hcell, &dummy, &dummy);
     for (dummy = 0; dummy < 10; dummy++) work_in[dummy] = 1;
@@ -5930,6 +5945,10 @@ void app_shell_run(void)
         if (!quit && (events & MU_BUTTON)) {
             atari_click(window_handle, vdi_handle, mx, my, mkstate);
         }
+        /* After the event and its redraw, never inside a redraw
+           (pageview.h): a relayout that ran out of memory says so once
+           rather than leaving the page blank. */
+        if (!quit && wp_pageview_short_news()) wp_action_tell(&g_ctx, WP_PAGEVIEW_SHORT_MSG);
         /* Heartbeat, after dispatch rather than before: a dispatch that
            crashes or wedges must NOT be able to bump the count first. */
         if (g_atari_ci_active && !quit) {
@@ -5945,10 +5964,7 @@ void app_shell_run(void)
         g_ctx.doc_loaded = WP_FALSE;
     }
 
-    if (g_help_doc_loaded) {
-        wp_help_doc_free(&g_help_doc);
-        g_help_doc_loaded = WP_FALSE;
-    }
+    help_doc_release();
 
     if (g_spell_dict != NULL) {
         spell_dict_close(g_spell_dict);

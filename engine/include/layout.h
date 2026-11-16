@@ -125,7 +125,8 @@ i32 wp_tab_next_stop(const wp_para_style *pstyle, i32 x_twips, u8 *kind_out);
    narrowed by the paragraph's own indent_left/indent_right/indent_first
    -- see docs/layout.md). Allocates para->layout on first use, reuses
    and regrows it on subsequent calls. Clears para->layout_dirty on
-   success. Safe to call unconditionally -- callers wanting the "only
+   success and sets it on failure, so a paragraph that ran out of memory
+   is tried again by the next relayout rather than skipped. Safe to call unconditionally -- callers wanting the "only
    recompute if needed" behavior check layout_dirty themselves (see
    wp_document_paginate). */
 wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para,

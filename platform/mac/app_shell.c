@@ -531,9 +531,30 @@ static void do_file_save(wp_bool save_as)
    action's menu dispatch, or mac_dispatch_key's F1 handling) already
    triggers an InvalRect afterward -- see both call sites -- so this
    doesn't force a redraw itself. */
-static void open_help_node(const char *node_name, u32 node_name_len)
+/* The manual is parsed when Help opens and freed when it closes: held
+   for the whole run it was ~40 KB of a heap that a 1 MB Mac Plus with
+   a document open cannot spare (DOS was found drawing a blank page for
+   the same reason, T20.9). */
+static wp_bool help_doc_ensure(void)
+{
+    if (g_help_doc_loaded) return WP_TRUE;
+    g_help_doc_loaded = (wp_bool)(wp_help_doc_parse(g_help_source_retrowp,
+                                                     (u32)g_help_source_retrowp_len,
+                                                     &g_help_doc) == WP_OK);
+    if (!g_help_doc_loaded) wp_action_tell(&g_ctx, "Not enough memory to open Help.");
+    return g_help_doc_loaded;
+}
+
+static void help_doc_release(void)
 {
     if (!g_help_doc_loaded) return;
+    wp_help_doc_free(&g_help_doc);
+    g_help_doc_loaded = WP_FALSE;
+}
+
+static void open_help_node(const char *node_name, u32 node_name_len)
+{
+    if (!help_doc_ensure()) return;
     {
         u32 node = wp_help_doc_find_node(&g_help_doc, (const u8 *)node_name, node_name_len);
         wp_help_view_init(&g_help_view, &g_help_doc, (node != WP_HELP_NODE_NONE) ? node : 0);
@@ -1044,7 +1065,10 @@ static wp_bool mac_dispatch_key(wp_key_event ev)
        showing help is a harmless no-op rather than resetting the
        user's position. */
     if (g_help_active) {
-        if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
+        if (wp_help_view_feed_key(&g_help_view, ev)) {
+            g_help_active = WP_FALSE;
+            help_doc_release();
+        }
         return WP_FALSE;
     }
     /* No 68k Mac or PC keyboard here has a dedicated HELP key, but the
@@ -2236,16 +2260,7 @@ void app_shell_run(void)
     g_ui_scale = wp_rulerbar_ui_scale((i32)(qd.screenBits.bounds.right - qd.screenBits.bounds.left), cfg.ui_scale);
     load_sample_document();
 
-    /* Phase 5: parsed ONCE at startup from the generated
-       g_help_source_retrowp array (build/generated/help_retrowp.h,
-       shared verbatim with every other backend -- produced from
-       docs/help/retrowp.help by host/tools/gen_help_header.c, see
-       docs/help.md). If parsing ever fails, g_help_doc_loaded stays
-       WP_FALSE and F1/Help are a silent no-op rather than a crash
-       (open_help_node's own guard). */
-    g_help_doc_loaded = (wp_bool)(wp_help_doc_parse(g_help_source_retrowp,
-                                                     (u32)g_help_source_retrowp_len,
-                                                     &g_help_doc) == WP_OK);
+    /* The help manual is parsed when Help opens (help_doc_ensure). */
 
     /* "\024" is the Apple-logo character (0x14) -- the Menu Manager's
        own documented convention for recognizing the Apple menu. */
@@ -2380,6 +2395,13 @@ void app_shell_run(void)
                 break;
             }
         }
+        /* After the event and its update, never inside an update
+           (pageview.h): a relayout that ran out of memory says so once
+           rather than leaving the page blank. */
+        if (wp_pageview_short_news()) {
+            wp_action_tell(&g_ctx, WP_PAGEVIEW_SHORT_MSG);
+            InvalRect(&g_win->portRect);
+        }
         if (g_ctx.quit_requested) g_quit = WP_TRUE;
         if (g_quit) break;
 
@@ -2397,7 +2419,7 @@ void app_shell_run(void)
         wp_undo_journal_free(&g_mac_journal);
         wp_document_free(&g_mac_doc);
     }
-    if (g_help_doc_loaded) wp_help_doc_free(&g_help_doc);
+    help_doc_release();
     wp_tools_shutdown();
     DisposeWindow(g_win);
 }

@@ -419,7 +419,7 @@ void wp_paragraph_layout_free(wp_paragraph *para)
     para->layout = NULL;
 }
 
-wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 content_width_twips)
+static wp_status relayout_para(wp_document *doc, wp_paragraph *para, i32 content_width_twips)
 {
     wp_paragraph_layout *layout;
     font_cache cache;
@@ -647,4 +647,17 @@ wp_bool wp_line_border_slice(const wp_document *doc, const wp_paragraph *para,
     out->top = first ? ps->space_before : 0;
     out->bottom = line->height_twips - (last ? ps->space_after : 0);
     return WP_TRUE;
+}
+
+/* A paragraph whose layout failed (out of memory, nearly always) is left
+   dirty, so the next relayout tries it again. Its layout record already
+   carries the new width and no lines, and the "skip what is clean and
+   the right width" test every caller makes would otherwise pass it over
+   for good: blank, even once memory was freed. */
+wp_status wp_paragraph_relayout(wp_document *doc, wp_paragraph *para, i32 content_width_twips)
+{
+    wp_status st = relayout_para(doc, para, content_width_twips);
+
+    if (st != WP_OK) para->layout_dirty = WP_TRUE;
+    return st;
 }

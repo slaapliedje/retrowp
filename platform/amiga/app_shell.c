@@ -427,9 +427,30 @@ static void do_file_save(wp_bool save_as)
    exist (Phase 3). The caller (invoke_backend_action's menu dispatch,
    or amiga_dispatch_key's F1 handling) already triggers a MUI_Redraw
    afterward -- see both call sites -- so this doesn't force one itself. */
-static void open_help_node(const char *node_name, u32 node_name_len)
+/* The manual is parsed when Help opens and freed when it closes: held
+   for the whole run it was ~40 KB of heap, the margin a small Amiga with
+   a document open does not have (DOS was found drawing a blank page for
+   the same reason, T20.9). */
+static wp_bool help_doc_ensure(void)
+{
+    if (g_help_doc_loaded) return WP_TRUE;
+    g_help_doc_loaded = (wp_bool)(wp_help_doc_parse(g_help_source_retrowp,
+                                                     (u32)g_help_source_retrowp_len,
+                                                     &g_help_doc) == WP_OK);
+    if (!g_help_doc_loaded) wp_action_tell(&g_ctx, "Not enough memory to open Help.");
+    return g_help_doc_loaded;
+}
+
+static void help_doc_release(void)
 {
     if (!g_help_doc_loaded) return;
+    wp_help_doc_free(&g_help_doc);
+    g_help_doc_loaded = WP_FALSE;
+}
+
+static void open_help_node(const char *node_name, u32 node_name_len)
+{
+    if (!help_doc_ensure()) return;
     {
         u32 node = wp_help_doc_find_node(&g_help_doc, (const u8 *)node_name, node_name_len);
         wp_help_view_init(&g_help_view, &g_help_doc, (node != WP_HELP_NODE_NONE) ? node : 0);
@@ -974,7 +995,10 @@ static wp_bool amiga_dispatch_key(wp_key_event ev)
        help is a harmless no-op rather than resetting the user's
        position. */
     if (g_help_active) {
-        if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
+        if (wp_help_view_feed_key(&g_help_view, ev)) {
+            g_help_active = WP_FALSE;
+            help_doc_release();
+        }
         return WP_FALSE;
     }
     /* A dedicated HELP key beats everything: no scheme competes for it. */
@@ -2327,16 +2351,7 @@ void app_shell_run(void)
         (void)wp_action_load_file(&g_ctx, g_start_file, &sink);
     }
 
-    /* M9 Phase 6: parsed ONCE at startup from the generated
-       g_help_source_retrowp array (build/generated/help_retrowp.h,
-       shared verbatim with the Atari backend -- produced from
-       docs/help/retrowp.help by host/tools/gen_help_header.c, see
-       docs/help.md), same as platform/atari/app_shell.c. If parsing
-       ever fails, g_help_doc_loaded stays WP_FALSE and F1/Help are a
-       silent no-op rather than a crash (open_help_node's own guard). */
-    g_help_doc_loaded = (wp_bool)(wp_help_doc_parse(g_help_source_retrowp,
-                                                     (u32)g_help_source_retrowp_len,
-                                                     &g_help_doc) == WP_OK);
+    /* The help manual is parsed when Help opens (help_doc_ensure). */
 
     g_editor_class = MUI_CreateCustomClass(NULL, MUIC_Area, NULL,
                                             sizeof(struct wp_editor_data),
@@ -2465,6 +2480,13 @@ void app_shell_run(void)
                     if (g_ctx.quit_requested) break;
                 }
             }
+            /* After the input and its redraw, never inside Draw
+               (pageview.h): a relayout that ran out of memory says so
+               once rather than leaving the page blank. */
+            if (wp_pageview_short_news()) {
+                wp_action_tell(&g_ctx, WP_PAGEVIEW_SHORT_MSG);
+                MUI_Redraw(g_editor, MADF_DRAWOBJECT);
+            }
             amiga_update_bars();   /* where this pass's paints left the view */
             if (sigs) {
                 sigs = Wait(sigs | SIGBREAKF_CTRL_C);
@@ -2488,7 +2510,7 @@ void app_shell_run(void)
         wp_undo_journal_free(&g_amiga_journal);
         wp_document_free(&g_amiga_doc);
     }
-    if (g_help_doc_loaded) wp_help_doc_free(&g_help_doc);
+    help_doc_release();
     close_libraries();
 }
 

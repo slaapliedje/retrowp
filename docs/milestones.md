@@ -2802,11 +2802,19 @@ Every fix comes with a test shown to fail without it.
       ("Not enough memory to open Help." if it cannot); a relayout that
       leaves a paragraph unlaid is reported by wp_pageview_relayout_short
       and DOS says "Out of memory: part of the document can't be shown"
-      once. Draws: 527 KB free (was blank), down to ~499 KB; below that
+      once (now through wp_pageview_short_news, as every port does). Draws: 527 KB free (was blank), down to ~499 KB; below that
       it says so. Every DOS choice prompt takes Enter for the caller's
       default and shows "(Enter=n)": "1)OK (Enter=1)", and the discard
-      question's "(Enter=2)" is Cancel. Atari, Amiga and Mac still parse
-      the manual at startup and do not ask wp_pageview_relayout_short.
+      question's "(Enter=2)" is Cancel. Then all four GUI/text ports
+      alike: the manual is parsed only while Help is open on the Atari,
+      Amiga and Mac too, and each shell asks wp_pageview_short_news after
+      an event (never inside a redraw) and tells WP_PAGEVIEW_SHORT_MSG
+      once per shortage. The engine half: a paragraph whose relayout
+      fails is left layout_dirty, because its record already held the new
+      width and no lines and every "skip the clean ones" caller passed it
+      over for good -- blank even after memory came back (host tests
+      layout_failed_relayout_stays_dirty, which fails without the fix,
+      and pageview_short_news_once_per_shortage).
 - [ ] T20.6 The offload link.
       AC: the client drops replies whose seq/op are not its request's and
       gives each request one overall deadline and a reply size cap; the

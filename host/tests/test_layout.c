@@ -5,6 +5,8 @@
 #include "format_txt.h"
 #include "editing.h"
 #include "metrics_host.h"
+#include "mem_host.h"
+#include "pageview.h"
 
 /* Host stub metrics (platform/host/metrics_host.c): cell_width =
    size_twips/2, ascent = size_twips, descent = size_twips/4, leading =
@@ -198,4 +200,69 @@ void test_layout_editing_one_paragraph_does_not_remeasure_whole_document(void)
     wp_undo_journal_free(&journal);
     wp_pagination_free(&incr_pg);
     wp_document_free(&incr_doc);
+}
+
+/* T20.9: a paragraph whose layout runs out of memory is left dirty. It
+   already holds the new width and no lines, so without that every
+   "skip the clean ones" caller passed it over for good -- the DOS blank
+   page, which stayed blank even after memory was freed. */
+void test_layout_failed_relayout_stays_dirty(void)
+{
+    wp_document doc;
+    wp_paragraph *para;
+    wp_paragraph_layout *layout;
+    static const char *text = "The quick brown fox jumps\n";
+
+    ASSERT_TRUE(format_txt_import((const u8 *)text, (u32)strlen(text), &doc) == WP_OK);
+    para = wp_section_paragraph_get(wp_document_section_get(&doc, 0), 0);
+    ASSERT_TRUE(wp_paragraph_relayout(&doc, para, 1100) == WP_OK);
+    ASSERT_TRUE(!para->layout_dirty);
+
+    mem_host_fail_after(0);                       /* every request fails */
+    ASSERT_TRUE(wp_paragraph_relayout(&doc, para, 1000) != WP_OK);
+    mem_host_fail_after(-1);
+    layout = (wp_paragraph_layout *)para->layout;
+    ASSERT_TRUE(layout != NULL);
+    ASSERT_EQ_U32(layout->wrap_twips, 1000);       /* the trap: new width... */
+    ASSERT_EQ_U32(layout->line_count, 0);          /* ...and nothing to draw */
+    ASSERT_TRUE(para->layout_dirty);               /* so it must be retried */
+
+    ASSERT_TRUE(wp_paragraph_relayout(&doc, para, 1000) == WP_OK);
+    ASSERT_EQ_U32(layout->line_count, 5);
+    ASSERT_TRUE(!para->layout_dirty);
+    wp_document_free(&doc);
+}
+
+/* wp_pageview_relayout says when it came up short, and the news comes
+   once per shortage: not at every repaint, but again after a success. */
+void test_pageview_short_news_once_per_shortage(void)
+{
+    wp_document doc;
+    static const char *text = "One paragraph.\nAnother one.\n";
+
+    ASSERT_TRUE(format_txt_import((const u8 *)text, (u32)strlen(text), &doc) == WP_OK);
+    (void)wp_pageview_short_news();                /* whatever an earlier test left */
+
+    mem_host_fail_after(0);
+    (void)wp_pageview_relayout(&doc, 9360);
+    ASSERT_TRUE(wp_pageview_relayout_short());
+    ASSERT_TRUE(wp_pageview_short_news());
+    ASSERT_TRUE(!wp_pageview_short_news());        /* told once */
+    (void)wp_pageview_relayout(&doc, 9360);        /* the next repaint, still short */
+    ASSERT_TRUE(wp_pageview_relayout_short());
+    ASSERT_TRUE(!wp_pageview_short_news());        /* not told again */
+    mem_host_fail_after(-1);
+
+    (void)wp_pageview_relayout(&doc, 9360);        /* memory back: retried, laid out */
+    ASSERT_TRUE(!wp_pageview_relayout_short());
+    ASSERT_TRUE(!wp_pageview_short_news());
+    ASSERT_TRUE(doc.sections[0].paras[0].layout != NULL);
+    ASSERT_TRUE(((wp_paragraph_layout *)doc.sections[0].paras[0].layout)->line_count > 0);
+
+    doc.sections[0].paras[1].layout_dirty = WP_TRUE;
+    mem_host_fail_after(0);
+    (void)wp_pageview_relayout(&doc, 9360);        /* a second shortage is news again */
+    mem_host_fail_after(-1);
+    ASSERT_TRUE(wp_pageview_short_news());
+    wp_document_free(&doc);
 }
