@@ -95,7 +95,7 @@ ops, and pictures on every backend. Since then:
 
 See [`docs/milestones.md`](docs/milestones.md) for the full history.
 
-Released (binaries in the [v0.15.0 release](https://github.com/slaapliedje/retrowp/releases/tag/v0.15.0)):
+Released (binaries in the [v0.19.0 release](https://github.com/slaapliedje/retrowp/releases/tag/v0.19.0)):
 the Atari ST, Amiga, Mac Classic and DOS. In progress: the Atari 8-bit,
 the Apple IIGS and the Commodore 900.
 
