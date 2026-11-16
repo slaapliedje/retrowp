@@ -71,7 +71,8 @@ static wp_status find_line_start(spell_dict *d, u32 offset, u32 *out_start)
    which is what proves each iteration of spell_dict_find's loop
    strictly shrinks its search range. */
 static wp_status read_line_at_or_before(spell_dict *d, u32 offset,
-                                         char *word, u32 *word_len, u32 *line_start)
+                                         char *word, u32 *word_len, u32 *line_start,
+                                         u32 *line_len)
 {
     u32 pos;
 
@@ -79,16 +80,18 @@ static wp_status read_line_at_or_before(spell_dict *d, u32 offset,
     if (plat_file_seek(d->f, (i32)pos, PLAT_SEEK_SET) != WP_OK) return WP_ERR;
 
     {
-        u32 len = 0;
+        u32 len = 0, all = 0;
         for (;;) {
             u8 c;
             u32 n;
 
             if (plat_file_read(d->f, &c, 1, &n) != WP_OK || n == 0 || c == '\n') break;
             if (len < SPELL_MAX_WORD_LEN - 1) word[len++] = (char)c;
+            all++;
         }
         word[len] = '\0';
         *word_len = len;
+        *line_len = all;
     }
     *line_start = pos;
     return WP_OK;
@@ -118,10 +121,10 @@ static wp_status spell_dict_find(spell_dict *d, const char *word, u32 word_len, 
     while (lo < hi) {
         u32 mid = lo + (hi - lo) / 2;
         char line_word[SPELL_MAX_WORD_LEN];
-        u32 line_word_len, line_start;
+        u32 line_word_len, line_start, line_len;
         int cmp;
 
-        if (read_line_at_or_before(d, mid, line_word, &line_word_len, &line_start) != WP_OK) {
+        if (read_line_at_or_before(d, mid, line_word, &line_word_len, &line_start, &line_len) != WP_OK) {
             hi = mid; /* unreadable at/before mid -- shrink the search up */
             continue;
         }
@@ -131,7 +134,11 @@ static wp_status spell_dict_find(spell_dict *d, const char *word, u32 word_len, 
         /* line_start <= mid < hi always (find_line_start never scans
            past mid), so both updates below are guaranteed to strictly
            shrink [lo, hi) -- see read_line_at_or_before's comment. */
-        if (cmp < 0) lo = line_start + line_word_len + 1; /* +1 for '\n'; > mid, since mid <= line_start + line_word_len */
+        /* +1 for '\n'; > mid, since mid <= line_start + line_len. The
+           whole line, not the word kept of it: a line longer than
+           SPELL_MAX_WORD_LEN once left lo inside itself, and the
+           search never ended. */
+        if (cmp < 0) lo = line_start + line_len + 1;
         else         hi = line_start;
     }
     return WP_OK;

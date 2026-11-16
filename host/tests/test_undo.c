@@ -598,3 +598,76 @@ void test_real_undo_marks_modified(void)
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
 }
+
+static void doc_text(const wp_document *doc, char *out, u32 cap)
+{
+    u32 len = 0;
+    if (format_txt_export(doc, (u8 *)out, cap - 1, &len) != WP_OK) len = 0;
+    out[len] = '\0';
+}
+
+/* An insert in the middle of a run, failing at every allocation it
+   makes in turn: the paragraph is either as it was or fully edited,
+   never short of its tail (the run used to be cut first). */
+void test_undo_insert_mid_run_out_of_memory_keeps_the_text(void)
+{
+    i32 n;
+
+    for (n = 0; n < 12; n++) {
+        wp_document doc;
+        wp_undo_journal journal;
+        wp_pos at;
+        wp_status st;
+        char text[64];
+
+        ASSERT_TRUE(format_txt_import((const u8 *)"Hello world\n", 12, &doc) == WP_OK);
+        wp_undo_journal_init(&journal);
+        at.section = 0; at.paragraph = 0; at.run = 0; at.offset = 2;
+        mem_host_fail_after(n);
+        st = wp_edit_insert_text(&doc, &journal, at, (const u8 *)"XX", 2, NULL);
+        mem_host_fail_after(-1);
+        doc_text(&doc, text, sizeof(text));
+        if (st == WP_OK) {
+            ASSERT_EQ_STR(text, "HeXXllo world\n");
+        } else {
+            ASSERT_EQ_STR(text, "Hello world\n");
+        }
+        wp_undo_journal_free(&journal);
+        wp_document_free(&doc);
+    }
+}
+
+/* Group markers when memory runs out: whichever allocation fails, Undo
+   stays on the stack (it walked past the bottom and crashed when a
+   BEGIN was lost and its END was not), and every edit comes undone. */
+void test_undo_group_out_of_memory_never_walks_off_the_stack(void)
+{
+    i32 n;
+
+    for (n = 0; n < 3; n++) {
+        wp_document doc;
+        wp_undo_journal journal;
+        wp_pos at;
+        char text[64];
+
+        ASSERT_TRUE(format_txt_import((const u8 *)"Hello\n", 6, &doc) == WP_OK);
+        wp_undo_journal_init(&journal);
+        at.section = 0; at.paragraph = 0; at.run = 0; at.offset = 5;
+        ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, at, (const u8 *)"!", 1, NULL) == WP_OK);
+
+        mem_host_fail_after(n);
+        wp_undo_group_begin(&journal);
+        mem_host_fail_after(-1);
+        at.offset = 0;
+        ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, at, (const u8 *)"A", 1, NULL) == WP_OK);
+        wp_undo_group_end(&journal);
+        ASSERT_EQ_U32(journal.group_depth, 0);
+        ASSERT_EQ_U32(journal.lost_from, 0);
+
+        while (wp_undo_can_undo(&journal)) ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+        doc_text(&doc, text, sizeof(text));
+        ASSERT_EQ_STR(text, "Hello\n");
+        wp_undo_journal_free(&journal);
+        wp_document_free(&doc);
+    }
+}

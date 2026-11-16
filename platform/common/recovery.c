@@ -158,6 +158,9 @@ wp_status wp_recovery_restore(wp_app_ctx *ctx, wp_image_sink *sink)
     mem_free(buf);
     if (st != WP_OK) return st;
 
+    /* Not the document's copy yet, or the replace below would settle
+       (delete) the very file this has just been read from. */
+    ctx->recovery_owned = WP_FALSE;
     wp_action_replace_document(ctx, &fresh);
     if (path[0] != '\0') wp_action_remember_path(ctx, path);
     else                 ctx->doc_path[0] = '\0';

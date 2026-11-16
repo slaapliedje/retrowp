@@ -2689,6 +2689,160 @@ the list").
       view, left alone until chosen, the relayout on a change.
 ---
 
+## M20 — Hardening
+Goal: fix what the audit of 2026-11-15 found (four read-only passes:
+engine, app shells, retroplat, offload) before building more on it.
+Every fix comes with a test shown to fail without it.
+
+- [x] T20.1 Work lost or memory overrun.
+      AC: the Atari Works merge-field scratch is sized for 32 three-byte
+      characters plus the guillemets (format_stw.c, ASan reproducer);
+      an .STW path too long to remember cannot write before doc_path;
+      the spell dictionary search skips to the real end of a line longer
+      than SPELL_MAX_WORD_LEN (it looped forever); an insert that runs
+      out of memory leaves the paragraph as it was (edit.c split the run
+      first); undo group markers that fail to allocate cannot send
+      wp_edit_undo past the stack's end; discarding settles the recovery
+      file only once the replacement document is in.
+      Done. Every journaled edit now allocates its journal entry BEFORE
+      changing the document (insert and delete text, split and merge,
+      paragraph insert and remove, picture insert): an insert that ran
+      out of memory had stood unrecorded and reported failure. Group
+      markers are allocated in pairs at begin, the END held until the
+      group closes; a begin that cannot get both marks no group. Undo
+      and redo stop at the end of their stack, and run_remove_at refuses
+      an index past the runs. retroplat's host allocator gained
+      mem_host_fail_after(n), which the out-of-memory tests walk. Run
+      under ASan/UBSan, the suite found one more: wp_prompt_begin read
+      the byte after its starting text and, when the string pool's next
+      byte looked like a UTF-8 continuation, dropped the header's last
+      character. Tests: each case, each shown to fail on the old code
+      (the spell search hangs, the old group code segfaults).
+      Not done here: footnote renumbering re-pointing a reference's run
+      (notes.c), which may leave an earlier insert unfindable to undo;
+      run_remove_at's guard now keeps that from removing the wrong run.
+- [ ] T20.2 Every way out asks, or keeps the work.
+      AC: the Mac's Quit Apple event goes through the unsaved-changes
+      question (userCanceledErr on Cancel); the Amiga's ARexx QUIT,
+      Commodities Remove and Ctrl-C likewise; menu commands do nothing
+      while Help is up on the ST and the Mac (the Amiga already guards).
+      Code done, built for every target; not driven on target. The Mac's
+      Quit event asks through AEInteractWithUser and answers
+      userCanceledErr on Cancel; when it may not ask it keeps the work
+      (recovery file where there is one, else it refuses). The Amiga's
+      ReturnID_Quit from outside (ARexx, Commodities) and Ctrl-C both go
+      through wp_action_request_quit.
+- [ ] T20.3 The floppy-only ST.
+      AC: no C:\ in the ST shell or backend. The config, dictionary,
+      recovery file and clipboard are found from where RETROWP.PRG was
+      started (or the boot drive), the clipboard through scrp_read's own
+      path; the file selector starts in the document's folder with its
+      name. Shown on a TOS 1.04 machine with drive A: only.
+      Code done (docs/atari-platform.md, "Where RetroWP keeps its files"):
+      home is the folder RETROWP.PRG started in; C:\ is still read for an
+      older install's configuration and dictionary; the clipboard follows
+      the Compendium's protocol (\CLIPBRD\ on the boot drive). Not yet
+      shown on a floppy-only machine.
+- [ ] T20.4 gem4xe dialogs in bank $00.
+      AC: dialog_atari.c's tree and strings are WP_AES_NEAR; a
+      two-button plat_dialog_choice (the recovery offer) drawn and
+      answered on gem4xe; the gem4xe gate exercises one.
+      Statics marked: the link map puts them at $189E-$1A74, bank $00.
+      Not yet drawn on gem4xe (the emulator was in use).
+- [ ] T20.5 DOS and Mac file safety.
+      AC: DOS installs an INT 24h handler (a missing floppy is an error,
+      not "Abort, Retry, Fail?" ending the program) and an INT 23h one;
+      Mac Open and Save keep the folder (working-directory refnum, not
+      the volume root).
+- [ ] T20.6 The offload link.
+      AC: the client drops replies whose seq/op are not its request's and
+      gives each request one overall deadline and a reply size cap; the
+      gateway caps a reassembled request, resets parts on a new seq,
+      answers STATUS_ERR instead of exiting on a handler exception, caps
+      ODT inflation and image pixels, and caps disc-tray copies; client
+      and gateway timeouts agree (print options, dictation).
+- [ ] T20.7 Timers and transports.
+      AC: one wrap-safe deadline test in every transport; SIGPIPE cannot
+      kill the host build; a transport write timeout means the same thing
+      (no progress for timeout_ms) on every backend.
+- [ ] T20.8 Tests that would have caught these.
+      AC: a host allocator that fails after N allocations, walked through
+      every edit and undo; `make test-m32` (32-bit long, as on the
+      targets); the format fuzz harness as a make target; a seam
+      conformance test of retroplat's edge cases (EOF, cap 0, deleting a
+      missing file, dialog cancel).
+
+## M21 — Never Lose a Document
+Goal: the writer always knows whether the work is saved, a crash costs
+minutes at most, and a copy can live off the machine -- on the Pi, and
+through it in cloud or network storage.
+
+- [ ] T21.1 The unsaved marker.
+      AC: a `*` before the document's name in the window title (ST,
+      gem4xe, Amiga, Mac) and in the DOS status line, from one shared
+      helper, redrawn when the modified state flips.
+- [ ] T21.2 Safe save.
+      AC: Save writes a temporary file beside the document and renames it
+      over the old one; a full disk leaves the last good copy intact.
+- [ ] T21.3 Autosave to the recovery file.
+      AC: when there are unsaved changes and typing has paused, every N
+      minutes (setting; default 5; off) the recovery file is written,
+      never the document itself; the start-up offer brings it back after
+      a crash or power cut as after AP_TERM. Every machine gets a
+      recovery path, not only the ST.
+- [ ] T21.4 Settings.
+      AC: one Settings dialog on every port, from a shared model in
+      platform/common: where documents are saved by default, where fonts
+      and the dictionary are loaded from, the recovery file, autosave,
+      backups, the offload link. Written to the configuration file.
+      Each port draws it its own way (GEM dialog, MUI, Mac dialog, DOS
+      text form).
+- [ ] T21.5 DOS menu bar.
+      AC: a text-mode menu bar in the DOS convention (MS-DOS Edit, Works
+      for DOS): Alt or F10 highlights it, Alt+letter opens a menu, the
+      mouse opens it by clicking the top row; every action the other
+      ports have in their menus is reachable (Spell, Thesaurus, Grammar,
+      Chat, Settings included). The direct Alt+letter shortcuts that
+      clash move.
+- [ ] T21.6 Storing on the Pi.
+      AC: protocol operations to store, list and fetch a document; the
+      gateway keeps each machine's documents with the last N versions,
+      names checked against path traversal; answered once the copy is
+      safe on the Pi. File > Save to Pi, File > Open from Pi (the
+      restore); "copy to the Pi on every save" in Settings.
+- [ ] T21.7 Cloud and network storage.
+      AC: the gateway syncs its store through rclone (Dropbox, Google
+      Drive, OneDrive, SMB, FTP, SFTP, WebDAV ...), set up by a script
+      on the Pi; credentials never leave the Pi; a status operation
+      reports the last sync or its failure, shown in RetroWP's status
+      line; "and then to cloud storage" in Settings.
+- [ ] T21.8 The shortcuts, in the program.
+      AC: Help > Keyboard Shortcuts shows the list for the scheme in use
+      (vi, WordStar, Emacs, WordPerfect, Word), in the help viewer on
+      every port: the application's own shortcuts and the scheme's
+      bindings. Generated at build time by the same tool as the printed
+      keycards (host/tools/gen_keycard.py, from docs/keymaps.md and
+      g_wp_actions[]), as one help node per scheme, so it cannot drift
+      from what the keys do. Settings shows the scheme and lets it be
+      changed.
+
+## M22 — The Manual, Written in RetroWP
+Goal: the manual is a RetroWP document, and its PDF is RetroWP's own
+rendering.
+
+- [ ] T22.1 A PDF device.
+      AC: pageprint draws onto a device that writes PDF, beside psdev:
+      the standard 14 faces stretched to this machine's measured widths,
+      paths for furniture and drawings, dithered pictures; File > Export
+      as PDF without the Pi. Checked in a PDF validator and two viewers.
+- [ ] T22.2 The manual.
+      AC: docs/manual/ holds the manual as a RetroWP document (styles,
+      footnotes, columns, screenshots) that opens and edits on every
+      port, and its PDF made by T22.1; anything that got in the way of
+      writing it is filed as a bug. Later, the help pager's text from
+      the same source.
+---
+
 ## Cross-Cutting "Done" Checklist (apply to every task)
 - [ ] Builds on host (+ target backend or stub).
 - [ ] Platform-free logic unit-tested on host.

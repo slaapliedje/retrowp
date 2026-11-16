@@ -28,7 +28,10 @@
  *
  * WHEN IT GOES. The file belongs to the document it was written from, or
  * that was recovered from it (recovery_owned), and goes when that document
- * is settled: saved, or its changes discarded on the writer's word. A
+ * is settled: saved, or gone -- replaced (New, Open, Mail Merge) or left
+ * (Quit) after the writer agreed to discard its changes. Agreeing alone
+ * is not enough: a cancelled picker or a failed load keeps the document,
+ * and so the copy. A
  * recovery file this run did not write and has not offered is never
  * deleted by anything but the writer's answer to the offer.
  *
@@ -66,8 +69,9 @@ wp_status wp_recovery_restore(struct wp_app_ctx *ctx, wp_image_sink *sink);
    whoever it belongs to. */
 void wp_recovery_drop(struct wp_app_ctx *ctx);
 
-/* The document has been settled -- saved, or its changes discarded on the
-   writer's word: its recovery file, if it has one, is not needed now. */
+/* The document has been settled -- saved, or replaced or left with its
+   changes discarded on the writer's word: its recovery file, if it has
+   one, is not needed now. */
 void wp_recovery_settled(struct wp_app_ctx *ctx);
 
 typedef enum {

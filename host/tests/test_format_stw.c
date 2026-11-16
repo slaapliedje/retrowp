@@ -4,6 +4,9 @@
 #include "format_stw.h"
 #include "strpool.h"
 #include "drawing.h"
+#include "format_txt.h"
+#include "app_ctx.h"
+#include "actions.h"
 
 /* Atari Works .STW (docs/formats/atariworks.md), against documents built
    here byte by byte from the map -- the specimen corpus is Atari's and
@@ -259,4 +262,71 @@ const u8 *test_stw_sample(u32 *len)
     build_v11();
     *len = g_n;
     return g_f;
+}
+
+/* Merge fields named in Atari ST characters that take three bytes in
+   UTF-8: 64 of them, each 32 characters of U+2261, every one used. The
+   scratch the run is built in once allowed 48 bytes a field; each needs
+   100 (the guillemets, two bytes each, and 32 x 3). */
+void test_format_stw_long_wide_field_names_fit(void)
+{
+    static u8 f[0x170 + 64 + 64 * 54 + 400];
+    wp_document doc;
+    u32 p, at, k, total = 0, ri;
+    const wp_paragraph *para;
+
+    memset(f, 0, sizeof(f));
+    f[0] = '1'; f[1] = '1';
+    f[0x13E + 9] = 1;
+    p = 0x170; at = p + 2;                         /* record 0 */
+    f[at + 23] = 64; f[at + 13] = 12;
+    p = at + 30; at = p + 2;
+    for (k = 0; k < 64; k++) memset(f + at + 54 * k + 22, 0xF0, 32);
+    p = at + 54 * 64;
+    for (k = 0; k < 64; k++) f[p + k] = 0x01;
+    p += 64;
+    memcpy(f + p + 4, "Arial", 5);
+    ASSERT_TRUE(format_stw_import(f, p + 40, &doc) == WP_OK);
+    para = para_at(&doc, 0);
+    ASSERT_TRUE(para != NULL);
+    for (ri = 0; para != NULL && ri < para->run_count; ri++) {
+        total += wp_paragraph_run_get((wp_paragraph *)para, (u16)ri)->text.length;
+    }
+    ASSERT_EQ_U32(total, 64u * 100u);
+    wp_document_free(&doc);
+}
+
+/* An Atari Works file whose path is too long to remember: it opens,
+   untitled (the next Save asks), and the .STW -> .RTF rename does not
+   reach before doc_path, which it did when doc_path was "". */
+void test_format_stw_opens_from_a_path_too_long_to_keep(void)
+{
+    char path[400];
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    plat_file *f;
+    u32 n;
+
+    build_v11();
+    strcpy(path, "build/");
+    for (n = 0; n < 140; n++) strcat(path, "./");
+    strcat(path, "LONG.STW");
+    ASSERT_TRUE(strlen(path) >= WP_APP_PATH_MAX);
+    ASSERT_TRUE(plat_file_open(path, PLAT_FILE_WRITE, &f) == WP_OK);
+    ASSERT_TRUE(plat_file_write(f, g_f, g_n) == WP_OK);
+    plat_file_close(f);
+
+    ASSERT_TRUE(format_txt_import((const u8 *)"x\n", 2, &doc) == WP_OK);
+    wp_undo_journal_init(&journal);
+    wp_app_ctx_init(&ctx, WP_KEYMAP_VI, &doc, &journal);
+    ctx.doc_loaded = WP_TRUE;
+    wp_action_remember_path(&ctx, "A:\\X.STW");
+    ASSERT_TRUE(wp_action_load_file(&ctx, path, NULL) == WP_OK);
+    ASSERT_EQ_STR(ctx.doc_path, "");
+    ASSERT_TRUE(ctx.doc_rtf);
+    (void)plat_file_delete(path);
+    wp_keymap_free(&ctx);
+    wp_undo_journal_free(&journal);
+    wp_document_free(ctx.doc);
 }

@@ -33,6 +33,10 @@ void run_remove_at(wp_paragraph *para, u16 index)
 {
     u16 i;
 
+    /* Out of range is a caller's lost run (a journal out of step with
+       the document): removing nothing beats removing the last run, or
+       wrapping run_count to 65535 in an empty paragraph. */
+    if (index >= para->run_count) return;
     for (i = index; (u16)(i + 1) < para->run_count; i++) {
         para->runs[i] = para->runs[i + 1];
     }
@@ -119,14 +123,22 @@ wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos 
             tail_span.offset = run->text.offset + pos.offset;
             tail_span.length = run->text.length - pos.offset;
 
-            para->runs[pos.run].text.length = pos.offset;
             insert_index = (u16)(pos.run + 1);
 
+            /* Both runs go in BEFORE the original is shortened: either
+               insert can run out of memory, and shortening first lost
+               the tail's text when it did -- unjournaled, so Undo could
+               not bring it back. Until the last step the original run
+               still holds all of its text. */
             st = run_insert_at(para, insert_index, span, style);
             if (st != WP_OK) return st;
 
             st = run_insert_at(para, (u16)(insert_index + 1), tail_span, style);
-            if (st != WP_OK) return st;
+            if (st != WP_OK) {
+                run_remove_at(para, insert_index);
+                return st;
+            }
+            para->runs[pos.run].text.length = pos.offset;
 
             if (out_pos) {
                 out_pos->section = pos.section;

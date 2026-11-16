@@ -209,6 +209,14 @@ wp_status wp_document_merge_paragraph_raw(wp_document *doc, u32 section,
 typedef struct {
     wp_op *undo_top;  /* most recently applied op, NULL if none */
     wp_op *redo_top;  /* most recently undone op, NULL if none */
+    /* Group bookkeeping. wp_undo_group_begin allocates BOTH markers, so
+       a group that opens always closes: the END waits here, one per open
+       group, and wp_undo_group_end cannot fail for want of memory. A
+       begin that cannot get both marks no group at all (lost_from is
+       its depth), and its edits undo one at a time instead. */
+    wp_op *spare_ends;
+    u16    group_depth;
+    u16    lost_from;   /* 0, or the depth of the group that went unmarked */
 } wp_undo_journal;
 
 void wp_undo_journal_init(wp_undo_journal *journal);

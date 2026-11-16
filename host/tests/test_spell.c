@@ -168,3 +168,18 @@ void test_spell_realistic_dictionary_sample(void)
 
     spell_dict_close(d);
 }
+
+/* A dictionary line longer than SPELL_MAX_WORD_LEN: words after it are
+   still found, and words that are not there are still not found --
+   the search once never ended past such a line. */
+void test_spell_check_after_a_line_too_long_to_keep(void)
+{
+    spell_dict *d;
+    ASSERT_TRUE(spell_dict_open("host/tests/fixtures/spell_longline.dict", &d) == WP_OK);
+    ASSERT_TRUE(check(d, "apple"));
+    ASSERT_TRUE(check(d, "yak"));
+    ASSERT_TRUE(check(d, "zebra"));
+    ASSERT_TRUE(!check(d, "zz"));
+    ASSERT_TRUE(!check(d, "quince"));
+    spell_dict_close(d);
+}

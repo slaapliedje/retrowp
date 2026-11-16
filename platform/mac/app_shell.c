@@ -26,6 +26,7 @@
 #include "keymap.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "recovery.h"
 #include "cisummary.h"
 #include "imgcache.h"
 #include "pageview.h"
@@ -708,6 +709,11 @@ static void invoke_backend_action(wp_action_id id)
 static void invoke_action(const wp_action *act)
 {
     if (act == NULL) return;
+    /* While Help covers the document, a menu pick (Cut, Bold, Align...)
+       would change it out of sight -- the Amiga found and fixed this
+       first. Keys never get here then (mac_dispatch_key routes them to
+       the pager); Quit still works, or Help is a trap. */
+    if (g_help_active && act->id != WP_ACT_FILE_QUIT) return;
     g_ctx.view.manual = WP_FALSE; /* a menu pick acts at the caret: show it */
     if (act->handler != NULL) {
         act->handler(&g_ctx);
@@ -1942,9 +1948,23 @@ static pascal OSErr ae_print_docs(const AppleEvent *e, AppleEvent *reply, long r
     return errAEEventNotHandled;
 }
 
+/* Quit from the Finder -- Shut Down, Restart, or another program asking.
+   It asks the same unsaved-changes question File > Quit does; it used to
+   set g_quit and leave, and Shut Down with a modified document lost it.
+   Cancel answers userCanceledErr, which stops the Finder's shut down.
+   Brought forward to ask (AEInteractWithUser), as a background program
+   must be; if it may not ask, it keeps the work: a recovery copy where
+   this machine has one (recovery.h), and otherwise it refuses to quit. */
 static pascal OSErr ae_quit(const AppleEvent *e, AppleEvent *reply, long refcon)
 {
     (void)e; (void)reply; (void)refcon;
+    if (AEInteractWithUser(kAEDefaultTimeout, NULL, NULL) != noErr) {
+        if (!wp_action_term_request(&g_ctx, NULL)) return userCanceledErr;
+        g_quit = WP_TRUE;
+        return noErr;
+    }
+    wp_action_request_quit(&g_ctx);
+    if (!g_ctx.quit_requested) return userCanceledErr;
     g_quit = WP_TRUE;
     return noErr;
 }

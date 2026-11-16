@@ -14,10 +14,14 @@ void wp_prompt_begin(wp_app_ctx *ctx, const char *label,
     p->done = done;
     p->len = 0;
     if (initial != NULL) {
-        if (initial_len > WP_PROMPT_MAX) initial_len = WP_PROMPT_MAX;
-        /* Never keep half a character at the cut. */
-        while (initial_len > 0 && initial_len < WP_PROMPT_MAX &&
-               (initial[initial_len] & 0xC0) == 0x80) initial_len--;
+        /* Never keep half a character at the cut -- and only at a cut:
+           initial[initial_len] is past the text otherwise, whatever the
+           string pool happens to hold next (it dropped a header's last
+           character when that byte looked like a continuation). */
+        if (initial_len > WP_PROMPT_MAX) {
+            initial_len = WP_PROMPT_MAX;
+            while (initial_len > 0 && (initial[initial_len] & 0xC0) == 0x80) initial_len--;
+        }
         memcpy(p->text, initial, initial_len);
         p->len = initial_len;
     }

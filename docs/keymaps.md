@@ -55,7 +55,7 @@ yield the default (`vim`), never an error.
 Per-platform path, a real, separate decision each (following the
 existing `WP_ATARI_SPELL_DICT_PATH` fixed-path convention -- no new
 `platform.h` primitive needed):
-- **Atari**: `C:\RETROWP.CFG`
+- **Atari**: `RETROWP.CFG` beside the program (M20 T20.3; `C:\RETROWP.CFG` still read)
 - **Amiga**: `PROGDIR:RetroWP.cfg` -- a standard, always-available
   AmigaDOS assign, no dependency on a full `ENV:`/Preferences tree.
 

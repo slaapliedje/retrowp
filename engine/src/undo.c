@@ -9,6 +9,9 @@ void wp_undo_journal_init(wp_undo_journal *journal)
 {
     journal->undo_top = NULL;
     journal->redo_top = NULL;
+    journal->spare_ends = NULL;
+    journal->group_depth = 0;
+    journal->lost_from = 0;
 }
 
 /* Every op starts zeroed, so a kind that does not use a field -- extra
@@ -39,8 +42,12 @@ void wp_undo_journal_free(wp_undo_journal *journal)
 {
     free_stack(journal->undo_top);
     free_stack(journal->redo_top);
+    free_stack(journal->spare_ends);
     journal->undo_top = NULL;
     journal->redo_top = NULL;
+    journal->spare_ends = NULL;
+    journal->group_depth = 0;
+    journal->lost_from = 0;
 }
 
 wp_bool wp_undo_can_undo(const wp_undo_journal *journal)
@@ -82,14 +89,17 @@ wp_status wp_edit_insert_text(wp_document *doc, wp_undo_journal *journal, wp_pos
     wp_span new_span;
     wp_op *op;
 
-    st = wp_strpool_append(&doc->strings, utf8, len, &new_span);
-    if (st != WP_OK) return st;
-
-    st = insert_span_at_pos(doc, pos, new_span, &local_out);
-    if (st != WP_OK) return st;
-
+    /* The journal entry first: once the document has changed, nothing
+       may fail, or the edit stands unrecorded (and reported as failed). */
     op = op_new();
     if (op == NULL) return WP_NOMEM;
+
+    st = wp_strpool_append(&doc->strings, utf8, len, &new_span);
+    if (st == WP_OK) st = insert_span_at_pos(doc, pos, new_span, &local_out);
+    if (st != WP_OK) {
+        op_free(op);
+        return st;
+    }
 
     op->kind = (u8)WP_OP_INSERT_TEXT;
     op->at = pos;             /* the pre-insert position */
@@ -146,12 +156,14 @@ wp_status wp_edit_delete_range(wp_document *doc, wp_undo_journal *journal,
         case_tag = 3; /* split: both fragments survive */
     }
 
+    op = op_new();                 /* before the change: see wp_edit_insert_text */
+    if (op == NULL) return WP_NOMEM;
     st = wp_document_delete_range_raw(doc, section, paragraph, run_index,
                                        start_offset, end_offset);
-    if (st != WP_OK) return st;
-
-    op = op_new();
-    if (op == NULL) return WP_NOMEM;
+    if (st != WP_OK) {
+        op_free(op);
+        return st;
+    }
 
     op->kind = (u8)WP_OP_DELETE_TEXT;
     op->at.section = section;
@@ -169,40 +181,52 @@ wp_status wp_edit_delete_range(wp_document *doc, wp_undo_journal *journal,
     return WP_OK;
 }
 
-static wp_op *push_marker_op(wp_undo_journal *journal, wp_op_kind kind)
+static void push_marker_op(wp_undo_journal *journal, wp_op *op, wp_op_kind kind)
 {
-    wp_op *op = op_new();
-    if (op == NULL) return NULL;
-
-    op->kind = (u8)kind;
-    op->at.section = 0;
-    op->at.paragraph = 0;
-    op->at.run = 0;
-    op->at.offset = 0;
-    op->text.offset = 0;
-    op->text.length = 0;
-    op->style_before = 0;
-    op->style_after = 0;
-
+    op->kind = (u8)kind;   /* every other field is op_new's zero */
     op->next = journal->undo_top;
     journal->undo_top = op;
-    return op;
 }
 
 void wp_undo_group_begin(wp_undo_journal *journal)
 {
+    wp_op *begin, *end;
+
     /* A new edit invalidates redo history -- the same rule every
        journaled op already applies, done once here rather than once
        per op inside the bracketed run (each of THOSE calls would
        harmlessly re-clear an already-empty stack, but there's no
        reason to). */
     clear_redo(journal);
-    push_marker_op(journal, WP_OP_GROUP_BEGIN);
+    journal->group_depth++;
+    if (journal->lost_from != 0) return;      /* inside an unmarked group */
+
+    /* Both markers now, or neither: a BEGIN without its END (or the
+       reverse) sent wp_edit_undo walking off the bottom of the stack. */
+    begin = op_new();
+    end = op_new();
+    if (begin == NULL || end == NULL) {
+        if (begin != NULL) op_free(begin);
+        if (end != NULL) op_free(end);
+        journal->lost_from = journal->group_depth;
+        return;
+    }
+    push_marker_op(journal, begin, WP_OP_GROUP_BEGIN);
+    end->next = journal->spare_ends;
+    journal->spare_ends = end;
 }
 
 void wp_undo_group_end(wp_undo_journal *journal)
 {
-    push_marker_op(journal, WP_OP_GROUP_END);
+    if (journal->group_depth == 0) return;    /* no group open */
+    if (journal->lost_from == 0) {
+        wp_op *end = journal->spare_ends;
+        journal->spare_ends = end->next;
+        push_marker_op(journal, end, WP_OP_GROUP_END);
+    } else if (journal->lost_from == journal->group_depth) {
+        journal->lost_from = 0;
+    }
+    journal->group_depth--;
 }
 
 /* An empty paragraph at index `paragraph`, with these fields. */
@@ -240,12 +264,10 @@ static wp_status take_empty_paragraph(wp_document *doc, u32 section, u32 paragra
     return WP_OK;
 }
 
-static wp_status push_para_op(wp_document *doc, wp_undo_journal *journal, wp_op_kind kind,
+/* op was allocated before the change it records (see wp_edit_insert_text). */
+static wp_status push_para_op(wp_document *doc, wp_undo_journal *journal, wp_op *op, wp_op_kind kind,
                               u32 section, u32 paragraph, wp_pstyle style, wp_trow trow, u8 tflags)
 {
-    wp_op *op = op_new();
-
-    if (op == NULL) return WP_NOMEM;
     op->kind = (u8)kind;
     op->at.section = section;
     op->at.paragraph = paragraph;
@@ -265,9 +287,16 @@ wp_status wp_edit_insert_empty_paragraph(wp_document *doc, wp_undo_journal *jour
                                          u32 section, u32 paragraph,
                                          wp_pstyle style, wp_trow trow, u8 tflags)
 {
-    wp_status st = put_empty_paragraph(doc, section, paragraph, style, trow, tflags);
-    if (st != WP_OK) return st;
-    return push_para_op(doc, journal, WP_OP_INSERT_PARA, section, paragraph, style, trow, tflags);
+    wp_op *op = op_new();
+    wp_status st;
+
+    if (op == NULL) return WP_NOMEM;
+    st = put_empty_paragraph(doc, section, paragraph, style, trow, tflags);
+    if (st != WP_OK) {
+        op_free(op);
+        return st;
+    }
+    return push_para_op(doc, journal, op, WP_OP_INSERT_PARA, section, paragraph, style, trow, tflags);
 }
 
 wp_status wp_edit_remove_empty_paragraph(wp_document *doc, wp_undo_journal *journal,
@@ -279,14 +308,20 @@ wp_status wp_edit_remove_empty_paragraph(wp_document *doc, wp_undo_journal *jour
     wp_trow trow;
     u8 tflags;
     wp_status st;
+    wp_op *op;
 
     if (para == NULL) return WP_RANGE;
     style = para->style;
     trow = para->trow;
     tflags = para->tflags;
+    op = op_new();
+    if (op == NULL) return WP_NOMEM;
     st = take_empty_paragraph(doc, section, paragraph);
-    if (st != WP_OK) return st;
-    return push_para_op(doc, journal, WP_OP_REMOVE_PARA, section, paragraph, style, trow, tflags);
+    if (st != WP_OK) {
+        op_free(op);
+        return st;
+    }
+    return push_para_op(doc, journal, op, WP_OP_REMOVE_PARA, section, paragraph, style, trow, tflags);
 }
 
 /* A section's page setup, everything but its paragraphs. */
@@ -399,11 +434,13 @@ wp_status wp_edit_split_paragraph(wp_document *doc, wp_undo_journal *journal,
     wp_pos local_out;
     wp_op *op;
 
-    st = wp_document_split_paragraph_raw(doc, pos, &local_out);
-    if (st != WP_OK) return st;
-
-    op = op_new();
+    op = op_new();                 /* before the change: see wp_edit_insert_text */
     if (op == NULL) return WP_NOMEM;
+    st = wp_document_split_paragraph_raw(doc, pos, &local_out);
+    if (st != WP_OK) {
+        op_free(op);
+        return st;
+    }
 
     op->kind = (u8)WP_OP_SPLIT_PARA;
     op->at = pos;             /* the pre-split position; undo re-merges
@@ -578,11 +615,13 @@ wp_status wp_edit_merge_paragraph(wp_document *doc, wp_undo_journal *journal,
         }
     }
 
-    st = wp_document_merge_paragraph_raw(doc, section, paragraph, &local_out);
-    if (st != WP_OK) return st;
-
-    op = op_new();
+    op = op_new();                 /* before the change: see wp_edit_insert_text */
     if (op == NULL) return WP_NOMEM;
+    st = wp_document_merge_paragraph_raw(doc, section, paragraph, &local_out);
+    if (st != WP_OK) {
+        op_free(op);
+        return st;
+    }
 
     op->kind = (u8)WP_OP_MERGE_PARA;
     op->at = local_out;             /* the join point -- exactly what a
@@ -614,11 +653,14 @@ wp_status wp_edit_insert_image(wp_document *doc, wp_undo_journal *journal,
     u32 image_idx;
     wp_op *op;
 
+    op = op_new();                 /* before the change: see wp_edit_insert_text */
+    if (op == NULL) return WP_NOMEM;
     st = wp_document_image_add(doc, desc, &handle);
-    if (st != WP_OK) return st;
-
-    st = wp_document_split_paragraph_raw(doc, pos, &split_out);
-    if (st != WP_OK) return st;
+    if (st == WP_OK) st = wp_document_split_paragraph_raw(doc, pos, &split_out);
+    if (st != WP_OK) {
+        op_free(op);
+        return st;
+    }
 
     /* split_out is (section, pos.paragraph + 1, 0, 0) -- the "after"
        paragraph split created. Insert the image paragraph immediately
@@ -627,16 +669,16 @@ wp_status wp_edit_insert_image(wp_document *doc, wp_undo_journal *journal,
        insert_at needs. */
     sec = wp_document_section_get(doc, pos.section);
     st = paragraph_insert_at(sec, split_out.paragraph, &image_idx);
-    if (st != WP_OK) return st;
+    if (st != WP_OK) {
+        op_free(op);
+        return st;
+    }
 
     image_para = wp_section_paragraph_get(sec, image_idx);
     image_para->kind = (u8)WP_PARA_IMAGE;
     image_para->image = handle;
     image_para->style = doc->default_pstyle;
     image_para->layout_dirty = WP_TRUE;
-
-    op = op_new();
-    if (op == NULL) return WP_NOMEM;
 
     op->kind = (u8)WP_OP_INSERT_IMAGE;
     op->at = pos;              /* the pre-insert position, same convention
@@ -1173,7 +1215,7 @@ wp_status wp_edit_undo(wp_document *doc, wp_undo_journal *journal)
 
         op->next = journal->redo_top;
         journal->redo_top = op;
-    } while (depth > 0);
+    } while (depth > 0 && journal->undo_top != NULL);   /* never past the bottom */
 
     return WP_OK;
 }
@@ -1223,7 +1265,7 @@ wp_status wp_edit_redo(wp_document *doc, wp_undo_journal *journal)
 
         op->next = journal->undo_top;
         journal->undo_top = op;
-    } while (depth > 0);
+    } while (depth > 0 && journal->redo_top != NULL);   /* never past the top */
 
     return st;
 }

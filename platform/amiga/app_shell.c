@@ -2423,7 +2423,17 @@ void app_shell_run(void)
 
         for (;;) {
             id = (LONG)DoMethod(g_app, MUIM_Application_NewInput, &sigs);
-            if (id == (LONG)MUIV_Application_ReturnID_Quit) break;
+            /* ReturnID_Quit comes from this program's own key path once
+               the writer has answered (quit_requested set), but also from
+               outside it: ARexx QUIT on the RETROWP port and Commodities
+               Exchange's Remove both send it, and used to end RetroWP
+               without the unsaved-changes question. They ask now. */
+            if (id == (LONG)MUIV_Application_ReturnID_Quit) {
+                if (!g_ctx.quit_requested) wp_action_request_quit(&g_ctx);
+                if (g_ctx.quit_requested) break;
+                MUI_Redraw(g_editor, MADF_DRAWOBJECT);
+                continue;
+            }
             if ((id == WP_RETURNID_VBAR && amiga_bar_moved(g_vbar)) ||
                 (id == WP_RETURNID_HBAR && amiga_bar_moved(g_hbar))) {
                 MUI_Redraw(g_editor, MADF_DRAWOBJECT);
@@ -2458,7 +2468,14 @@ void app_shell_run(void)
             amiga_update_bars();   /* where this pass's paints left the view */
             if (sigs) {
                 sigs = Wait(sigs | SIGBREAKF_CTRL_C);
-                if (sigs & SIGBREAKF_CTRL_C) break;
+                if (sigs & SIGBREAKF_CTRL_C) {
+                    /* Ctrl-C or BREAK from the Shell: a way out like the
+                       close gadget, so it asks too. */
+                    sigs &= ~SIGBREAKF_CTRL_C;
+                    wp_action_request_quit(&g_ctx);
+                    if (g_ctx.quit_requested) break;
+                    MUI_Redraw(g_editor, MADF_DRAWOBJECT);
+                }
             }
         }
         set(g_win, MUIA_Window_Open, FALSE);

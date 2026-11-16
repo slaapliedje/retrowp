@@ -130,7 +130,7 @@ that host's simplified round-number metrics generalize.
 
 ## Delivery: compiled in, not read from disk
 
-Unlike the optional spell dictionary (`C:\WPSPELL.DIC`, a real runtime
+Unlike the optional spell dictionary (`WPSPELL.DIC` beside the program, a real runtime
 file dependency with a documented "missing file degrades gracefully"
 path), help content ships **compiled into every target**. A new host
 tool, `host/tools/gen_help_header.c`, converts a `.help` source file

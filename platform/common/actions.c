@@ -122,9 +122,11 @@ wp_bool wp_action_confirm_discard(wp_app_ctx *ctx)
     }
     if (cancelled) return WP_FALSE;
     if (chosen != 0u) return WP_FALSE;
-    /* The writer threw the changes away: a recovery copy of them, if this
-       document has one, goes with them (recovery.h). */
-    wp_recovery_settled(ctx);
+    /* The recovery copy, if this document has one, is NOT settled here:
+       the writer has agreed to lose the changes, but the document is
+       still the only other copy until something replaces it -- and a
+       cancelled picker or a failed load replaces nothing. It goes when
+       the document does (wp_action_replace_document, act_file_quit). */
     return WP_TRUE;
 }
 
@@ -180,6 +182,10 @@ void wp_action_replace_document(wp_app_ctx *ctx, wp_document *fresh)
     const wp_char_style *def_cs;
     const wp_para_style *def_ps;
 
+    /* The old document is going, so its recovery copy goes with it:
+       every caller has either asked (wp_action_confirm_discard) or is
+       replacing a document with nothing unsaved in it. */
+    wp_recovery_settled(ctx);
     if (ctx->doc_loaded) {
         wp_undo_journal_free(ctx->journal);
         wp_document_free(ctx->doc);
@@ -1465,6 +1471,7 @@ static wp_status act_file_quit(wp_app_ctx *ctx)
        (nothing), and reporting an error would make a backend show a
        failure message on top of a dialog they just dismissed. */
     if (!wp_action_confirm_discard(ctx)) return WP_OK;
+    wp_recovery_settled(ctx);     /* leaving without the changes, on the writer's word */
     ctx->quit_requested = WP_TRUE;
     return WP_OK;
 }
@@ -3432,9 +3439,11 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
            over one: LETTER.STW saves as LETTER.RTF beside it, keeping
            its formatting; a name with no extension asks. */
         wp_action_remember_path(ctx, native_path);
-        if (wp_path_ends_with_ci(native_path, ".STW")) {
+        /* doc_path is "" when the path was too long to keep (and then
+           there is no extension in it to change). */
+        if (wp_path_ends_with_ci(ctx->doc_path, ".STW")) {
             u32 n = (u32)strlen(ctx->doc_path);
-            memcpy(ctx->doc_path + n - 3, native_path[n - 3] == 's' ? "rtf" : "RTF", 3);
+            memcpy(ctx->doc_path + n - 3, ctx->doc_path[n - 3] == 's' ? "rtf" : "RTF", 3);
         } else {
             ctx->doc_path[0] = '\0';
         }

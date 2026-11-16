@@ -3,6 +3,7 @@
 #include "gemcompat.h"
 #ifndef GEM4XE_APP_GEM_H
 #include <mint/cookie.h>   /* Getcookie: which GDOS prints (atari_gdos_takes_raster_copy) */
+#include <mint/osbind.h>   /* Dgetdrv, Dgetpath, Drvmap: where RetroWP lives */
 #endif
 #include <string.h>
 #include "types.h"
@@ -2028,16 +2029,105 @@ static void atari_image_sink_init(wp_image_sink *sink);
 
 static short g_window_handle = -1; /* the document window, for its title */
 
+/* Where RetroWP lives: "X:\FOLDER\", the drive and folder it was started
+   in (the desktop makes the program's folder current), read once before
+   anything changes it. Its configuration, dictionary and recovery file
+   are kept there, as an ST program's .CFG and .INF always were. It used
+   to be C:\ for all of them, and a floppy-only ST -- the 1 MB baseline --
+   has no C:. Static, not on the stack: on gem4xe the stack is the near
+   pool's. */
+static char g_home[128];
+static char g_home_probe[128];
+
+static void atari_home_init(void)
+{
+    short d = (short)Dgetdrv();
+    u32 n;
+
+    if (d < 0 || d > 25) d = 0;
+    g_home_probe[0] = '\0';
+    if (Dgetpath(g_home_probe, 0) != 0) g_home_probe[0] = '\0';   /* 0: the current drive */
+    g_home_probe[sizeof(g_home_probe) - 1] = '\0';
+    g_home[0] = (char)('A' + d);
+    g_home[1] = ':';
+    g_home[2] = '\0';
+    n = (u32)strlen(g_home_probe);
+    if (n + 4 >= sizeof(g_home)) n = 0;                 /* too deep: the root */
+    if (n > 0 && g_home_probe[0] != '\\') strcat(g_home, "\\");
+    if (n > 0) strcat(g_home, g_home_probe);
+    n = (u32)strlen(g_home);
+    if (g_home[n - 1] != '\\') strcat(g_home, "\\");
+}
+
+/* home + name into out (cap bytes); "" when it will not fit. */
+static void atari_home_file(char *out, u32 cap, const char *name)
+{
+    if (strlen(g_home) + strlen(name) + 1 > cap) {
+        out[0] = '\0';
+        return;
+    }
+    strcpy(out, g_home);
+    strcat(out, name);
+}
+
+/* A file RetroWP reads (configuration, dictionary): beside the program,
+   or -- for an install from before they moved there -- in C:\, where
+   there is a C:. Written files always go beside the program. */
+static void atari_find_file(char *out, u32 cap, const char *name)
+{
+    wp_bool there = WP_FALSE;
+
+    atari_home_file(out, cap, name);
+    if (plat_file_exists(out, &there) == WP_OK && there) return;
+#ifndef GEM4XE_APP_GEM_H
+    if ((Drvmap() & 4L) != 0 && strlen(name) + 4 <= cap) {
+        char old[48];
+        strcpy(old, "C:\\");
+        strncat(old, name, sizeof(old) - 4);
+        if (plat_file_exists(old, &there) == WP_OK && there) {
+            strcpy(out, old);
+            return;
+        }
+    }
+#endif
+    atari_home_file(out, cap, name);
+}
+
+/* The selector's starting folder and name: the document's own, so Save As
+   offers where it came from; otherwise RetroWP's folder. path must hold
+   128, fname 16 (an 8.3 name). */
+static void atari_picker_start(const wp_app_ctx *ctx, char *path, char *fname, const char *new_name)
+{
+    const char *doc = ctx->doc_path;
+    u32 n = (u32)strlen(doc), cut = 0, i;
+
+    for (i = 0; i < n; i++) {
+        if (doc[i] == '\\' || doc[i] == ':') cut = i + 1;
+    }
+    if (n > 0 && cut > 0 && cut + 4 < 128 && n - cut < 13) {
+        memcpy(path, doc, cut);
+        strcpy(path + cut, "*.*");
+        strcpy(fname, doc + cut);
+        return;
+    }
+    if (strlen(g_home) + 4 < 128) {
+        strcpy(path, g_home);
+        strcat(path, "*.*");
+    } else {
+        strcpy(path, "A:\\*.*");
+    }
+    strcpy(fname, new_name);
+}
+
 /* fsel_input, in the shape the shared file flow wants. */
 static wp_bool atari_pick_path(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
 {
     char path[128];
     char fname[16];
 
-    WP_UNUSED(ctx);
     /* "*.*" (not "*.TXT") so RTF/ODT files are visible too. */
-    strcpy(path, "C:\\*.*");
-    strcpy(fname, save ? "UNTITLED.TXT" : "");
+    atari_picker_start(ctx, path, fname, save ? "UNTITLED.TXT" : "");
+    if (!save) fname[0] = '\0';
     return run_file_selector(path, fname, out, cap);
 }
 
@@ -2138,10 +2228,11 @@ static void do_file_save(wp_bool save_as)
    dictionary asset, and none is needed for this feature to build/link/
    run -- a missing file is reported through the same form_alert path as
    a real miss, not a crash). */
-#define WP_ATARI_SPELL_DICT_PATH "C:\\WPSPELL.DIC"
+#define WP_ATARI_SPELL_DICT_NAME "WPSPELL.DIC"
+static char g_spell_dict_path[160];   /* atari_find_file, at start-up */
 #define WP_ATARI_SPELL_MAX_SUGGESTIONS 3
 
-/* M10: same fixed-path convention as WP_ATARI_SPELL_DICT_PATH above --
+/* M10: found the same way as the dictionary (atari_find_file) --
    a user who wants a non-default keybinding layout drops a plain-text
    `keymap=<name>` config file at this path (docs/keymaps.md). A missing
    file is a normal, silent, zero-config case (wp_config_load's own
@@ -2149,11 +2240,17 @@ static void do_file_save(wp_bool save_as)
    there is no user-visible alert for a missing config file, since "no
    config" is the expected common case, not a feature the user opted
    into and might be missing an asset for. */
-#define WP_ATARI_CONFIG_PATH "C:\\RETROWP.CFG"
+#define WP_ATARI_CONFIG_NAME "RETROWP.CFG"
+static char g_config_path[160];       /* atari_find_file, at start-up */
 
 /* The unsaved document, when the AES ends RetroWP (recovery.h): beside
    the configuration, one slot, offered back at the next start. */
-#define WP_ATARI_RECOVERY_PATH "C:\\RETROWP.REC"
+#define WP_ATARI_RECOVERY_NAME "RETROWP.REC"
+static char g_recovery_path[160];     /* beside the program */
+
+/* The self-checks (SMOKE.PRG) run in the CI harness, whose drive is C:. */
+#define WP_ATARI_SELFCHECK_CFG "C:\\RETROWP.CFG"
+#define WP_ATARI_SELFCHECK_REC "C:\\RETROWP.REC"
 
 static spell_dict *g_spell_dict = NULL;
 static wp_bool g_spell_dict_open_attempted = WP_FALSE;
@@ -2162,7 +2259,7 @@ static spell_dict *get_spell_dict(void)
 {
     if (!g_spell_dict_open_attempted) {
         g_spell_dict_open_attempted = WP_TRUE;
-        if (spell_dict_open(WP_ATARI_SPELL_DICT_PATH, &g_spell_dict) != WP_OK) {
+        if (spell_dict_open(g_spell_dict_path, &g_spell_dict) != WP_OK) {
             g_spell_dict = NULL;
         }
     }
@@ -2242,7 +2339,7 @@ static void do_spell_check(void)
 
     dict = get_spell_dict();
     if (dict == NULL) {
-        form_alert(1, FA_ERROR "[Spell-check dictionary not found.|Expected at " WP_ATARI_SPELL_DICT_PATH "][ OK ]");
+        form_alert(1, FA_ERROR "[Spell-check dictionary not found.|Put " WP_ATARI_SPELL_DICT_NAME " in the|folder RETROWP.PRG is in.][ OK ]");
         return;
     }
 
@@ -2930,21 +3027,24 @@ static u32 atari_image_color_budget(void)
 
 static u32 g_atari_image_cache_counter = 0;
 
-/* "C:\WPIMG###.TMP" -- 8.3-safe, same fixed-scratch-path convention as
-   WP_ATARI_SPELL_DICT_PATH/the *_selfcheck scratch files above, except
-   counter-suffixed: a single fixed name would let a SECOND Insert
-   Image in one session silently overwrite the first image's still-
-   referenced pixel cache file underneath it. out must be >= 16 bytes.
-   Wraps at 1000 -- a real, accepted session-scope limit far beyond
-   anything a real editing session would reach. */
+/* "WPIMG###.TMP" beside the program (atari_home_init) -- 8.3-safe and
+   counter-suffixed: a single fixed name would let a SECOND Insert Image
+   in one session silently overwrite the first image's still-referenced
+   pixel cache file underneath it. out holds 128 (imgcache.h). Wraps at
+   1000 -- a real, accepted session-scope limit far beyond anything a
+   real editing session would reach. It was C:\ once, which a floppy-only
+   ST does not have. */
 static void atari_format_image_cache_path(char *out, u32 counter)
 {
+    char name[16];
     u32 c = counter % 1000u;
-    memcpy(out, "C:\\WPIMG", 8);
-    out[8] = (char)('0' + (c / 100u) % 10u);
-    out[9] = (char)('0' + (c / 10u) % 10u);
-    out[10] = (char)('0' + c % 10u);
-    memcpy(out + 11, ".TMP", 5); /* includes NUL */
+
+    memcpy(name, "WPIMG", 5);
+    name[5] = (char)('0' + (c / 100u) % 10u);
+    name[6] = (char)('0' + (c / 10u) % 10u);
+    name[7] = (char)('0' + c % 10u);
+    memcpy(name + 8, ".TMP", 5); /* includes NUL */
+    atari_home_file(out, 128u, name);
 }
 
 /* Receives an imported picture's pixels and puts them in a cache file --
@@ -2963,7 +3063,7 @@ static plat_file *g_atari_image_sink_file;
 static wp_status atari_image_begin(void *user, i32 width_px, i32 height_px,
                                     char *path_out, u32 path_cap, u32 *path_len)
 {
-    char cache_path[16];
+    char cache_path[128];
 
     (void)user; (void)width_px; (void)height_px;
     if (path_cap < sizeof(cache_path)) return WP_ERR;
@@ -3020,7 +3120,7 @@ static void do_insert_image(void)
 
     if (!g_ctx.doc_loaded) return;
 
-    strcpy(path, "C:\\*.*");
+    atari_picker_start(&g_ctx, path, fname, "");
     fname[0] = '\0';
     if (!run_file_selector(path, fname, fullpath, (u32)sizeof(fullpath))) return;
 
@@ -3100,7 +3200,7 @@ static void do_insert_image(void)
         const u8 *packed_pixels = palette + (u32)palette_count * 3u;
         u32 row_bytes = ((u32)width_px + 1u) / 2u;
         u32 packed_len = row_bytes * (u32)height_px;
-        char cache_path[16];
+        char cache_path[128];
         wp_image_desc desc;
         wp_status st;
 
@@ -4569,7 +4669,7 @@ wp_bool wp_atari_help_selfcheck(void)
 }
 
 /* M10 Phase 6: proves wp_config_load resolves all five real keymap=
-   values against a REAL file at WP_ATARI_CONFIG_PATH, written and read
+   values against a REAL file at WP_ATARI_SELFCHECK_CFG, written and read
    through real Atari file I/O -- host/tests/test_config.c already
    proves wp_config_parse's own string-matching logic exhaustively
    against hand-fed byte arrays, so this selfcheck deliberately doesn't
@@ -4595,20 +4695,20 @@ wp_bool wp_atari_config_selfcheck(void)
         plat_file *f;
         wp_config cfg;
 
-        if (plat_file_open(WP_ATARI_CONFIG_PATH, PLAT_FILE_WRITE, &f) != WP_OK) { ok = WP_FALSE; continue; }
+        if (plat_file_open(WP_ATARI_SELFCHECK_CFG, PLAT_FILE_WRITE, &f) != WP_OK) { ok = WP_FALSE; continue; }
         if (plat_file_write(f, (const u8 *)cases[i].content, (u32)strlen(cases[i].content)) != WP_OK) ok = WP_FALSE;
         plat_file_close(f);
 
-        wp_config_load(WP_ATARI_CONFIG_PATH, &cfg);
+        wp_config_load(WP_ATARI_SELFCHECK_CFG, &cfg);
         if (cfg.keymap_id != cases[i].expected) ok = WP_FALSE;
     }
 
-    plat_file_delete(WP_ATARI_CONFIG_PATH);
+    plat_file_delete(WP_ATARI_SELFCHECK_CFG);
     return ok;
 }
 
 /* The AES's AP_TERM, through the real dispatch, writing and reading the
-   real recovery file at WP_ATARI_RECOVERY_PATH (recovery.h): a clean
+   real recovery file at WP_ATARI_SELFCHECK_REC (recovery.h): a clean
    document leaves and writes nothing; a modified one leaves and leaves
    its work behind, which reads back as the same text, still unsaved; and
    settling it removes the file. host/tests/test_recovery.c proves the
@@ -4629,7 +4729,7 @@ wp_bool wp_atari_recovery_selfcheck(void)
     wp_undo_journal_init(&g_journal);
     wp_app_ctx_init(&g_ctx, WP_KEYMAP_VI, &g_doc, &g_journal);
     g_ctx.doc_loaded = WP_TRUE;
-    g_ctx.recovery_path = WP_ATARI_RECOVERY_PATH;
+    g_ctx.recovery_path = WP_ATARI_SELFCHECK_REC;
     wp_recovery_drop(&g_ctx);
 
     memset(msg, 0, sizeof(msg));
@@ -5028,6 +5128,16 @@ static wp_bool dispatch_menu_item(short window_handle, VdiHdl vdi, short obj)
 {
     short i;
 
+    if (g_help_active && obj != WP_MENU_OBJ_DESK_ABOUT) {
+        /* While Help covers the document, a menu pick (Cut, Bold, Align...)
+           would change it out of sight; the Amiga found and fixed this
+           first. Quit and the Help menu still work, or Help is a trap. */
+        const wp_action *act = NULL;
+        for (i = 0; i < WP_MENU_ACTION_COUNT; i++) {
+            if (g_menu_actions[i].obj == obj) act = wp_action_find(g_menu_actions[i].action);
+        }
+        if (act == NULL || (act->id != WP_ACT_FILE_QUIT && act->group != WP_MENU_HELP)) return WP_FALSE;
+    }
     if (!dispatch_local_menu_item(window_handle, vdi, obj)) {
         for (i = 0; i < WP_MENU_ACTION_COUNT; i++) {
             if (g_menu_actions[i].obj != obj) continue;
@@ -5628,6 +5738,10 @@ void app_shell_run(void)
 
     appl_init();
     atari_register_ap_term();
+    atari_home_init();
+    atari_find_file(g_config_path, (u32)sizeof(g_config_path), WP_ATARI_CONFIG_NAME);
+    atari_find_file(g_spell_dict_path, (u32)sizeof(g_spell_dict_path), WP_ATARI_SPELL_DICT_NAME);
+    atari_home_file(g_recovery_path, (u32)sizeof(g_recovery_path), WP_ATARI_RECOVERY_NAME);
 
     /* M10: read once at startup, fixed for the process lifetime -- see
        WP_ATARI_CONFIG_PATH's own comment and docs/keymaps.md. Missing/
@@ -5636,7 +5750,7 @@ void app_shell_run(void)
        exactly as it always has. */
     {
         wp_config cfg;
-        wp_config_load(WP_ATARI_CONFIG_PATH, &cfg);
+        wp_config_load(g_config_path, &cfg);
 
         /* M8.5/M10: wires the active scheme's own .doc/.journal to
            &g_doc/&g_journal and seeds everything else to sane defaults
@@ -5662,7 +5776,7 @@ void app_shell_run(void)
         wp_pageview_metrics(g_metrics_pref);   /* pageview.h */
         g_ui_scale_setting = cfg.ui_scale;
         /* Both GEMs: gem4xe's shutdown asks with AP_TERM too. */
-        g_ctx.recovery_path = WP_ATARI_RECOVERY_PATH;
+        g_ctx.recovery_path = g_recovery_path[0] != '\0' ? g_recovery_path : NULL;
 #ifndef GEM4XE_APP_GEM_H
         /* GEMDOS's printer, the Centronics port: an Epson-style printer
            takes the PC character set, which the ST's own largely is.
@@ -5676,7 +5790,7 @@ void app_shell_run(void)
         g_ctx.printer_driver = cfg.printer_driver;
         g_ctx.printer_sides = cfg.printer_sides;
         g_ctx.printer_choosable = WP_TRUE;
-        g_ctx.config_path = WP_ATARI_CONFIG_PATH;
+        g_ctx.config_path = g_config_path;
         /* With a GDOS loaded (SpeedoGDOS, NVDI), its printer heads the
            list: real fonts and sizes on paper, as GEM programs print. */
         if (vq_gdos() != 0) {

@@ -21,6 +21,7 @@
 #define STW_FONT_ENTRY  36u      /* 00, id, name */
 #define STW_STYLE       8u       /* 00, font, size, effects, 00 */
 #define STW_MAX_FIELDS  64u
+#define STW_FIELD_UTF8_MAX (2u + 32u * 3u + 2u)   /* «name» in UTF-8 */
 #define STW_MAX_OBJECTS 64u
 
 static u16 rd16(const u8 *p) { return (u16)(((u16)p[0] << 8) | p[1]); }
@@ -525,8 +526,10 @@ wp_status format_stw_import(const u8 *bytes, u32 len, wp_document *doc)
     st = stw_anchor_objects(&m, anchors);
     if (st != WP_OK) { wp_document_free(doc); return st; }
     /* A run is never longer than the body, and each byte is at most a
-       three-byte character -- or a merge field's name, 48 at most. */
-    c.scratch = (u8 *)mem_alloc((m.end - m.body) * 3u + STW_MAX_FIELDS * 48u + 4u);
+       three-byte character -- or a merge field: its name's 32 characters,
+       three bytes each at most (the ST's high half is mostly beyond
+       U+07FF), between two two-byte guillemets. */
+    c.scratch = (u8 *)mem_alloc((m.end - m.body) * 3u + STW_MAX_FIELDS * STW_FIELD_UTF8_MAX + 4u);
     if (c.scratch == NULL) { wp_document_free(doc); return WP_NOMEM; }
 
     /* The page: paper and margins, both versions. */

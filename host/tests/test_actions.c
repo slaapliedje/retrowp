@@ -7,6 +7,7 @@
 #include "format_prn.h"
 #include "drawing.h"
 #include "actions.h"
+#include "prompt.h"
 #include "imgcache.h"
 #include "rulerbar.h"
 #include "format_txt.h"
@@ -2580,5 +2581,22 @@ void test_actions_column_break(void)
     ASSERT_EQ_U32(caret_pstyle(&ctx, 0)->page_break_before, 0);
     doc_text(&doc, text, sizeof(text));
     ASSERT_EQ_STR(text, "Left side. Right side\n");
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* The prompt's starting text is cut only when it is too long: the byte
+   after a short one is not the text's, and must not shorten it. */
+void test_actions_prompt_initial_ignores_the_byte_past_it(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    static const u8 text[] = "Title|#\x80";
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Body\n");
+    wp_prompt_begin(&ctx, "Header:", text, 7, NULL);
+    ASSERT_EQ_U32(ctx.prompt.len, 7);
+    ASSERT_TRUE(memcmp(ctx.prompt.text, "Title|#", 7) == 0);
+    ctx.prompt.active = WP_FALSE;
     ctx_teardown(&doc, &journal, &ctx);
 }

@@ -1070,7 +1070,8 @@ after Edit in the hand-built `OBJECT[]` tree rather than inserted between
 existing titles, so none of T4.1/T4.3's existing menu object indices had
 to change -- only `wp_menu_tree_selfcheck()` grew three more linkage
 assertions. `do_spell_check()`:
-- Lazily opens a dictionary at a fixed path, `C:\WPSPELL.DIC`, via
+- Lazily opens a dictionary, `WPSPELL.DIC` beside the program (or `C:\WPSPELL.DIC`
+  from an older install; M20 T20.3), via
   `spell_dict_open()` -- there is no shipped dictionary asset (that would
   be a real multi-week undertaking of its own, same reasoning
   `docs/services/spell.md` gives for not being Hunspell-compatible); a
@@ -1940,7 +1941,8 @@ single-image `ci_atari.sh` and the full 6-image `ci_atari_matrix.sh`.
 Full account: `docs/keymaps.md`. This backend's own share of that
 milestone:
 
-- **Config file**: `C:\RETROWP.CFG`, read once at startup via
+- **Config file**: `RETROWP.CFG` beside the program (M20 T20.3; before
+  that `C:\RETROWP.CFG`, still read when there is none beside it), read once at startup via
   `wp_config_load` before `wp_app_ctx_init`, right in `app_shell_run`.
   Missing/malformed both quietly default to vi-mode -- an existing
   zero-config install keeps behaving exactly as it always has.
@@ -2286,8 +2288,8 @@ kills it, work and all. So now:
 
 - **No unsaved changes:** leave at once.
 - **Unsaved changes:** write the document, with its pictures, to
-  `C:\RETROWP.REC`, without marking it saved, and leave.
-- **The copy cannot be written** (disk full, no C:): answer `AP_TFAIL`
+  `RETROWP.REC` beside the program, without marking it saved, and leave.
+- **The copy cannot be written** (disk full, write-protected): answer `AP_TFAIL`
   (error `EWRITF`), which stops the shutdown. Only then does an alert
   say why, since by then nothing is waiting on the program.
 
@@ -2709,3 +2711,28 @@ cleanly at 300 dpi.
 The screen decoder's stripes (`spd/epson2png.py`) are its own: it plots
 the FX80's 144 rows an inch on a 1/216" grid, so every third row is
 empty in solid areas and text alike. They are not in the print.
+
+## Where RetroWP keeps its files (M20 T20.3)
+
+The baseline machine is a 1 MB ST with floppies and no hard disk, so no
+C:. Everything RetroWP kept used to be at `C:\`, and on that machine the
+configuration, the dictionary, the recovery file and the clipboard all
+failed, and every file selector opened on a drive that is not there.
+
+- **Home** is the drive and folder RETROWP.PRG was started in, read
+  once at start-up with `Dgetdrv`/`Dgetpath` (the desktop makes a
+  program's folder current before it runs it, which `CLIPART\` already
+  relied on). `RETROWP.CFG`, `WPSPELL.DIC`, `RETROWP.REC` and the
+  picture cache (`WPIMG###.TMP`) live there. For an install from
+  before, the configuration and dictionary are still read from `C:\`
+  when there is a C: (`Drvmap`) and none beside the program; anything
+  written goes beside the program.
+- **The clipboard** follows the Compendium's protocol: the AES's
+  directory from `scrp_read` (a trailing backslash added if a program
+  left it off); if there is none, or it is not there, `\CLIPBRD\` is
+  made on the boot drive (`_bootdev`) and registered with `scrp_write`;
+  `SCRAP.*` there is deleted before `SCRAP.TXT` is written.
+- **The file selector** opens in the document's own folder with its
+  name (so Save As offers where it came from), and otherwise in home.
+- The self-checks and the CI markers keep `C:\`: they run in the CI
+  harness, whose drive is C:.

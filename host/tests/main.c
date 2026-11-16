@@ -341,6 +341,7 @@ void test_rulerbar_hit_test_finds_buttons_gaps_and_the_ruler(void);
 void test_rulerbar_signature_follows_what_the_bar_shows(void);
 void test_actions_page_break_splits_and_undo_merges(void);
 void test_actions_header_prompt_types_edits_and_sets(void);
+void test_actions_prompt_initial_ignores_the_byte_past_it(void);
 void test_actions_document_name_is_the_last_path_component(void);
 void test_selspan_marks_the_lines_a_selection_crosses(void);
 void test_selspan_within_one_line(void);
@@ -510,6 +511,8 @@ void test_recovery_save_removes_the_documents_copy(void);
 void test_recovery_save_keeps_a_copy_it_does_not_own(void);
 void test_recovery_drop_and_the_saved_name(void);
 void test_recovery_ignores_a_file_that_is_not_one(void);
+void test_recovery_discard_keeps_the_copy_until_the_document_goes(void);
+void test_recovery_quit_discarding_drops_the_copy(void);
 void test_pagecanvas_fit_and_stack(void);
 void test_pagecanvas_paint_caret_hit(void);
 void test_pagecanvas_note_at_foot(void);
@@ -535,6 +538,8 @@ void test_merge_row_height_in_rtf(void);
 void test_merge_apply_and_restore(void);
 void test_format_stw_reads_version_10_page(void);
 void test_format_stw_refuses_what_is_not(void);
+void test_format_stw_long_wide_field_names_fit(void);
+void test_format_stw_opens_from_a_path_too_long_to_keep(void);
 void test_charsheet_prints(void);
 void test_charsheet_postscript(void);
 void test_actions_insert_svg_through_gateway(void);
@@ -575,6 +580,8 @@ void test_paginate_no_leaks(void);
 
 /* undo.c */
 void test_undo_insert_then_undo_then_redo(void);
+void test_undo_insert_mid_run_out_of_memory_keeps_the_text(void);
+void test_undo_group_out_of_memory_never_walks_off_the_stack(void);
 
 /* style_range.c */
 void test_style_range_bolds_a_word_in_the_middle(void);
@@ -733,6 +740,7 @@ void test_format_rtf_roundtrip_full_attribute_set(void);
 void test_spell_dict_open_missing_file_fails(void);
 void test_spell_check_exact_known_word(void);
 void test_spell_check_unknown_word(void);
+void test_spell_check_after_a_line_too_long_to_keep(void);
 void test_spell_check_case_insensitive(void);
 void test_spell_check_affix_rules(void);
 void test_spell_check_non_ascii_fails_open(void);
@@ -1135,6 +1143,7 @@ static const test_case g_cases[] = {
     { "rulerbar_signature_follows_what_the_bar_shows", test_rulerbar_signature_follows_what_the_bar_shows },
     { "actions_page_break_splits_and_undo_merges", test_actions_page_break_splits_and_undo_merges },
     { "actions_header_prompt_types_edits_and_sets", test_actions_header_prompt_types_edits_and_sets },
+    { "actions_prompt_initial_ignores_the_byte_past_it", test_actions_prompt_initial_ignores_the_byte_past_it },
     { "actions_document_name_is_the_last_path_component", test_actions_document_name_is_the_last_path_component },
     { "selspan_marks_the_lines_a_selection_crosses", test_selspan_marks_the_lines_a_selection_crosses },
     { "selspan_within_one_line", test_selspan_within_one_line },
@@ -1282,6 +1291,8 @@ static const test_case g_cases[] = {
     { "recovery_save_keeps_a_copy_it_does_not_own", test_recovery_save_keeps_a_copy_it_does_not_own },
     { "recovery_drop_and_the_saved_name", test_recovery_drop_and_the_saved_name },
     { "recovery_ignores_a_file_that_is_not_one", test_recovery_ignores_a_file_that_is_not_one },
+    { "recovery_discard_keeps_the_copy_until_the_document_goes", test_recovery_discard_keeps_the_copy_until_the_document_goes },
+    { "recovery_quit_discarding_drops_the_copy", test_recovery_quit_discarding_drops_the_copy },
     { "pagecanvas_fit_and_stack", test_pagecanvas_fit_and_stack },
     { "pagecanvas_paint_caret_hit", test_pagecanvas_paint_caret_hit },
     { "pagecanvas_note_at_foot", test_pagecanvas_note_at_foot },
@@ -1307,6 +1318,8 @@ static const test_case g_cases[] = {
     { "merge_apply_and_restore", test_merge_apply_and_restore },
     { "format_stw_reads_version_10_page", test_format_stw_reads_version_10_page },
     { "format_stw_refuses_what_is_not", test_format_stw_refuses_what_is_not },
+    { "format_stw_long_wide_field_names_fit", test_format_stw_long_wide_field_names_fit },
+    { "format_stw_opens_from_a_path_too_long_to_keep", test_format_stw_opens_from_a_path_too_long_to_keep },
     { "charsheet_prints", test_charsheet_prints },
     { "charsheet_postscript", test_charsheet_postscript },
     { "actions_insert_svg_through_gateway", test_actions_insert_svg_through_gateway },
@@ -1344,6 +1357,8 @@ static const test_case g_cases[] = {
     { "paginate_no_leaks", test_paginate_no_leaks },
 
     { "undo_insert_then_undo_then_redo", test_undo_insert_then_undo_then_redo },
+    { "undo_insert_mid_run_out_of_memory_keeps_the_text", test_undo_insert_mid_run_out_of_memory_keeps_the_text },
+    { "undo_group_out_of_memory_never_walks_off_the_stack", test_undo_group_out_of_memory_never_walks_off_the_stack },
     { "style_range_bolds_a_word_in_the_middle", test_style_range_bolds_a_word_in_the_middle },
     { "style_range_splits_the_run_it_partially_covers", test_style_range_splits_the_run_it_partially_covers },
     { "style_range_marks_the_paragraph_for_relayout", test_style_range_marks_the_paragraph_for_relayout },
@@ -1492,6 +1507,7 @@ static const test_case g_cases[] = {
     { "spell_dict_open_missing_file_fails", test_spell_dict_open_missing_file_fails },
     { "spell_check_exact_known_word", test_spell_check_exact_known_word },
     { "spell_check_unknown_word", test_spell_check_unknown_word },
+    { "spell_check_after_a_line_too_long_to_keep", test_spell_check_after_a_line_too_long_to_keep },
     { "spell_check_case_insensitive", test_spell_check_case_insensitive },
     { "spell_check_affix_rules", test_spell_check_affix_rules },
     { "spell_check_non_ascii_fails_open", test_spell_check_non_ascii_fails_open },

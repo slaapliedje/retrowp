@@ -10,6 +10,7 @@
 #include "actions.h"
 #include "docmodel.h"
 #include "format_txt.h"
+#include "window_host.h"
 
 #define REC_PATH "build/test_recovery.rec"
 
@@ -244,5 +245,60 @@ void test_recovery_ignores_a_file_that_is_not_one(void)
     write_raw(WP_RECOVERY_MAGIC "path=A:\\CUT.RTF\nrtf=1");
     ASSERT_TRUE(!wp_recovery_pending(&ctx, NULL, 0, NULL));
     ASSERT_TRUE(wp_recovery_restore(&ctx, NULL) != WP_OK);
+    teardown(&doc, &journal, &ctx);
+}
+
+static wp_bool pick_nothing(struct wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
+{
+    (void)ctx; (void)save; (void)out; (void)cap;
+    return WP_FALSE;
+}
+
+/* Recovered work, the writer agrees to discard it for File > Open, then
+   cancels the picker: the document is still the work, so the copy stays.
+   It goes only when something replaces the document (New), or when the
+   writer leaves without it (Quit, Discard). */
+void test_recovery_discard_keeps_the_copy_until_the_document_goes(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+
+    setup(&doc, &journal, &ctx, "Hello\n");
+    edit(&doc, &journal);
+    ASSERT_TRUE(wp_recovery_write(&ctx, NULL) == WP_OK);
+    ASSERT_TRUE(wp_recovery_restore(&ctx, NULL) == WP_OK);
+    ASSERT_TRUE(there(REC_PATH));
+    ASSERT_TRUE(ctx.recovery_owned);
+
+    window_host_next_choice(0);                     /* Discard changes */
+    ASSERT_TRUE(wp_action_file_open(&ctx, pick_nothing, NULL) == WP_OK);
+    ASSERT_TRUE(there(REC_PATH));
+    ASSERT_TRUE(ctx.recovery_owned);
+
+    window_host_next_choice(0);
+    ASSERT_TRUE(wp_action_find(WP_ACT_FILE_NEW)->handler(&ctx) == WP_OK);
+    ASSERT_TRUE(!there(REC_PATH));
+    ASSERT_TRUE(!ctx.recovery_owned);
+    teardown(ctx.doc, &journal, &ctx);
+}
+
+void test_recovery_quit_discarding_drops_the_copy(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+
+    setup(&doc, &journal, &ctx, "Hello\n");
+    edit(&doc, &journal);
+    ASSERT_TRUE(wp_recovery_write(&ctx, NULL) == WP_OK);
+    window_host_next_choice(1);                     /* Cancel: nothing happens */
+    wp_action_request_quit(&ctx);
+    ASSERT_TRUE(!ctx.quit_requested);
+    ASSERT_TRUE(there(REC_PATH));
+    window_host_next_choice(0);                     /* Discard changes */
+    wp_action_request_quit(&ctx);
+    ASSERT_TRUE(ctx.quit_requested);
+    ASSERT_TRUE(!there(REC_PATH));
     teardown(&doc, &journal, &ctx);
 }
