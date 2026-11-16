@@ -2815,6 +2815,16 @@ Every fix comes with a test shown to fail without it.
       over for good -- blank even after memory came back (host tests
       layout_failed_relayout_stays_dirty, which fails without the fix,
       and pageview_short_news_once_per_shortage).
+      (3), the user's call (2026-11-16): an ST in low resolution is
+      offered Medium at startup, since nearly everyone wants 80 columns.
+      The ROM AES cannot change resolution for a program (sh_write
+      refuses any mode above 1, FALCON.AES GEMSHLIB.C), so where the AES
+      is 4.0+ or EmuTOS ('ETOS' at OS header +$2C) RetroWP asks
+      "[Medium|Stay]", calls shel_write(5, 3) and ends; on ROM TOS it
+      says where: Options > Set Preferences (TOS 1.x) or Set Video (2.x).
+      Seen under Hatari: EmuTOS switched and came back in Medium; TOS
+      1.04, 1.62 and 2.06 named the right menu item. Choosing Stay still
+      leaves the overlapping low-res menu bar, which remains open.
 - [ ] T20.6 The offload link.
       AC: the client drops replies whose seq/op are not its request's and
       gives each request one overall deadline and a reply size cap; the

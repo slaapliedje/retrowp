@@ -5744,6 +5744,69 @@ static void atari_ci_write_alive(void)
     plat_file_close(f);
 }
 
+#ifndef GEM4XE_APP_GEM_H
+/* ST low resolution: offer Medium, since nearly everyone wants 80
+   columns to write in.
+
+   Only some AESes let a program change the resolution. The ROM AES does
+   not: its sh_write refuses any mode above 1 (FALCON.AES GEMSHLIB.C), so
+   on plain TOS only the desktop's own preferences can, and the alert
+   says where. shel_write mode 5 (SWM_REZCHANGE) is AES 4.0's (MultiTOS,
+   XaAES, N.AES), and EmuTOS honours it at any AES version. Either way
+   the change happens when this program has ended, so it ends; the user
+   starts it again in Medium. Its argument is the workstation ID, the
+   Getrez() resolution plus 2. */
+#ifndef SWM_REZCHANGE
+#define SWM_REZCHANGE 5
+#endif
+#define WP_ATARI_REZ_ST_LOW      0
+#define WP_ATARI_WSID_ST_MEDIUM  3
+
+static long g_os_header_offset;
+
+/* A long from the ROM's own OS header: _sysbase ($4F2) -> os_beg (+8),
+   which a RAM-patched header still points back at. Supervisor only. */
+static long read_os_header(void)
+{
+    const char *sysbase = *(const char * volatile *)0x4F2L;
+    const char *rom = *(const char * const volatile *)(sysbase + 8);
+
+    return *(const volatile long *)(rom + g_os_header_offset);
+}
+
+static wp_bool atari_aes_changes_rez(void)
+{
+    if ((unsigned short)_AESversion >= 0x0400) return WP_TRUE;
+    g_os_header_offset = 0x2C;                       /* EmuTOS's signature */
+    return (wp_bool)(Supexec(read_os_header) == 0x45544F53L);   /* 'ETOS' */
+}
+
+/* WP_TRUE when the program should end now so the AES can change to
+   Medium. Anything narrower than 80 columns that is not ST low (TT low,
+   a Falcon 40-column mode) keeps the plain warning. */
+static wp_bool atari_offer_medium(void)
+{
+    long tos;
+
+    if (Getrez() != WP_ATARI_REZ_ST_LOW) {
+        form_alert(1, FA_ERROR "[Screen is under 80 columns.|Text and menus may be cramped|at this resolution.][ OK ]");
+        return WP_FALSE;
+    }
+    if (atari_aes_changes_rez()) {
+        if (form_alert(1, FA_QUESTION "[Screen is under 80 columns.|Switch to Medium resolution?|RetroWP closes: start it|again afterwards.][Medium|Stay]") != 1)
+            return WP_FALSE;
+        return (wp_bool)(shel_write(SWM_REZCHANGE, WP_ATARI_WSID_ST_MEDIUM, 0, "", "") != 0);
+    }
+    g_os_header_offset = 2;                          /* os_version, high word */
+    tos = (Supexec(read_os_header) >> 16) & 0xFFFFL;
+    if (tos >= 0x0200)
+        form_alert(1, FA_ERROR "[Screen is under 80 columns.|For 80, choose Medium in the|desktop's Options menu,|Set Video.][ OK ]");
+    else
+        form_alert(1, FA_ERROR "[Screen is under 80 columns.|For 80, choose Medium in the|desktop's Options menu,|Set Preferences.][ OK ]");
+    return WP_FALSE;
+}
+#endif
+
 void app_shell_run(void)
 {
     short work_in[11];
@@ -5830,25 +5893,16 @@ void app_shell_run(void)
     work_in[10] = 2; /* raster coordinates */
     v_opnvwk(work_in, &vdi_handle, work_out);
 
-    /* This window's own drawing handle needs the identical one-time
-       GDOS registration ensure_metrics_vdi already does for the
-       separate metrics-only handle -- otherwise plat_draw_text's own
-       atari_select_font call (draw_atari.c) can only snap to the
-       built-in bitmap font's coarse sizes on THIS handle even when
-       g_metrics_vdi's measurements used the full scalable range,
-       reintroducing the same measure-vs-draw mismatch fixing
-       plat_draw_text alone doesn't fully close. */
-    atari_ensure_gdos_fonts(vdi_handle);
-
     /* work_out[0] is the screen's max addressable X (width in pixels,
        minus one) -- a standard v_opnvwk output, same field the real
        SpeedoGDOS INSTALL.PRG checks before it will run at all (verified:
        it refuses at 320x200 low-res with "needs an 80 column screen",
        and proceeds at 640x200 medium-res -- see docs/atari-platform.md).
        This app doesn't need to refuse outright the way an installer
-       does -- editing still works, just cramped -- so this warns once
-       at startup with the same 640px/80-column threshold rather than
-       blocking launch. */
+       does -- editing still works, just cramped -- so at the same
+       640px/80-column threshold it offers Medium on an ST in low
+       resolution (atari_offer_medium) and otherwise warns once, rather
+       than blocking launch. */
     /* CI mode is detected BEFORE this alert, not after it as it used to
        be: the alert is modal, and under CI there is nobody to answer it.
        The app then sits on it forever with no window, which every marker
@@ -5865,8 +5919,29 @@ void app_shell_run(void)
 
     if (needs_80_column_warning((short)(work_out[0] + 1), wcell)
         && !g_atari_ci_active) {
+#ifndef GEM4XE_APP_GEM_H
+        /* Before the GDOS fonts are loaded, so ending here for a change
+           to Medium has only this workstation and the AES to let go. */
+        if (atari_offer_medium()) {
+            v_clsvwk(vdi_handle);
+            appl_exit();
+            return;
+        }
+#else
         form_alert(1, FA_ERROR "[Screen is under 80 columns.|Text and menus may be cramped|at this resolution.][ OK ]");
+#endif
     }
+
+    /* This window's own drawing handle needs the identical one-time
+       GDOS registration ensure_metrics_vdi already does for the
+       separate metrics-only handle -- otherwise plat_draw_text's own
+       atari_select_font call (draw_atari.c) can only snap to the
+       built-in bitmap font's coarse sizes on THIS handle even when
+       g_metrics_vdi's measurements used the full scalable range,
+       reintroducing the same measure-vs-draw mismatch fixing
+       plat_draw_text alone doesn't fully close. */
+    atari_ensure_gdos_fonts(vdi_handle);
+
 
     g_ui_scale = wp_rulerbar_ui_scale((i32)work_out[0] + 1, g_ui_scale_setting);
     wp_menu_tree_init(wcell, hcell,
