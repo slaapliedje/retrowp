@@ -2,6 +2,8 @@
 #include <i86.h>
 #include <bios.h>
 #include <conio.h>
+#include <dos.h>
+#include <stdlib.h>
 #include <string.h>
 #include "app_shell.h"
 #include "app_shell_internal.h"
@@ -210,6 +212,75 @@ static void dos_break_restore(void)
     regs.x.ax = 0x3301;
     regs.h.dl = g_dos_break_was;
     int86(0x21, &regs, &regs);
+}
+
+/* M20 T20.5: DOS's own critical-error handler (INT 24h) asks "Abort,
+   Retry, Fail?" across the editor's screen, and Abort ends the program
+   with the document unsaved -- the answer a user with no floppy in A:
+   is most likely to give. RetroWP's handler answers Fail instead, so the
+   DOS call in progress fails, the file layer sees an ordinary error and
+   the document stays open; what went wrong is kept for the main loop to
+   say once the action has unwound. Fail exists from DOS 3.1; before
+   that the only answer that keeps the program is Ignore, and the
+   message is all the warning there is that the operation went wrong.
+
+   Only DOS functions 01h-0Ch and 59h may be called from inside the
+   handler, so it records and returns, nothing more. DOS puts INT 23h
+   and 24h back from the PSP when the program ends.
+
+   INT 23h (Ctrl-C/Ctrl-Break) is answered with an IRET, which tells DOS
+   to carry on: BREAK OFF (dos_break_off) only narrows the checks, and a
+   Ctrl-C seen during console I/O would otherwise end the program too. */
+static volatile unsigned g_dos_crit_deverr;
+static volatile unsigned g_dos_crit_errcode;
+static volatile wp_bool g_dos_crit_pending = WP_FALSE;
+
+static int __far dos_crit_handler(unsigned deverr, unsigned errcode, unsigned __far *devhdr)
+{
+    WP_UNUSED(devhdr);
+    g_dos_crit_deverr = deverr;
+    g_dos_crit_errcode = errcode;
+    g_dos_crit_pending = WP_TRUE;
+    if (_osmajor > 3 || (_osmajor == 3 && _osminor >= 10)) return _HARDERR_FAIL;
+    return _HARDERR_IGNORE;
+}
+
+static void __interrupt __far dos_ctrl_c_handler(void)
+{
+}
+
+static void dos_crit_install(void)
+{
+    _harderr(dos_crit_handler);
+    _dos_setvect(0x23, dos_ctrl_c_handler);
+}
+
+/* The sentence for the last critical error, or NULL if none. */
+static const char *dos_crit_take(char *buf)
+{
+    static const char *const why[] = {
+        "is write-protected", "is not known to DOS", "is not ready",
+        "did not understand a command", "had a data error (CRC)",
+        "had a bad request", "could not find the track",
+        "has an unknown disk type", "could not find the sector",
+        "is out of paper", "could not be written", "could not be read",
+        "failed"
+    };
+    unsigned code;
+
+    if (!g_dos_crit_pending) return NULL;
+    g_dos_crit_pending = WP_FALSE;
+    code = g_dos_crit_errcode & 0xFFu;
+    if (code >= sizeof(why) / sizeof(why[0])) code = sizeof(why) / sizeof(why[0]) - 1;
+    if ((g_dos_crit_deverr & 0x8000u) == 0) {
+        strcpy(buf, "Drive A: ");
+        buf[6] = (char)('A' + (g_dos_crit_deverr & 0xFFu));
+    } else {
+        strcpy(buf, "The device ");
+    }
+    strcat(buf, why[code]);
+    strcat(buf, ".");
+    return buf;
 }
 
 /* BIOS INT 16h AH=02h: bit0=RShift bit1=LShift bit2=Ctrl bit3=Alt. */
@@ -1674,6 +1745,7 @@ void app_shell_run(void)
 
     set_text_mode();
     dos_break_off();
+    dos_crit_install();
 
     {
         wp_config cfg;
@@ -1728,6 +1800,12 @@ void app_shell_run(void)
         } else {
             dos_idle();
             continue;
+        }
+        {
+            char why[64];
+            const char *msg = dos_crit_take(why);
+
+            if (msg != NULL) dos_show_message(msg);
         }
         redraw_screen();
         /* After dispatch and repaint, never before: a dispatch or paint

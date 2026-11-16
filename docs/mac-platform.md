@@ -533,6 +533,17 @@ window, vi-mode Normal-mode movement, clean quit," not wrapped layout
   `plat_file_open` needs (it always passes vRefNum 0 to `FSOpen`/
   `Create`, relying on the volume name in the path itself -- the exact
   mechanism `"Unix:name"` already proved throughout Phase 0/1).
+  **That lost the folder (fixed in M20 T20.5):** under HFS the
+  `SFReply`'s vRefNum is a *working directory* -- volume and folder --
+  and `PBHGetVInfo` names only the volume, so "HD:Letters:Memo" was
+  read and saved as "HD:Memo". `build_full_path` now asks
+  `PBGetWDInfo` for the real volume and directory ID and walks
+  `PBGetCatInfo` (`ioFDirIndex -1`) up to the root, building
+  "Vol:Folder:...:File"; without HFS (`FSFCBLen` at `$3F6` is -1) or
+  on an MFS volume it keeps "Vol:File", which is all there is. The Mac
+  gate checks it: the app opens a working directory on
+  `Unix:WPFOLDER:INNER` and writes the path it builds to
+  `Unix:RETROWP.FLD`.
 - **A real, reproducible input bug, found by testing actual keystrokes
   under BasiliskII, not by inspection**: `translate_mac_key` originally
   set `WP_MOD_SHIFT` whenever the Toolbox's own `shiftKey` modifier bit

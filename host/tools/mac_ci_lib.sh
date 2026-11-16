@@ -246,6 +246,8 @@ run_mac_app_once() {
     cp build/mac/.rsrc/RETROWP.APPL "$_shared/.rsrc/CI_TARGET.APPL"
     cp build/mac/.finf/RETROWP.APPL "$_shared/.finf/CI_TARGET.APPL"
     echo "ci" > "$_shared/RETROWP.CI"
+    # M20 T20.5: a folder for the app's working-directory path probe.
+    mkdir -p "$_shared/WPFOLDER/INNER"
 
     # seriala/serialb name a path that cannot be opened. Left unset,
     # BasiliskII takes /dev/ttyS0 and /dev/ttyS1, and once this host had a
@@ -371,6 +373,11 @@ EOF
     kill -9 "$_basilisk_pid" 2>/dev/null; wait "$_basilisk_pid" 2>/dev/null
     kill "$_xvfb_pid" 2>/dev/null; wait "$_xvfb_pid" 2>/dev/null
 
+    # M20 T20.5: Standard File's folder must survive into the path.
+    _folder="$(head -n 1 "$_shared/RETROWP.FLD" 2>/dev/null)"
+    _folder_ok=0
+    [ "$_folder" = "Unix:WPFOLDER:INNER:PROBE.TXT" ] && _folder_ok=1
+
     MAC_APP_LOG="$_scratch/app.log"
     {
         echo "window-open sentinel: $([ "$_alive" -eq 1 ] && echo present || echo MISSING)"
@@ -384,12 +391,13 @@ EOF
         echo "still responsive: $([ "$_responsive" -eq 1 ] && echo yes || echo NO)"
         echo "painted text fragments: ${_painted:-<none>}"
         echo "rendered document: $([ "$_rendered" -eq 1 ] && echo yes || echo 'NO -- app came up but painted an EMPTY page')"
+        echo "folder path: ${_folder:-<none>} $([ "$_folder_ok" -eq 1 ] && echo ok || echo 'WRONG -- want Unix:WPFOLDER:INNER:PROBE.TXT')"
         echo "screenshot: $_scratch/screen.png"
     } > "$MAC_APP_LOG"
 
     _mac_ci_cleanup_share "$_shared"
 
-    if [ "$_alive" -eq 1 ] && [ "$_responsive" -eq 1 ] && [ "$_rendered" -eq 1 ]; then
+    if [ "$_alive" -eq 1 ] && [ "$_responsive" -eq 1 ] && [ "$_rendered" -eq 1 ] && [ "$_folder_ok" -eq 1 ]; then
         MAC_APP_STATUS=0
         return 0
     fi

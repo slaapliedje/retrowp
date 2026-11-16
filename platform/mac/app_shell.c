@@ -337,8 +337,32 @@ static void c_to_pstr(const char *c, unsigned char *p)
    wrap) works directly: ioVolIndex 0 + ioVRefNum selects the volume by
    reference number, and ioNamePtr (given a buffer) receives its name. */
 
-static wp_bool build_full_path(short vRefNum, const unsigned char *fname,
-                                char *out, u32 out_cap)
+/* M20 T20.5: under HFS the vRefNum Standard File answers is a WORKING
+   DIRECTORY reference -- the volume AND the folder the user was looking
+   at. PBHGetVInfo on it names only the volume, so a document in
+   "HD:Letters:" used to be opened (or worse, saved) as "HD:name", at the
+   root. The folder is recovered instead: PBGetWDInfo turns the working
+   directory into its real volume and directory ID, and PBGetCatInfo
+   with ioFDirIndex -1 names each directory and gives its parent, up to
+   the root (ID 2, whose name is the volume's). The path is built from
+   the end of a buffer backwards, since it is found leaf first.
+
+   Without HFS (FSFCBLen, $3F6, is -1 on a 64K ROM) or on an MFS volume
+   (PBGetCatInfo fails: no catalog), there are no folders to lose, and
+   the old "VolName:FileName" is the whole truth. A path past the 255
+   bytes file_mac.c can hand the File Manager fails instead of being cut. */
+
+#define MAC_FS_RTDIR    2L      /* fsRtDirID: a volume's root directory */
+#define MAC_DIR_DEPTH   32      /* guards a corrupt catalog's cycle */
+#define MAC_PATH_MAX    255
+
+static wp_bool hfs_present(void)
+{
+    return (wp_bool)(*(volatile short *)0x3F6 > 0);    /* FSFCBLen */
+}
+
+static wp_bool build_volume_path(short vRefNum, const unsigned char *fname,
+                                  char *out, u32 out_cap)
 {
     HParamBlockRec pb;
     unsigned char volName[64];
@@ -360,6 +384,66 @@ static wp_bool build_full_path(short vRefNum, const unsigned char *fname,
     for (i = 0; i < n && pos < out_cap - 1; i++) out[pos++] = (char)fname[i + 1];
 
     out[pos] = '\0';
+    return WP_TRUE;
+}
+
+/* Prepends Pascal string `name` and a ':' to the path being built
+   backwards in buf[*start..]. */
+static wp_bool path_prepend(char *buf, u32 *start, const unsigned char *name, wp_bool colon)
+{
+    u32 n = name[0], need = n + (colon ? 1u : 0u);
+
+    if (need > *start) return WP_FALSE;
+    if (colon) buf[--*start] = ':';
+    *start -= n;
+    memcpy(buf + *start, name + 1, n);
+    return WP_TRUE;
+}
+
+static wp_bool build_full_path(short vRefNum, const unsigned char *fname,
+                                char *out, u32 out_cap)
+{
+    WDPBRec wd;
+    CInfoPBRec cpb;
+    unsigned char name[64];
+    char buf[MAC_PATH_MAX + 1];
+    u32 start = MAC_PATH_MAX;
+    long dir;
+    short vol;
+    int depth;
+
+    if (!hfs_present()) return build_volume_path(vRefNum, fname, out, out_cap);
+
+    memset(&wd, 0, sizeof(wd));
+    wd.ioVRefNum = vRefNum;
+    wd.ioWDIndex = 0;
+    wd.ioWDProcID = 0;
+    if (PBGetWDInfoSync(&wd) != noErr) return build_volume_path(vRefNum, fname, out, out_cap);
+    vol = wd.ioWDVRefNum;
+    dir = wd.ioWDDirID;
+    if (dir == 0) dir = MAC_FS_RTDIR;
+
+    buf[MAC_PATH_MAX] = '\0';
+    if (!path_prepend(buf, &start, fname, WP_FALSE)) return WP_FALSE;
+    for (depth = 0; depth < MAC_DIR_DEPTH; depth++) {
+        memset(&cpb, 0, sizeof(cpb));
+        name[0] = 0;
+        cpb.dirInfo.ioNamePtr = name;
+        cpb.dirInfo.ioVRefNum = vol;
+        cpb.dirInfo.ioFDirIndex = -1;          /* name the directory itself */
+        cpb.dirInfo.ioDrDirID = dir;
+        if (PBGetCatInfoSync(&cpb) != noErr) {
+            /* MFS: no catalog, no folders. */
+            if (depth == 0) return build_volume_path(vRefNum, fname, out, out_cap);
+            return WP_FALSE;
+        }
+        if (!path_prepend(buf, &start, name, WP_TRUE)) return WP_FALSE;
+        if (dir == MAC_FS_RTDIR) break;
+        dir = cpb.dirInfo.ioDrParID;
+    }
+    if (depth == MAC_DIR_DEPTH) return WP_FALSE;
+    if (MAC_PATH_MAX - start + 1 > out_cap) return WP_FALSE;
+    memcpy(out, buf + start, MAC_PATH_MAX - start + 1);
     return WP_TRUE;
 }
 
@@ -617,7 +701,7 @@ static void do_insert_image(void)
         }
 
         /* fullpath's own trailing ':' marks where the bare filename
-           starts -- build_full_path's own "VolName:FileName" shape. */
+           starts -- build_full_path's own "Vol:Folder:FileName" shape. */
         fname_start = 0;
         for (k = 0; fullpath[k] != '\0'; k++) {
             if (fullpath[k] == ':') fname_start = k + 1;
@@ -2072,6 +2156,47 @@ static void mac_ci_write_alive(void)
     plat_file_close(f);
 }
 
+/* M20 T20.5's check on target: the gate makes WPFOLDER:INNER on the
+   share, and this opens a working directory on it -- the kind of
+   vRefNum Standard File answers for a folder -- and writes the path
+   build_full_path makes of it, for the gate to compare with
+   "Unix:WPFOLDER:INNER:PROBE.TXT". Before T20.5 it said "Unix:PROBE.TXT". */
+#define WP_MAC_CI_FOLDER   "Unix:RETROWP.FLD"
+
+static void mac_ci_folder_probe(void)
+{
+    HParamBlockRec vpb;
+    CInfoPBRec cpb;
+    WDPBRec wd;
+    char path[MAC_PATH_MAX + 1];
+    const char *say = "no-folder";
+    plat_file *f;
+    long dir;
+
+    memset(&vpb, 0, sizeof(vpb));
+    vpb.volumeParam.ioNamePtr = (StringPtr) "\pUnix:";
+    vpb.volumeParam.ioVolIndex = -1;            /* by name */
+    memset(&cpb, 0, sizeof(cpb));
+    cpb.dirInfo.ioNamePtr = (StringPtr) "\pUnix:WPFOLDER:INNER";
+    if (PBHGetVInfoSync(&vpb) == noErr && PBGetCatInfoSync(&cpb) == noErr) {
+        dir = cpb.dirInfo.ioDrDirID;
+        memset(&wd, 0, sizeof(wd));
+        wd.ioVRefNum = vpb.volumeParam.ioVRefNum;
+        wd.ioWDDirID = dir;
+        wd.ioWDProcID = 0x52575054L;            /* 'RWPT' */
+        say = "no-wd";
+        if (PBOpenWDSync(&wd) == noErr) {
+            say = build_full_path(wd.ioVRefNum, (const unsigned char *)"\pPROBE.TXT",
+                                  path, (u32)sizeof(path)) ? path : "no-path";
+            (void)PBCloseWDSync(&wd);
+        }
+    }
+    if (plat_file_open(WP_MAC_CI_FOLDER, PLAT_FILE_WRITE, &f) != WP_OK) return;
+    plat_file_write(f, (const u8 *)say, (u32)strlen(say));
+    plat_file_write(f, (const u8 *)"\n", 1);
+    plat_file_close(f);
+}
+
 void app_shell_run(void)
 {
     Rect winRect;
@@ -2160,6 +2285,7 @@ void app_shell_run(void)
     g_mac_ci_active = mac_ci_mode();
     if (g_mac_ci_active) {
         mac_ci_open_named_document(WP_MAC_CI_TRIGGER);
+        mac_ci_folder_probe();
         mac_ci_write_alive();
     }
 

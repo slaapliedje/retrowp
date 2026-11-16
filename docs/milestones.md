@@ -2749,11 +2749,38 @@ Every fix comes with a test shown to fail without it.
       answered on gem4xe; the gem4xe gate exercises one.
       Statics marked: the link map puts them at $189E-$1A74, bank $00.
       Not yet drawn on gem4xe (the emulator was in use).
-- [ ] T20.5 DOS and Mac file safety.
+- [x] T20.5 DOS and Mac file safety.
       AC: DOS installs an INT 24h handler (a missing floppy is an error,
       not "Abort, Retry, Fail?" ending the program) and an INT 23h one;
       Mac Open and Save keep the folder (working-directory refnum, not
       the volume root).
+      Done 2026-11-16. DOS: _harderr answers Fail (Ignore before DOS
+      3.1), records the drive and error, and the main loop says
+      "Drive A: is not ready." once the action has unwound; INT 23h is
+      an IRET. DOSBox never raises INT 24h, so it was tried on MiSTer2's
+      ao486 core under MS-DOS 7.1 (2026-11-16): DIR A: with the drive
+      empty gives "Abort, Retry, Fail?" at the prompt, and in RetroWP
+      both :e and :w on A: say "Couldn't open/save that file", then
+      "Drive A: is not ready.", and the editor carries on. Ctrl+C reaches
+      RetroWP as Copy. Ctrl+Break was not tried. Mac:
+      build_full_path walks PBGetWDInfo/PBGetCatInfo up to the root,
+      falling back to "Vol:File" without HFS or on MFS. The Mac gate now
+      opens a working directory on Unix:WPFOLDER:INNER and requires
+      "Unix:WPFOLDER:INNER:PROBE.TXT" (Unix:RETROWP.FLD); the old code
+      fails it on both ROMs ("Unix:PROBE.TXT").
+- [ ] T20.9 What the MiSTer run turned up (2026-11-16).
+      AC: (1) DOS with 527 KB free (ao486, MS-DOS 7.1 loaded low) opens
+      a file, names it in the title row and draws NO text -- not even
+      what is typed -- without a word; with 564 KB free it draws. Find
+      the allocation that fails and say "Out of memory", or tier it.
+      (2) DOS "Couldn't open that file  1)OK" takes only 1, not Enter,
+      while "Drive A: is not ready. (Enter=OK)" takes Enter: one rule
+      for every one-button prompt. (3) ST low resolution: the menu bar
+      overflows and Help is drawn over Desk; the bar can end up
+      all-inverted with the Desk menu open (TOS 1.62, STE). (4) Paste on
+      a floppy-only ST is still unconfirmed on target: Copy wrote
+      A:\CLIPBRD\SCRAP.TXT, but the injected input could not drive
+      Paste reliably.
 - [ ] T20.6 The offload link.
       AC: the client drops replies whose seq/op are not its request's and
       gives each request one overall deadline and a reply size cap; the

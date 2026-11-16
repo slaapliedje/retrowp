@@ -515,6 +515,16 @@ What it took, in the order it was found:
   BIOS now (INT 16h AH=01h), BREAK is off while RetroWP runs (restored at
   exit, so a Ctrl+C -- Copy -- cannot stop the program mid-document), and
   Shift+F7, WordPerfect's Print, is Print too.
+- **"Abort, Retry, Fail?" (M20 T20.5).** With no handler of its own a
+  program gets DOS's critical-error prompt across its screen, and Abort
+  ends it with the document unsaved. RetroWP's INT 24h handler (Watcom's
+  `_harderr`) answers Fail -- Ignore before DOS 3.1, which has no Fail --
+  so the open or save simply fails, and once the action has unwound the
+  main loop says what happened ("Drive A: is not ready."). INT 23h is an
+  IRET, so Ctrl+C or Ctrl+Break during console I/O cannot end the
+  program either. DOS restores both vectors from the PSP at exit.
+  DOSBox's DOS never raises INT 24h, so no gate exercises the handler;
+  it was tried by hand on a MiSTer ao486 core under MS-DOS 7.1.
 - **A printer port with no printer.** RetroWP asks INT 17h first (see
   `dos_printer_ready`) and says the printer is not ready.
 - **The serial line.** The transport used to be BIOS INT 14h, whose send
