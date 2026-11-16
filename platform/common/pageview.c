@@ -17,6 +17,7 @@ i32 wp_pageview_wrap_twips(const wp_document *doc, u32 section, i32 window_twips
 }
 
 static u8 g_metrics_mode = WP_METRICS_AS_SET;
+static wp_bool g_relayout_short = WP_FALSE;   /* the last relayout left a paragraph unlaid */
 static i16 g_screen_wider = -1;   /* not measured yet */
 
 void wp_pageview_metrics(u8 mode)
@@ -53,6 +54,7 @@ u32 wp_pageview_relayout(wp_document *doc, i32 window_twips)
     u32 si, pi;
     wp_bool all = WP_FALSE;
 
+    g_relayout_short = WP_FALSE;
     if (g_metrics_mode != WP_METRICS_AS_SET) {
         wp_bool want = (wp_bool)(g_metrics_mode == WP_METRICS_PAPER &&
                                  (window_twips <= 0 || !wp_pageview_screen_face_wider()));
@@ -77,10 +79,15 @@ u32 wp_pageview_relayout(wp_document *doc, i32 window_twips)
             i32 w = wp_paragraph_wrap_twips(doc, sec, pi, wrap);   /* a cell's, a frame's, or wrap */
 
             if (!all && layout != NULL && !para->layout_dirty && layout->wrap_twips == w) continue;
-            (void)wp_paragraph_relayout(doc, para, w);
+            if (wp_paragraph_relayout(doc, para, w) != WP_OK) g_relayout_short = WP_TRUE;
         }
     }
     return wp_document_mark_pages(doc);
+}
+
+wp_bool wp_pageview_relayout_short(void)
+{
+    return g_relayout_short;
 }
 
 u32 wp_pageview_cursor_page(wp_document *doc, const wp_pos *cursor, u32 *page_count_out)

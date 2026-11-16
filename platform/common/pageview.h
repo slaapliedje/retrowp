@@ -33,6 +33,13 @@ i32 wp_pageview_wrap_twips(const wp_document *doc, u32 section, i32 window_twips
    every shell runs before it paints. Returns the page count. */
 u32 wp_pageview_relayout(wp_document *doc, i32 window_twips);
 
+/* WP_TRUE when the last wp_pageview_relayout could not lay out every
+   paragraph -- out of memory, almost always. Such a paragraph keeps no
+   lines (or its old ones) and is not drawn, so a shell that does not ask
+   shows a blank or stale page and says nothing; it should tell the user
+   once, not at every repaint. */
+wp_bool wp_pageview_relayout_short(void);
+
 /* How layout measures (papermetrics.h), chosen at each relayout.
 
    WP_METRICS_AS_SET, the default: left as plat_metrics_set_paper has it

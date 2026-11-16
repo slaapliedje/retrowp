@@ -2793,6 +2793,20 @@ Every fix comes with a test shown to fail without it.
       default is item 1 -- and the Mac shut down with the work lost.
       dialog_mac.c now makes the caller's default_index the outlined
       default button, Esc/Cmd-. cancel, and adds no second Cancel.
+      (1) and (2) done, reproduced under DOSBox with LOADFIX eating
+      conventional memory (a logging mem_alloc build named the failure):
+      the 15 KB line-break token buffer failed because the help manual,
+      parsed at startup and kept, held ~40 KB of the heap with the holes
+      its 1.5x growth left. RETROWP.EXE needs 461 KB to load. DOS now
+      parses the manual when Help opens and frees it when Help closes
+      ("Not enough memory to open Help." if it cannot); a relayout that
+      leaves a paragraph unlaid is reported by wp_pageview_relayout_short
+      and DOS says "Out of memory: part of the document can't be shown"
+      once. Draws: 527 KB free (was blank), down to ~499 KB; below that
+      it says so. Every DOS choice prompt takes Enter for the caller's
+      default and shows "(Enter=n)": "1)OK (Enter=1)", and the discard
+      question's "(Enter=2)" is Cancel. Atari, Amiga and Mac still parse
+      the manual at startup and do not ask wp_pageview_relayout_short.
 - [ ] T20.6 The offload link.
       AC: the client drops replies whose seq/op are not its request's and
       gives each request one overall deadline and a reply size cap; the

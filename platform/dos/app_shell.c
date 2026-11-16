@@ -446,6 +446,14 @@ static const char g_sample_text[] =
    unconditionally -- see linebreak.c), so without this check the
    relayout-before-every-paint below would re-measure a completely
    unchanged document on every redraw. */
+/* Set when a relayout first leaves a paragraph unlaid (out of memory):
+   the main loop says so once, after the repaint, rather than the
+   document just coming up blank. Cleared when a relayout succeeds, so a
+   second shortage is told about too. */
+static void dos_show_message(const char *msg);
+static wp_bool g_layout_short_told = WP_FALSE;
+static wp_bool g_layout_short_pending = WP_FALSE;
+
 static void relayout_document(i32 content_width_twips)
 {
     /* The page's text column, or the window when that is narrower
@@ -453,6 +461,21 @@ static void relayout_document(i32 content_width_twips)
        breaks are marked. */
     g_content_width_twips = content_width_twips;
     (void)wp_pageview_relayout(&g_doc, content_width_twips);
+    if (!wp_pageview_relayout_short()) {
+        g_layout_short_told = WP_FALSE;
+    } else if (!g_layout_short_told) {
+        g_layout_short_told = WP_TRUE;
+        g_layout_short_pending = WP_TRUE;
+    }
+}
+
+/* Told after a repaint, never from inside one: the prompt row is part of
+   the screen being painted. */
+static void dos_layout_short_take(void)
+{
+    if (!g_layout_short_pending) return;
+    g_layout_short_pending = WP_FALSE;
+    dos_show_message("Out of memory: part of the document can't be shown. Save your work.");
 }
 
 /* Replaces the currently-open document with new_doc (already built and
@@ -1453,9 +1476,30 @@ static void invoke_action(wp_action_id id)
 
 /* Opens the help viewer at the named node (falling back to node 0) --
    mirrors platform/atari/app_shell.c's own open_help_node exactly. */
-static void open_help_node(const char *node_name, u32 node_name_len)
+/* The manual is parsed when Help opens and freed when it closes. Held
+   for the whole session it was ~40 KB of a 640 KB machine's heap, and on
+   one with 527 KB free that was the difference between the document
+   showing and a blank page (T20.9). */
+static wp_bool help_doc_ensure(void)
+{
+    if (g_help_doc_loaded) return WP_TRUE;
+    g_help_doc_loaded = (wp_bool)(wp_help_doc_parse(g_help_source_retrowp,
+                                                     (u32)g_help_source_retrowp_len,
+                                                     &g_help_doc) == WP_OK);
+    if (!g_help_doc_loaded) dos_show_message("Not enough memory to open Help.");
+    return g_help_doc_loaded;
+}
+
+static void help_doc_release(void)
 {
     if (!g_help_doc_loaded) return;
+    wp_help_doc_free(&g_help_doc);
+    g_help_doc_loaded = WP_FALSE;
+}
+
+static void open_help_node(const char *node_name, u32 node_name_len)
+{
+    if (!help_doc_ensure()) return;
     {
         u32 node = wp_help_doc_find_node(&g_help_doc, (const u8 *)node_name, node_name_len);
         wp_help_view_init(&g_help_view, &g_help_doc, (node != WP_HELP_NODE_NONE) ? node : 0);
@@ -1602,7 +1646,10 @@ static wp_bool dos_dispatch_key(void)
     }
 
     if (g_help_active) {
-        if (wp_help_view_feed_key(&g_help_view, ev)) g_help_active = WP_FALSE;
+        if (wp_help_view_feed_key(&g_help_view, ev)) {
+            g_help_active = WP_FALSE;
+            help_doc_release();
+        }
         return WP_FALSE;
     }
     /* No 68k Mac or PC keyboard here has a dedicated HELP key, but the
@@ -1769,16 +1816,16 @@ void app_shell_run(void)
         g_ctx.view.line_px = dos_line_rows;
     }
 
-    g_help_doc_loaded = (wp_bool)(wp_help_doc_parse(g_help_source_retrowp,
-                                                     (u32)g_help_source_retrowp_len,
-                                                     &g_help_doc) == WP_OK);
-
     load_sample_document(dos_col_to_twips(DOS_SCREEN_COLS));
     if (g_start_file != NULL && g_start_file[0] != '\0') {
         (void)wp_action_load_file(&g_ctx, g_start_file, NULL);
     }
 
     redraw_screen();
+    if (g_layout_short_pending) {
+        dos_layout_short_take();
+        redraw_screen();
+    }
 
     /* After the sample document is loaded AND the first full screen is
        painted -- so the marker's existence really does mean "the app
@@ -1808,6 +1855,10 @@ void app_shell_run(void)
             if (msg != NULL) dos_show_message(msg);
         }
         redraw_screen();
+        if (g_layout_short_pending) {
+            dos_layout_short_take();
+            redraw_screen();
+        }
         /* After dispatch and repaint, never before: a dispatch or paint
            that crashes or wedges must not get to bump the count first. */
         if (g_dos_ci_active && !quit) {
@@ -1822,10 +1873,7 @@ void app_shell_run(void)
         wp_document_free(&g_doc);
         g_ctx.doc_loaded = WP_FALSE;
     }
-    if (g_help_doc_loaded) {
-        wp_help_doc_free(&g_help_doc);
-        g_help_doc_loaded = WP_FALSE;
-    }
+    help_doc_release();
 
     clear_rows(0, DOS_SCREEN_ROWS - 1, DOS_ATTR_NORMAL);
     move_cursor(0, 0);
