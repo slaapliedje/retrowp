@@ -2781,6 +2781,18 @@ Every fix comes with a test shown to fail without it.
       a floppy-only ST is still unconfirmed on target: Copy wrote
       A:\CLIPBRD\SCRAP.TXT, but the injected input could not drive
       Paste reliably.
+      (5) The unsaved-changes question lists "Cancel" itself, and the Mac
+      and Atari choice dialogs add a Cancel of their own: the Mac drew
+      two (fixed in retroplat's dialog_mac.c, below); the Atari's radio
+      list plus its Cancel button is unchecked. Decide one rule -- the
+      caller offers Cancel, or the backend does -- for every port.
+      Mac, tried under BasiliskII/System 7.5.3 (2026-11-16): the Finder's
+      Shut Down with an unsaved document brings RetroWP forward and asks
+      (T20.2's ae_quit); Cancel, Esc and Return all stop the shutdown.
+      Before the fix Return pressed "Discard changes" -- ModalDialog's
+      default is item 1 -- and the Mac shut down with the work lost.
+      dialog_mac.c now makes the caller's default_index the outlined
+      default button, Esc/Cmd-. cancel, and adds no second Cancel.
 - [ ] T20.6 The offload link.
       AC: the client drops replies whose seq/op are not its request's and
       gives each request one overall deadline and a reply size cap; the
