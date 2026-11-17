@@ -2824,13 +2824,26 @@ Every fix comes with a test shown to fail without it.
       says where: Options > Set Preferences (TOS 1.x) or Set Video (2.x).
       Seen under Hatari: EmuTOS switched and came back in Medium; TOS
       1.04, 1.62 and 2.06 named the right menu item.
-      (4) The low-res menu bar: padded " Desk " titles need 45 columns,
+      Then the low-res menu bar: padded " Desk " titles need 45 columns,
       low res has 40, and the VDI wrapped Help back over Desk. Titles are
       now laid out from their own strings (wp_menu_titles_fit), and when
       the padded set does not fit each loses its trailing space (38
       columns). The tree selfcheck now fails if the last title ends off
       screen. Seen under Hatari in low res: TOS 1.04 and 2.06 show all
       seven titles; 80 columns is unchanged.
+      (5) One Cancel rule, written into platform.h at plat_dialog_choice:
+      a choice of two or more has exactly one way out; a caller option
+      labelled exactly "Cancel" IS it (no second one is added, choosing
+      it answers cancelled, and default_index may name it); otherwise the
+      backend adds its own. The Atari drew it twice (a radio row and the
+      button) and now takes the caller's off the list, making the Cancel
+      button the default when it was; the Amiga's MUI requester had
+      "|Cancel|Cancel" and now has one, on the right where MUI answers 0;
+      DOS, the Mac and the host stub answer cancelled for it. Host test
+      actions_caller_cancel_answers_cancelled (fails without the host
+      change). Seen under Hatari, TOS 1.04: the unsaved-changes question
+      shows "Discard changes" over [OK] [Cancel], Cancel the default, and
+      Return kept the text.
 - [ ] T20.6 The offload link.
       AC: the client drops replies whose seq/op are not its request's and
       gives each request one overall deadline and a reply size cap; the

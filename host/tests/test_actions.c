@@ -58,6 +58,30 @@ void test_actions_find_by_id(void)
     ASSERT_TRUE(wp_action_find((wp_action_id)999) == NULL);
 }
 
+/* platform.h's Cancel rule, on the host backend: a caller's own
+   "Cancel" is the way out, whether picked or left as the default. */
+void test_actions_caller_cancel_answers_cancelled(void)
+{
+    static const char *const opts[] = { "Discard changes", "Cancel" };
+    const u8 *labels[2];
+    u32 lens[2], idx = 99;
+    wp_bool cancelled = WP_FALSE;
+
+    labels[0] = (const u8 *)opts[0]; lens[0] = (u32)strlen(opts[0]);
+    labels[1] = (const u8 *)opts[1]; lens[1] = (u32)strlen(opts[1]);
+
+    ASSERT_TRUE(plat_dialog_choice(NULL, (const u8 *)"Q", 1, labels, lens, 2, 1,
+                                   &cancelled, &idx) == WP_OK);
+    ASSERT_TRUE(cancelled);
+
+    cancelled = WP_TRUE;
+    window_host_next_choice(0);
+    ASSERT_TRUE(plat_dialog_choice(NULL, (const u8 *)"Q", 1, labels, lens, 2, 1,
+                                   &cancelled, &idx) == WP_OK);
+    ASSERT_TRUE(!cancelled);
+    ASSERT_EQ_U32(idx, 0);
+}
+
 void test_actions_find_by_shortcut(void)
 {
     const wp_action *a = wp_action_find_by_shortcut(0x02); /* Ctrl+B */

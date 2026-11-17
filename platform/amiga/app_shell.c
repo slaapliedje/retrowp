@@ -2249,15 +2249,29 @@ wp_status plat_dialog_choice(plat_window *parent,
     char gadgets[256];
     char body[256];
     u32 i, pos, n;
+    u32 caller_cancel = option_count;     /* none */
     LONG result;
 
     WP_UNUSED(parent);
     WP_UNUSED(default_index);
 
+    /* platform.h's Cancel rule: a caller's own "Cancel" is the way out,
+       so it becomes the one this requester adds on the right, not a
+       second one beside it. */
+    if (option_count > 1) {
+        for (i = 0; i < option_count; i++) {
+            if (option_label_lens[i] == 6u && memcmp(option_labels_utf8[i], "Cancel", 6) == 0) {
+                caller_cancel = i;
+                break;
+            }
+        }
+    }
+
     pos = 0;
     for (i = 0; i < option_count; i++) {
+        if (i == caller_cancel) continue;
         n = option_label_lens[i];
-        if (i > 0 && pos < sizeof(gadgets) - 1) gadgets[pos++] = '|';
+        if (pos > 0 && pos < sizeof(gadgets) - 1) gadgets[pos++] = '|';
         if (pos + n > sizeof(gadgets) - 1) n = (u32)sizeof(gadgets) - 1 - pos;
         memcpy(gadgets + pos, option_labels_utf8[i], n);
         pos += n;
@@ -2291,7 +2305,10 @@ wp_status plat_dialog_choice(plat_window *parent,
         return WP_OK;
     }
     if (out_cancelled) *out_cancelled = WP_FALSE;
-    if (out_index) *out_index = (u32)(result - 1);
+    if (out_index) {
+        *out_index = (u32)(result - 1);
+        if (*out_index >= caller_cancel) (*out_index)++;   /* past the caller's Cancel */
+    }
     return WP_OK;
 }
 

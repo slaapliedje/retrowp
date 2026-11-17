@@ -255,6 +255,7 @@ void test_msword_no_leaks(void);
 
 /* test_actions.c */
 void test_actions_find_by_id(void);
+void test_actions_caller_cancel_answers_cancelled(void);
 
 /* format_rtf_image.c */
 void test_rtf_image_exports_a_real_pict(void);
@@ -1061,6 +1062,7 @@ static const test_case g_cases[] = {
     { "msword_no_leaks", test_msword_no_leaks },
 
     { "actions_find_by_id", test_actions_find_by_id },
+    { "actions_caller_cancel_answers_cancelled", test_actions_caller_cancel_answers_cancelled },
     { "rtf_image_exports_a_real_pict", test_rtf_image_exports_a_real_pict },
     { "rtf_image_round_trips_through_export_and_import", test_rtf_image_round_trips_through_export_and_import },
     { "rtf_image_import_without_a_sink_skips_the_picture", test_rtf_image_import_without_a_sink_skips_the_picture },
