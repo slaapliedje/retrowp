@@ -373,6 +373,48 @@ short wp_menu_dropdown_x(short title_x, short box_w, short screen_w,
     return (want < limit) ? want : limit;
 }
 
+/* The menu titles, in bar order (the AES needs them contiguous from
+   DESK_TITLE, which wp_menu_tree_selfcheck checks). */
+static char *const g_menu_title_text[] = {
+    g_text_desk, g_text_file, g_text_edit, g_text_view,
+    g_text_tools, g_text_format, g_text_help
+};
+#define WP_MENU_TITLE_COUNT \
+    ((short)(sizeof(g_menu_title_text) / sizeof(g_menu_title_text[0])))
+
+/* Lay the titles out side by side, each as wide as its own string.
+
+   Padded " Desk " style, the seven titles need 45 columns. ST low
+   resolution has 40, and there the Help title ran off the right edge
+   and the VDI wrapped it over Desk. When the padded set doesn't fit,
+   each title loses its trailing space (" Desk"), which needs 38: the
+   leading space still separates one title from the next, so the bar
+   reads the same, only tighter. */
+static void wp_menu_titles_fit(short wcell, short screen_w_px)
+{
+    short i, n, cols = 0;
+
+    for (i = 0; i < WP_MENU_TITLE_COUNT; i++)
+        cols = (short)(cols + (short)strlen(g_menu_title_text[i]));
+
+    if (wcell > 0 && (short)(cols * wcell) > screen_w_px) {
+        for (i = 0; i < WP_MENU_TITLE_COUNT; i++) {
+            char *s = g_menu_title_text[i];
+            n = (short)strlen(s);
+            if (n > 1 && s[n - 1] == ' ') s[n - 1] = '\0';
+        }
+    }
+
+    cols = 0;
+    for (i = 0; i < WP_MENU_TITLE_COUNT; i++) {
+        OBJECT *t = &wp_menu_tree[WP_MENU_OBJ_DESK_TITLE + i];
+        n = (short)strlen(g_menu_title_text[i]);
+        t->ob_x     = (short)(cols * wcell);
+        t->ob_width = (short)(n * wcell);
+        cols = (short)(cols + n);
+    }
+}
+
 /* What wp_menu_tree_init was last given. The placement selfcheck below
    re-derives every box position from these rather than hardcoding an
    alignment rule, which is what let a stale "flush with its title"
@@ -512,6 +554,8 @@ void wp_menu_tree_init(short wcell, short hcell,
        hcell here, which is a cell short of what the AES lays out for. */
     wp_menu_tree[WP_MENU_OBJ_BAR].ob_height    = (short)(hcell + 2);
     wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_height = (short)(hcell + 3);
+
+    wp_menu_titles_fit(wcell, screen_w_px);
 
     /* Now clamp every dropdown onto the screen. Titles and boxes are
        paired in menu-bar order; see wp_menu_dropdown_x above for why
@@ -767,6 +811,14 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_x <
         wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_x +
         wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_width) TREE_FAIL();
+
+    /* And the last title must end on screen: off the right edge, the VDI
+       wraps it back over Desk (ST low resolution, before
+       wp_menu_titles_fit). */
+    if (g_menu_screen_w > 0 &&
+        wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_x +
+        wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_width > g_menu_screen_w)
+        TREE_FAIL();
 
     /* DROPDOWNS -> one G_BOX per title, same left-to-right order, each
        structurally unreachable from BAR's subtree (see the tree's own

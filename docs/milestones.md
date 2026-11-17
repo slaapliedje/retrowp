@@ -2823,8 +2823,14 @@ Every fix comes with a test shown to fail without it.
       "[Medium|Stay]", calls shel_write(5, 3) and ends; on ROM TOS it
       says where: Options > Set Preferences (TOS 1.x) or Set Video (2.x).
       Seen under Hatari: EmuTOS switched and came back in Medium; TOS
-      1.04, 1.62 and 2.06 named the right menu item. Choosing Stay still
-      leaves the overlapping low-res menu bar, which remains open.
+      1.04, 1.62 and 2.06 named the right menu item.
+      (4) The low-res menu bar: padded " Desk " titles need 45 columns,
+      low res has 40, and the VDI wrapped Help back over Desk. Titles are
+      now laid out from their own strings (wp_menu_titles_fit), and when
+      the padded set does not fit each loses its trailing space (38
+      columns). The tree selfcheck now fails if the last title ends off
+      screen. Seen under Hatari in low res: TOS 1.04 and 2.06 show all
+      seven titles; 80 columns is unchanged.
 - [ ] T20.6 The offload link.
       AC: the client drops replies whose seq/op are not its request's and
       gives each request one overall deadline and a reply size cap; the
