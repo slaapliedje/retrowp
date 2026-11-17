@@ -2741,8 +2741,9 @@ Every fix comes with a test shown to fail without it.
       Code done (docs/atari-platform.md, "Where RetroWP keeps its files"):
       home is the folder RETROWP.PRG started in; C:\ is still read for an
       older install's configuration and dictionary; the clipboard follows
-      the Compendium's protocol (\CLIPBRD\ on the boot drive). Not yet
-      shown on a floppy-only machine.
+      the Compendium's protocol (\CLIPBRD\ on the boot drive). Shown
+      under Hatari with drive A: only (2026-11-17, T20.9 (4)): the config
+      read from A:, Copy and Paste through A:\CLIPBRD\SCRAP.TXT.
 - [ ] T20.4 gem4xe dialogs in bank $00.
       AC: dialog_atari.c's tree and strings are WP_AES_NEAR; a
       two-button plat_dialog_choice (the recovery offer) drawn and
@@ -2768,7 +2769,7 @@ Every fix comes with a test shown to fail without it.
       opens a working directory on Unix:WPFOLDER:INNER and requires
       "Unix:WPFOLDER:INNER:PROBE.TXT" (Unix:RETROWP.FLD); the old code
       fails it on both ROMs ("Unix:PROBE.TXT").
-- [ ] T20.9 What the MiSTer run turned up (2026-11-16).
+- [x] T20.9 What the MiSTer run turned up (2026-11-16).
       AC: (1) DOS with 527 KB free (ao486, MS-DOS 7.1 loaded low) opens
       a file, names it in the title row and draws NO text -- not even
       what is typed -- without a word; with 564 KB free it draws. Find
@@ -2844,6 +2845,21 @@ Every fix comes with a test shown to fail without it.
       change). Seen under Hatari, TOS 1.04: the unsaved-changes question
       shows "Discard changes" over [OK] [Cancel], Cancel the default, and
       Return kept the text.
+      (4) Floppy-only Paste, under Hatari (TOS 1.04, 1 MB, drive A: only,
+      a stripped RETROWP.PRG on a 720K image, keymap=msword): Paste took
+      a pre-seeded A:\CLIPBRD\SCRAP.TXT ("FROMDISK"); Select All + Copy
+      wrote the document there (471 bytes, read back from the image), and
+      Paste put it back. The run found a real ST bug: Left, Right and
+      Home never carried Shift, so no keymap could select from the
+      keyboard, and Ctrl+Left/Right (scan codes 0x73/0x74) were dropped.
+      atari_translate_key now passes both on (selfcheck rows added).
+      Hatari drops a held Shift after a couple of injected keys, which is
+      why Select All, not Shift+arrows, made the selection; a probe build
+      showed Shift+Left arriving as $4B with kstate 2 and selecting.
+      With its symbol table RETROWP.PRG (730 KB) no longer fit a 720K
+      disk; the user's call (2026-11-17): the symbols are only for our
+      debugging, so `make atari` now ships it stripped (529 KB) and keeps
+      the unstripped link as build/atari/RETROWP.SYM.
 - [ ] T20.6 The offload link.
       AC: the client drops replies whose seq/op are not its request's and
       gives each request one overall deadline and a reply size cap; the

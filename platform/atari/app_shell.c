@@ -4547,9 +4547,22 @@ static wp_key_event atari_translate_key(short key, short kstate)
     case 0x53: ev.special = (u16)WP_KEY_DELETE; goto done;
     case 0x48: ev.special = (u16)(shift ? WP_KEY_PAGE_UP : WP_KEY_UP); goto done;
     case 0x50: ev.special = (u16)(shift ? WP_KEY_PAGE_DOWN : WP_KEY_DOWN); goto done;
-    case 0x4B: ev.special = (u16)WP_KEY_LEFT; goto done;
-    case 0x4D: ev.special = (u16)WP_KEY_RIGHT; goto done;
-    case 0x47: ev.special = (u16)WP_KEY_HOME; goto done;
+    /* Left, Right and Home carry Shift, which is how every keymap's
+       Shift+motion extends a selection. They did not, so on the ST no
+       scheme could select from the keyboard (seen under Hatari,
+       2026-11-17: Shift+Left moved the cursor, Copy said "Nothing is
+       selected"). Ctrl+Left/Right arrive as scan codes of their own,
+       0x73 and 0x74 with no ASCII (IKBD table, atari-st-tech corpus V19),
+       and were dropped: they are Left/Right with Ctrl, the word motion. */
+    case 0x4B: case 0x73:
+        ev.special = (u16)WP_KEY_LEFT;
+        goto arrow_mods;
+    case 0x4D: case 0x74:
+        ev.special = (u16)WP_KEY_RIGHT;
+        goto arrow_mods;
+    case 0x47:
+        ev.special = (u16)WP_KEY_HOME;
+        goto arrow_mods;
     default: break;
     }
     if (scan >= 0x3B && scan <= 0x44) {
@@ -4575,6 +4588,11 @@ static wp_key_event atari_translate_key(short key, short kstate)
         goto done;
     }
     ev.codepoint = (u32)ascii;
+    goto done;
+
+arrow_mods:
+    if (shift) ev.mods |= (u8)WP_MOD_SHIFT;
+    if (scan == 0x73 || scan == 0x74 || (kstate & 0x04)) ev.mods |= (u8)WP_MOD_CTRL;
 
 done:
     ev.mods |= alt;
@@ -4631,6 +4649,11 @@ wp_bool wp_atari_key_translate_selfcheck(void)
         { (short)((0x50 << 8) | 0x00), 0, 0, (u16)WP_KEY_DOWN, 0 },
         { (short)((0x48 << 8) | 0x00), 0x01, 0, (u16)WP_KEY_PAGE_UP, 0 },   /* Right Shift+Up */
         { (short)((0x50 << 8) | 0x00), 0x02, 0, (u16)WP_KEY_PAGE_DOWN, 0 }, /* Left Shift+Down */
+        { (short)((0x4B << 8) | 0x00), 0x02, 0, (u16)WP_KEY_LEFT, (u8)WP_MOD_SHIFT },  /* Shift+Left selects */
+        { (short)((0x4D << 8) | 0x00), 0x01, 0, (u16)WP_KEY_RIGHT, (u8)WP_MOD_SHIFT }, /* Shift+Right */
+        { (short)((0x73 << 8) | 0x00), 0x04, 0, (u16)WP_KEY_LEFT, (u8)WP_MOD_CTRL },   /* Ctrl+Left: a word */
+        { (short)((0x74 << 8) | 0x00), 0x06, 0, (u16)WP_KEY_RIGHT,
+          (u8)(WP_MOD_CTRL | WP_MOD_SHIFT) },                                         /* Shift+Ctrl+Right */
         { (short)((0x4B << 8) | 0x00), 0, 0, (u16)WP_KEY_LEFT, 0 },
         { (short)((0x4D << 8) | 0x00), 0, 0, (u16)WP_KEY_RIGHT, 0 },
         { (short)((0x47 << 8) | 0x00), 0, 0, (u16)WP_KEY_HOME, 0 },

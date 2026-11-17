@@ -235,6 +235,7 @@ ollama-smoke: $(BIN)/ollama_gateway_smoke
 # ---------------------------------------------------------------------
 
 ATARICC ?= m68k-atari-mint-gcc
+ATARISTRIP ?= m68k-atari-mint-strip
 
 # -O2 is required, not just a size/speed nicety: at -O0 the smoke test's
 # NF_STDERR/NF_EXIT Native Features trap (illegal-opcode inline asm,
@@ -319,8 +320,16 @@ $(ATARI_BUILD)/app/%.o: $(RETROPLAT)/backends/atari/%.c | $(ATARI_BUILD)/app
 # lines on its own the way it tracks the rule graph above.
 $(ATARI_BUILD)/app/app_shell.o: $(GENERATED)/help_retrowp.h
 
-$(ATARI_BIN)/RETROWP.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/app/main.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
+# The program ships stripped: with its symbol table it is 730 KB and no
+# longer fits a 720K floppy, which is all a floppy-only ST has; without,
+# 529 KB. The symbols are only for our debugging, so the unstripped link
+# stays in the build tree as RETROWP.SYM (load it in Hatari's debugger
+# or read it with m68k-atari-mint-nm).
+$(ATARI_BUILD)/RETROWP.SYM: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/app/main.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ)
 	$(ATARICC) $^ -o $@ -lgem
+
+$(ATARI_BIN)/RETROWP.PRG: $(ATARI_BUILD)/RETROWP.SYM | $(ATARI_BIN)
+	$(ATARISTRIP) -o $@ $<
 
 $(ATARI_BUILD)/smoke/%.o: host/tools/%.c | $(ATARI_BUILD)/smoke
 	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -c $< -o $@
