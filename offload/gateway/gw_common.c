@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 #include <poll.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -44,15 +45,16 @@ int gw_write_all(int fd, const u8 *data, u32 len)
     return 0;
 }
 
-void gw_send_frame(int fd, wire_msg_type type, u8 op, u8 status, u16 seq,
-                    const u8 *payload, u32 payload_len, wp_bool corrupt)
+int gw_send_frame(int fd, wire_msg_type type, u8 op, u8 status, u16 seq,
+                   const u8 *payload, u32 payload_len, wp_bool corrupt)
 {
     u32 buf_size = WIRE_HEADER_SIZE + payload_len + WIRE_CRC_SIZE;
     u8 *buf = (u8 *)malloc(buf_size);
     wire_header hdr;
     u32 n;
+    int rc = -1;
 
-    if (buf == NULL) return;
+    if (buf == NULL) return -1;
 
     hdr.type = (u8)type;
     hdr.op = op;
@@ -62,9 +64,19 @@ void gw_send_frame(int fd, wire_msg_type type, u8 op, u8 status, u16 seq,
 
     n = wire_encode_frame(&hdr, payload, buf, buf_size);
     if (n > 0 && corrupt) buf[n - 1] ^= 0xFFu;
-    if (n > 0) gw_write_all(fd, buf, n);
+    if (n > 0) rc = gw_write_all(fd, buf, n);
 
     free(buf);
+    return rc;
+}
+
+/* A client that goes away mid-reply makes the next write() raise
+   SIGPIPE, whose default ends the gateway; ignored, the write fails
+   with EPIPE instead and the gateway goes on to its next client or a
+   clean exit. Called first thing in each gateway's main(). */
+void gw_ignore_sigpipe(void)
+{
+    signal(SIGPIPE, SIG_IGN);
 }
 
 int gw_open_fifo_rdwr(const char *path)

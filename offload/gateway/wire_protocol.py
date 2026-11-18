@@ -228,6 +228,18 @@ def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, hand
     payload) -> (status, response_payload). Returns a process exit
     code (0 = clean shutdown, e.g. the peer closed the connection; 1 =
     handshake failure)."""
+    # A peer that vanishes mid-reply is a write error (Python makes
+    # SIGPIPE a BrokenPipeError) -- the end of this session, not of the
+    # gateway: the serial loop must go on to the next HELLO.
+    try:
+        return _serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name,
+                      handle_request, lenient)
+    except OSError:
+        return 0
+
+
+def _serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, handle_request,
+           lenient):
     caps_payload = encode_caps(ops_supported, gateway_name)
     try:
         hdr, payload = read_frame(read_fd, hello_timeout_ms / 1000.0)

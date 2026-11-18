@@ -2880,10 +2880,32 @@ Every fix comes with a test shown to fail without it.
       gateway side was driven through serve() over pipes: a raising
       handler, orphan parts, an over-cap request and the request after
       it, a zip bomb and an oversized image. Serial gates pass.
-- [ ] T20.7 Timers and transports.
+- [x] T20.7 Timers and transports.
       AC: one wrap-safe deadline test in every transport; SIGPIPE cannot
       kill the host build; a transport write timeout means the same thing
       (no progress for timeout_ms) on every backend.
+      Done 2026-11-17 (retroplat platform.h, "Timer / ticks").
+      The one test is PLAT_TICKS_PASSED(start, ms), the u32 difference;
+      every `now >= start + timeout` in the Atari, Amiga, DOS and Mac
+      transports is gone. It needs a clean wrap, and two clocks did not
+      have one: Amiga's and Mac's plat_ticks_ms multiplied before
+      dividing, so the count jumped after about 24 and 20 hours of one
+      run; now divide first. The write timeout now means no progress on
+      every backend: Amiga and Mac sent the whole buffer as one request
+      under one deadline, and now send 128-byte pieces, each with its own.
+      SIGPIPE: the host transport ignores it on its first write (only if
+      left at the default); the C gateways ignore it; gw_send_frame
+      reports the write error; the Python serve() takes a write error as
+      the end of a session, not of the gateway. Tests:
+      ticks_deadline_holds_across_the_wrap and the offload request across
+      it (a host-only timer_host_set_bias puts the clock just short of the
+      wrap), and a write to a killed peer. That last one passed before the
+      fix as well -- the host write polls first and usually sees the dead
+      peer -- so what it guards is the race between that poll and write().
+      Data before hang-up (reported by the OpenUA session): the host read
+      tested POLLHUP/POLLERR before POLLIN, so bytes followed by a reset
+      were lost; platform.h now says data is delivered before WP_ERR, and
+      transport_delivers_data_before_hangup fails on the old order.
 - [ ] T20.8 Tests that would have caught these.
       AC: a host allocator that fails after N allocations, walked through
       every edit and undo; `make test-m32` (32-bit long, as on the

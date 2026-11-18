@@ -25,8 +25,12 @@ int gw_write_all(int fd, const u8 *data, u32 len);
 /* Encodes and sends one frame. If corrupt is WP_TRUE, flips the frame's
    last byte (inside the CRC) after encoding -- mock_gateway's fault
    injection; ollama_gateway always passes WP_FALSE. */
-void gw_send_frame(int fd, wire_msg_type type, u8 op, u8 status, u16 seq,
-                    const u8 *payload, u32 payload_len, wp_bool corrupt);
+int gw_send_frame(int fd, wire_msg_type type, u8 op, u8 status, u16 seq,
+                   const u8 *payload, u32 payload_len, wp_bool corrupt);  /* 0, or -1 on a write error */
+
+/* SIGPIPE to ignored, so a vanished client is a write error, not the
+   gateway's end. */
+void gw_ignore_sigpipe(void);
 
 /* Opens `path` as a named FIFO (creating it if it doesn't exist) with
    O_RDWR -- not O_RDONLY/O_WRONLY -- so the open never blocks waiting

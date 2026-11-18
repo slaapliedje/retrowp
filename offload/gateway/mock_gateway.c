@@ -112,6 +112,8 @@ int main(int argc, char **argv)
     gw_ctx ctx;
     int respond_count = 0;
 
+    gw_ignore_sigpipe();
+
     for (i = 1; i < argc; i++) {
         if (parse_int_flag(argv[i], "--corrupt-after", &corrupt_after)) continue;
         if (parse_int_flag(argv[i], "--die-after", &die_after)) continue;
@@ -224,10 +226,9 @@ int main(int argc, char **argv)
 
         if (endless_parts) {
             static u8 part[WIRE_RESPONSE_PART_MAX];
-            for (;;) {
-                gw_send_frame(ctx.write_fd, WIRE_MSG_RESPONSE_PART, req_hdr.op, (u8)OFFLOAD_OK,
-                              req_hdr.seq, part, (u32)sizeof(part), WP_FALSE);
-            }
+            while (gw_send_frame(ctx.write_fd, WIRE_MSG_RESPONSE_PART, req_hdr.op, (u8)OFFLOAD_OK,
+                                 req_hdr.seq, part, (u32)sizeof(part), WP_FALSE) == 0) { }
+            break;
         }
 
         if (trickle_ms > 0) {

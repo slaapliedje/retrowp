@@ -613,6 +613,8 @@ int main(int argc, char **argv)
     socklen_t addrlen;
     gw_ctx ctx;
 
+    gw_ignore_sigpipe();
+
     for (i = 1; i < argc; i++) {
         if (parse_str_flag(argv[i], "--ollama-host", &ollama_host)) continue;
         if (parse_int_flag(argv[i], "--ollama-port", &ollama_port)) continue;
