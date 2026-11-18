@@ -141,9 +141,27 @@ def font_family_guess(name):
 # ODT bytes -> paragraph model (CONVERT_IMPORT's first half)
 # ---------------------------------------------------------------------
 
+# The most one part of an ODT (content.xml, styles.xml) may inflate to.
+# A real document's content.xml is a few hundred KB; a zip bomb's is
+# gigabytes from a few KB on the wire.
+ODT_MAX_PART_BYTES = 32 * 1024 * 1024
+
+
+def _zip_read(zf, name):
+    """The entry's bytes, refused past ODT_MAX_PART_BYTES -- by the size
+    it claims and, since that can lie, by what actually inflates."""
+    if zf.getinfo(name).file_size > ODT_MAX_PART_BYTES:
+        raise ValueError('%s inflates past %d bytes' % (name, ODT_MAX_PART_BYTES))
+    with zf.open(name) as f:
+        data = f.read(ODT_MAX_PART_BYTES + 1)
+    if len(data) > ODT_MAX_PART_BYTES:
+        raise ValueError('%s inflates past %d bytes' % (name, ODT_MAX_PART_BYTES))
+    return data
+
+
 def odt_bytes_to_paragraphs(odt_bytes):
     with zipfile.ZipFile(io.BytesIO(odt_bytes)) as zf:
-        content = zf.read('content.xml')
+        content = _zip_read(zf, 'content.xml')
     root = ET.fromstring(content)
 
     para_styles = {}
@@ -365,7 +383,7 @@ def odt_masters(odt_bytes):
     with zipfile.ZipFile(io.BytesIO(odt_bytes)) as zf:
         if 'styles.xml' not in zf.namelist():
             return None, {}
-        root = ET.fromstring(zf.read('styles.xml'))
+        root = ET.fromstring(_zip_read(zf, 'styles.xml'))
     masters = root.findall('.//' + _q('style', 'master-page'))
     if not masters:
         return None, {}
@@ -1912,6 +1930,12 @@ def _pretty_choice(name):
     return ' '.join([words[0]] + [w.lower() if w.isalpha() else w for w in words[1:]])
 
 
+# lpoptions must answer inside the client's PRINT_OPTIONS deadline
+# (actions.c asks with 10 s) or the writer sees no options at all, and
+# the late reply is for a request the client has stopped waiting for.
+QUEUE_OPTIONS_TIMEOUT_S = 7
+
+
 def _queue_options(printer=None, host=None):
     """A printer queue's own options, from lpoptions -l: {key: (label,
     default, [choices])}; {} when there is no printer to ask. The
@@ -1927,7 +1951,7 @@ def _queue_options(printer=None, host=None):
     if printer:
         cmd += ['-p', printer]
     try:
-        done = subprocess.run(cmd, capture_output=True, timeout=30)
+        done = subprocess.run(cmd, capture_output=True, timeout=QUEUE_OPTIONS_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired):
         return {}
     found = {}
@@ -2091,7 +2115,11 @@ def handle_print(payload):
         lp_args, why = disc_print_args()
         if lp_args is None:
             return STATUS_ERR, _reply(why)
-        lp_args = ['-n', chosen['copies'] if chosen['copies'].isdigit() else '1'] + lp_args
+        # The tray holds one disc: each copy is another disc to load, so
+        # no more than the main printer's largest choice.
+        n = int(chosen['copies']) if chosen['copies'].isdigit() else 1
+        n = max(1, min(n, int(COPIES_CHOICES[-1])))
+        lp_args = ['-n', str(n)] + lp_args
     else:
         lp_args, why = _print_args(chosen)
         if lp_args is None:

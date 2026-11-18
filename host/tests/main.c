@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#include <string.h>
 #include "test.h"
 
 /* endian.c */
@@ -781,6 +782,9 @@ void test_offload_corrupt_response_is_rejected(void);
 void test_offload_timeout_on_delayed_gateway(void);
 void test_offload_gateway_dies_before_responding(void);
 void test_offload_short_frame_times_out(void);
+void test_offload_stale_reply_is_dropped(void);
+void test_offload_trickling_reply_meets_one_deadline(void);
+void test_offload_endless_reply_hits_the_cap(void);
 void test_offload_submit_fails_after_gateway_killed(void);
 
 /* offload/gateway/odt_gateway.py (M7 T7.2) */
@@ -1549,6 +1553,9 @@ static const test_case g_cases[] = {
     { "offload_timeout_on_delayed_gateway", test_offload_timeout_on_delayed_gateway },
     { "offload_gateway_dies_before_responding", test_offload_gateway_dies_before_responding },
     { "offload_short_frame_times_out", test_offload_short_frame_times_out },
+    { "offload_stale_reply_is_dropped", test_offload_stale_reply_is_dropped },
+    { "offload_trickling_reply_meets_one_deadline", test_offload_trickling_reply_meets_one_deadline },
+    { "offload_endless_reply_hits_the_cap", test_offload_endless_reply_hits_the_cap },
     { "offload_submit_fails_after_gateway_killed", test_offload_submit_fails_after_gateway_killed },
     { "convert_odt_import_via_gateway", test_convert_odt_import_via_gateway },
     { "convert_print_needs_a_printer", test_convert_print_needs_a_printer },
@@ -1602,8 +1609,16 @@ static const test_case g_cases[] = {
     { "search_empty_needle_is_error", test_search_empty_needle_is_error }
 };
 
-int main(void)
+/* `host_tests` runs every case; `host_tests WORD` only those whose
+   name contains WORD -- for running one test against an old build. */
+int main(int argc, char **argv)
 {
+    static test_case picked[sizeof(g_cases) / sizeof(g_cases[0])];
     int count = (int)(sizeof(g_cases) / sizeof(g_cases[0]));
-    return test_run_all(g_cases, count);
+    int i, n = 0;
+
+    if (argc < 2) return test_run_all(g_cases, count);
+    for (i = 0; i < count; i++)
+        if (strstr(g_cases[i].name, argv[1]) != NULL) picked[n++] = g_cases[i];
+    return test_run_all(picked, n);
 }

@@ -2860,13 +2860,26 @@ Every fix comes with a test shown to fail without it.
       disk; the user's call (2026-11-17): the symbols are only for our
       debugging, so `make atari` now ships it stripped (529 KB) and keeps
       the unstripped link as build/atari/RETROWP.SYM.
-- [ ] T20.6 The offload link.
+- [x] T20.6 The offload link.
       AC: the client drops replies whose seq/op are not its request's and
       gives each request one overall deadline and a reply size cap; the
       gateway caps a reassembled request, resets parts on a new seq,
       answers STATUS_ERR instead of exiting on a handler exception, caps
       ODT inflation and image pixels, and caps disc-tray copies; client
       and gateway timeouts agree (print options, dictation).
+      Done 2026-11-17 (docs/formats/offload-protocol.md, "Bounds").
+      The deadline is timeout_ms plus 2 ms a byte moved, not timeout_ms
+      alone: a 512000-byte convert at 9600 baud is about nine minutes,
+      and a flat two-minute deadline would have failed every honest one.
+      Dropped frames are counted as well (16), because each moves bytes
+      and so lengthens the deadline. Caps: a 4 MB result, a 16 MB request,
+      32 MB per ODT part, 24 megapixels, 10 disc copies; lpoptions 7 s,
+      whisper 90 s. Tests: three mock modes (--stale-reply, --trickle-ms,
+      --endless-parts), each failing or hanging on the old client
+      (`bin/host_tests WORD` now runs only the matching cases). The
+      gateway side was driven through serve() over pipes: a raising
+      handler, orphan parts, an over-cap request and the request after
+      it, a zip bomb and an oversized image. Serial gates pass.
 - [ ] T20.7 Timers and transports.
       AC: one wrap-safe deadline test in every transport; SIGPIPE cannot
       kill the host build; a transport write timeout means the same thing

@@ -2,6 +2,7 @@
 #include <string.h>
 #include "test.h"
 #include "offload.h"
+#include "platform.h"
 #include "endian.h"
 #include "gateway_harness.h"
 
@@ -534,6 +535,73 @@ void test_offload_short_frame_times_out(void)
 
     offload_shutdown();
     gateway_stop(&gw);
+}
+
+/* T20.6: a reply under another seq (or op) is a late answer to a
+   request the client gave up on. Taken as this one's, the thesaurus
+   would have shown the stale word list instead of "glad". */
+void test_offload_stale_reply_is_dropped(void)
+{
+    gateway_handle gw;
+    offload_response resp;
+    static const char *args[] = { "--stale-reply", NULL };
+
+    ASSERT_TRUE(gateway_start(args, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    ASSERT_TRUE(submit_word(OFFLOAD_THESAURUS, "happy", 2000, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_OK);
+    ASSERT_TRUE(word_list_contains(resp.result, resp.result_len, "glad"));
+    ASSERT_TRUE(!word_list_contains(resp.result, resp.result_len, "stale"));
+    offload_response_free(&resp);
+
+    /* ... and the next request, too, past the next stale pair. */
+    ASSERT_TRUE(submit_word(OFFLOAD_THESAURUS, "happy", 2000, &resp) == WP_OK);
+    ASSERT_TRUE(word_list_contains(resp.result, resp.result_len, "glad"));
+    offload_response_free(&resp);
+
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+/* T20.6: one deadline for the whole request. A byte every 100 ms keeps
+   every read inside an 800 ms per-read timeout, so the old client waited
+   the full 400 s for the frame; now 800 ms plus 2 ms a byte moved. */
+void test_offload_trickling_reply_meets_one_deadline(void)
+{
+    gateway_handle gw;
+    offload_response resp;
+    static const char *args[] = { "--trickle-ms=100", NULL };
+    u32 start, took;
+
+    ASSERT_TRUE(gateway_start(args, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    start = plat_ticks_ms();
+    ASSERT_TRUE(submit_word(OFFLOAD_THESAURUS, "happy", 800, &resp) == WP_TIMEOUT);
+    took = plat_ticks_ms() - start;
+    ASSERT_TRUE(took < 3000u);
+
+    offload_shutdown();
+    gateway_stop(&gw);
+}
+
+/* T20.6: a reply that never ends is refused at the result cap, not
+   gathered until memory runs out. */
+void test_offload_endless_reply_hits_the_cap(void)
+{
+    gateway_handle gw;
+    offload_response resp;
+    static const char *args[] = { "--endless-parts", NULL };
+
+    ASSERT_TRUE(gateway_start(args, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+
+    ASSERT_TRUE(submit_word(OFFLOAD_THESAURUS, "happy", 20000, &resp) == WP_RANGE);
+    ASSERT_TRUE(resp.result == NULL);
+
+    offload_shutdown();
+    gateway_kill(&gw);
 }
 
 void test_offload_submit_fails_after_gateway_killed(void)

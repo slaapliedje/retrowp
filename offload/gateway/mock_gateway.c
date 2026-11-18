@@ -52,6 +52,14 @@
                           payload, writes a few bytes, then goes back to
                           waiting for the next request -- the promised
                           payload never arrives.
+     --stale-reply        before every real response, sends a complete,
+                          valid RESPONSE for another seq and op -- a late
+                          answer to a request the client gave up on.
+     --trickle-ms=N       answers with a frame header promising 4000
+                          bytes, then sends one every N ms: never idle
+                          long enough for a per-read timeout to fire.
+     --endless-parts      answers with RESPONSE_PART frames, right seq
+                          and op, that never end.
      --hello-timeout-ms=N how long to wait for the client's first HELLO
                           before giving up and exiting (default 5000,
                           fine for the TCP tests where the client
@@ -90,6 +98,9 @@ int main(int argc, char **argv)
     int delay_ms = 0;
     int hello_timeout_ms = 5000;
     wp_bool short_frame = WP_FALSE;
+    wp_bool stale_reply = WP_FALSE;
+    wp_bool endless_parts = WP_FALSE;
+    int trickle_ms = 0;
     const char *serial_rx = NULL;
     const char *serial_tx = NULL;
     int i;
@@ -107,6 +118,9 @@ int main(int argc, char **argv)
         if (parse_int_flag(argv[i], "--delay-ms", &delay_ms)) continue;
         if (parse_int_flag(argv[i], "--hello-timeout-ms", &hello_timeout_ms)) continue;
         if (strcmp(argv[i], "--short-frame") == 0) { short_frame = WP_TRUE; continue; }
+        if (strcmp(argv[i], "--stale-reply") == 0) { stale_reply = WP_TRUE; continue; }
+        if (strcmp(argv[i], "--endless-parts") == 0) { endless_parts = WP_TRUE; continue; }
+        if (parse_int_flag(argv[i], "--trickle-ms", &trickle_ms)) continue;
         if (strncmp(argv[i], "--serial-rx=", 12) == 0) { serial_rx = argv[i] + 12; continue; }
         if (strncmp(argv[i], "--serial-tx=", 12) == 0) { serial_tx = argv[i] + 12; continue; }
     }
@@ -198,6 +212,45 @@ int main(int argc, char **argv)
         respond_count++;
         if (die_after >= 0 && respond_count > die_after) {
             _exit(1); /* simulate a crash: no response, no clean close */
+        }
+
+        if (stale_reply) {
+            static const u8 stale[] = { 0, 1, 0, 5, 's', 't', 'a', 'l', 'e' };
+            gw_send_frame(ctx.write_fd, WIRE_MSG_RESPONSE, (u8)(req_hdr.op ^ 1u), (u8)OFFLOAD_OK,
+                          (u16)(req_hdr.seq - 1u), stale, (u32)sizeof(stale), WP_FALSE);
+            gw_send_frame(ctx.write_fd, WIRE_MSG_RESPONSE, req_hdr.op, (u8)OFFLOAD_OK,
+                          (u16)(req_hdr.seq - 1u), stale, (u32)sizeof(stale), WP_FALSE);
+        }
+
+        if (endless_parts) {
+            static u8 part[WIRE_RESPONSE_PART_MAX];
+            for (;;) {
+                gw_send_frame(ctx.write_fd, WIRE_MSG_RESPONSE_PART, req_hdr.op, (u8)OFFLOAD_OK,
+                              req_hdr.seq, part, (u32)sizeof(part), WP_FALSE);
+            }
+        }
+
+        if (trickle_ms > 0) {
+            u8 hdr_buf[WIRE_HEADER_SIZE];
+            struct timespec ts;
+            int k;
+
+            hdr_buf[0] = (u8)WIRE_MAGIC0;
+            hdr_buf[1] = (u8)WIRE_MAGIC1;
+            hdr_buf[2] = (u8)WIRE_VERSION;
+            hdr_buf[3] = (u8)WIRE_MSG_RESPONSE;
+            hdr_buf[4] = req_hdr.op;
+            hdr_buf[5] = (u8)OFFLOAD_OK;
+            be_write16(hdr_buf + 6, req_hdr.seq);
+            be_write32(hdr_buf + 8, 4000uL);
+            gw_write_all(ctx.write_fd, hdr_buf, WIRE_HEADER_SIZE);
+            ts.tv_sec = trickle_ms / 1000;
+            ts.tv_nsec = (long)(trickle_ms % 1000) * 1000000L;
+            for (k = 0; k < 4000; k++) {
+                nanosleep(&ts, NULL);
+                if (gw_write_all(ctx.write_fd, (const u8 *)"x", 1) != 0) break;
+            }
+            continue;
         }
 
         if (short_frame) {

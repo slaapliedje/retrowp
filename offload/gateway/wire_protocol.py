@@ -60,6 +60,12 @@ STATUS_OK, STATUS_TIMEOUT, STATUS_UNSUPPORTED, STATUS_ERR = range(4)
 
 WIRE_MAX_PAYLOAD = 65536  # wire.h: a frame's payload, at most
 
+# The most a request reassembled from MSG_REQUEST_PART frames may come to.
+# The largest real one is a document's RTF or ODT from a machine with a
+# few MB; past this it is answered STATUS_ERR, not held in memory.
+# RETROWP_GATEWAY_REQUEST_MAX lowers it, for tests.
+REQUEST_MAX_TOTAL = int(os.environ.get('RETROWP_GATEWAY_REQUEST_MAX', 16 * 1024 * 1024))
+
 CAPS_PAYLOAD_SIZE = 42  # 2 (version) + 4 (ops_supported) + 4 (max_payload) + 32 (name)
 
 
@@ -243,6 +249,9 @@ def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, hand
         return 1
 
     parts = []          # a request's MSG_REQUEST_PART payloads, so far
+    parts_seq = None    # ... and the seq they belong to
+    parts_len = 0
+    refused_seq = None  # a request that outgrew REQUEST_MAX_TOTAL
     while True:
         if first is not None:
             hdr, payload = first
@@ -259,16 +268,43 @@ def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, hand
         # once told "unsupported" and gave up), and any half-sent request
         # from the old session is dropped.
         if hdr['type'] == MSG_HELLO:
-            parts = []
+            parts, parts_seq, parts_len, refused_seq = [], None, 0, None
             os.write(write_fd, encode_frame(MSG_CAPS, 0, 0, 0, caps_payload))
+            continue
+        if hdr['type'] not in (MSG_REQUEST, MSG_REQUEST_PART):
+            continue
+        # Parts under another seq are the rest of a request the client
+        # gave up on (its deadline passed, or it was reset): never glued
+        # onto this one.
+        if parts and hdr['seq'] != parts_seq:
+            parts, parts_seq, parts_len = [], None, 0
+        if hdr['seq'] == refused_seq:
+            if hdr['type'] == MSG_REQUEST_PART:
+                continue
+            refused_seq = None
+            os.write(write_fd, encode_frame(MSG_RESPONSE, hdr['op'], STATUS_ERR, hdr['seq'], b''))
+            continue
+        if parts_len + len(payload) > REQUEST_MAX_TOTAL:
+            parts, parts_seq, parts_len = [], None, 0
+            if hdr['type'] == MSG_REQUEST_PART:
+                refused_seq = hdr['seq']
+                continue
+            os.write(write_fd, encode_frame(MSG_RESPONSE, hdr['op'], STATUS_ERR, hdr['seq'], b''))
             continue
         if hdr['type'] == MSG_REQUEST_PART:
             parts.append(payload)
+            parts_seq = hdr['seq']
+            parts_len += len(payload)
             continue
         if parts:
             payload = b''.join(parts) + payload
-            parts = []
-        status, resp_payload = handle_request(hdr['op'], payload)
+            parts, parts_seq, parts_len = [], None, 0
+        # A handler that raises answers STATUS_ERR: one bad document must
+        # not take the gateway, and every later request, down with it.
+        try:
+            status, resp_payload = handle_request(hdr['op'], payload)
+        except Exception:
+            status, resp_payload = STATUS_ERR, b''
         if len(resp_payload) > RESPONSE_SINGLE_MAX:
             while len(resp_payload) > RESPONSE_PART_MAX:
                 os.write(write_fd, encode_frame(MSG_RESPONSE_PART, hdr['op'], status, hdr['seq'],

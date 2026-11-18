@@ -34,16 +34,73 @@
    margin its DOS heap needs for the frame buffer. Past it, parts. */
 #define OFFLOAD_MAX_REQUEST_SINGLE    65000u
 
+/* The most one response may come to, all its parts together. A reply
+   past it is a gateway gone wrong (or a stream that is not ours), not a
+   document: refused with WP_RANGE rather than gathered until memory, or
+   the export's disk, runs out. */
+#define OFFLOAD_MAX_RESULT            (4uL * 1024uL * 1024uL)
+
+/* A request's deadline is its timeout_ms, plus this much for every byte
+   that moves: 2 ms a byte is a 4800-baud line (480 bytes a second), so
+   an honest slow link carrying a big document finishes, while a peer
+   that has stalled -- or trickles bytes slower than any real line, which
+   a per-read timeout would wait out forever -- does not. */
+#define OFFLOAD_MS_PER_BYTE           2uL
+
+/* How many frames that are not this request's reply may be dropped
+   before the stream is given up on. A late reply or two is normal after
+   a timeout; a stream of them is a peer that is not answering us, and
+   since each moves bytes (and so lengthens the deadline) it must be
+   bounded by count, not only by time. */
+#define OFFLOAD_MAX_DROPPED           16u
+
+/* One request's clock. Every read and write takes what is left of it,
+   so the whole exchange, not each read, is bounded. Elapsed time is
+   now - start in u32 arithmetic, which stays right across the tick
+   counter's wrap. */
+typedef struct {
+    plat_transport *t;
+    u32 start;
+    u32 budget;     /* timeout_ms + OFFLOAD_MS_PER_BYTE * bytes moved */
+} offload_clock;
+
+static void clock_start(offload_clock *c, plat_transport *t, u32 timeout_ms)
+{
+    c->t = t;
+    c->start = plat_ticks_ms();
+    c->budget = timeout_ms;
+}
+
+static void clock_moved(offload_clock *c, u32 bytes)
+{
+    u32 more = (bytes > 0xFFFFFFFFuL / OFFLOAD_MS_PER_BYTE) ? 0xFFFFFFFFuL : bytes * OFFLOAD_MS_PER_BYTE;
+    c->budget = (c->budget > 0xFFFFFFFFuL - more) ? 0xFFFFFFFFuL : c->budget + more;
+}
+
+/* What is left, or 0 once the deadline has passed. */
+static u32 clock_left(const offload_clock *c)
+{
+    u32 elapsed = plat_ticks_ms() - c->start;
+    return (elapsed >= c->budget) ? 0u : c->budget - elapsed;
+}
+
+static wp_status clock_read_adapter(void *ctx, u8 *out, u32 out_cap, u32 timeout_ms, u32 *out_len)
+{
+    offload_clock *c = (offload_clock *)ctx;
+    u32 left = clock_left(c);
+    wp_status st;
+
+    if (left == 0) { *out_len = 0; return WP_TIMEOUT; }
+    if (timeout_ms > left) timeout_ms = left;
+    st = plat_transport_read(c->t, out, out_cap, timeout_ms, out_len);
+    if (st == WP_OK) clock_moved(c, *out_len);
+    return st;
+}
+
 static plat_transport       *g_transport = NULL;
 static wp_bool                g_available = WP_FALSE;
 static offload_capabilities   g_caps;
 static u16                    g_next_seq = 1;
-
-static wp_status transport_read_adapter(void *ctx, u8 *out, u32 out_cap,
-                                         u32 timeout_ms, u32 *out_len)
-{
-    return plat_transport_read((plat_transport *)ctx, out, out_cap, timeout_ms, out_len);
-}
 
 wp_status offload_init(const char *endpoint)
 {
@@ -52,7 +109,8 @@ wp_status offload_init(const char *endpoint)
     u8 hello_buf[WIRE_HEADER_SIZE + WIRE_CRC_SIZE];
     u8 caps_payload[CAPS_PAYLOAD_SIZE];
     u32 caps_len;
-    u32 n;
+    u32 n, dropped;
+    offload_clock clock;
 
     g_available = WP_FALSE;
 
@@ -73,9 +131,18 @@ wp_status offload_init(const char *endpoint)
         return st;
     }
 
-    st = wire_read_frame(transport_read_adapter, g_transport, OFFLOAD_HANDSHAKE_TIMEOUT_MS,
-                          &resp_hdr, caps_payload, sizeof(caps_payload), &caps_len);
-    if (st != WP_OK || resp_hdr.type != WIRE_MSG_CAPS || caps_len != CAPS_PAYLOAD_SIZE) {
+    /* A reply still in flight from before -- the program was run again
+       while the gateway answered its last request -- may come ahead of
+       the CAPS: skipped, inside the one handshake deadline. */
+    clock_start(&clock, g_transport, OFFLOAD_HANDSHAKE_TIMEOUT_MS);
+    dropped = 0;
+    for (;;) {
+        st = wire_read_frame(clock_read_adapter, &clock, OFFLOAD_HANDSHAKE_TIMEOUT_MS,
+                              &resp_hdr, caps_payload, sizeof(caps_payload), &caps_len);
+        if ((st != WP_OK && st != WP_RANGE) || resp_hdr.type == WIRE_MSG_CAPS) break;
+        if (++dropped > OFFLOAD_MAX_DROPPED) { st = WP_ERR; break; }
+    }
+    if (st != WP_OK || caps_len != CAPS_PAYLOAD_SIZE) {
         plat_transport_close(g_transport);
         g_transport = NULL;
         return (st == WP_OK) ? WP_ERR : st;
@@ -109,11 +176,12 @@ wp_status offload_query(offload_capabilities *out)
 }
 
 /* One frame of the request: `type`, `len` bytes of payload. */
-static wp_status send_frame(const offload_request *req, u8 type, u16 seq, const u8 *data, u32 len)
+static wp_status send_frame(const offload_request *req, offload_clock *c, u8 type, u16 seq,
+                            const u8 *data, u32 len)
 {
     wire_header hdr;
     u8 *buf;
-    u32 size, n;
+    u32 size, n, left;
     wp_status st;
 
     hdr.type = type;
@@ -126,7 +194,9 @@ static wp_status send_frame(const offload_request *req, u8 type, u16 seq, const 
     if (buf == NULL) return WP_NOMEM;
     n = wire_encode_frame(&hdr, data, buf, size);
     if (n == 0) { mem_free(buf); return WP_ERR; }
-    st = plat_transport_write(g_transport, buf, n, req->timeout_ms);
+    clock_moved(c, n);
+    left = clock_left(c);
+    st = (left == 0) ? WP_TIMEOUT : plat_transport_write(g_transport, buf, n, left);
     mem_free(buf);
     return st;
 }
@@ -135,7 +205,7 @@ static wp_status send_frame(const offload_request *req, u8 type, u16 seq, const 
    reassembles them -- REQUEST_PART frames and a REQUEST with the rest.
    Each part is framed on its own, so no more than one part's buffer is
    ever held. WP_RANGE for a request too big for a gateway that cannot. */
-static wp_status send_request(const offload_request *req, u16 seq)
+static wp_status send_request(const offload_request *req, offload_clock *c, u16 seq)
 {
     const u8 *p = req->payload;
     u32 left = req->payload_len;
@@ -143,13 +213,13 @@ static wp_status send_request(const offload_request *req, u16 seq)
     if (left > OFFLOAD_MAX_REQUEST_SINGLE) {
         if (g_caps.protocol_version < WIRE_CAPS_REQUEST_PARTS) return WP_RANGE;
         while (left > WIRE_REQUEST_PART_MAX) {
-            wp_status st = send_frame(req, (u8)WIRE_MSG_REQUEST_PART, seq, p, WIRE_REQUEST_PART_MAX);
+            wp_status st = send_frame(req, c, (u8)WIRE_MSG_REQUEST_PART, seq, p, WIRE_REQUEST_PART_MAX);
             if (st != WP_OK) return st;
             p += WIRE_REQUEST_PART_MAX;
             left -= WIRE_REQUEST_PART_MAX;
         }
     }
-    return send_frame(req, (u8)WIRE_MSG_REQUEST, seq, p, left);
+    return send_frame(req, c, (u8)WIRE_MSG_REQUEST, seq, p, left);
 }
 
 wp_status offload_submit_stream(const offload_request *req, offload_chunk_fn chunk, void *user,
@@ -157,8 +227,10 @@ wp_status offload_submit_stream(const offload_request *req, offload_chunk_fn chu
 {
     wp_status st;
     wire_header resp_hdr;
+    offload_clock clock;
     u8 *scratch;
-    u32 scratch_len;
+    u32 scratch_len, dropped = 0;
+    u16 seq;
 
     resp->status = OFFLOAD_ERR;
     resp->result = NULL;
@@ -166,7 +238,10 @@ wp_status offload_submit_stream(const offload_request *req, offload_chunk_fn chu
 
     if (!g_available) return WP_ERR;
 
-    st = send_request(req, g_next_seq++);
+    clock_start(&clock, g_transport, req->timeout_ms);
+    seq = g_next_seq++;
+    if (g_next_seq == 0) g_next_seq = 1;    /* 0 is the handshake's */
+    st = send_request(req, &clock, seq);
     if (st != WP_OK) return st;
 
     scratch = (u8 *)mem_alloc(OFFLOAD_MAX_RESPONSE_PAYLOAD);
@@ -175,11 +250,19 @@ wp_status offload_submit_stream(const offload_request *req, offload_chunk_fn chu
     /* Parts until the final RESPONSE (or an ERROR); each frame's bytes
        go on before the next is read, so only one frame is ever held. */
     for (;;) {
-        st = wire_read_frame(transport_read_adapter, g_transport, req->timeout_ms,
+        st = wire_read_frame(clock_read_adapter, &clock, req->timeout_ms,
                               &resp_hdr, scratch, OFFLOAD_MAX_RESPONSE_PAYLOAD, &scratch_len);
         if (st != WP_OK) break;
         if (resp_hdr.type != WIRE_MSG_RESPONSE && resp_hdr.type != WIRE_MSG_ERROR &&
             resp_hdr.type != WIRE_MSG_RESPONSE_PART) { st = WP_ERR; break; }
+        /* Another request's reply -- one this side stopped waiting for
+           when its deadline passed, arriving late -- is not this one's:
+           dropped, and the wait goes on (within the same deadline). */
+        if (resp_hdr.seq != seq || resp_hdr.op != (u8)req->op) {
+            if (++dropped > OFFLOAD_MAX_DROPPED) { st = WP_ERR; break; }
+            continue;
+        }
+        if (scratch_len > OFFLOAD_MAX_RESULT - resp->result_len) { st = WP_RANGE; break; }
         if (scratch_len > 0 && chunk != NULL) {
             st = chunk(user, scratch, scratch_len);
             if (st != WP_OK) break;

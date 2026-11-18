@@ -246,12 +246,18 @@ def _write_wav(path, pcm):
         w.writeframes(pcm)
 
 
+# The client's DICTATE deadline (actions.c, WP_DICTATE_TIMEOUT_MS) is
+# 120 s for the speaking (at most 15 s) and this together; a transcript
+# that comes after it answers nobody. So stop well inside it.
+TRANSCRIBE_TIMEOUT_S = 90
+
+
 def _transcribe(cli, model, wav_path, language, threads):
     cmd = [cli, '-m', model, '-f', wav_path, '-nt', '-np', '-t', str(threads)]
     if language:
         cmd += ['-l', language]
     try:
-        out = subprocess.run(cmd, capture_output=True, timeout=300)
+        out = subprocess.run(cmd, capture_output=True, timeout=TRANSCRIBE_TIMEOUT_S)
     except (subprocess.TimeoutExpired, OSError):
         return None
     if out.returncode != 0:

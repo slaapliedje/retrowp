@@ -98,6 +98,33 @@ refuses an oversized request to them with `WP_RANGE` before sending
 anything. `offload_takes_large_requests()` tells a caller which it has:
 the ODT/PDF file flow allows 512000 bytes with one, 60000 without.
 
+**Bounds (T20.6, 2026-11-17).** The client:
+- drops any frame whose seq or op is not its request's (a late reply to a
+  request it gave up on) and keeps waiting, at most 16 such frames
+  (`OFFLOAD_MAX_DROPPED`), then `WP_ERR`. The handshake skips non-CAPS
+  frames the same way;
+- gives each request ONE deadline, `timeout_ms` plus 2 ms for every byte
+  sent or received (`OFFLOAD_MS_PER_BYTE`, a 4800-baud line). Every read
+  and write takes what is left, so a peer trickling bytes cannot keep a
+  request alive read by read. Elapsed time is `now - start` in u32, which
+  survives the tick counter's wrap;
+- refuses a response past 4 MB in all (`OFFLOAD_MAX_RESULT`) with
+  `WP_RANGE`.
+
+The Python gateways (`wire_protocol.py`'s `serve`):
+- answer a reassembled request past 16 MB (`REQUEST_MAX_TOTAL`;
+  `RETROWP_GATEWAY_REQUEST_MAX` lowers it for tests) with one
+  `STATUS_ERR`, holding none of it;
+- drop held parts when a frame of another seq arrives;
+- answer `STATUS_ERR`, and stay up, when a handler raises.
+
+The ODT gateway refuses a `content.xml` or `styles.xml` inflating past
+32 MB. The image gateway refuses a source over 24 megapixels before
+decoding it. A disc-tray print is capped at the main printer's largest
+copies choice (10). Each gateway's own timeouts sit inside the client's:
+lpoptions gets 7 s against PRINT_OPTIONS' 10 s, and whisper.cpp gets
+90 s against DICTATE's 120 s.
+
 ## Handshake: HELLO / CAPS
 
 Immediately after `plat_transport_open` succeeds, the client
@@ -594,6 +621,9 @@ failure mode exercised by `test_offload.c`:
 | `--die-after=N` | `_exit(1)` after the Nth request instead of responding | Client detects a dead peer mid-request, doesn't hang |
 | `--delay-ms=N` | Sleeps N ms before every response | Deterministic `WP_TIMEOUT` with no race on process timing |
 | `--short-frame` | Sends a response header promising a large payload, writes a few bytes, then goes back to waiting for the next request | Client times out on a stalled/incomplete frame, distinct from CRC corruption |
+| `--stale-reply` | Before each real response, sends a valid RESPONSE under the previous seq (once with another op, once with the same) | Client drops replies that are not its request's |
+| `--trickle-ms=N` | Answers with a header promising 4000 bytes, then one byte every N ms | The one overall deadline, which a per-read timeout never reaches |
+| `--endless-parts` | Answers with RESPONSE_PART frames (right seq and op) that never end | The 4 MB result cap (`WP_RANGE`) |
 
 `OFFLOAD_IMAGE` gets the same fixture treatment (M15): a small, hand-
 computed canned bitmap (a 4x4 checkerboard, 2 colors) rather than a

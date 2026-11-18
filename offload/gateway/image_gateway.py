@@ -57,6 +57,10 @@ try:
 except ImportError:
     _PILLOW_AVAILABLE = False
 
+# The biggest source image decoded: a 24-megapixel photo, about 70 MB
+# as RGB. Past it the request is answered STATUS_ERR.
+IMAGE_MAX_SOURCE_PIXELS = 24 * 1000 * 1000
+
 WP_IMAGE_MAX_WIDTH_PX = 320
 WP_IMAGE_MAX_HEIGHT_PX = 200
 
@@ -87,7 +91,12 @@ def _downconvert(source_bytes, target_max_colors, grayscale,
                   target_max_width_px, target_max_height_px):
     """Real decode + resize + quantize/dither via Pillow. Returns
     (width_px, height_px, palette (list of (r,g,b)), packed_indices)."""
-    decoded = Image.open(io.BytesIO(source_bytes)).convert('RGB')
+    opened = Image.open(io.BytesIO(source_bytes))
+    # Image.open reads only the header: refuse a huge canvas before
+    # convert() decodes it (a small PNG can claim 50000 x 50000).
+    if opened.width * opened.height > IMAGE_MAX_SOURCE_PIXELS:
+        raise ValueError('source image too large')
+    decoded = opened.convert('RGB')
 
     scale = min(target_max_width_px / decoded.width,
                 target_max_height_px / decoded.height, 1.0)
