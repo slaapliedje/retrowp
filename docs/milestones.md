@@ -2721,7 +2721,7 @@ Every fix comes with a test shown to fail without it.
       Not done here: footnote renumbering re-pointing a reference's run
       (notes.c), which may leave an earlier insert unfindable to undo;
       run_remove_at's guard now keeps that from removing the wrong run.
-- [ ] T20.2 Every way out asks, or keeps the work.
+- [~] T20.2 Every way out asks, or keeps the work.
       AC: the Mac's Quit Apple event goes through the unsaved-changes
       question (userCanceledErr on Cancel); the Amiga's ARexx QUIT,
       Commodities Remove and Ctrl-C likewise; menu commands do nothing
@@ -2732,7 +2732,23 @@ Every fix comes with a test shown to fail without it.
       (recovery file where there is one, else it refuses). The Amiga's
       ReturnID_Quit from outside (ARexx, Commodities) and Ctrl-C both go
       through wp_action_request_quit.
-- [ ] T20.3 The floppy-only ST.
+      Shown on target 2026-11-18, all but one:
+      - Mac Quit event: the Finder's Shut Down asks, Cancel stops it
+        (2026-11-16, T20.9).
+      - Amiga, amiberry A500 with Kickstart 3.1 and MUI (a copy of the
+        fixture with a boot script): `rx "address 'RETROWP.1' QUIT"` with
+        the document edited asks "Unsaved changes will be lost." (Discard
+        changes / Cancel), and Esc keeps the work; `Break <cli> C` asks
+        the same, and Esc keeps it again.
+      - ST, Hatari TOS 1.04: File > New picked from the menu bar (the
+        keyboard mouse, a real click) while Help is up does nothing;
+        Help stays, the document is intact after Esc. The same pick with
+        Help closed empties it (the control).
+      - Mac, BasiliskII System 7.5.3: the same, by a menu drag, with the
+        same control.
+      Not shown: Commodities Remove -- it is Exchange's list and buttons,
+      and amiberry takes no injected clicks.
+- [x] T20.3 The floppy-only ST.
       AC: no C:\ in the ST shell or backend. The config, dictionary,
       recovery file and clipboard are found from where RETROWP.PRG was
       started (or the boot drive), the clipboard through scrp_read's own
@@ -2744,6 +2760,11 @@ Every fix comes with a test shown to fail without it.
       the Compendium's protocol (\CLIPBRD\ on the boot drive). Shown
       under Hatari with drive A: only (2026-11-17, T20.9 (4)): the config
       read from A:, Copy and Paste through A:\CLIPBRD\SCRAP.TXT.
+      Done 2026-11-18: that run was TOS 1.04, 1 MB, no hard drive; and
+      on the same machine Save of the new document opened the selector at
+      A:\ (pre-filled UNTITLED.TXT), wrote A:\NOTE.TXT (read back from
+      the disk image), and Open then started in the document's folder,
+      A:\*.*, listing it. (Open clears the name on purpose; Save keeps it.)
 - [ ] T20.4 gem4xe dialogs in bank $00.
       AC: dialog_atari.c's tree and strings are WP_AES_NEAR; a
       two-button plat_dialog_choice (the recovery offer) drawn and

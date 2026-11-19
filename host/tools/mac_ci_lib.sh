@@ -30,6 +30,7 @@
 #                     explaining why it's missing, on timeout/launcher
 #                     failure); the caller owns cleanup
 #                     (rm -rf "$(dirname "$MAC_CI_LOG")") once done reading.
+. host/tools/display_lib.sh
 MAC_FIXTURE="${MAC_FIXTURE:-$HOME/opt/mac/fixture}"
 MAC_BASILISK_BIN="${MAC_BASILISK_BIN:-$HOME/macemu-mon/BasiliskII/src/Unix/BasiliskII}"
 
@@ -50,7 +51,7 @@ run_mac_smoke_once() {
 
     # PID-derived AND offset-derived -- same collision reasoning
     # atari_ci_lib.sh's own comment gives for its Xvfb display number.
-    _xvfb_display=":$((97 + ($$ + _offset) % 400))"
+    _xvfb_display="$(wp_free_display $((97 + ($$ + _offset) % 400)))"
 
     cp "$MAC_FIXTURE/boot_template.img" "$_boot_img"
     rm -f "$_shared/mac_smoke.out" "$_shared/mac_smoke.log" "$_shared/launcher_fsspec_fail.txt" "$_shared/launcher_launch_fail.txt"
@@ -238,7 +239,7 @@ run_mac_app_once() {
     _shared="$_scratch/shared"
     mkdir -p "$_shared/.finf" "$_shared/.rsrc"
     _boot_img="$_scratch/boot.img"
-    _xvfb_display=":$((97 + ($$ + _offset) % 400))"
+    _xvfb_display="$(wp_free_display $((97 + ($$ + _offset) % 400)))"
 
     cp "$MAC_FIXTURE/boot_template.img" "$_boot_img"
     _mac_ci_cleanup_share "$_shared"

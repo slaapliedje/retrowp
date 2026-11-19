@@ -31,6 +31,7 @@
 #                       explaining why it's missing, on timeout); the
 #                       caller owns cleanup (rm -rf "$(dirname
 #                       "$AMIGA_CI_LOG")") once done reading it.
+. host/tools/display_lib.sh
 AMIGA_FIXTURE="${AMIGA_FIXTURE:-$HOME/opt/amiga/fixture}"
 
 run_amiga_smoke_once() {
@@ -41,7 +42,7 @@ run_amiga_smoke_once() {
 
     # PID-derived AND offset-derived -- same collision reasoning
     # atari_ci_lib.sh's own comment gives for its Xvfb display number.
-    _xvfb_display=":$((97 + ($$ + _offset) % 400))"
+    _xvfb_display="$(wp_free_display $((97 + ($$ + _offset) % 400)))"
 
     rm -f "$_wb/amiga_smoke.out" "$_wb/amiga_ci_done"
     find "$_wb" -maxdepth 1 -name "trace*" -delete 2>/dev/null
@@ -158,7 +159,7 @@ run_amiga_app_once() {
     _offset="$2"
     _wb="$AMIGA_FIXTURE/wb"
     _scratch="$(mktemp -d)"
-    _xvfb_display=":$((97 + ($$ + _offset) % 400))"
+    _xvfb_display="$(wp_free_display $((97 + ($$ + _offset) % 400)))"
 
     rm -f "$_wb/retrowp_ci_alive"
     find "$_wb" -maxdepth 1 -name "trace*" -delete 2>/dev/null

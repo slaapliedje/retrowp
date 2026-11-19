@@ -24,6 +24,7 @@
 set -e
 
 cd "$(dirname "$0")/../.."
+. host/tools/display_lib.sh
 . host/tools/afros_ci_lib.sh
 
 if [ ! -d "$AFROS_FIXTURE" ]; then
@@ -84,7 +85,7 @@ sed -i "s/MEM_PROT=[A-Za-z]*/MEM_PROT=$MEMPROT/" "$SCRATCH/afros/config"
 # on a 1280x1024 root the bottom of the Atari screen -- including
 # RetroWP's whole status line -- fell off the captured image entirely and
 # could never be compared.
-DISPLAY_NUM=":$((97 + $$ % 400))"
+DISPLAY_NUM="$(wp_free_display $((97 + $$ % 400)))"
 Xvfb "$DISPLAY_NUM" -screen 0 1600x1400x24 >"$SCRATCH/xvfb.log" 2>&1 &
 XVFB_PID=$!
 

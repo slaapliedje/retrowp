@@ -54,6 +54,7 @@
 #   AFROS_CI_LOG     - combined stdout+stderr, carrying the smoke's own
 #                       NF_STDERR PASS/FAIL lines; the caller owns
 #                       cleanup (rm -rf "$(dirname "$AFROS_CI_LOG")").
+. host/tools/display_lib.sh
 AFROS_FIXTURE="${AFROS_FIXTURE:-$HOME/src/afros}"
 
 run_afros_smoke_once() {
@@ -63,7 +64,7 @@ run_afros_smoke_once() {
 
     # PID-derived AND offset-derived -- same collision reasoning
     # atari_ci_lib.sh's own comment gives for its Xvfb display number.
-    _xvfb_display=":$((97 + ($$ + _offset) % 400))"
+    _xvfb_display="$(wp_free_display $((97 + ($$ + _offset) % 400)))"
 
     # Work on a copy. MiNT writes into drive_c during boot, and the
     # fixture is the developer's own AFROS install -- CI must not mutate

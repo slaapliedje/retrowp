@@ -33,6 +33,7 @@
 #                     explaining why it's missing, on timeout); the
 #                     caller owns cleanup (rm -rf "$(dirname
 #                     "$DOS_CI_LOG")") once done reading it.
+. host/tools/display_lib.sh
 run_dos_smoke_once() {
     _offset="$1"
     _machine="${2:-svga_s3}"
@@ -40,7 +41,7 @@ run_dos_smoke_once() {
 
     # PID-derived AND offset-derived -- same collision reasoning
     # atari_ci_lib.sh's own comment gives for its Xvfb display number.
-    _xvfb_display=":$((97 + ($$ + _offset) % 400))"
+    _xvfb_display="$(wp_free_display $((97 + ($$ + _offset) % 400)))"
 
     Xvfb "$_xvfb_display" -screen 0 800x600x16 >"$_scratch/xvfb.log" 2>&1 &
     _xvfb_pid=$!
@@ -137,7 +138,7 @@ run_dos_app_once() {
     _offset="$1"
     _machine="${2:-svga_s3}"
     _scratch="$(mktemp -d)"
-    _xvfb_display=":$((97 + ($$ + _offset) % 400))"
+    _xvfb_display="$(wp_free_display $((97 + ($$ + _offset) % 400)))"
 
     Xvfb "$_xvfb_display" -screen 0 800x600x16 >"$_scratch/xvfb.log" 2>&1 &
     _xvfb_pid=$!

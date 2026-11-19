@@ -60,6 +60,7 @@
 #
 # RAM likewise: 1MB is the project's ST baseline (CLAUDE.md rule 5) and is
 # what the ST entries must keep testing, but a TT030 will not boot in it.
+. host/tools/display_lib.sh
 atari_ci_video_args() {
     case "$1" in
     tt) echo "--monitor vga --tos-res ttmed" ;;
@@ -125,7 +126,7 @@ run_atari_smoke_once() {
     # exact "new Xvfb silently fails to bind, stale lock file from the
     # dying old one fools the readiness poll" bug ci_atari.sh's own
     # history already found once (see its comment).
-    _xvfb_display=":$((97 + ($$ + _offset) % 400))"
+    _xvfb_display="$(wp_free_display $((97 + ($$ + _offset) % 400)))"
 
     Xvfb "$_xvfb_display" -screen 0 1280x800x24 >"$_scratch/xvfb.log" 2>&1 &
     _xvfb_pid=$!
@@ -239,7 +240,7 @@ run_atari_app_once() {
     _offset="$2"
     _machine="${3:-st}"
     _scratch="$(mktemp -d)"
-    _xvfb_display=":$((97 + ($$ + _offset) % 400))"
+    _xvfb_display="$(wp_free_display $((97 + ($$ + _offset) % 400)))"
 
     Xvfb "$_xvfb_display" -screen 0 1280x800x24 >"$_scratch/xvfb.log" 2>&1 &
     _xvfb_pid=$!

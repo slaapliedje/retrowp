@@ -24,6 +24,7 @@
 set -u
 
 cd "$(dirname "$0")/../.."
+. host/tools/display_lib.sh
 . host/tools/atari_ci_lib.sh
 . host/tools/amiga_ci_lib.sh
 . host/tools/mac_ci_lib.sh
@@ -90,7 +91,7 @@ run_st() {
     cp "$SHEET" "$_dir/c/TEST.RTF"
     printf 'printer = postscript\r\n%b' "$CFG_EXTRA" > "$_dir/c/RETROWP.CFG"
     echo ci > "$_dir/c/RETROWP.CI"
-    _d=":$((300 + $$ % 200))"
+    _d="$(wp_free_display $((300 + $$ % 200)))"
     start_xvfb "$_d"
     HOME="$_dir" DISPLAY="$_d" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy hatari \
         --natfeats on --tos /usr/share/hatari/tos104us.img --machine st --memsize 4 \
@@ -153,7 +154,7 @@ run_amiga() {
     cp "$SHEET" "$_dir/wb/TEST.RTF"
     echo ci > "$_dir/wb/RETROWP_CI"
     rm -f "$_dir/wb/retrowp_ci_alive"
-    _d=":$((300 + ($$ + 7) % 200))"
+    _d="$(wp_free_display $((300 + ($$ + 7) % 200)))"
     start_xvfb "$_d"
     env HOME="$_dir" DISPLAY="$_d" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
         amiberry --model A500 --config "$_dir/mounts.uae" -r "$_rom" \
@@ -198,7 +199,7 @@ run_mac() {
         "bootdrive 0" "bootdriver 0" "ramsize 33554432" "modelid 14" "cpu 4" "fpu true" \
         "nocdrom true" "seriala /dev/retrowp-no-serial" "serialb /dev/retrowp-no-serial" \
         "nosound true" "nogui true" "jit false" "keyboardtype 5" "idlewait true" > "$_dir/prefs"
-    _d=":$((300 + ($$ + 21) % 200))"
+    _d="$(wp_free_display $((300 + ($$ + 21) % 200)))"
     start_xvfb "$_d"
     env HOME="$_dir" DISPLAY="$_d" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
         "$MAC_BASILISK_BIN" --config "$_dir/prefs" >"$_dir/basilisk.log" 2>&1 &
@@ -227,7 +228,7 @@ run_dos() {
     cp bin/dos/RETROWP.EXE "$_dir/c/"
     cp "$SHEET" "$_dir/c/TEST.RTF"
     echo ci > "$_dir/c/RETROWP.CI"
-    _d=":$((300 + ($$ + 13) % 200))"
+    _d="$(wp_free_display $((300 + ($$ + 13) % 200)))"
     start_xvfb "$_d"
     HOME="$_dir" DISPLAY="$_d" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
         dosbox --noprimaryconf --nolocalconf --machine svga_s3 \
