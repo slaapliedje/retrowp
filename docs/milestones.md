@@ -2765,12 +2765,19 @@ Every fix comes with a test shown to fail without it.
       A:\ (pre-filled UNTITLED.TXT), wrote A:\NOTE.TXT (read back from
       the disk image), and Open then started in the document's folder,
       A:\*.*, listing it. (Open clears the name on purpose; Save keeps it.)
-- [ ] T20.4 gem4xe dialogs in bank $00.
+- [x] T20.4 gem4xe dialogs in bank $00.
       AC: dialog_atari.c's tree and strings are WP_AES_NEAR; a
       two-button plat_dialog_choice (the recovery offer) drawn and
       answered on gem4xe; the gem4xe gate exercises one.
       Statics marked: the link map puts them at $189E-$1A74, bank $00.
-      Not yet drawn on gem4xe (the emulator was in use).
+      Done 2026-11-18 on patched AltirraSDL (gem4xe's suite done, the
+      gem4xe session's go): gem4xe-check passes; with a RETROWP.REC on the
+      boot disk the offer draws ("Unsaved changes to an untitled
+      document", Recover / Discard, OK / Cancel) and Return takes Recover:
+      the recovered text is the document. The gate runs no answer, so
+      that part is a one-off (scratch t204.py), not a gate yet.
+      Seen in passing, open: the status line draws as garbage on gem4xe
+      ("??a..?%?"), in the gate's own screenshot too -- not this item's.
 - [x] T20.5 DOS and Mac file safety.
       AC: DOS installs an INT 24h handler (a missing floppy is an error,
       not "Abort, Retry, Fail?" ending the program) and an INT 23h one;
