@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 #include "test.h"
 #include "platform.h"
 #include "offload.h"
@@ -128,4 +129,55 @@ void test_link_speed_falls_back(void)
 void test_link_speed_gateway_caps_it(void)
 {
     run_case("--serial-max-baud=38400", WP_FALSE, 38400uL);
+}
+
+/* The program run again after a session that moved up: the gateway is
+   still at 115200, the new client starts at 9600. On a real wire its
+   HELLO arrives as noise; a pty carries bytes whatever the speed, so the
+   noise is written here by hand, as the wire would deliver it. The
+   gateway must hear it as a client starting over, go back to 9600, and
+   move up again with it -- not stay at 115200 while the client, told
+   "unsupported", stays at 9600, which on a wire is a dead link. */
+void test_link_speed_restart_finds_the_gateway(void)
+{
+    static const u8 noise[16] = { 0, 0x80, 0, 0xF8, 0, 0, 0x80, 0xFE,
+                                  0, 0x80, 0, 0xF8, 0, 0, 0x80, 0xFE };
+    pty_pair pp;
+    gateway_handle gw;
+    char rx[160], tx[160], endpoint[160];
+    const char *args[5];
+    int fd;
+
+    memset(&pp, 0, sizeof(pp));
+    if (!pty_pair_open(&pp)) {
+        printf("  SKIP: socat could not make a pty pair\n");
+        pty_pair_close(&pp);
+        return;
+    }
+    snprintf(rx, sizeof(rx), "--serial-rx=%s", pp.a);
+    snprintf(tx, sizeof(tx), "--serial-tx=%s", pp.a);
+    args[0] = rx; args[1] = tx; args[2] = "--serial-baud=9600";
+    args[3] = "--serial-max-baud=115200"; args[4] = NULL;
+    ASSERT_TRUE(gateway_start_bin(GW, args, &gw) == WP_OK);
+
+    snprintf(endpoint, sizeof(endpoint), "serial:%s:9600", pp.b);
+    ASSERT_TRUE(offload_init(endpoint) == WP_OK);
+    ASSERT_EQ_U32(offload_link_speed(), 115200uL);
+    offload_shutdown();
+
+    fd = open(pp.b, O_RDWR | O_NOCTTY);
+    ASSERT_TRUE(fd >= 0);
+    if (fd >= 0) {
+        ASSERT_TRUE(write(fd, noise, sizeof(noise)) == (ssize_t)sizeof(noise));
+        close(fd);
+    }
+    plat_sleep_ms(300);
+
+    ASSERT_TRUE(offload_init(endpoint) == WP_OK);
+    ASSERT_EQ_U32(offload_link_speed(), 115200uL);
+    ASSERT_TRUE(request_works());
+
+    offload_shutdown();
+    gateway_stop(&gw);
+    pty_pair_close(&pp);
 }

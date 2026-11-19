@@ -609,6 +609,17 @@ the handshake; nothing else sends it.
   then goes back too. A line that will not carry the new speed, or a
   machine that cannot keep up, costs a few seconds once and leaves the
   link where it was.
+- **Starting over.** The new speed outlives the session: a client idle
+  past the gateway's 120 s session timeout comes back at it and is still
+  heard. A client that starts over -- the program run again, another
+  machine on the cable -- opens at the line's own speed, and its HELLO
+  reaches a raised gateway as noise. At a raised speed, 8 skipped bytes
+  with no good frame (`SPEED_NOISE_BYTES`; a 14-byte HELLO at the wrong
+  speed is a dozen or more, a glitch on a working line one or two) send
+  the gateway back to the speed it was started at. The client, on a line
+  that has speeds, asks a second time when its first HELLO goes
+  unanswered (`offload_init`), and that one is heard; the speed is then
+  negotiated again as usual.
 - **What each machine offers** (retroplat, each backend's
   `plat_transport_speeds`):
   - Plain ST/STE: 19200 (the MFP's Timer D ceiling).

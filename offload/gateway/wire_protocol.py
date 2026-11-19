@@ -61,6 +61,10 @@ if os.environ.get('RETROWP_GATEWAY_PART_TEST'):
 # sooner (offload_client.c), so by the time it says HELLO again at the
 # old speed this side is listening there.
 SPEED_CONFIRM_S = 3.0
+# Skipped bytes that, at a raised speed, mean a client is starting over at
+# the line's own: its 14-byte HELLO arrives as a dozen or more bytes of
+# noise, where a glitch on a working line is one or two.
+SPEED_NOISE_BYTES = 8
 
 STATUS_OK, STATUS_TIMEOUT, STATUS_UNSUPPORTED, STATUS_ERR = range(4)
 
@@ -103,6 +107,12 @@ class GatewayTimeout(GatewayError):
     pass
 
 
+class LineNoise(Exception):
+    """read_frame skipped noise_limit bytes without a good frame. Not a
+    GatewayError: the caller that asked for it handles it."""
+    pass
+
+
 def read_exact(read_fd, n, deadline):
     buf = b''
     while len(buf) < n:
@@ -119,21 +129,30 @@ def read_exact(read_fd, n, deadline):
     return buf
 
 
-def read_frame(read_fd, timeout_s):
+def read_frame(read_fd, timeout_s, noise_limit=None):
     """The next good frame within timeout_s. Anything before the magic, and
     any frame whose version or CRC is wrong, is line noise to skip, the
     way wire.c's reader resyncs: a real serial line delivers a stray byte
     as a port opens (an Atari ST core's first byte was 0xFF, a second
     before its HELLO), and a gateway that gave up on it lost the HELLO
-    behind it. Only the deadline ends the hunt."""
+    behind it. Only the deadline ends the hunt -- unless noise_limit is
+    given: then that many skipped bytes raise LineNoise, which is how a
+    gateway at a raised speed hears a client starting over at the line's
+    own (see _serve)."""
     deadline = time.monotonic() + timeout_s
+    junk = 0
     while True:
+        if noise_limit is not None and junk >= noise_limit:
+            raise LineNoise()
         if read_exact(read_fd, 1, deadline)[0] != WIRE_MAGIC0:
+            junk += 1
             continue
         second = read_exact(read_fd, 1, deadline)[0]
         while second == WIRE_MAGIC0:            # "WWP": the frame starts later
+            junk += 1
             second = read_exact(read_fd, 1, deadline)[0]
         if second != WIRE_MAGIC1:
+            junk += 2
             continue
         rest = read_exact(read_fd, WIRE_HEADER_SIZE - 2, deadline)
         header = bytes([WIRE_MAGIC0, WIRE_MAGIC1]) + rest
@@ -141,10 +160,12 @@ def read_frame(read_fd, timeout_s):
         seq = struct.unpack('>H', header[6:8])[0]
         length = struct.unpack('>I', header[8:12])[0]
         if version != WIRE_VERSION or length > WIRE_MAX_PAYLOAD:
+            junk += WIRE_HEADER_SIZE
             continue
         payload = read_exact(read_fd, length, deadline) if length else b''
         crc_bytes = read_exact(read_fd, WIRE_CRC_SIZE, deadline)
         if struct.unpack('>H', crc_bytes)[0] != crc16_ccitt_false(header[2:] + payload):
+            junk += WIRE_HEADER_SIZE + length + WIRE_CRC_SIZE
             continue
         return {'type': msg_type, 'op': op, 'status': status, 'seq': seq}, payload
 
@@ -281,7 +302,7 @@ def _set_speed(fd, payload, seq, max_baud, caps_payload):
 
 
 def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, handle_request,
-          lenient=False, max_baud=115200):
+          lenient=False, max_baud=115200, base_baud=None):
     """The HELLO/CAPS handshake plus the request/response loop, shared
     verbatim by every Python gateway: read HELLO, answer CAPS, then
     repeatedly read a REQUEST and dispatch it to handle_request(op,
@@ -293,20 +314,44 @@ def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, hand
     # gateway: the serial loop must go on to the next HELLO.
     try:
         return _serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name,
-                      handle_request, lenient, max_baud)
+                      handle_request, lenient, max_baud, base_baud)
     except OSError:
         return 0
 
 
 def _serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, handle_request,
-           lenient, max_baud):
+           lenient, max_baud, base_baud):
     # A real tty, one fd both ways, can change speed: say so.
     tty = read_fd == write_fd and os.isatty(read_fd) and _tty_speed(read_fd) is not None
     if tty:
         ops_supported |= 1 << OP_SET_SPEED
     caps_payload = encode_caps(ops_supported, gateway_name)
+
+    def next_frame(timeout_s):
+        """read_frame, except that at a speed an earlier OP_SET_SPEED
+        raised, a run of noise sends the line back to base_baud: that is
+        a client starting over (the program run again, another machine on
+        the cable) with a HELLO at the line's own speed, which it sends
+        once more when this one goes unanswered. The session's speed
+        otherwise outlives the session -- a writer idle past the timeout
+        below comes back at the raised speed, and is still heard."""
+        deadline = time.monotonic() + timeout_s
+        while True:
+            now = _tty_speed(read_fd) if tty and base_baud else None
+            raised = now is not None and now != base_baud
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise GatewayTimeout()
+            try:
+                return read_frame(read_fd, left, SPEED_NOISE_BYTES if raised else None)
+            except LineNoise:
+                _tty_set_speed(read_fd, base_baud)
+                termios.tcflush(read_fd, termios.TCIFLUSH)
+                print('serial: noise at %d baud; back at %d' % (now, base_baud),
+                      file=sys.stderr, flush=True)
+
     try:
-        hdr, payload = read_frame(read_fd, hello_timeout_ms / 1000.0)
+        hdr, payload = next_frame(hello_timeout_ms / 1000.0)
     except GatewayError:
         return 1
     # lenient: a request where a HELLO was expected is served, not refused.
@@ -334,7 +379,7 @@ def _serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, han
             first = None
         else:
             try:
-                hdr, payload = read_frame(read_fd, 120.0)
+                hdr, payload = next_frame(120.0)
             except GatewayError:
                 break
         # A HELLO mid-session is the peer starting over -- a machine reset,
@@ -478,9 +523,13 @@ def run_gateway_with_args(args, handle_request, ops_supported, gateway_name):
         # and reporting a dead link. A one-shot gateway turns "three of
         # these four configurations were never actually tested" into
         # "nothing works", which is the worst kind of wrong answer.
+        # The speed every session starts at, and the one noise at a raised
+        # speed sends the line back to (_serve's next_frame).
+        base_baud = _tty_speed(rx_fd) if rx_fd == tx_fd and os.isatty(rx_fd) else None
         if getattr(args, 'serial_once', False):
             return serve(rx_fd, tx_fd, args.hello_timeout_ms, ops_supported, gateway_name,
-                         handle_request, lenient=True, max_baud=args.serial_max_baud)
+                         handle_request, lenient=True, max_baud=args.serial_max_baud,
+                         base_baud=base_baud)
 
         cycle = 0
         while True:
@@ -488,7 +537,8 @@ def run_gateway_with_args(args, handle_request, ops_supported, gateway_name):
             print('serial: waiting for HELLO (cycle %d)' % cycle,
                   file=sys.stderr, flush=True)
             rc = serve(rx_fd, tx_fd, args.hello_timeout_ms, ops_supported,
-                       gateway_name, handle_request, lenient=True, max_baud=args.serial_max_baud)
+                       gateway_name, handle_request, lenient=True, max_baud=args.serial_max_baud,
+                       base_baud=base_baud)
             print('serial: session ended rc=%d' % rc, file=sys.stderr, flush=True)
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

@@ -413,6 +413,14 @@ $(ATARI_BUILD)/convertsmoke/%.o: host/tools/%.c | $(ATARI_BUILD)/convertsmoke
 $(ATARI_BIN)/CONVERTST.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/convertsmoke/atari_convert_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
+# CONVHW.PRG: the same test for real hardware or a MiSTer core -- no
+# NatFeats (an illegal instruction there); it logs to CONVERT.LOG.
+$(ATARI_BUILD)/convhw/atari_convert_smoke.o: host/tools/atari_convert_smoke.c | $(ATARI_BUILD)/convhw
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -DWP_CONVERT_HW -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -Ioffload/transport -c $< -o $@
+
+$(ATARI_BIN)/CONVHW.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/convhw/atari_convert_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
+	$(ATARICC) $^ -o $@ -lgem
+
 # The multitasking-AES redraw prober (host/tools/atari_wmredraw_probe.c).
 # Unlike every other .PRG here it links NOTHING but gemlib -- it is a
 # second AES process that covers and uncovers RetroWP's window, and has
@@ -424,10 +432,10 @@ $(ATARI_BUILD)/redrawprobe/%.o: host/tools/%.c | $(ATARI_BUILD)/redrawprobe
 $(ATARI_BIN)/WMREDRAW.PRG: $(ATARI_BUILD)/redrawprobe/atari_wmredraw_probe.o | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
-$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/common $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BUILD)/serialhw $(ATARI_BUILD)/convertsmoke $(ATARI_BUILD)/redrawprobe $(ATARI_BIN):
+$(ATARI_BUILD)/engine $(ATARI_BUILD)/transport $(ATARI_BUILD)/services $(ATARI_BUILD)/common $(ATARI_BUILD)/app $(ATARI_BUILD)/smoke $(ATARI_BUILD)/serialsmoke $(ATARI_BUILD)/serialhw $(ATARI_BUILD)/convertsmoke $(ATARI_BUILD)/convhw $(ATARI_BUILD)/redrawprobe $(ATARI_BIN):
 	mkdir -p $@
 
-.PHONY: atari atari-smoke atari-serial-smoke atari-serial-hw atari-serial-raw atari-serial-mint atari-convert-smoke atari-wmredraw-probe
+.PHONY: atari atari-smoke atari-serial-smoke atari-serial-hw atari-serial-raw atari-serial-mint atari-convert-smoke atari-convert-hw atari-wmredraw-probe
 atari: $(ATARI_BIN)/RETROWP.PRG
 
 atari-smoke: $(ATARI_BIN)/SMOKE.PRG
@@ -476,6 +484,8 @@ atari-serial-mint: $(ATARI_BIN)/SERMINT.PRG
 atari-serial-smoke: $(ATARI_BIN)/SERIALTST.PRG
 
 atari-convert-smoke: $(ATARI_BIN)/CONVERTST.PRG
+
+atari-convert-hw: $(ATARI_BIN)/CONVHW.PRG
 
 atari-wmredraw-probe: $(ATARI_BIN)/WMREDRAW.PRG
 

@@ -52,6 +52,26 @@ static long nf_call1(long id, long arg1)
 static long g_nf_stderr_id;
 static long g_nf_exit_id;
 
+#ifdef WP_CONVERT_HW
+/* CONVHW.PRG: the same test for a real machine (or a MiSTer core), where
+   a NatFeats opcode is an illegal instruction and bombs. The log goes
+   to CONVERT.LOG in the folder it runs from, and to the screen. */
+static FILE *g_log;
+
+static void nf_log(const char *msg)
+{
+    if (g_log == NULL) g_log = fopen("CONVERT.LOG", "a");
+    if (g_log != NULL) { fputs(msg, g_log); fflush(g_log); }
+    fputs(msg, stdout);
+}
+
+static void nf_exit_now(long code)
+{
+    (void)code;
+    if (g_log != NULL) fclose(g_log);
+    g_log = NULL;
+}
+#else
 static void nf_log(const char *msg)
 {
     if (g_nf_stderr_id) nf_call1(g_nf_stderr_id, (long)msg);
@@ -61,6 +81,7 @@ static void nf_exit_now(long code)
 {
     if (g_nf_exit_id) nf_call1(g_nf_exit_id, code);
 }
+#endif
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -128,8 +149,12 @@ int main(void)
     u8 odt_bytes[4096];
     u32 odt_len = 0;
 
+#ifndef WP_CONVERT_HW
     g_nf_stderr_id = nf_get_id("NF_STDERR");
     g_nf_exit_id = nf_get_id("NF_EXIT");
+#else
+    (void)nf_get_id; (void)nf_call1; (void)g_nf_stderr_id; (void)g_nf_exit_id;
+#endif
 
     nf_log("ATARI CONVERT SMOKE: starting\r\n");
 

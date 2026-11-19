@@ -205,6 +205,15 @@ static void negotiate_speed(void)
     if (handshake(OFFLOAD_HANDSHAKE_TIMEOUT_MS) != WP_OK) g_available = WP_FALSE;
 }
 
+/* Whether this line has speeds to move between -- a serial port, not a
+   socket. */
+static wp_bool line_can_change_speed(void)
+{
+    u32 rates[1], now = 0;
+
+    return (wp_bool)(plat_transport_speeds(g_transport, rates, 1u, &now) > 0u || now != 0u);
+}
+
 wp_status offload_init(const char *endpoint)
 {
     wp_status st;
@@ -215,6 +224,16 @@ wp_status offload_init(const char *endpoint)
     if (st != WP_OK) { g_transport = NULL; return st; }
 
     st = handshake(OFFLOAD_HANDSHAKE_TIMEOUT_MS);
+    if (st != WP_OK && line_can_change_speed()) {
+        /* A gateway an earlier session moved up is still listening at
+           that speed; this HELLO, sent at the line's own, reached it as
+           noise, and noise is what sends it back down
+           (docs/formats/offload-protocol.md, OFFLOAD_SET_SPEED). Asked
+           once more, it hears. A line that cannot change speed was never
+           moved, so it is not asked twice. */
+        plat_sleep_ms(OFFLOAD_SPEED_SETTLE_MS);
+        st = handshake(OFFLOAD_HANDSHAKE_TIMEOUT_MS);
+    }
     if (st != WP_OK) {
         plat_transport_close(g_transport);
         g_transport = NULL;

@@ -2988,10 +2988,20 @@ Every fix comes with a test shown to fail without it.
       conversion. On target: the ST conversion smoke under Hatari on a
       pty pair moved to 19200 by its own Rsconf path and passed every
       conversion there.
+      2026-11-19: the Pi gateway runs the new wire_protocol.py. Found
+      while setting up a MiSTer test: a gateway an earlier session moved
+      up stayed there, so the program run again (at 9600) could not
+      reach it until the gateway was restarted. Now noise at a raised
+      speed sends the gateway back to its starting speed, and the client
+      asks twice on a line that has speeds (offload-protocol.md,
+      "Starting over"); test link_speed_restart_finds_the_gateway, which
+      fails without the fix. host/tools/mister/speed_relay.py, a MiSTer
+      relay that follows the switch, and CONVHW.PRG (make
+      atari-convert-hw), the conversion smoke logging to CONVERT.LOG for
+      a real machine or a core, are ready for the TT030 core.
       Still to do: a real cable and a real Falcon on TOS 5 (115200);
       the DOS, Amiga and Mac ceilings measured on hardware; MiNT's
-      device-node path (TIOCOBAUD) offers nothing yet; the Pi gateway
-      needs the new wire_protocol.py.
+      device-node path (TIOCOBAUD) offers nothing yet.
 
 ## M21 — Never Lose a Document
 Goal: the writer always knows whether the work is saved, a crash costs
