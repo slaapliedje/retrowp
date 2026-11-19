@@ -2906,12 +2906,40 @@ Every fix comes with a test shown to fail without it.
       tested POLLHUP/POLLERR before POLLIN, so bytes followed by a reset
       were lost; platform.h now says data is delivered before WP_ERR, and
       transport_delivers_data_before_hangup fails on the old order.
-- [ ] T20.8 Tests that would have caught these.
+- [x] T20.8 Tests that would have caught these.
       AC: a host allocator that fails after N allocations, walked through
       every edit and undo; `make test-m32` (32-bit long, as on the
       targets); the format fuzz harness as a make target; a seam
       conformance test of retroplat's edge cases (EOF, cap 0, deleting a
       missing file, dialog cancel).
+      Done 2026-11-18. Each part found real bugs, each shown to fail first:
+      - The out-of-memory walk (host/tests/test_oom_walk.c): 15 journaled
+        edits, then Undo and Redo of each, failing at every allocation in
+        turn; the document must be before or after (compared as RTF with
+        same-style run halves joined -- undo is content-equivalent), no
+        leaks. Found: Undo of a group ran on past a failed op into a NULL
+        run (now all or nothing: the ops already undone are redone, and it
+        answers WP_NOMEM; Redo the same); merge_paragraph_raw and
+        split_paragraph_raw moved runs one at a time, leaving text in two
+        places; run_split_at, paragraph_split_point and the delete split
+        shortened a run before inserting its other half, losing text --
+        styling a range or pressing Enter with memory short dropped words.
+        All now reserve first (wp_paragraph_run_reserve).
+      - `make test-m32` and `make test-sanitize` (the 32-bit suite under
+        ASan/UBSan, leaks included): two tests leaking a document.
+      - `make fuzz` (host/tools/fuzz_formats.c): 11 readers, seeded from
+        the repository and the unit tests' own documents, deterministic
+        (FUZZ_SEED), a fault's input saved with a replay line. Found: the
+        RTF parameter parser overflowing i32 (after ten digits on a 32-bit
+        target); a PCX whose width exceeds its bytes-per-line read past
+        the line buffer. Clean at 20000 inputs a reader over three seeds.
+      - Seam conformance (retroplat tests/conformance.c, platform.h only):
+        `make check` runs it on the host, and SMOKE.PRG, AMISMOKE and
+        SMOKE.EXE run it on the targets. The contract is now written in
+        platform.h. Found: a 0-byte read was WP_ERR on Atari and DOS (fread
+        returns 0 short of EOF) -- shown failing under Hatari and DOSBox,
+        passing fixed. Dialog Cancel (the caller's, the backend's, none
+        for a choice of one) is host-only: WINDOW_HOST_CANCEL drives it.
 
 ## M21 — Never Lose a Document
 Goal: the writer always knows whether the work is saved, a crash costs

@@ -519,6 +519,12 @@ wp_status wp_section_paragraph_add(wp_section *section, u32 *out_index);
 wp_status wp_paragraph_run_add(wp_paragraph *para, wp_span text, wp_cstyle style,
                                 u16 *out_index);
 
+/* Room for `count` runs in all, allocated now (WP_NOMEM, nothing
+   changed, if it cannot be), so that the run_adds up to that count
+   cannot fail. An edit that moves several runs reserves first: running
+   out part-way through would leave half of them in two places. */
+wp_status wp_paragraph_run_reserve(wp_paragraph *para, u32 count);
+
 wp_section   *wp_document_section_get(wp_document *doc, u32 index);
 wp_paragraph *wp_section_paragraph_get(wp_section *section, u32 index);
 /* Paragraphs first..first+count-1 let go (their runs and layouts), the

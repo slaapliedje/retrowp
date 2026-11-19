@@ -1567,9 +1567,15 @@ static void rtf_handle_backslash(rtf_parser *p)
         name[name_len] = '\0';
 
         if (p->pos < p->len && p->src[p->pos] == '-') { neg = WP_TRUE; p->pos++; }
+        /* The spec makes a parameter a signed 16-bit number; real files
+           stay inside 32 bits. A longer digit run is read to its end but
+           held at 99,999,999, so it cannot overflow an i32 (undefined
+           behaviour, and after only ten digits on a 32-bit-long target)
+           -- found by host/tools/fuzz_formats.c. */
         while (p->pos < p->len && is_digit(p->src[p->pos])) {
             has_param = WP_TRUE;
-            param = param * 10 + (i32)(p->src[p->pos] - '0');
+            if (param < 10000000L) param = param * 10 + (i32)(p->src[p->pos] - '0');
+            else param = 99999999L;
             p->pos++;
         }
         if (neg) param = -param;

@@ -215,6 +215,47 @@ help-guide: $(GENERATED)/retrowp.guide
 test: $(BIN)/host_tests $(BIN)/mock_gateway
 	./$(BIN)/host_tests
 
+# T20.8: the same suite where `long` is 32 bits, as on every target
+# (m68k GCC, Watcom's 16-bit DOS, SAS/C, Retro68, Calypsi): a modern
+# host's 64-bit long hides overflow and size assumptions that only the
+# machines would show. Its own object and binary trees, so the normal
+# build is untouched. The gateways stay the 64-bit ones the harness
+# starts from bin/ -- the wire is explicit big-endian, so a 32-bit
+# client against a 64-bit gateway is a fair test of it too.
+M32_CC ?= $(CC) -m32
+.PHONY: test-m32 test-sanitize
+test-m32: $(BIN)/mock_gateway
+	$(MAKE) BUILD=$(BUILD)/m32 BIN=$(BIN)/m32 CC="$(M32_CC)" $(BIN)/m32/host_tests
+	./$(BIN)/m32/host_tests
+
+# The 32-bit suite under AddressSanitizer and UndefinedBehaviorSanitizer,
+# leaks included: any memory error, undefined operation or leak fails it
+# (first found: two tests leaking a document they initialised twice).
+test-sanitize: $(BIN)/mock_gateway
+	$(MAKE) BUILD=$(BUILD)/m32san BIN=$(BIN)/m32san \
+	    CC="$(M32_CC) -fsanitize=address,undefined -fno-sanitize-recover=undefined -g" \
+	    $(BIN)/m32san/host_tests
+	ASAN_OPTIONS=detect_leaks=1 ./$(BIN)/m32san/host_tests
+
+# T20.8: every reader of file bytes fed mutated inputs, under ASan and
+# UBSan (host/tools/fuzz_formats.c). Deterministic: FUZZ_SEED fixes the
+# inputs, FUZZ_ITERS sets how many per reader, FUZZ_TARGET runs one
+# (txt md rtf stw ws bitmap gem wmf merge config help). A fault saves the
+# input to build/fuzz/crash-*.bin and says how to replay it. It links the
+# test objects (less main.o) for their seed builders.
+FUZZ_ITERS ?= 20000
+FUZZ_SEED  ?= 1
+FUZZ_CC    ?= $(CC) -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -O1
+.PHONY: fuzz
+fuzz:
+	$(MAKE) BUILD=$(BUILD)/fuzz BIN=$(BIN)/fuzz CC="$(FUZZ_CC)" $(BIN)/fuzz/fuzz_formats
+	FUZZ_ITERS=$(FUZZ_ITERS) FUZZ_SEED=$(FUZZ_SEED) \
+	    ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=abort_on_error=1:print_stacktrace=1 \
+	    ./$(BIN)/fuzz/fuzz_formats
+
+$(BIN)/fuzz_formats: $(ENGINE_OBJ) $(PLATFORM_OBJ) $(PLATFORM_COMMON_OBJ) $(TRANSPORT_OBJ) $(SERVICES_OBJ) $(filter-out $(BUILD)/tests/main.o,$(TEST_OBJ)) $(BUILD)/tools/fuzz_formats.o | $(BIN)
+	$(CC) $^ -o $@
+
 # Manual verification only (see ollama_gateway_smoke.c's own comment) --
 # never a dependency of `all`/`test`.
 $(BIN)/ollama_gateway_smoke: $(ENGINE_OBJ) $(PLATFORM_OBJ) $(TRANSPORT_OBJ) $(BUILD)/tools/ollama_gateway_smoke.o | $(BIN)
@@ -332,9 +373,14 @@ $(ATARI_BIN)/RETROWP.PRG: $(ATARI_BUILD)/RETROWP.SYM | $(ATARI_BIN)
 	$(ATARISTRIP) -o $@ $<
 
 $(ATARI_BUILD)/smoke/%.o: host/tools/%.c | $(ATARI_BUILD)/smoke
-	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -c $< -o $@
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/atari -Iplatform/atari -I$(RETROPLAT)/tests -c $< -o $@
 
-$(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
+# retroplat's seam conformance test (T20.8), run on the target by
+# SMOKE.PRG: the same file `make check` runs on the host, compiled here.
+$(ATARI_BUILD)/smoke/conformance.o: $(RETROPLAT)/tests/conformance.c | $(ATARI_BUILD)/smoke
+	$(ATARICC) $(ATARI_RELAXED_CFLAGS) -I$(RETROPLAT)/include -I$(RETROPLAT)/tests -c $< -o $@
+
+$(ATARI_BIN)/SMOKE.PRG: $(ATARI_PLATFORM_OBJ) $(ATARI_BUILD)/smoke/atari_smoke.o $(ATARI_BUILD)/smoke/conformance.o $(ATARI_ENGINE_OBJ) $(ATARI_COMMON_OBJ) $(ATARI_TRANSPORT_OBJ) $(ATARI_SERVICES_OBJ) | $(ATARI_BIN)
 	$(ATARICC) $^ -o $@ -lgem
 
 # T6.3's serial offload smoke test doesn't touch any AES/window API
@@ -530,7 +576,7 @@ $(AMIGA_BUILD)/app/%.o: $(RETROPLAT)/backends/amiga/%.c | $(AMIGA_BUILD)/app
 # toolchain; see docs/amiga-platform.md), so it appears only on the final
 # link line below, never in AMIGA_STRICT_CFLAGS/AMIGA_RELAXED_CFLAGS.
 $(AMIGA_BUILD)/smoke/%.o: host/tools/%.c | $(AMIGA_BUILD)/smoke
-	$(AMIGACC) $(AMIGA_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/amiga -Iplatform/amiga -c $< -o $@
+	$(AMIGACC) $(AMIGA_RELAXED_CFLAGS) -Iengine/include -I$(RETROPLAT)/include -I$(RETROPLAT)/backends/amiga -Iplatform/amiga -I$(RETROPLAT)/tests -c $< -o $@
 
 # T9.1b's MUI shell and T9.1a's selfcheck live in the same app_shell.c
 # (mirroring platform/atari/app_shell.c's own single-big-file precedent),
@@ -569,7 +615,10 @@ $(AMIGA_BUILD)/smoke/%.o: host/tools/%.c | $(AMIGA_BUILD)/smoke
 # verbatim with platform/atari/app_shell.c's own dependency line below).
 $(AMIGA_BUILD)/app/app_shell.o: $(GENERATED)/help_retrowp.h
 
-$(AMIGA_BIN)/AMISMOKE: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/smoke/amiga_smoke.o $(AMIGA_COMMON_OBJ) $(AMIGA_ENGINE_OBJ) $(AMIGA_TRANSPORT_OBJ) $(AMIGA_SERVICES_OBJ) | $(AMIGA_BIN)
+$(AMIGA_BUILD)/smoke/conformance.o: $(RETROPLAT)/tests/conformance.c | $(AMIGA_BUILD)/smoke
+	$(AMIGACC) $(AMIGA_RELAXED_CFLAGS) -I$(RETROPLAT)/include -I$(RETROPLAT)/tests -c $< -o $@
+
+$(AMIGA_BIN)/AMISMOKE: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/smoke/amiga_smoke.o $(AMIGA_BUILD)/smoke/conformance.o $(AMIGA_COMMON_OBJ) $(AMIGA_ENGINE_OBJ) $(AMIGA_TRANSPORT_OBJ) $(AMIGA_SERVICES_OBJ) | $(AMIGA_BIN)
 	$(AMIGACC) -noixemul $^ -o $@ -lmui
 
 $(AMIGA_BIN)/RETROWP: $(AMIGA_PLATFORM_OBJ) $(AMIGA_BUILD)/app/main.o $(AMIGA_COMMON_OBJ) $(AMIGA_ENGINE_OBJ) $(AMIGA_TRANSPORT_OBJ) $(AMIGA_SERVICES_OBJ) | $(AMIGA_BIN)
@@ -794,10 +843,13 @@ $(DOS_BUILD)/common/%.o: platform/common/%.c | $(DOS_BUILD)/common
 # so it now needs the full platform/dos + engine/transport/services
 # object set, same as SMOKE.PRG/AMISMOKE each needed from very early on.
 $(DOS_BUILD)/smoke/%.o: host/tools/%.c | $(DOS_BUILD)/smoke
-	env $(DOS_ENV) $(DOSCC) $(DOS_RELAXED_CFLAGS) $(DOS_INCLUDES) $(DOS_DEPFLAGS) -fo=$@ $<
+	env $(DOS_ENV) $(DOSCC) $(DOS_RELAXED_CFLAGS) $(DOS_INCLUDES) -i=$(RETROPLAT)/tests $(DOS_DEPFLAGS) -fo=$@ $<
 	@$(call dos_depfix,$(@:.o=.d))
 
-$(DOS_BIN)/SMOKE.EXE: $(DOS_PLATFORM_OBJ) $(DOS_BUILD)/smoke/dos_smoke.o $(DOS_ENGINE_OBJ) $(DOS_COMMON_OBJ) $(DOS_TRANSPORT_OBJ) $(DOS_SERVICES_OBJ) | $(DOS_BIN)
+$(DOS_BUILD)/smoke/conformance.o: $(RETROPLAT)/tests/conformance.c | $(DOS_BUILD)/smoke
+	env $(DOS_ENV) $(DOSCC) $(DOS_RELAXED_CFLAGS) $(DOS_INCLUDES) -i=$(RETROPLAT)/tests -fo=$@ $<
+
+$(DOS_BIN)/SMOKE.EXE: $(DOS_PLATFORM_OBJ) $(DOS_BUILD)/smoke/dos_smoke.o $(DOS_BUILD)/smoke/conformance.o $(DOS_ENGINE_OBJ) $(DOS_COMMON_OBJ) $(DOS_TRANSPORT_OBJ) $(DOS_SERVICES_OBJ) | $(DOS_BIN)
 	env $(DOS_ENV) $(DOSLINK) -0 -ml -bt=dos -k32768 $^ -fe=$@
 
 .PHONY: dos-smoke

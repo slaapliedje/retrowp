@@ -16,6 +16,7 @@
 #include <gem.h>
 #include "types.h"
 #include "app_shell_internal.h"
+#include "conformance.h"
 #include "metrics_atari_internal.h"   /* wp_atari_font_selfcheck */
 
 /* GCC can prove the string-pointer argument is unused by the asm's
@@ -84,6 +85,16 @@ static void nf_log_long(const char *label, long v)
 
 static int g_pass = 0;
 static int g_fail = 0;
+
+/* retroplat's seam conformance test (tests/conformance.c): each edge
+   case it finds broken is one FAIL line. */
+static void conformance_report(const char *what)
+{
+    g_fail++;
+    nf_log("FAIL: seam conformance: ");
+    nf_log(what);
+    nf_log("\r\n");
+}
 
 static void check(wp_bool cond, const char *what)
 {
@@ -156,6 +167,16 @@ int main(void)
 
     check(wp_atari_file_clipboard_selfcheck(),
           "plat_file_* and plat_clipboard_* round-trip a fixture byte-identical");
+
+    {
+        int before = g_fail;
+        (void)rp_conformance_files("", conformance_report);
+        (void)rp_conformance_clipboard(conformance_report);
+        if (g_fail == before) {
+            g_pass++;
+            nf_log("PASS: seam conformance: files and clipboard (EOF, cap 0, missing files)\r\n");
+        }
+    }
 
     check(wp_atari_rtf_spell_selfcheck(),
           "RTF file round-trip + spell dictionary lookups over real Atari file I/O");

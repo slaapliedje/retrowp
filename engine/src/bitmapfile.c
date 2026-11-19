@@ -212,6 +212,10 @@ static wp_status open_pcx(bm_src *s)
     s->h = (i32)le16(d + 10) - (i32)le16(d + 6) + 1;
     s->start = 128;
     if (s->w <= 0 || s->h <= 0 || s->planes == 0 || s->bpl == 0) return WP_BADFMT;
+    /* A plane's line must hold the picture's width: every reader below
+       takes w pixels from a line of bpl bytes, and a file whose header
+       says otherwise read past the line buffer (fuzz_formats.c). */
+    if ((u32)s->bpl * 8u < (u32)s->w * s->bpp) return WP_BADFMT;
     s->rowbytes = s->bpl;
     if (s->bpp == 8 && s->planes == 3) {
         cube_palette(s);

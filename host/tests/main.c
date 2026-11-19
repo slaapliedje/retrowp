@@ -783,6 +783,7 @@ void test_offload_timeout_on_delayed_gateway(void);
 void test_offload_gateway_dies_before_responding(void);
 void test_offload_short_frame_times_out(void);
 void test_ticks_deadline_holds_across_the_wrap(void);
+void test_oom_walk_every_edit_undo_and_redo(void);
 void test_ticks_offload_deadline_across_the_wrap(void);
 void test_ticks_write_to_a_dead_peer_is_an_error(void);
 void test_transport_delivers_data_before_hangup(void);
@@ -1558,6 +1559,7 @@ static const test_case g_cases[] = {
     { "offload_gateway_dies_before_responding", test_offload_gateway_dies_before_responding },
     { "offload_short_frame_times_out", test_offload_short_frame_times_out },
     { "ticks_deadline_holds_across_the_wrap", test_ticks_deadline_holds_across_the_wrap },
+    { "oom_walk_every_edit_undo_and_redo", test_oom_walk_every_edit_undo_and_redo },
     { "ticks_offload_deadline_across_the_wrap", test_ticks_offload_deadline_across_the_wrap },
     { "ticks_write_to_a_dead_peer_is_an_error", test_ticks_write_to_a_dead_peer_is_an_error },
     { "transport_delivers_data_before_hangup", test_transport_delivers_data_before_hangup },

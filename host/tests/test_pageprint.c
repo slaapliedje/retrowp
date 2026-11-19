@@ -64,8 +64,7 @@ void test_pageprint_pages(void)
     u32 pages = 0;
     plat_gc *gc = (plat_gc *)&dev;   /* the host ignores it; it only must not be NULL */
 
-    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
-    make_doc(&doc);
+    make_doc(&doc);                  /* format_txt_import initialises doc */
     memset(&dev, 0, sizeof(dev));
     dev.gc = gc;
     dev.x_px = same;
@@ -99,8 +98,7 @@ void test_pageprint_printable_area(void)
     wp_page_device dev;
     u32 pages = 9;
 
-    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
-    make_doc(&doc);
+    make_doc(&doc);                  /* format_txt_import initialises doc */
     memset(&dev, 0, sizeof(dev));
     dev.gc = (plat_gc *)&dev;
     dev.x_px = same;

@@ -174,6 +174,11 @@ static wp_status run_table_grow(wp_paragraph *para, u32 needed_count)
     return WP_OK;
 }
 
+wp_status wp_paragraph_run_reserve(wp_paragraph *para, u32 count)
+{
+    return run_table_grow(para, count);
+}
+
 wp_status wp_paragraph_run_add(wp_paragraph *para, wp_span text, wp_cstyle style,
                                 u16 *out_index)
 {

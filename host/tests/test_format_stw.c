@@ -101,6 +101,16 @@ static void build_v11(void)
     put8(0); put16(0x14AC); put_name("Humanist 521 Bold Italic", 33);
 }
 
+/* The version-11 document above, for host/tools/fuzz_formats.c to
+   start from: its length, or 0 if `cap` is too small. */
+u32 test_stw_seed(u8 *out, u32 cap)
+{
+    build_v11();
+    if (g_n > cap) return 0;
+    memcpy(out, g_f, g_n);
+    return g_n;
+}
+
 static const wp_paragraph *para_at(wp_document *doc, u32 i)
 {
     return wp_section_paragraph_get(wp_document_section_get(doc, 0), i);

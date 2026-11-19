@@ -958,18 +958,20 @@ wp_status wp_edit_paste_text(wp_document *doc, wp_undo_journal *journal, wp_pos 
     return WP_OK;
 }
 
-static void apply_single_undo_op(wp_document *doc, wp_op *op)
+static wp_status apply_single_undo_op(wp_document *doc, wp_op *op)
 {
     wp_section *sec;
     wp_paragraph *para;
+    wp_status st = WP_OK;
 
     if (op->kind == (u8)WP_OP_SPLIT_SECTION) {
-        if (wp_document_merge_section_raw(doc, op->at.section) == WP_OK && op->extra != NULL) {
+        st = wp_document_merge_section_raw(doc, op->at.section);
+        if (st == WP_OK && op->extra != NULL) {
             wp_section *back = &doc->sections[op->at.section];
             const wp_section *was = (const wp_section *)op->extra;
             copy_setup(back, was);
         }
-        return;
+        return st;
     }
     if (op->kind == (u8)WP_OP_SET_SECTION) {
         sec = wp_document_section_get(doc, op->at.section);
@@ -977,37 +979,36 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
             copy_setup(sec, &((const wp_section *)op->extra)[0]);
             section_dirty(sec);
         }
-        return;
+        return WP_OK;
     }
     if (op->kind == (u8)WP_OP_MERGE_SECTION) {
         /* Split where the join was, and give the section back its own
            page setup and header and footer. */
-        if (wp_document_split_section_raw(doc, op->at.section, op->at.paragraph) == WP_OK &&
-            op->extra != NULL) {
+        st = wp_document_split_section_raw(doc, op->at.section, op->at.paragraph);
+        if (st == WP_OK && op->extra != NULL) {
             wp_section *back = &doc->sections[op->at.section + 1];
             const wp_section *was = (const wp_section *)op->extra;
             copy_setup(back, was);
         }
-        return;
+        return st;
     }
     sec = wp_document_section_get(doc, op->at.section);
     para = wp_section_paragraph_get(sec, op->at.paragraph);
 
     if (op->kind == (u8)WP_OP_INSERT_PARA) {
         (void)take_empty_paragraph(doc, op->at.section, op->at.paragraph);
-        return;
+        return WP_OK;
     }
     if (op->kind == (u8)WP_OP_REMOVE_PARA) {
-        (void)put_empty_paragraph(doc, op->at.section, op->at.paragraph, (wp_pstyle)op->style_before,
-                                  (wp_trow)op->style_after, (u8)op->at.run);
-        return;
+        return put_empty_paragraph(doc, op->at.section, op->at.paragraph, (wp_pstyle)op->style_before,
+                                   (wp_trow)op->style_after, (u8)op->at.run);
     }
     if (op->kind == (u8)WP_OP_SET_PSTYLE) {
         if (para != NULL) {
             wp_paragraph_pstyle_set(para, (wp_pstyle)op->style_before);
             para->layout_dirty = WP_TRUE;
         }
-        return;
+        return WP_OK;
     }
     if (op->kind == (u8)WP_OP_SET_TABLE) {
         if (para != NULL) {
@@ -1015,7 +1016,7 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
             para->tflags = (u8)op->at.run;
             para->layout_dirty = WP_TRUE;
         }
-        return;
+        return WP_OK;
     }
     if (op->kind == (u8)WP_OP_INSERT_TEXT) {
         u16 idx = find_run_by_span(para, op->text);
@@ -1025,7 +1026,7 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
 
         switch (op->style_after) {
             case 0: /* whole run removed -- reinsert it */
-                run_insert_at(para, run_index, op->text, op->style_before);
+                st = run_insert_at(para, run_index, op->text, op->style_before);
                 break;
             case 1: /* left survived -- extend length back over the deleted part */
                 para->runs[run_index].text.length += op->text.length;
@@ -1041,11 +1042,15 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
                 break;
         }
     } else if (op->kind == (u8)WP_OP_SPLIT_PARA) {
-        wp_document_merge_paragraph_raw(doc, op->at.section, op->at.paragraph, NULL);
+        st = wp_document_merge_paragraph_raw(doc, op->at.section, op->at.paragraph, NULL);
     } else if (op->kind == (u8)WP_OP_MERGE_PARA) {
         wp_paragraph *resurrected;
 
-        wp_document_split_paragraph_raw(doc, op->at, NULL);
+        /* Failing, nothing has changed (split_paragraph_raw is all or
+           nothing) -- and the paragraph after it is NOT the resurrected
+           one, so stop here. */
+        st = wp_document_split_paragraph_raw(doc, op->at, NULL);
+        if (st != WP_OK) return st;
         /* Re-split defaults the new paragraph's style to a COPY of the
            survivor's (see docs/editing.md) -- correct for a real Enter
            keypress, but wrong here: the paragraph being resurrected had
@@ -1075,8 +1080,17 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
            the same two-step shape WP_OP_SPLIT_PARA's own undo already
            uses. The registered wp_image_desc stays in doc->images --
            side tables are append-only, same as cstyles/pstyles. */
+        /* Room to merge the tail back BEFORE the picture goes: the merge
+           then cannot fail, so this is never left half done. */
+        {
+            wp_paragraph *head = wp_section_paragraph_get(sec, op->at.paragraph);
+            wp_paragraph *tail = wp_section_paragraph_get(sec, op->at.paragraph + 2);
+            if (head == NULL || tail == NULL) return WP_RANGE;
+            st = wp_paragraph_run_reserve(head, (u32)head->run_count + (u32)tail->run_count);
+            if (st != WP_OK) return st;
+        }
         paragraph_remove_at(sec, op->at.paragraph + 1);
-        wp_document_merge_paragraph_raw(doc, op->at.section, op->at.paragraph, NULL);
+        st = wp_document_merge_paragraph_raw(doc, op->at.section, op->at.paragraph, NULL);
     } else if (op->kind == (u8)WP_OP_SET_CSTYLE) {
         /* The run is still exactly where styling left it: this op moved
            no bytes, so no index in the paragraph has shifted since.  The
@@ -1086,6 +1100,7 @@ static void apply_single_undo_op(wp_document *doc, wp_op *op)
         wp_run_cstyle_set(para, (u16)op->at.run, (wp_cstyle)op->style_before);
         para->layout_dirty = WP_TRUE;
     }
+    return st;
 }
 
 static wp_status apply_single_redo_op(wp_document *doc, wp_op *op)
@@ -1201,22 +1216,48 @@ wp_status wp_edit_undo(wp_document *doc, wp_undo_journal *journal)
     doc->modified = 1;
 
 
-    do {
-        op = journal->undo_top;
-        journal->undo_top = op->next;
+    /* All or nothing. Each op's own undo is all or nothing (the raw
+       operations reserve before they change anything), so if one fails
+       -- out of memory, on a 1 MB machine -- the ops this call already
+       undid are redone, newest first, and the failed op and everything
+       above it stay where they were: the document and both stacks are
+       as they were before the call, and it answers the failure. Going
+       on instead applied the rest of a group to a document they no
+       longer matched (host/tests/test_oom_walk.c: a NULL run). Redoing
+       what was just undone needs no more memory than it gave back. */
+    {
+        wp_op *redo_mark = journal->redo_top;
+        wp_status st = WP_OK;
 
-        if (op->kind == (u8)WP_OP_GROUP_END) {
-            depth++;
-        } else if (op->kind == (u8)WP_OP_GROUP_BEGIN) {
-            depth--;
-        } else {
-            apply_single_undo_op(doc, op);
+        do {
+            op = journal->undo_top;
+
+            if (op->kind == (u8)WP_OP_GROUP_END) {
+                depth++;
+            } else if (op->kind == (u8)WP_OP_GROUP_BEGIN) {
+                depth--;
+            } else {
+                st = apply_single_undo_op(doc, op);
+                if (st != WP_OK) break;
+            }
+
+            journal->undo_top = op->next;
+            op->next = journal->redo_top;
+            journal->redo_top = op;
+        } while (depth > 0 && journal->undo_top != NULL);   /* never past the bottom */
+
+        if (st != WP_OK) {
+            while (journal->redo_top != redo_mark) {
+                op = journal->redo_top;
+                if (op->kind != (u8)WP_OP_GROUP_BEGIN && op->kind != (u8)WP_OP_GROUP_END)
+                    (void)apply_single_redo_op(doc, op);
+                journal->redo_top = op->next;
+                op->next = journal->undo_top;
+                journal->undo_top = op;
+            }
+            return st;
         }
-
-        op->next = journal->redo_top;
-        journal->redo_top = op;
-    } while (depth > 0 && journal->undo_top != NULL);   /* never past the bottom */
-
+    }
     return WP_OK;
 }
 
@@ -1246,27 +1287,42 @@ wp_status wp_edit_redo(wp_document *doc, wp_undo_journal *journal)
     doc->modified = 1;
 
 
-    do {
-        op = journal->redo_top;
-        journal->redo_top = op->next;
+    /* All or nothing, as wp_edit_undo: an op that fails stops the
+       redo, and the ops this call redid are undone again, newest first,
+       so the document and both stacks are as they were. (It used to go
+       on past a failed op, applying the rest of the group to a document
+       they did not match.) */
+    {
+        wp_op *undo_mark = journal->undo_top;
 
-        if (op->kind == (u8)WP_OP_GROUP_BEGIN) {
-            depth++;
-        } else if (op->kind == (u8)WP_OP_GROUP_END) {
-            depth--;
-        } else {
-            /* If an op inside a group fails, st reflects that failed
-               op's status even if later ops in the same group still
-               apply -- an accepted, narrow limitation matching this
-               journal's existing no-rollback-on-partial-failure
-               posture elsewhere (see docs/editing.md). */
-            st = apply_single_redo_op(doc, op);
+        do {
+            op = journal->redo_top;
+
+            if (op->kind == (u8)WP_OP_GROUP_BEGIN) {
+                depth++;
+            } else if (op->kind == (u8)WP_OP_GROUP_END) {
+                depth--;
+            } else {
+                st = apply_single_redo_op(doc, op);
+                if (st != WP_OK) break;
+            }
+
+            journal->redo_top = op->next;
+            op->next = journal->undo_top;
+            journal->undo_top = op;
+        } while (depth > 0 && journal->redo_top != NULL);   /* never past the top */
+
+        if (st != WP_OK) {
+            while (journal->undo_top != undo_mark) {
+                op = journal->undo_top;
+                if (op->kind != (u8)WP_OP_GROUP_BEGIN && op->kind != (u8)WP_OP_GROUP_END)
+                    (void)apply_single_undo_op(doc, op);
+                journal->undo_top = op->next;
+                op->next = journal->redo_top;
+                journal->redo_top = op;
+            }
         }
-
-        op->next = journal->undo_top;
-        journal->undo_top = op;
-    } while (depth > 0 && journal->redo_top != NULL);   /* never past the top */
-
+    }
     return st;
 }
 

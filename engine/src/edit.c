@@ -265,20 +265,13 @@ static wp_status paragraph_split_point(wp_paragraph *para, wp_pos pos, u16 *out_
             return WP_OK;
         }
 
-        {
-            wp_span tail_span;
-            wp_cstyle style = run->style;
-
-            tail_span.offset = run->text.offset + pos.offset;
-            tail_span.length = run->text.length - pos.offset;
-            para->runs[pos.run].text.length = pos.offset;
-
-            st = run_insert_at(para, (u16)(pos.run + 1), tail_span, style);
-            if (st != WP_OK) return st;
-
-            *out_split_run = (u16)(pos.run + 1);
-            return WP_OK;
-        }
+        /* run_split_at reserves before it cuts: this used to shorten the
+           run first, and losing the insert lost the tail's text
+           (test_oom_walk.c, Enter with memory short). */
+        st = run_split_at(para, (u16)pos.run, pos.offset);
+        if (st != WP_OK) return st;
+        *out_split_run = (u16)(pos.run + 1);
+        return WP_OK;
     }
 }
 
@@ -329,6 +322,16 @@ wp_status wp_document_split_paragraph_raw(wp_document *doc, wp_pos pos, wp_pos *
     }
 
     moved_count = (u16)(para->run_count - split_run);
+    /* Room for the moved runs before any of them move: running out
+       part-way left the new paragraph with some of them and the old one
+       with all (test_oom_walk.c). Failing here, the new paragraph goes
+       again and nothing has changed but, perhaps, a run split in two at
+       pos -- which is invisible: same style both sides. */
+    st = wp_paragraph_run_reserve(new_para, (u32)moved_count);
+    if (st != WP_OK) {
+        paragraph_remove_at(sec, new_idx);
+        return st;
+    }
     if (moved_count == 0) {
         /* Enter at the end: after a Title or a Heading the new paragraph
            is Normal (styles.h), as a writer expects. */
@@ -566,6 +569,12 @@ wp_status wp_document_merge_paragraph_raw(wp_document *doc, u32 section,
         return WP_RANGE;
     }
 
+    /* Room for second's runs on first before anything changes, so the
+       appends below cannot fail part-way -- which left some of second's
+       runs on both paragraphs (found by host/tests/test_oom_walk.c). */
+    st = wp_paragraph_run_reserve(first, (u32)first->run_count + (u32)second->run_count);
+    if (st != WP_OK) return st;
+
     /* Capture the join point BEFORE mutating first -- the position
        immediately after first's ORIGINAL last codepoint (or (0,0) if
        first was empty), the exact convention wp_pos_next/prev's own
@@ -674,7 +683,13 @@ wp_status wp_document_delete_range_raw(wp_document *doc, u32 section,
         right_span.offset = run->text.offset + end_offset;
         right_span.length = run->text.length - end_offset;
 
-        run->text.length = start_offset;
+        /* Room first, then cut: cut first and a failed insert lost the
+           right fragment as well as the deleted middle. */
+        {
+            wp_status st = wp_paragraph_run_reserve(para, (u32)para->run_count + 1u);
+            if (st != WP_OK) return st;
+        }
+        para->runs[run_index].text.length = start_offset;
 
         return run_insert_at(para, (u16)(run_index + 1), right_span, style);
     }
@@ -734,6 +749,15 @@ wp_status run_split_at(wp_paragraph *para, u16 index, u32 offset)
     right.offset = run->text.offset + offset;
     right.length = run->text.length - offset;
 
+    /* Room for the right half BEFORE the left is cut short: shortening
+       first and then failing to insert lost the right half's text for
+       good -- styling a range with memory short dropped words
+       (host/tests/test_oom_walk.c). */
+    {
+        wp_status st = wp_paragraph_run_reserve(para, (u32)para->run_count + 1u);
+        if (st != WP_OK) return st;
+    }
+    run = wp_paragraph_run_get(para, index);     /* the reserve may have moved it */
     run->text.length = offset;
     return run_insert_at(para, (u16)(index + 1), right, style);
 }

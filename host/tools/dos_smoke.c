@@ -27,6 +27,7 @@
 
 #include <stdio.h>
 #include "types.h"
+#include "conformance.h"
 #include "app_shell_internal.h"
 
 static void report(const char *line)
@@ -36,6 +37,18 @@ static void report(const char *line)
     if (f == NULL) return;
     fprintf(f, "%s", line);
     fclose(f);
+}
+
+/* retroplat's seam conformance test (tests/conformance.c), the same
+   file `make check` runs on the host: one line for each broken case. */
+static wp_bool g_conf_ok = WP_TRUE;
+
+static void conformance_report(const char *what)
+{
+    report("seam_conformance: FAIL ");
+    report(what);
+    report("\r\n");
+    g_conf_ok = WP_FALSE;
 }
 
 int main(void)
@@ -76,6 +89,11 @@ int main(void)
     ok = wp_dos_image_selfcheck();
     report(ok ? "image: PASS\r\n" : "image: FAIL\r\n");
     if (!ok) all_ok = WP_FALSE;
+
+    (void)rp_conformance_files("", conformance_report);
+    (void)rp_conformance_clipboard(conformance_report);
+    if (g_conf_ok) report("seam_conformance: PASS\r\n");
+    else all_ok = WP_FALSE;
 
     printf("RETROWP DOS SMOKE OK\r\n");
     return all_ok ? 0 : 1;

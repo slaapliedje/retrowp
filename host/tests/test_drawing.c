@@ -481,6 +481,13 @@ static u32 make_gem(u8 *out, wp_bool le)
     return n * 2u;
 }
 
+/* The GEM metafile above, big-endian, for host/tools/fuzz_formats.c:
+   its length (out must hold 256 bytes). */
+u32 test_gem_seed(u8 *out)
+{
+    return make_gem(out, WP_FALSE);
+}
+
 static i32 bd16(const u8 *p) { return (i32)(i16)(((u16)p[0] << 8) | p[1]); }
 
 void test_drawfile_gem(void)
