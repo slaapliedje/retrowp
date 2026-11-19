@@ -52,6 +52,7 @@ wp_status wp_recovery_write(wp_app_ctx *ctx, wp_image_source *img_src)
         if (st == WP_OK) st = write_all(f, ctx->doc_rtf ? "\n" K_RTF "1\n\n" : "\n" K_RTF "0\n\n",
                                         (u32)strlen("\n" K_RTF "1\n\n"));
         if (st == WP_OK) st = plat_file_write(f, buf, needed);
+        if (st == WP_OK) st = plat_file_flush(f);   /* a full disk shows here */
         plat_file_close(f);
         /* A half-written copy would be offered next time as if it were
            the work: better none, and the caller refuses to leave. */

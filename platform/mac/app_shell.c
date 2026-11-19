@@ -479,21 +479,23 @@ static wp_bool mac_pick_path(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
 }
 
 /* The window title carries the document's name, so the writer knows
-   where Save will go; set only when it changed. */
+   where Save will go, and a '*' while there are unsaved changes (T21.1);
+   set only when it changed. */
 static void mac_show_document_name(void)
 {
-    static char shown[WP_APP_PATH_MAX];
-    const char *name = wp_action_document_name(&g_ctx);
+    static char shown[64];
+    char name[54];
     char title[64];
     unsigned char ptitle[256];
 
-    if (strcmp(shown, name) == 0) return;
-    strcpy(shown, name);
+    wp_action_title_name(&g_ctx, name, sizeof(name));
     strcpy(title, "RetroWP");
     if (name[0] != '\0') {
         strcat(title, " - ");
-        strncat(title, name, sizeof(title) - strlen(title) - 1);
+        strcat(title, name);
     }
+    if (strcmp(shown, title) == 0) return;
+    strcpy(shown, title);
     c_to_pstr(title, ptitle);
     if (g_win != NULL) SetWTitle(g_win, ptitle);
 }
@@ -2404,6 +2406,10 @@ void app_shell_run(void)
         }
         if (g_ctx.quit_requested) g_quit = WP_TRUE;
         if (g_quit) break;
+        /* Typing flips the unsaved flag without a menu pick, so the
+           title's '*' is checked after every event (T21.1); SetWTitle is
+           only called when it changed. */
+        mac_show_document_name();
 
         /* After dispatch, never before: a dispatch that crashes or
            wedges must not get to bump the count first. WaitNextEvent

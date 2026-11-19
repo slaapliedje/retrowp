@@ -373,21 +373,25 @@ static wp_bool amiga_pick_path(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap
 }
 
 /* The window title carries the document's name, so the writer knows
-   where Save will go. MUI keeps the pointer, not a copy, so the buffer
-   is static; set only when the name changed, to spare a redraw. */
+   where Save will go, and a '*' while there are unsaved changes (T21.1).
+   MUI keeps the pointer, not a copy, so the shown buffer is static and
+   only rewritten when the title changes, which also spares a redraw.
+   Two static buffers rather than stack ones: a RUN-launched program has
+   a 4 KB stack. */
 static void amiga_show_document_name(void)
 {
     static char title[16 + WP_APP_PATH_MAX];
-    static char shown[WP_APP_PATH_MAX];
-    const char *name = wp_action_document_name(&g_ctx);
+    static char want[16 + WP_APP_PATH_MAX];
+    static char name[WP_APP_PATH_MAX];
 
-    if (strcmp(shown, name) == 0) return;
-    strcpy(shown, name);
-    strcpy(title, "RetroWP");
+    wp_action_title_name(&g_ctx, name, sizeof(name));
+    strcpy(want, "RetroWP");
     if (name[0] != '\0') {
-        strcat(title, " - ");
-        strcat(title, name);
+        strcat(want, " - ");
+        strcat(want, name);
     }
+    if (strcmp(title, want) == 0) return;
+    strcpy(title, want);
     if (g_win != NULL) set(g_win, MUIA_Window_Title, (IPTR)title);
 }
 
@@ -2505,6 +2509,10 @@ void app_shell_run(void)
                 MUI_Redraw(g_editor, MADF_DRAWOBJECT);
             }
             amiga_update_bars();   /* where this pass's paints left the view */
+            /* Typing flips the unsaved flag without a menu pick, so the
+               title's '*' is checked after every input (T21.1); MUI is
+               only told when the title changed. */
+            amiga_show_document_name();
             if (sigs) {
                 sigs = Wait(sigs | SIGBREAKF_CTRL_C);
                 if (sigs & SIGBREAKF_CTRL_C) {

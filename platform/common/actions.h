@@ -392,6 +392,15 @@ void wp_action_remember_path(struct wp_app_ctx *ctx, const char *native_path);
    "" when the document has no file. */
 const char *wp_action_document_name(const struct wp_app_ctx *ctx);
 
+/* What a title bar or status line shows for the document (M21 T21.1):
+   the name, with a '*' before it while there are unsaved changes --
+   "NOTES.TXT", "*NOTES.TXT", "*Untitled" for changed work with no file
+   yet, "" for an untouched document with no file. Written into `out`
+   (always terminated; truncated to cap - 1). Every port builds its title
+   from this, so the marker means the same everywhere; a shell redraws
+   when the string changes, which covers the modified flag flipping. */
+void wp_action_title_name(const struct wp_app_ctx *ctx, char *out, u32 cap);
+
 /* Case-insensitive "ends with", for extensions: wp_path_ends_with_ci(p,
    ".RTF") matches "notes.rtf" and "NOTES.RTF" alike. */
 wp_bool wp_path_ends_with_ci(const char *path, const char *suffix);

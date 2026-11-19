@@ -2184,20 +2184,24 @@ static wp_bool atari_pick_path(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap
 }
 
 /* The window title carries the document's name, so the writer knows
-   where Save will go; set only when it changed (wind_set redraws). */
+   where Save will go, and a '*' while there are unsaved changes (T21.1).
+   Set only when it changed (wind_set redraws). The AES keeps the
+   pointer, so `title` is static and only rewritten when it changes. */
 static void atari_show_document_name(void)
 {
-    static char shown[WP_APP_PATH_MAX];
     static char title[48];
-    const char *name = wp_action_document_name(&g_ctx);
+    char name[40];
+    char want[48];
 
-    if (g_window_handle < 0 || strcmp(shown, name) == 0) return;
-    strcpy(shown, name);
-    strcpy(title, "RetroWP");
+    if (g_window_handle < 0) return;
+    wp_action_title_name(&g_ctx, name, sizeof(name));
+    strcpy(want, "RetroWP");
     if (name[0] != '\0') {
-        strcat(title, " - ");
-        strncat(title, name, sizeof(title) - strlen(title) - 1);
+        strcat(want, " - ");
+        strcat(want, name);
     }
+    if (strcmp(title, want) == 0) return;
+    strcpy(title, want);
     wind_set_str(g_window_handle, WF_NAME, title);
 }
 
@@ -6076,6 +6080,7 @@ void app_shell_run(void)
        smoke tests cannot attest. See atari_ci_mode's own comment. */
     if (g_atari_ci_active) atari_ci_write_alive();
 
+    atari_show_document_name(); /* a recovered document starts unsaved */
     quit = WP_FALSE;
     while (!quit) {
         /* MU_BUTTON with clicks 1, mask 1, state 1: the left button
@@ -6095,6 +6100,10 @@ void app_shell_run(void)
         if (!quit && (events & MU_BUTTON)) {
             atari_click(window_handle, vdi_handle, mx, my, mkstate);
         }
+        /* Typing flips the unsaved flag without any menu pick, so the
+           '*' in the title is checked after every event (a strcmp; the
+           AES is only called when it changed). */
+        if (!quit) atari_show_document_name();
         /* After the event and its redraw, never inside a redraw
            (pageview.h): a relayout that ran out of memory says so once
            rather than leaving the page blank. */

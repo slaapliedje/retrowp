@@ -2998,13 +2998,33 @@ Goal: the writer always knows whether the work is saved, a crash costs
 minutes at most, and a copy can live off the machine -- on the Pi, and
 through it in cloud or network storage.
 
-- [ ] T21.1 The unsaved marker.
+- [x] T21.1 The unsaved marker.
       AC: a `*` before the document's name in the window title (ST,
       gem4xe, Amiga, Mac) and in the DOS status line, from one shared
       helper, redrawn when the modified state flips.
-- [ ] T21.2 Safe save.
+      Done (2026-11-19): wp_action_title_name (platform/common/actions.c)
+      gives "NOTE.TXT", "*NOTE.TXT", or "*Untitled" for changed work with
+      no file; each shell builds its title from it and checks it after
+      every event, not only menu picks, so typing shows the marker (the
+      DOS title row is repainted every pass anyway). Shown on TOS 1.04:
+      RetroWP -> *Untitled -> NOTE.TXT -> *NOTE.TXT -> NOTE.TXT.
+- [x] T21.2 Safe save.
       AC: Save writes a temporary file beside the document and renames it
       over the old one; a full disk leaves the last good copy intact.
+      Done (2026-11-19): the new copy is written whole to RETROWP.$$$
+      beside the document and flushed; the old one steps aside as
+      RETROWP.OLD, the new one takes the name, the old is deleted -- one
+      complete copy under a findable name at every moment. Any failure
+      leaves the old file, keeps the document modified and says "Not
+      saved (disk full?); old copy kept". ODT/PDF export streams into the
+      same temporary file (a failed transfer used to delete the old file);
+      the recovery file checks its write. retroplat gained
+      plat_file_flush (where a buffered backend's full disk shows) and
+      plat_file_rename (never onto an existing name, on any backend), both
+      in the conformance test the ST/Amiga/DOS smokes run. A filesystem
+      that cannot rename falls back to writing in place, as before. Shown
+      on TOS 1.04 from a floppy: a second Save over NOTE.TXT, both edits
+      in it, no helper file left.
 - [ ] T21.3 Autosave to the recovery file.
       AC: when there are unsaved changes and typing has paused, every N
       minutes (setting; default 5; off) the recovery file is written,

@@ -1015,10 +1015,12 @@ static void redraw_screen(void)
         for (p = "RetroWP -- DOS (F1: Help, "; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
         for (p = quit_key_hint(); *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
         for (p = ": Quit)"; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
-        /* The document's file, so the writer knows where Save goes. */
+        /* The document's file, so the writer knows where Save goes, with
+           a '*' while there are unsaved changes (T21.1). */
         {
-            const char *name = wp_action_document_name(&g_ctx);
+            char name[DOS_SCREEN_COLS + 1];
 
+            wp_action_title_name(&g_ctx, name, sizeof(name));
             if (name[0] != '\0') {
                 for (p = "  "; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
                 for (p = name; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;

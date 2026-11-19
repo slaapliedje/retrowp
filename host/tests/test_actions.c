@@ -882,6 +882,118 @@ void test_actions_save_file_picks_the_format_by_extension_and_remembers(void)
     ctx_teardown(&doc, &journal, &ctx);
 }
 
+/* M21 T21.1: the title's unsaved marker, from the one helper every port
+   builds its title with. */
+void test_actions_title_name_marks_unsaved_work(void)
+{
+    static const char txt[] = "build/test_actions_title.txt";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char t[64];
+    char tiny[4];
+
+    ctx_setup(&doc, &journal, &ctx, "Hello");
+    wp_document_mark_saved(&doc);
+    wp_action_title_name(&ctx, t, sizeof(t));
+    ASSERT_EQ_STR(t, "");                          /* untouched, no file */
+
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, wp_pos_doc_start(&doc),
+                                    (const u8 *)"X", 1, NULL) == WP_OK);
+    wp_action_title_name(&ctx, t, sizeof(t));
+    ASSERT_EQ_STR(t, "*Untitled");                 /* changed, no file yet */
+
+    ASSERT_TRUE(wp_action_save_file(&ctx, txt, NULL) == WP_OK);
+    wp_action_title_name(&ctx, t, sizeof(t));
+    ASSERT_EQ_STR(t, "test_actions_title.txt");    /* saved: no marker */
+
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, wp_pos_doc_start(&doc),
+                                    (const u8 *)"Y", 1, NULL) == WP_OK);
+    wp_action_title_name(&ctx, t, sizeof(t));
+    ASSERT_EQ_STR(t, "*test_actions_title.txt");   /* typed again */
+
+    wp_action_title_name(&ctx, tiny, sizeof(tiny));
+    ASSERT_EQ_STR(tiny, "*te");                    /* truncated, terminated */
+
+    ctx_teardown(&doc, &journal, &ctx);
+}
+
+/* M21 T21.2: Save writes beside the document and renames over it, so a
+   write that fails leaves the last good copy whole. The failure is made
+   by putting a non-empty folder where the temporary file would go. */
+static wp_bool file_there(const char *path)
+{
+    wp_bool e = WP_FALSE;
+    (void)plat_file_exists(path, &e);
+    return e;
+}
+
+void test_actions_safe_save_replaces_whole_and_leaves_nothing(void)
+{
+    static const char doc_path[] = "build/safesave/NOTE.TXT";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char back[64];
+    FILE *fp;
+
+    (void)mkdir("build/safesave", 0777);
+    (void)remove("build/safesave/RETROWP.$$$");
+    fp = fopen("build/safesave/RETROWP.OLD", "w");   /* stale, from a crash */
+    if (fp != NULL) { fputs("stale", fp); fclose(fp); }
+
+    ctx_setup(&doc, &journal, &ctx, "First");
+    ASSERT_TRUE(wp_action_save_file(&ctx, doc_path, NULL) == WP_OK);
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, wp_pos_doc_start(&doc),
+                                    (const u8 *)"Second ", 7, NULL) == WP_OK);
+    ASSERT_TRUE(wp_action_save_file(&ctx, doc_path, NULL) == WP_OK);
+    read_whole_file(doc_path, back, sizeof(back));
+    ASSERT_EQ_STR(back, "Second First\n");
+    ASSERT_TRUE(!file_there("build/safesave/RETROWP.$$$"));
+    ASSERT_TRUE(!file_there("build/safesave/RETROWP.OLD"));
+    ASSERT_TRUE(!wp_document_is_modified(&doc));
+
+    ctx_teardown(&doc, &journal, &ctx);
+    (void)remove(doc_path);
+}
+
+void test_actions_safe_save_failure_keeps_the_old_copy(void)
+{
+    static const char doc_path[] = "build/safesave2/NOTE.TXT";
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char back[64];
+    FILE *fp;
+
+    (void)mkdir("build/safesave2", 0777);
+    ctx_setup(&doc, &journal, &ctx, "Good copy");
+    ASSERT_TRUE(wp_action_save_file(&ctx, doc_path, NULL) == WP_OK);
+
+    /* Block the temporary file: a folder of that name, not empty, so
+       neither open-for-writing nor delete can clear it. */
+    (void)mkdir("build/safesave2/RETROWP.$$$", 0777);
+    fp = fopen("build/safesave2/RETROWP.$$$/KEEP", "w");
+    if (fp != NULL) fclose(fp);
+
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, wp_pos_doc_start(&doc),
+                                    (const u8 *)"Lost ", 5, NULL) == WP_OK);
+    ASSERT_TRUE(wp_action_save_file(&ctx, doc_path, NULL) != WP_OK);
+    read_whole_file(doc_path, back, sizeof(back));
+    ASSERT_EQ_STR(back, "Good copy\n");                /* untouched */
+    ASSERT_TRUE(wp_document_is_modified(&doc));         /* not saved */
+    ASSERT_TRUE(!file_there("build/safesave2/RETROWP.OLD"));
+
+    (void)remove("build/safesave2/RETROWP.$$$/KEEP");
+    (void)remove("build/safesave2/RETROWP.$$$");
+    ASSERT_TRUE(wp_action_save_file(&ctx, doc_path, NULL) == WP_OK);
+    read_whole_file(doc_path, back, sizeof(back));
+    ASSERT_EQ_STR(back, "Lost Good copy\n");           /* and saves once it can */
+
+    ctx_teardown(&doc, &journal, &ctx);
+    (void)remove(doc_path);
+}
+
 void test_actions_save_goes_to_the_remembered_name_without_asking(void)
 {
     static const char first[] = "build/test_actions_pick1.txt";

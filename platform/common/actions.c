@@ -1494,23 +1494,154 @@ void wp_action_request_quit_after_save(wp_app_ctx *ctx)
     ctx->quit_requested = WP_TRUE;
 }
 
-/* The tail end of every backend's Save. plat_file_open for writing
-   truncates, so a write that fails halfway has already cost the old
-   file; the least this can do is say so, and leave the document marked
-   modified so nothing later assumes it is safe on disk. */
-wp_status wp_action_write_file(wp_app_ctx *ctx, const char *native_path,
-                                const u8 *buf, u32 len, wp_bool marks_saved)
+/* Writes buf to path whole: open, write, flush, close. The flush is
+   where a full disk shows on a buffered backend; close cannot say. */
+static wp_status write_whole(const char *path, const u8 *buf, u32 len)
 {
     plat_file *f;
     wp_status st;
 
-    st = plat_file_open(native_path, PLAT_FILE_WRITE, &f);
-    if (st == WP_OK) {
-        st = plat_file_write(f, buf, len);
-        plat_file_close(f);
+    st = plat_file_open(path, PLAT_FILE_WRITE, &f);
+    if (st != WP_OK) return st;
+    st = plat_file_write(f, buf, len);
+    if (st == WP_OK) st = plat_file_flush(f);
+    plat_file_close(f);
+    return st;
+}
+
+/* `path` with its last part replaced by `name`, in the same folder:
+   every target's separator ('\\' ST/DOS, '/' and ':' AmigaDOS, ':'
+   Mac). WP_FALSE if it will not fit. */
+static wp_bool sibling_path(char *out, u32 cap, const char *path, const char *name)
+{
+    u32 dir = 0, i, n;
+
+    for (i = 0; path[i] != '\0'; i++) {
+        if (path[i] == '\\' || path[i] == '/' || path[i] == ':') dir = i + 1;
     }
+    n = (u32)strlen(name);
+    if (dir + n + 1 > cap) return WP_FALSE;
+    memcpy(out, path, dir);
+    memcpy(out + dir, name, n + 1);
+    return WP_TRUE;
+}
+
+/* M21 T21.2, safe save. The new copy is written whole to a temporary
+   file beside the document, and only then takes the document's name;
+   the old copy steps aside under a second name first and is deleted
+   last. At every moment one complete copy is on disk under a name the
+   writer can find: a full disk or a pulled floppy halfway through costs
+   the temporary file, never the last good save. No filesystem here can
+   rename onto an existing name (plat_file_rename refuses on purpose),
+   hence the step aside. */
+#define WP_SAVE_TMP_NAME "RETROWP.$$$"
+#define WP_SAVE_OLD_NAME "RETROWP.OLD"
+
+/* The two helper names beside `path`. WP_UNSUPPORTED if they will not
+   fit, or if the document IS one of them -- then nothing is renamed. */
+static wp_status safe_names(const char *path, char *tmp, char *old, u32 cap)
+{
+    if (!sibling_path(tmp, cap, path, WP_SAVE_TMP_NAME) ||
+        !sibling_path(old, cap, path, WP_SAVE_OLD_NAME) ||
+        wp_path_ends_with_ci(path, WP_SAVE_TMP_NAME) ||
+        wp_path_ends_with_ci(path, WP_SAVE_OLD_NAME)) {
+        return WP_UNSUPPORTED;
+    }
+    return WP_OK;
+}
+
+/* The finished temporary file takes the document's name. WP_OK; WP_ERR
+   with the old copy back under its name; or WP_UNSUPPORTED when this
+   filesystem will not rename, with nothing moved and `tmp` still there
+   for the caller to deal with. */
+static wp_status safe_commit(const char *tmp, const char *old, const char *path)
+{
+    wp_bool there = WP_FALSE;
+
+    if (plat_file_exists(path, &there) != WP_OK) there = WP_TRUE;
+    if (!there) {
+        return (plat_file_rename(tmp, path) == WP_OK) ? WP_OK : WP_UNSUPPORTED;
+    }
+    (void)plat_file_delete(old);           /* a stale one from a crash */
+    if (plat_file_rename(path, old) != WP_OK) return WP_UNSUPPORTED;
+    if (plat_file_rename(tmp, path) != WP_OK) {
+        /* Put the old copy back; the new one stays as RETROWP.$$$ only
+           if even that fails, so neither copy is ever thrown away. */
+        if (plat_file_rename(old, path) == WP_OK) (void)plat_file_delete(tmp);
+        return WP_ERR;
+    }
+    (void)plat_file_delete(old);
+    return WP_OK;
+}
+
+/* For a filesystem that cannot rename: `tmp` copied over `path`, then
+   deleted. As unsafe as every save was before T21.2, and no worse. */
+static wp_status copy_over(const char *tmp, const char *path)
+{
+    static u8 chunk[512];
+    plat_file *in, *out;
+    u32 n = 0;
+    wp_status st;
+
+    if (plat_file_open(tmp, PLAT_FILE_READ, &in) != WP_OK) return WP_ERR;
+    st = plat_file_open(path, PLAT_FILE_WRITE, &out);
     if (st != WP_OK) {
-        wp_action_tell(ctx, "Couldn't save that file");
+        plat_file_close(in);
+        return st;
+    }
+    do {
+        st = plat_file_read(in, chunk, (u32)sizeof(chunk), &n);
+        if (st == WP_OK && n > 0) st = plat_file_write(out, chunk, n);
+    } while (st == WP_OK && n > 0);
+    if (st == WP_OK) st = plat_file_flush(out);
+    plat_file_close(out);
+    plat_file_close(in);
+    if (st == WP_OK) (void)plat_file_delete(tmp);
+    return st;
+}
+
+/* Answers WP_OK when the file is safe, WP_ERR with the old copy intact,
+   or WP_UNSUPPORTED when this filesystem cannot rename -- then the
+   caller writes in place. */
+static wp_status safe_write(const char *path, const u8 *buf, u32 len)
+{
+    /* Static: two paths are a lot for a 4 KB Amiga stack. */
+    static char tmp[WP_APP_PATH_MAX];
+    static char old[WP_APP_PATH_MAX];
+    wp_status st;
+
+    if (safe_names(path, tmp, old, (u32)sizeof(tmp)) != WP_OK) return WP_UNSUPPORTED;
+    (void)plat_file_delete(tmp);           /* a stale one from a crash */
+    st = write_whole(tmp, buf, len);
+    if (st != WP_OK) {
+        (void)plat_file_delete(tmp);
+        return WP_ERR;                      /* the document was not touched */
+    }
+    st = safe_commit(tmp, old, path);
+    if (st == WP_UNSUPPORTED) (void)plat_file_delete(tmp);
+    return st;
+}
+
+/* The tail end of every backend's Save, through safe_write. Where the
+   filesystem cannot rename, it writes in place as before: that
+   truncates first, so a failure halfway has cost the old file, and the
+   least it can do is say so and leave the document marked modified so
+   nothing later assumes it is safe on disk. */
+wp_status wp_action_write_file(wp_app_ctx *ctx, const char *native_path,
+                                const u8 *buf, u32 len, wp_bool marks_saved)
+{
+    wp_status st;
+
+    st = safe_write(native_path, buf, len);
+    if (st == WP_UNSUPPORTED) {
+        st = write_whole(native_path, buf, len);
+        if (st != WP_OK) {
+            wp_action_tell(ctx, "Couldn't save that file");
+            return st;
+        }
+    } else if (st != WP_OK) {
+        /* Short enough for the ST's 40-column status line. */
+        wp_action_tell(ctx, "Not saved (disk full?); old copy kept");
         return st;
     }
     if (marks_saved) {
@@ -2745,6 +2876,20 @@ const char *wp_action_document_name(const wp_app_ctx *ctx)
     return name;
 }
 
+void wp_action_title_name(const wp_app_ctx *ctx, char *out, u32 cap)
+{
+    const char *name = wp_action_document_name(ctx);
+    wp_bool changed = (wp_bool)(ctx->doc_loaded && ctx->doc != NULL &&
+                                wp_document_is_modified(ctx->doc));
+    u32 n = 0;
+
+    if (cap == 0) return;
+    if (changed && name[0] == '\0') name = "Untitled";
+    if (changed && n + 1 < cap) out[n++] = '*';
+    for (; *name != '\0' && n + 1 < cap; name++) out[n++] = *name;
+    out[n] = '\0';
+}
+
 /* ---- ODT and PDF, through the gateway --------------------------------
    OFFLOAD_CONVERT_IMPORT/EXPORT ship a WHOLE file as one request and one
    response (unlike Thesaurus's single words), so they get their own
@@ -2828,6 +2973,10 @@ static wp_status convert_export(wp_app_ctx *ctx, const char *native_path, u8 for
     offload_response resp;
     plat_file *out;
     wp_status st;
+    wp_status wrote = WP_ERR;
+    /* Static: two paths are a lot for a 4 KB Amiga stack. */
+    static char tmp[WP_APP_PATH_MAX];
+    static char old[WP_APP_PATH_MAX];
 
     format_rtf_export(ctx->doc, NULL, 0, &rtf_len);
     if (rtf_len + 1 > convert_max_file()) {
@@ -2851,21 +3000,38 @@ static wp_status convert_export(wp_app_ctx *ctx, const char *native_path, u8 for
     req.payload_len = rtf_len + 1;
     req.timeout_ms = (u32)WP_ACTION_CONVERT_TIMEOUT_MS;
 
-    if (plat_file_open(native_path, PLAT_FILE_WRITE, &out) != WP_OK) {
+    /* Streamed into the temporary file beside it (T21.2), so a transfer
+       that does not finish, or a gateway that says no, leaves the old
+       file of that name as it was -- not deleted, not half-written. */
+    if (safe_names(native_path, tmp, old, (u32)sizeof(tmp)) != WP_OK) {
+        strcpy(tmp, native_path);           /* no room for the helpers: in place */
+        old[0] = '\0';
+    } else {
+        (void)plat_file_delete(tmp);
+    }
+    if (plat_file_open(tmp, PLAT_FILE_WRITE, &out) != WP_OK) {
         mem_free(payload);
         wp_action_tell(ctx, "Couldn't save that file");
         return WP_ERR;
     }
     st = offload_submit_stream(&req, write_part, out, &resp);
     mem_free(payload);
+    if (st == WP_OK && resp.status == OFFLOAD_OK) wrote = plat_file_flush(out);
     plat_file_close(out);
-    /* A transfer that did not finish, or a gateway that said no, leaves
-       no half-written file behind under the name the writer chose. */
-    if (st != WP_OK || resp.status != OFFLOAD_OK) {
-        (void)plat_file_delete(native_path);
-        wp_action_tell(ctx, (st != WP_OK) ? "Saving that file failed or timed out"
-                                          : "The gateway couldn't produce that file format");
+    if (st != WP_OK || resp.status != OFFLOAD_OK || wrote != WP_OK) {
+        (void)plat_file_delete(tmp);
+        wp_action_tell(ctx, (st != WP_OK) ? "Saving that file failed or timed out" :
+                            (resp.status != OFFLOAD_OK) ? "The gateway couldn't produce that file format"
+                                                        : "Not saved (disk full?); old copy kept");
         return WP_ERR;
+    }
+    if (old[0] != '\0') {
+        st = safe_commit(tmp, old, native_path);
+        if (st == WP_UNSUPPORTED) st = copy_over(tmp, native_path);
+        if (st != WP_OK) {
+            wp_action_tell(ctx, "Couldn't save that file");
+            return WP_ERR;
+        }
     }
     if (format_id == (u8)OFFLOAD_FORMAT_ODT) {
         wp_document_mark_saved(ctx->doc);

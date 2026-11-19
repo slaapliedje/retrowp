@@ -345,6 +345,9 @@ void test_actions_page_break_splits_and_undo_merges(void);
 void test_actions_header_prompt_types_edits_and_sets(void);
 void test_actions_prompt_initial_ignores_the_byte_past_it(void);
 void test_actions_document_name_is_the_last_path_component(void);
+void test_actions_title_name_marks_unsaved_work(void);
+void test_actions_safe_save_replaces_whole_and_leaves_nothing(void);
+void test_actions_safe_save_failure_keeps_the_old_copy(void);
 void test_selspan_marks_the_lines_a_selection_crosses(void);
 void test_selspan_within_one_line(void);
 void test_selspan_starting_at_a_line_end_shows_nothing_there(void);
@@ -1161,6 +1164,9 @@ static const test_case g_cases[] = {
     { "actions_header_prompt_types_edits_and_sets", test_actions_header_prompt_types_edits_and_sets },
     { "actions_prompt_initial_ignores_the_byte_past_it", test_actions_prompt_initial_ignores_the_byte_past_it },
     { "actions_document_name_is_the_last_path_component", test_actions_document_name_is_the_last_path_component },
+    { "actions_title_name_marks_unsaved_work", test_actions_title_name_marks_unsaved_work },
+    { "actions_safe_save_replaces_whole_and_leaves_nothing", test_actions_safe_save_replaces_whole_and_leaves_nothing },
+    { "actions_safe_save_failure_keeps_the_old_copy", test_actions_safe_save_failure_keeps_the_old_copy },
     { "selspan_marks_the_lines_a_selection_crosses", test_selspan_marks_the_lines_a_selection_crosses },
     { "selspan_within_one_line", test_selspan_within_one_line },
     { "selspan_starting_at_a_line_end_shows_nothing_there", test_selspan_starting_at_a_line_end_shows_nothing_there },
