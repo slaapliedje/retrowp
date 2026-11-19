@@ -31,6 +31,9 @@ wp_status gateway_start(const char *const *extra_args, gateway_handle *handle);
    directly executable (a compiled binary, or a script with a valid
    #!/usr/bin/env shebang and the executable bit set). */
 wp_status gateway_start_bin(const char *binary, const char *const *extra_args, gateway_handle *handle);
+/* (A gateway given --serial-rx/--serial-tx prints "serial" instead of a
+   port; gateway_start_bin then returns WP_OK with port 0 and an empty
+   endpoint, for the caller to fill in with its own end of the line.) */
 
 /* SIGKILLs the gateway process immediately and reaps it. Used both as a
    fault-injection tool (simulating a hard crash) and as end-of-test

@@ -25,6 +25,7 @@
    correctness doesn't depend on payload size, so a small fixture proves
    the same thing a large one would, faster. */
 
+#include <stdio.h>
 #include <string.h>
 #include "types.h"
 #include "docmodel.h"
@@ -135,6 +136,14 @@ int main(void)
     check(!offload_available(), "offload_available() false before offload_init");
     check(offload_init("serial:aux:9600") == WP_OK,
           "offload_init(serial:aux:9600) handshake succeeded");
+    {
+        /* Where OFFLOAD_SET_SPEED left the link: 9600 over the gate's
+           FIFOs (no tty, so the gateway offers nothing), faster over a
+           real line -- 19200 on an ST's MFP. */
+        char line[48];
+        sprintf(line, "link speed: %lu baud\r\n", (unsigned long)offload_link_speed());
+        nf_log(line);
+    }
     check(offload_available(), "offload_available() true after handshake");
 
     if (offload_query(&caps) == WP_OK) {

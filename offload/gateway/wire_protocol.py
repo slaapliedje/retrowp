@@ -54,7 +54,13 @@ if os.environ.get('RETROWP_GATEWAY_PART_TEST'):
 
 (OP_SPELL_CHECK, OP_GRAMMAR_CHECK, OP_THESAURUS,
  OP_CONVERT_IMPORT, OP_CONVERT_EXPORT, OP_CHAT, OP_IMAGE,
- OP_DICTATE, OP_PRINT, OP_PRINT_OPTIONS, OP_DRAWING) = range(11)
+ OP_DICTATE, OP_PRINT, OP_PRINT_OPTIONS, OP_DRAWING, OP_SET_SPEED) = range(12)
+
+# OP_SET_SPEED: how long the gateway waits, at the new speed, for the
+# client's HELLO before going back to the old one. The client gives up
+# sooner (offload_client.c), so by the time it says HELLO again at the
+# old speed this side is listening there.
+SPEED_CONFIRM_S = 3.0
 
 STATUS_OK, STATUS_TIMEOUT, STATUS_UNSUPPORTED, STATUS_ERR = range(4)
 
@@ -220,8 +226,62 @@ def open_fifo_rdwr(path, baud=None, flow='none'):
     return fd
 
 
+def _tty_speed(fd):
+    """The tty's speed in baud, or None."""
+    try:
+        sp = termios.tcgetattr(fd)[5]
+    except termios.error:
+        return None
+    for name in dir(termios):
+        if name.startswith('B') and name[1:].isdigit() and getattr(termios, name) == sp:
+            return int(name[1:])
+    return None
+
+
+def _tty_set_speed(fd, baud):
+    """Switch the tty to `baud` once what is written has gone out."""
+    sp = getattr(termios, 'B%d' % baud)
+    attrs = termios.tcgetattr(fd)
+    attrs[4] = attrs[5] = sp
+    termios.tcdrain(fd)
+    termios.tcsetattr(fd, termios.TCSADRAIN, attrs)
+
+
+def _set_speed(fd, payload, seq, max_baud, caps_payload):
+    """OP_SET_SPEED (docs/formats/offload-protocol.md): the client's
+    rates, fastest first, four bytes each; the first this side can do
+    and that is faster than now is the answer -- sent at the OLD speed --
+    and then both switch. A HELLO at the new speed within SPEED_CONFIRM_S
+    keeps it; anything else, and this side goes back to the old one,
+    where the client will look for it."""
+    now = _tty_speed(fd)
+    want = [struct.unpack('>I', payload[i:i + 4])[0] for i in range(0, len(payload) - 3, 4)]
+    pick = None
+    for r in want:
+        if now is not None and r > now and r <= max_baud and hasattr(termios, 'B%d' % r):
+            pick = r
+            break
+    if pick is None:
+        os.write(fd, encode_frame(MSG_RESPONSE, OP_SET_SPEED, STATUS_UNSUPPORTED, seq, b''))
+        return
+    os.write(fd, encode_frame(MSG_RESPONSE, OP_SET_SPEED, STATUS_OK, seq, struct.pack('>I', pick)))
+    _tty_set_speed(fd, pick)
+    confirmed = False
+    try:
+        hdr, _ = read_frame(fd, SPEED_CONFIRM_S)
+        confirmed = hdr['type'] == MSG_HELLO and not os.environ.get('RETROWP_GATEWAY_SPEED_FAIL')
+    except GatewayError:
+        pass
+    if confirmed:
+        os.write(fd, encode_frame(MSG_CAPS, 0, 0, 0, caps_payload))
+        print('serial: now at %d baud' % pick, file=sys.stderr, flush=True)
+    else:
+        _tty_set_speed(fd, now)
+        print('serial: %d baud not confirmed; back at %d' % (pick, now), file=sys.stderr, flush=True)
+
+
 def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, handle_request,
-          lenient=False):
+          lenient=False, max_baud=115200):
     """The HELLO/CAPS handshake plus the request/response loop, shared
     verbatim by every Python gateway: read HELLO, answer CAPS, then
     repeatedly read a REQUEST and dispatch it to handle_request(op,
@@ -233,13 +293,17 @@ def serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, hand
     # gateway: the serial loop must go on to the next HELLO.
     try:
         return _serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name,
-                      handle_request, lenient)
+                      handle_request, lenient, max_baud)
     except OSError:
         return 0
 
 
 def _serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, handle_request,
-           lenient):
+           lenient, max_baud):
+    # A real tty, one fd both ways, can change speed: say so.
+    tty = read_fd == write_fd and os.isatty(read_fd) and _tty_speed(read_fd) is not None
+    if tty:
+        ops_supported |= 1 << OP_SET_SPEED
     caps_payload = encode_caps(ops_supported, gateway_name)
     try:
         hdr, payload = read_frame(read_fd, hello_timeout_ms / 1000.0)
@@ -311,6 +375,13 @@ def _serve(read_fd, write_fd, hello_timeout_ms, ops_supported, gateway_name, han
         if parts:
             payload = b''.join(parts) + payload
             parts, parts_seq, parts_len = [], None, 0
+        if hdr['op'] == OP_SET_SPEED:
+            if tty:
+                _set_speed(read_fd, payload, hdr['seq'], max_baud, caps_payload)
+            else:
+                os.write(write_fd, encode_frame(MSG_RESPONSE, OP_SET_SPEED, STATUS_UNSUPPORTED,
+                                                hdr['seq'], b''))
+            continue
         # A handler that raises answers STATUS_ERR: one bad document must
         # not take the gateway, and every later request, down with it.
         try:
@@ -342,6 +413,9 @@ def parse_gateway_args(description=None, extra_args=None):
     parser.add_argument('--serial-baud', type=int, default=None,
                         help='line speed when --serial-rx/--serial-tx name a '
                               'real tty rather than a FIFO (ignored for FIFOs)')
+    parser.add_argument('--serial-max-baud', type=int, default=115200,
+                        help='the fastest speed OFFLOAD_SET_SPEED may move a tty to '
+                             '(default 115200); the client asks only for what it can do')
     parser.add_argument('--serial-once', action='store_true',
                         help='serve a single handshake then exit. The default '
                              'over serial is to serve forever -- see '
@@ -406,7 +480,7 @@ def run_gateway_with_args(args, handle_request, ops_supported, gateway_name):
         # "nothing works", which is the worst kind of wrong answer.
         if getattr(args, 'serial_once', False):
             return serve(rx_fd, tx_fd, args.hello_timeout_ms, ops_supported, gateway_name,
-                         handle_request, lenient=True)
+                         handle_request, lenient=True, max_baud=args.serial_max_baud)
 
         cycle = 0
         while True:
@@ -414,7 +488,7 @@ def run_gateway_with_args(args, handle_request, ops_supported, gateway_name):
             print('serial: waiting for HELLO (cycle %d)' % cycle,
                   file=sys.stderr, flush=True)
             rc = serve(rx_fd, tx_fd, args.hello_timeout_ms, ops_supported,
-                       gateway_name, handle_request, lenient=True)
+                       gateway_name, handle_request, lenient=True, max_baud=args.serial_max_baud)
             print('serial: session ended rc=%d' % rc, file=sys.stderr, flush=True)
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

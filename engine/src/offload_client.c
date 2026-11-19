@@ -102,20 +102,16 @@ static wp_bool                g_available = WP_FALSE;
 static offload_capabilities   g_caps;
 static u16                    g_next_seq = 1;
 
-wp_status offload_init(const char *endpoint)
+/* HELLO, then the CAPS, within timeout_ms: WP_OK with g_caps filled. */
+static wp_status handshake(u32 timeout_ms)
 {
     wp_status st;
     wire_header req_hdr, resp_hdr;
     u8 hello_buf[WIRE_HEADER_SIZE + WIRE_CRC_SIZE];
     u8 caps_payload[CAPS_PAYLOAD_SIZE];
-    u32 caps_len;
+    u32 caps_len = 0;
     u32 n, dropped;
     offload_clock clock;
-
-    g_available = WP_FALSE;
-
-    st = plat_transport_open(endpoint, OFFLOAD_CONNECT_TIMEOUT_MS, &g_transport);
-    if (st != WP_OK) { g_transport = NULL; return st; }
 
     req_hdr.type = WIRE_MSG_HELLO;
     req_hdr.op = 0;
@@ -124,34 +120,127 @@ wp_status offload_init(const char *endpoint)
     req_hdr.length = 0;
 
     n = wire_encode_frame(&req_hdr, NULL, hello_buf, sizeof(hello_buf));
-    st = plat_transport_write(g_transport, hello_buf, n, OFFLOAD_HANDSHAKE_TIMEOUT_MS);
+    st = plat_transport_write(g_transport, hello_buf, n, timeout_ms);
+    if (st != WP_OK) return st;
+
+    /* A reply still in flight from before -- the program was run again
+       while the gateway answered its last request -- may come ahead of
+       the CAPS: skipped, inside the one handshake deadline. */
+    clock_start(&clock, g_transport, timeout_ms);
+    dropped = 0;
+    for (;;) {
+        st = wire_read_frame(clock_read_adapter, &clock, timeout_ms,
+                              &resp_hdr, caps_payload, sizeof(caps_payload), &caps_len);
+        if ((st != WP_OK && st != WP_RANGE) || resp_hdr.type == WIRE_MSG_CAPS) break;
+        if (++dropped > OFFLOAD_MAX_DROPPED) { st = WP_ERR; break; }
+    }
+    if (st != WP_OK) return st;
+    if (caps_len != CAPS_PAYLOAD_SIZE) return WP_ERR;
+    caps_decode(caps_payload, &g_caps);
+    return WP_OK;
+}
+
+/* OFFLOAD_SET_SPEED (docs/formats/offload-protocol.md): a link opened at
+   a safe speed, moved to the fastest both ends can do. This side offers
+   every rate its line can be switched to that is faster than now,
+   fastest first; the gateway answers with the one it picked -- still at
+   the old speed -- and both switch. A HELLO at the new speed must bring
+   the CAPS back within OFFLOAD_SPEED_CONFIRM_MS. If it does not (a cable
+   that will not carry it, a machine that cannot keep up), this side goes
+   back, waits out the gateway's own wait (it gives up at
+   SPEED_CONFIRM_S, longer than this side's, and goes back too), and
+   shakes hands at the old speed again. Every failure here leaves the
+   link as it was: the speed is an improvement, never a requirement. */
+#define OFFLOAD_SPEED_MAX_RATES   8u
+#define OFFLOAD_SPEED_CONFIRM_MS  1500u
+#define OFFLOAD_SPEED_SETTLE_MS   100u     /* the gateway drains, then switches */
+#define OFFLOAD_SPEED_GATEWAY_MS  3000u    /* wire_protocol.py's SPEED_CONFIRM_S */
+
+static void negotiate_speed(void)
+{
+    u32 rates[OFFLOAD_SPEED_MAX_RATES], now = 0, count, i, n = 0;
+    u8 payload[OFFLOAD_SPEED_MAX_RATES * 4u];
+    offload_request req;
+    offload_response resp;
+    u32 pick, t0;
+
+    if ((g_caps.ops_supported & (1uL << (u32)OFFLOAD_SET_SPEED)) == 0) return;
+    count = plat_transport_speeds(g_transport, rates, OFFLOAD_SPEED_MAX_RATES, &now);
+    for (i = 0; i < count; i++) {
+        if (rates[i] <= now) continue;
+        payload[n * 4u]      = (u8)(rates[i] >> 24);
+        payload[n * 4u + 1u] = (u8)(rates[i] >> 16);
+        payload[n * 4u + 2u] = (u8)(rates[i] >> 8);
+        payload[n * 4u + 3u] = (u8)rates[i];
+        n++;
+    }
+    if (n == 0) return;
+
+    req.op = OFFLOAD_SET_SPEED;
+    req.payload = payload;
+    req.payload_len = n * 4u;
+    req.timeout_ms = OFFLOAD_HANDSHAKE_TIMEOUT_MS;
+    if (offload_submit(&req, &resp) != WP_OK) return;
+    pick = 0;
+    if (resp.status == OFFLOAD_OK && resp.result_len >= 4) {
+        pick = ((u32)resp.result[0] << 24) | ((u32)resp.result[1] << 16) |
+               ((u32)resp.result[2] << 8) | (u32)resp.result[3];
+    }
+    offload_response_free(&resp);
+    if (pick <= now) return;
+
+    t0 = plat_ticks_ms();
+    if (plat_transport_set_speed(g_transport, pick) != WP_OK) {
+        /* The gateway has switched and this side cannot follow: let it
+           give up and go back, then say HELLO where it will be. */
+        while (!PLAT_TICKS_PASSED(t0, OFFLOAD_SPEED_GATEWAY_MS + 200u)) plat_sleep_ms(50);
+        (void)handshake(OFFLOAD_HANDSHAKE_TIMEOUT_MS);
+        return;
+    }
+    plat_sleep_ms(OFFLOAD_SPEED_SETTLE_MS);
+    if (handshake(OFFLOAD_SPEED_CONFIRM_MS) == WP_OK) return;   /* the new speed holds */
+
+    (void)plat_transport_set_speed(g_transport, now);
+    while (!PLAT_TICKS_PASSED(t0, OFFLOAD_SPEED_GATEWAY_MS + 200u)) plat_sleep_ms(50);
+    if (handshake(OFFLOAD_HANDSHAKE_TIMEOUT_MS) != WP_OK) g_available = WP_FALSE;
+}
+
+wp_status offload_init(const char *endpoint)
+{
+    wp_status st;
+
+    g_available = WP_FALSE;
+
+    st = plat_transport_open(endpoint, OFFLOAD_CONNECT_TIMEOUT_MS, &g_transport);
+    if (st != WP_OK) { g_transport = NULL; return st; }
+
+    st = handshake(OFFLOAD_HANDSHAKE_TIMEOUT_MS);
     if (st != WP_OK) {
         plat_transport_close(g_transport);
         g_transport = NULL;
         return st;
     }
-
-    /* A reply still in flight from before -- the program was run again
-       while the gateway answered its last request -- may come ahead of
-       the CAPS: skipped, inside the one handshake deadline. */
-    clock_start(&clock, g_transport, OFFLOAD_HANDSHAKE_TIMEOUT_MS);
-    dropped = 0;
-    for (;;) {
-        st = wire_read_frame(clock_read_adapter, &clock, OFFLOAD_HANDSHAKE_TIMEOUT_MS,
-                              &resp_hdr, caps_payload, sizeof(caps_payload), &caps_len);
-        if ((st != WP_OK && st != WP_RANGE) || resp_hdr.type == WIRE_MSG_CAPS) break;
-        if (++dropped > OFFLOAD_MAX_DROPPED) { st = WP_ERR; break; }
-    }
-    if (st != WP_OK || caps_len != CAPS_PAYLOAD_SIZE) {
-        plat_transport_close(g_transport);
-        g_transport = NULL;
-        return (st == WP_OK) ? WP_ERR : st;
-    }
-
-    caps_decode(caps_payload, &g_caps);
     g_next_seq = 1;
     g_available = WP_TRUE;
+
+    negotiate_speed();
+    if (!g_available) {
+        plat_transport_close(g_transport);
+        g_transport = NULL;
+        return WP_ERR;
+    }
     return WP_OK;
+}
+
+/* The link's speed now, in baud; 0 when it has none (a socket) or there
+   is no link. */
+u32 offload_link_speed(void)
+{
+    u32 rates[1], now = 0;
+
+    if (!g_available) return 0;
+    (void)plat_transport_speeds(g_transport, rates, 1u, &now);
+    return now;
 }
 
 void offload_shutdown(void)

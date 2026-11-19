@@ -96,6 +96,13 @@ wp_status gateway_start_bin(const char *binary, const char *const *extra_args, g
             return WP_ERR;
         }
 
+        /* A gateway serving a serial line says "serial", not a port:
+           the caller knows the line, and sets handle->endpoint itself. */
+        if (strcmp(line, "serial") == 0) {
+            handle->port = 0;
+            handle->endpoint[0] = '\0';
+            return WP_OK;
+        }
         handle->port = atoi(line);
         if (handle->port <= 0) {
             gateway_kill(handle);

@@ -783,6 +783,9 @@ void test_offload_timeout_on_delayed_gateway(void);
 void test_offload_gateway_dies_before_responding(void);
 void test_offload_short_frame_times_out(void);
 void test_ticks_deadline_holds_across_the_wrap(void);
+void test_link_speed_moves_up(void);
+void test_link_speed_falls_back(void);
+void test_link_speed_gateway_caps_it(void);
 void test_oom_walk_every_edit_undo_and_redo(void);
 void test_ticks_offload_deadline_across_the_wrap(void);
 void test_ticks_write_to_a_dead_peer_is_an_error(void);
@@ -1559,6 +1562,9 @@ static const test_case g_cases[] = {
     { "offload_gateway_dies_before_responding", test_offload_gateway_dies_before_responding },
     { "offload_short_frame_times_out", test_offload_short_frame_times_out },
     { "ticks_deadline_holds_across_the_wrap", test_ticks_deadline_holds_across_the_wrap },
+    { "link_speed_moves_up", test_link_speed_moves_up },
+    { "link_speed_falls_back", test_link_speed_falls_back },
+    { "link_speed_gateway_caps_it", test_link_speed_gateway_caps_it },
     { "oom_walk_every_edit_undo_and_redo", test_oom_walk_every_edit_undo_and_redo },
     { "ticks_offload_deadline_across_the_wrap", test_ticks_offload_deadline_across_the_wrap },
     { "ticks_write_to_a_dead_peer_is_an_error", test_ticks_write_to_a_dead_peer_is_an_error },

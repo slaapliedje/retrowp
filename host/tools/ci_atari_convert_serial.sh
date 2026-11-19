@@ -10,10 +10,11 @@
 set -e
 
 cd "$(dirname "$0")/../.."
+. host/tools/display_lib.sh
 
 TOS_IMAGE=/usr/share/hatari/etos512k.img
 SCRATCH="$(mktemp -d)"
-XVFB_DISPLAY=":96"
+XVFB_DISPLAY="$(wp_free_display 96)"   # display_lib.sh: never someone else's
 GW_PID=""
 XVFB_PID=""
 

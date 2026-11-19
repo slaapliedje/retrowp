@@ -37,10 +37,15 @@ typedef enum {
     OFFLOAD_PRINT_OPTIONS,   /* nothing -> the gateway printer's options,
                                  one tab-separated line each: key, label,
                                  default, name=label choices. Same section */
-    OFFLOAD_DRAWING          /* SVG bytes -> a placeable Windows metafile
+    OFFLOAD_DRAWING,         /* SVG bytes -> a placeable Windows metafile
                                  that engine/src/drawfile.c reads as a
                                  drawing (T16.4). docs/formats/offload-
                                  protocol.md's OFFLOAD_DRAWING section */
+    OFFLOAD_SET_SPEED        /* the rates this side's line can do, fastest
+                                 first, u32 BE each -> the one the gateway
+                                 picked, and both switch (offload_init does
+                                 it; nothing else asks). docs/formats/
+                                 offload-protocol.md's OFFLOAD_SET_SPEED */
 } offload_op;
 
 /* The format_id byte that leads an OFFLOAD_CONVERT_IMPORT/EXPORT payload
@@ -106,6 +111,11 @@ wp_status offload_submit(const offload_request *req, offload_response *resp);
    CAPS protocol_version says it reassembles parts) -- what a caller
    checks before building a payload past ~64 KB. */
 wp_bool offload_takes_large_requests(void);
+
+/* The link's speed now in baud (after offload_init's OFFLOAD_SET_SPEED
+   has moved it up, where both ends could); 0 for a link with no speed
+   (a socket) or no link. */
+u32 offload_link_speed(void);
 void      offload_response_free(offload_response *resp);
 
 /* The response's bytes, as they arrive -- one call per frame. A non-OK

@@ -581,6 +581,47 @@ The client sends it from Insert Image when the file chosen is an SVG
 (platform/common/actions.c, `wp_action_insert_picture_file`); a GEM or
 Windows metafile is read on the machine without the gateway.
 
+### `OFFLOAD_SET_SPEED` (op 11)
+
+A serial link opened at a safe speed (the endpoint's, usually 9600),
+moved up to the fastest both ends can do. `offload_init` does it after
+the handshake; nothing else sends it.
+
+- **Who offers it.** A gateway sets op bit 11 in its CAPS only when it
+  is serving a real tty, one fd both ways (`wire_protocol.py`'s
+  `serve`); over TCP or FIFOs it never appears. A client asks only when
+  the bit is set and its transport lists faster rates
+  (`plat_transport_speeds`). Old gateways never set the bit and old
+  clients never ask, so neither breaks the other; CAPS itself is
+  unchanged.
+- **Request:** the rates the client's line can be switched to that are
+  faster than now, fastest first, a u32 BE each (at most 8).
+- **Response**, at the OLD speed: `OFFLOAD_OK` and a u32 BE, the rate the
+  gateway picked -- the first offered that it can do and that is no
+  faster than its `--serial-max-baud` (default 115200) -- or
+  `OFFLOAD_UNSUPPORTED` with nothing, and the link stays as it is.
+- **The switch.** The gateway drains its output and switches. The client
+  switches (`plat_transport_set_speed`, which lets what it wrote go out
+  first), waits 100 ms, and sends HELLO at the new speed. CAPS back
+  within 1.5 s and the new speed holds. Otherwise the client goes back
+  to the old speed, waits until 3.2 s after its switch, and shakes hands
+  there again; the gateway waits 3 s for that HELLO at the new speed and
+  then goes back too. A line that will not carry the new speed, or a
+  machine that cannot keep up, costs a few seconds once and leaves the
+  link where it was.
+- **What each machine offers** (retroplat, each backend's
+  `plat_transport_speeds`):
+  - Plain ST/STE: 19200 (the MFP's Timer D ceiling).
+  - Falcon (TOS 5's RSVF cookie, or HSMODEM): 38400 and 57600, plus
+    115200 and 230400 with RTS/CTS (`:hard`).
+  - DOS: 115200 with a 16550's FIFO, 19200 without (the UART is polled).
+  - Amiga: 38400 on a 68000, 115200 on a 68020 or better.
+  - Mac: 57600 (the Serial Driver's table; a 2 KB SerSetBuf input
+    buffer).
+  - The host's `serial:` endpoint (a USB adapter, a pty): 115200.
+  These ceilings are cautious. Each says so in its backend, and should be
+  measured on the real machine before it is raised.
+
 ### Any other op
 
 The mock gateway responds `RESPONSE` with `status = OFFLOAD_UNSUPPORTED`

@@ -2969,6 +2969,30 @@ Every fix comes with a test shown to fail without it.
         passing fixed. Dialog Cancel (the caller's, the backend's, none
         for a choice of one) is host-only: WINDOW_HOST_CANCEL drives it.
 
+- [~] T20.10 The fastest link both ends can do.
+      AC: a serial link opened at its endpoint's speed moves up after
+      the handshake to the fastest rate both ends can do, and falls back
+      by itself when the new rate does not hold; old gateways and old
+      clients are unaffected; each backend offers only what its machine
+      keeps up with.
+      Done so far (2026-11-18): OFFLOAD_SET_SPEED (op 11, docs/formats/
+      offload-protocol.md); platform.h's plat_transport_speeds/set_speed
+      in every backend (ST MFP 19200; Falcon via TOS 5's RSVF cookie up
+      to 230400 with RTS/CTS; DOS 115200 with a 16550's FIFO, else 19200;
+      Amiga 38400 on a 68000, 115200 on 68020+; Mac 57600 with a 2 KB
+      SerSetBuf; gem4xe none); the host backend's new serial: endpoint;
+      the gateway's side in wire_protocol.py (--serial-max-baud).
+      Tests: over a socat pty pair the link moves 9600 -> 115200, falls
+      back to 9600 when the gateway (test hook) does not confirm, and
+      stops at the gateway's 38400 cap; each then carries an ODT
+      conversion. On target: the ST conversion smoke under Hatari on a
+      pty pair moved to 19200 by its own Rsconf path and passed every
+      conversion there.
+      Still to do: a real cable and a real Falcon on TOS 5 (115200);
+      the DOS, Amiga and Mac ceilings measured on hardware; MiNT's
+      device-node path (TIOCOBAUD) offers nothing yet; the Pi gateway
+      needs the new wire_protocol.py.
+
 ## M21 — Never Lose a Document
 Goal: the writer always knows whether the work is saved, a crash costs
 minutes at most, and a copy can live off the machine -- on the Pi, and
