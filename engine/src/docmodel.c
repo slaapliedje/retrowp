@@ -400,6 +400,7 @@ wp_status wp_document_init(wp_document *doc)
     doc->title = 0;
     doc->author = 0;
     doc->modified = 0;
+    doc->edits = 0;
 
     st = wp_strpool_init(&doc->strings);
     if (st != WP_OK) return st;
@@ -438,7 +439,10 @@ void wp_document_mark_saved(wp_document *doc)
 
 void wp_document_mark_modified(wp_document *doc)
 {
-    if (doc != NULL) doc->modified = 1;
+    if (doc != NULL) {
+        doc->modified = 1;
+        doc->edits++;
+    }
 }
 
 void wp_section_paragraphs_drop(wp_section *section, u32 first, u32 count)

@@ -266,6 +266,16 @@ void wp_action_request_quit_after_save(struct wp_app_ctx *ctx);
 wp_status wp_action_write_file(struct wp_app_ctx *ctx, const char *native_path,
                                 const u8 *buf, u32 len, wp_bool marks_saved);
 
+/* The two halves of that, for a file that is not the document (the
+   recovery file). Neither tells the writer anything.
+   wp_action_safe_write: the new copy written whole beside `path` and
+   renamed over it (M21 T21.2) -- WP_OK; WP_ERR with the old copy
+   untouched; or WP_UNSUPPORTED when this filesystem cannot rename, with
+   nothing changed. wp_action_write_whole: open, write, flush, close, in
+   place -- the fallback, which loses the old copy if it fails. */
+wp_status wp_action_safe_write(const char *path, const u8 *buf, u32 len);
+wp_status wp_action_write_whole(const char *path, const u8 *buf, u32 len);
+
 /* A one-line message with an OK button, through plat_dialog_choice --
    the one dialog primitive every backend implements. Keep it short:
    Amiga shows it as a requester title. */

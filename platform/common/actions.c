@@ -1496,7 +1496,7 @@ void wp_action_request_quit_after_save(wp_app_ctx *ctx)
 
 /* Writes buf to path whole: open, write, flush, close. The flush is
    where a full disk shows on a buffered backend; close cannot say. */
-static wp_status write_whole(const char *path, const u8 *buf, u32 len)
+wp_status wp_action_write_whole(const char *path, const u8 *buf, u32 len)
 {
     plat_file *f;
     wp_status st;
@@ -1603,7 +1603,7 @@ static wp_status copy_over(const char *tmp, const char *path)
 /* Answers WP_OK when the file is safe, WP_ERR with the old copy intact,
    or WP_UNSUPPORTED when this filesystem cannot rename -- then the
    caller writes in place. */
-static wp_status safe_write(const char *path, const u8 *buf, u32 len)
+wp_status wp_action_safe_write(const char *path, const u8 *buf, u32 len)
 {
     /* Static: two paths are a lot for a 4 KB Amiga stack. */
     static char tmp[WP_APP_PATH_MAX];
@@ -1612,7 +1612,7 @@ static wp_status safe_write(const char *path, const u8 *buf, u32 len)
 
     if (safe_names(path, tmp, old, (u32)sizeof(tmp)) != WP_OK) return WP_UNSUPPORTED;
     (void)plat_file_delete(tmp);           /* a stale one from a crash */
-    st = write_whole(tmp, buf, len);
+    st = wp_action_write_whole(tmp, buf, len);
     if (st != WP_OK) {
         (void)plat_file_delete(tmp);
         return WP_ERR;                      /* the document was not touched */
@@ -1632,9 +1632,9 @@ wp_status wp_action_write_file(wp_app_ctx *ctx, const char *native_path,
 {
     wp_status st;
 
-    st = safe_write(native_path, buf, len);
+    st = wp_action_safe_write(native_path, buf, len);
     if (st == WP_UNSUPPORTED) {
-        st = write_whole(native_path, buf, len);
+        st = wp_action_write_whole(native_path, buf, len);
         if (st != WP_OK) {
             wp_action_tell(ctx, "Couldn't save that file");
             return st;

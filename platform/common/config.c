@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stddef.h>
 #include "config.h"
+#include "autosave.h"
 #include "format_prn.h"
 #include "platform.h"
 
@@ -50,6 +51,7 @@ static void view_defaults(wp_config *out)
     out->paper_metrics = 1;
     out->return_addr[0] = '\0';
     out->ui_scale = 0;
+    out->autosave_minutes = WP_AUTOSAVE_DEFAULT_MINUTES;
 }
 
 static void parse_line(const u8 *bytes, u32 len, wp_config *out)
@@ -108,6 +110,17 @@ static void parse_line(const u8 *bytes, u32 len, wp_config *out)
         const u8 *v = bytes + val_start;
         if (ascii_ieq(v, val_len, "auto")) out->ui_scale = 0;
         else if (val_len == 1 && v[0] >= '1' && v[0] <= '3') out->ui_scale = (u8)(v[0] - '0');
+        return;
+    }
+    if (ascii_ieq(bytes + key_start, key_len, "autosave")) {
+        const u8 *v = bytes + val_start;
+        u32 n;
+        if (ascii_ieq(v, val_len, "off") || ascii_ieq(v, val_len, "0")) {
+            out->autosave_minutes = 0;
+        } else if (val_len > 0 && v[0] >= '1' && v[0] <= '9') {
+            n = parse_num(v, val_len);
+            out->autosave_minutes = (u16)(n > WP_AUTOSAVE_MAX_MINUTES ? WP_AUTOSAVE_MAX_MINUTES : n);
+        }
         return;
     }
     if (ascii_ieq(bytes + key_start, key_len, "return")) {

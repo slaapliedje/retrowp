@@ -5,6 +5,7 @@
 #include "actions.h"
 #include "docmodel.h"
 #include "format_rtf.h"
+#include "autosave.h"
 
 /* The header's three lines after the magic; the body follows the empty
    line. Read back by parse_header, which is all that knows the layout. */
@@ -22,44 +23,51 @@ static wp_bool file_there(const char *path)
     return (wp_bool)(plat_file_exists(path, &there) == WP_OK && there);
 }
 
-static wp_status write_all(plat_file *f, const char *s, u32 len)
-{
-    return plat_file_write(f, (const u8 *)s, len);
-}
-
 wp_status wp_recovery_write(wp_app_ctx *ctx, wp_image_source *img_src)
 {
-    u32 needed = 0;
+    const char *rtf_line;
+    u32 needed = 0, head, magic, plen, rlen;
     u8 *buf;
-    plat_file *f;
     wp_status st;
 
     if (!have_slot(ctx) || !ctx->doc_loaded || ctx->doc == NULL) return WP_ERR;
 
-    /* The exporter's two-call sizing, then the bytes. No wp_action_tell
-       anywhere on this path: it runs while the AES waits on us. */
+    /* The exporter's two-call sizing, then the header and the body in
+       one buffer, so the file can be written whole and renamed into
+       place: a copy that fails halfway (a full disk, a power cut during
+       an autosave) leaves the last good one, never half of a new one.
+       No wp_action_tell anywhere on this path: it runs while the AES
+       waits on us. */
     if (img_src != NULL) format_rtf_export_images(ctx->doc, NULL, 0, &needed, img_src);
     else                 format_rtf_export(ctx->doc, NULL, 0, &needed);
-    buf = (u8 *)mem_alloc(needed > 0 ? needed : 1);
+    rtf_line = ctx->doc_rtf ? "\n" K_RTF "1\n\n" : "\n" K_RTF "0\n\n";
+    magic = (u32)strlen(WP_RECOVERY_MAGIC);
+    plen = (u32)strlen(K_PATH) + (u32)strlen(ctx->doc_path);
+    rlen = (u32)strlen(rtf_line);
+    head = magic + plen + rlen;
+    buf = (u8 *)mem_alloc(head + needed + 1);
     if (buf == NULL) return WP_NOMEM;
-    st = (img_src != NULL) ? format_rtf_export_images(ctx->doc, buf, needed, &needed, img_src)
-                           : format_rtf_export(ctx->doc, buf, needed, &needed);
-    if (st == WP_OK) st = plat_file_open(ctx->recovery_path, PLAT_FILE_WRITE, &f);
+    memcpy(buf, WP_RECOVERY_MAGIC, magic);
+    memcpy(buf + magic, K_PATH, strlen(K_PATH));
+    memcpy(buf + magic + strlen(K_PATH), ctx->doc_path, strlen(ctx->doc_path));
+    memcpy(buf + magic + plen, rtf_line, rlen);
+    st = (img_src != NULL) ? format_rtf_export_images(ctx->doc, buf + head, needed, &needed, img_src)
+                           : format_rtf_export(ctx->doc, buf + head, needed, &needed);
     if (st == WP_OK) {
-        st = write_all(f, WP_RECOVERY_MAGIC, (u32)strlen(WP_RECOVERY_MAGIC));
-        if (st == WP_OK) st = write_all(f, K_PATH, (u32)strlen(K_PATH));
-        if (st == WP_OK) st = write_all(f, ctx->doc_path, (u32)strlen(ctx->doc_path));
-        if (st == WP_OK) st = write_all(f, ctx->doc_rtf ? "\n" K_RTF "1\n\n" : "\n" K_RTF "0\n\n",
-                                        (u32)strlen("\n" K_RTF "1\n\n"));
-        if (st == WP_OK) st = plat_file_write(f, buf, needed);
-        if (st == WP_OK) st = plat_file_flush(f);   /* a full disk shows here */
-        plat_file_close(f);
-        /* A half-written copy would be offered next time as if it were
-           the work: better none, and the caller refuses to leave. */
-        if (st != WP_OK) (void)plat_file_delete(ctx->recovery_path);
+        st = wp_action_safe_write(ctx->recovery_path, buf, head + needed);
+        if (st == WP_UNSUPPORTED) {
+            st = wp_action_write_whole(ctx->recovery_path, buf, head + needed);
+            /* In place, a failure has already cost the old copy, and a
+               half-written one would be offered next time as if it were
+               the work: better none, and the caller refuses to leave. */
+            if (st != WP_OK) (void)plat_file_delete(ctx->recovery_path);
+        }
     }
     mem_free(buf);
-    if (st == WP_OK) ctx->recovery_owned = WP_TRUE;
+    if (st == WP_OK) {
+        ctx->recovery_owned = WP_TRUE;
+        wp_autosave_caught_up(ctx);
+    }
     return st;
 }
 
@@ -170,6 +178,7 @@ wp_status wp_recovery_restore(wp_app_ctx *ctx, wp_image_sink *sink)
        them as the unsaved work they are. */
     wp_document_mark_modified(ctx->doc);
     ctx->recovery_owned = WP_TRUE;
+    wp_autosave_caught_up(ctx);     /* the copy holds exactly this */
     return WP_OK;
 }
 

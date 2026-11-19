@@ -3035,12 +3035,33 @@ through it in cloud or network storage.
       that cannot rename falls back to writing in place, as before. Shown
       on TOS 1.04 from a floppy: a second Save over NOTE.TXT, both edits
       in it, no helper file left.
-- [ ] T21.3 Autosave to the recovery file.
+- [x] T21.3 Autosave to the recovery file.
       AC: when there are unsaved changes and typing has paused, every N
       minutes (setting; default 5; off) the recovery file is written,
       never the document itself; the start-up offer brings it back after
       a crash or power cut as after AP_TERM. Every machine gets a
       recovery path, not only the ST.
+      Done (2026-11-19): platform/common/autosave.c. wp_autosave_poll
+      writes the recovery file once the first change it lacks is
+      `autosave=N` minutes old (config file; 5; off; up to 240) and
+      typing has paused 2 s, and answers how long until it next wants a
+      look -- the ST's evnt_multi takes that as an MU_TIMER (only while a
+      copy is owed), the Amiga as a timer.device alarm in its Wait, DOS
+      and the Mac look on their idle passes. The document gained an edit
+      counter (wp_document.edits), since "modified" cannot say whether
+      anything changed since the last copy. The recovery file is now
+      written whole beside itself and renamed into place (T21.2's
+      helpers): before, a failed write deleted it, and an autosave that
+      failed would have cost the last good copy. A failure keeps that
+      copy, says "Autosave failed (disk full?)" once, and retries an
+      interval later. The Amiga (PROGDIR:RetroWP.rec), DOS
+      (C:\RETROWP.REC) and the Mac (RetroWP.rec) gained a recovery file
+      and the start-up offer; the Mac's Shut Down that may not ask now
+      keeps pictures in its copy. Shown on TOS 1.04 from a floppy with
+      autosave=1: typed, idle a minute, the emulator killed -- the next
+      start offered "Unsaved changes to an untitled document", Recover
+      brought the typing back as *Untitled. Amiga, DOS and Mac gates
+      green; autosave not yet driven on those three.
 - [ ] T21.4 Settings.
       AC: one Settings dialog on every port, from a shared model in
       platform/common: where documents are saved by default, where fonts

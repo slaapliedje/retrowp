@@ -137,6 +137,17 @@ typedef struct wp_app_ctx {
        -- and goes when the document is saved or its changes discarded. */
     const char *recovery_path;
     wp_bool     recovery_owned;
+    /* Autosave (autosave.h): `minutes` is the shell's to set from the
+       config file (0 = off); the rest is wp_autosave_poll's own. */
+    struct {
+        u16     minutes;
+        wp_bool armed;       /* there are changes the recovery file lacks */
+        wp_bool told;        /* a failed write has been reported */
+        u32     written;     /* doc->edits as the recovery file holds it */
+        u32     seen;        /* doc->edits at the last look */
+        u32     due_from;    /* ticks: the first change the copy lacks */
+        u32     changed_at;  /* ticks: the latest change seen */
+    } autosave;
 
     wp_prompt prompt;   /* the status line's one-line text prompt (prompt.h) */
 

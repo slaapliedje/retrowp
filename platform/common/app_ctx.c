@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <string.h>
 #include "app_ctx.h"
+#include "autosave.h"
 
 void wp_app_ctx_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
                       wp_document *doc, wp_undo_journal *journal)
@@ -34,6 +35,13 @@ void wp_app_ctx_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
     ctx->config_path = NULL;
     ctx->recovery_path = NULL;
     ctx->recovery_owned = WP_FALSE;
+    ctx->autosave.minutes = WP_AUTOSAVE_DEFAULT_MINUTES;
+    ctx->autosave.armed = WP_FALSE;
+    ctx->autosave.told = WP_FALSE;
+    ctx->autosave.written = 0;
+    ctx->autosave.seen = 0;
+    ctx->autosave.due_from = 0;
+    ctx->autosave.changed_at = 0;
     ctx->print_pages = NULL;
     ctx->print_pages_name = NULL;
     memset(&ctx->prompt, 0, sizeof(ctx->prompt));

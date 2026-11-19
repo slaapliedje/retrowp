@@ -27,6 +27,7 @@
 #include "app_ctx.h"
 #include "actions.h"
 #include "recovery.h"
+#include "autosave.h"
 #include "cisummary.h"
 #include "imgcache.h"
 #include "pageview.h"
@@ -231,6 +232,9 @@ static i32 g_ui_scale = 1;
    "Unix:"; for a real double-clicked app on real media, it's wherever
    the app itself lives. */
 #define WP_MAC_CONFIG_PATH "RetroWP.cfg"
+/* The recovery file (recovery.h), beside the config: what autosave and
+   a Shut Down that may not ask write, and what the next start offers. */
+#define WP_MAC_RECOVERY_PATH "RetroWP.rec"
 
 /* Phase 3: the width (in twips) every paragraph's real
    wp_paragraph_layout was last built against -- lets relayout_document
@@ -2069,7 +2073,10 @@ static pascal OSErr ae_quit(const AppleEvent *e, AppleEvent *reply, long refcon)
 {
     (void)e; (void)reply; (void)refcon;
     if (AEInteractWithUser(kAEDefaultTimeout, NULL, NULL) != noErr) {
-        if (!wp_action_term_request(&g_ctx, NULL)) return userCanceledErr;
+        wp_image_source src;
+
+        wp_image_cache_source(&src, &g_mac_doc);
+        if (!wp_action_term_request(&g_ctx, &src)) return userCanceledErr;
         g_quit = WP_TRUE;
         return noErr;
     }
@@ -2257,6 +2264,8 @@ void app_shell_run(void)
     g_ctx.canvas.y_tw = mac_px_to_twips;
     g_ctx.page_view_able = WP_TRUE;
     g_ctx.config_path = WP_MAC_CONFIG_PATH;
+    g_ctx.recovery_path = WP_MAC_RECOVERY_PATH;
+    g_ctx.autosave.minutes = cfg.autosave_minutes;   /* autosave.h */
     wp_config_view_apply(&cfg, &g_ctx);
     wp_pageview_metrics(cfg.paper_metrics != 0 ? WP_METRICS_PAPER : WP_METRICS_SCREEN);   /* pageview.h */
     g_ui_scale = wp_rulerbar_ui_scale((i32)(qd.screenBits.bounds.right - qd.screenBits.bounds.left), cfg.ui_scale);
@@ -2294,6 +2303,22 @@ void app_shell_run(void)
         g_vbar = NewControl(g_win, &br, (ConstStringPtr) "\p", true, 0, 0, 0, scrollBarProc, 0);
         g_hbar = NewControl(g_win, &br, (ConstStringPtr) "\p", true, 0, 0, 0, scrollBarProc, 0);
         mac_place_bars(g_win);
+    }
+
+    /* The last run ended with work unsaved -- a crash, a bomb, the
+       power, or a Shut Down that could not ask (recovery.h): offer it
+       before anything else is opened. */
+    {
+        wp_image_sink sink;
+        char saved[WP_APP_PATH_MAX];
+        wp_recovery_answer ans;
+
+        wp_image_cache_sink(&sink, mac_format_image_cache_path, &g_mac_image_cache_counter);
+        ans = wp_recovery_offer(&g_ctx, &sink, saved, (u32)sizeof(saved));
+        if (ans == WP_RECOVERY_USE_SAVED && saved[0] != '\0') {
+            (void)wp_action_load_file(&g_ctx, saved, &sink);
+        }
+        if (ans != WP_RECOVERY_NONE) InvalRect(&g_win->portRect);
     }
 
     /* Written after the menu bar is drawn and the window is open, so
@@ -2410,6 +2435,16 @@ void app_shell_run(void)
            title's '*' is checked after every event (T21.1); SetWTitle is
            only called when it changed. */
         mac_show_document_name();
+        /* Autosave (autosave.h): WaitNextEvent comes back with a null
+           event every 15 ticks, so looking here is often enough. */
+        {
+            wp_image_source src;
+            wp_bool told = g_ctx.autosave.told;
+
+            wp_image_cache_source(&src, &g_mac_doc);
+            (void)wp_autosave_poll(&g_ctx, &src);
+            if (g_ctx.autosave.told && !told) InvalRect(&g_win->portRect);
+        }
 
         /* After dispatch, never before: a dispatch that crashes or
            wedges must not get to bump the count first. WaitNextEvent

@@ -17,6 +17,7 @@ Pick a topic:
 {Undo and Redo|UndoRedo}
 {Format Menu and Shortcuts|Format}
 {Printing|Print}
+{Saving and Recovery|Saving}
 {About RetroWP|About}
 @endnode
 
@@ -389,6 +390,28 @@ Collate, as the printer has them. Pick one to change it, then
 Print.
 
 {Back to Main|Main}
+@endnode
+
+@node Saving "Saving and Recovery"
+A "*" before the name in the title bar means there are changes
+you have not saved.
+
+Save writes the new copy whole beside the old one and only then
+puts it in the old one's place, so a full disk or a pulled floppy
+costs the new copy, never the last good one. If that happens
+RetroWP says "Not saved (disk full?); old copy kept".
+
+While there are unsaved changes, RetroWP copies them every five
+minutes to its recovery file, when you pause typing. It never
+saves over your document: that is still yours to do. If the
+machine crashes, is reset or loses power, the next start offers
+the changes back: Recover, or Use saved for the file as you last
+saved it. Put autosave=10 (or any number of minutes up to 240) in
+the configuration file to change how often, or autosave=off.
+
+The recovery file is RETROWP.REC beside the program on the ST,
+C:\RETROWP.REC on DOS, RetroWP.rec beside the program on the
+Amiga and the Mac.
 @endnode
 
 @node About "About RetroWP"

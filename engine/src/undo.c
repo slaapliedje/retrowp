@@ -78,7 +78,7 @@ static void clear_redo(wp_undo_journal *journal)
 static void commit_edit(wp_document *doc, wp_undo_journal *journal)
 {
     clear_redo(journal);
-    doc->modified = 1;
+    wp_document_mark_modified(doc);
 }
 
 wp_status wp_edit_insert_text(wp_document *doc, wp_undo_journal *journal, wp_pos pos,
@@ -1213,7 +1213,7 @@ wp_status wp_edit_undo(wp_document *doc, wp_undo_journal *journal)
        their work silently. Set only AFTER the nothing-to-do early
        return: a rejected undo changed nothing and must not dirty a
        clean document. */
-    doc->modified = 1;
+    wp_document_mark_modified(doc);
 
 
     /* All or nothing. Each op's own undo is all or nothing (the raw
@@ -1284,7 +1284,7 @@ wp_status wp_edit_redo(wp_document *doc, wp_undo_journal *journal)
        their work silently. Set only AFTER the nothing-to-do early
        return: a rejected undo changed nothing and must not dirty a
        clean document. */
-    doc->modified = 1;
+    wp_document_mark_modified(doc);
 
 
     /* All or nothing, as wp_edit_undo: an op that fails stops the

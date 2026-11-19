@@ -340,6 +340,12 @@ typedef struct {
        there ARE unsaved changes; warning once too often costs a
        keystroke, losing someone's work does not. */
     u8 modified;
+    /* Counts every change that sets `modified` (it never goes down, and a
+       save does not reset it), so a caller that remembers a value can
+       tell whether anything changed since -- autosave (autosave.h) asks
+       exactly that, which the flag alone cannot answer. Wraps after 2^32
+       edits, harmlessly: only equality is ever tested. */
+    u32 edits;
 } wp_document;
 
 /* -- M2 (editing) shells --------------------------------------------- */
@@ -439,7 +445,8 @@ wp_bool   wp_document_is_modified(const wp_document *doc);
 void      wp_document_mark_saved(wp_document *doc);
 /* For a change made outside the journal -- a paragraph's alignment set
    straight on its style handle -- so quitting afterwards still warns.
-   Journaled edits set the flag themselves and never need this. */
+   Journaled edits set the flag themselves and never need this. Counts
+   the change in `edits` as well. */
 void      wp_document_mark_modified(wp_document *doc);
 void      wp_document_free(wp_document *doc);
 

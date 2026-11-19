@@ -516,6 +516,14 @@ void test_recovery_save_removes_the_documents_copy(void);
 void test_recovery_save_keeps_a_copy_it_does_not_own(void);
 void test_recovery_drop_and_the_saved_name(void);
 void test_recovery_ignores_a_file_that_is_not_one(void);
+/* test_autosave.c */
+void test_autosave_nothing_unsaved_writes_nothing(void);
+void test_autosave_writes_the_copy_after_the_interval(void);
+void test_autosave_waits_for_typing_to_pause(void);
+void test_autosave_off_and_after_a_save(void);
+void test_autosave_failure_keeps_the_last_copy(void);
+void test_autosave_recovered_document_is_caught_up(void);
+void test_autosave_config_setting(void);
 void test_recovery_discard_keeps_the_copy_until_the_document_goes(void);
 void test_recovery_quit_discarding_drops_the_copy(void);
 void test_pagecanvas_fit_and_stack(void);
@@ -1314,6 +1322,13 @@ static const test_case g_cases[] = {
     { "recovery_save_keeps_a_copy_it_does_not_own", test_recovery_save_keeps_a_copy_it_does_not_own },
     { "recovery_drop_and_the_saved_name", test_recovery_drop_and_the_saved_name },
     { "recovery_ignores_a_file_that_is_not_one", test_recovery_ignores_a_file_that_is_not_one },
+    { "autosave_nothing_unsaved_writes_nothing", test_autosave_nothing_unsaved_writes_nothing },
+    { "autosave_writes_the_copy_after_the_interval", test_autosave_writes_the_copy_after_the_interval },
+    { "autosave_waits_for_typing_to_pause", test_autosave_waits_for_typing_to_pause },
+    { "autosave_off_and_after_a_save", test_autosave_off_and_after_a_save },
+    { "autosave_failure_keeps_the_last_copy", test_autosave_failure_keeps_the_last_copy },
+    { "autosave_recovered_document_is_caught_up", test_autosave_recovered_document_is_caught_up },
+    { "autosave_config_setting", test_autosave_config_setting },
     { "recovery_discard_keeps_the_copy_until_the_document_goes", test_recovery_discard_keeps_the_copy_until_the_document_goes },
     { "recovery_quit_discarding_drops_the_copy", test_recovery_quit_discarding_drops_the_copy },
     { "pagecanvas_fit_and_stack", test_pagecanvas_fit_and_stack },

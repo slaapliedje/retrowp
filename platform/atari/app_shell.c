@@ -51,6 +51,7 @@
 #include "menucheck.h"
 #include "statusline.h"
 #include "recovery.h"
+#include "autosave.h"
 #include "help_doc.h"
 #include "help_view.h"
 #include "help_retrowp.h"
@@ -5941,6 +5942,7 @@ void app_shell_run(void)
         g_ui_scale_setting = cfg.ui_scale;
         /* Both GEMs: gem4xe's shutdown asks with AP_TERM too. */
         g_ctx.recovery_path = g_recovery_path[0] != '\0' ? g_recovery_path : NULL;
+        g_ctx.autosave.minutes = cfg.autosave_minutes;   /* autosave.h */
 #ifndef GEM4XE_APP_GEM_H
         /* GEMDOS's printer, the Centronics port: an Epson-style printer
            takes the PC character set, which the ST's own largely is.
@@ -6083,14 +6085,24 @@ void app_shell_run(void)
     atari_show_document_name(); /* a recovered document starts unsaved */
     quit = WP_FALSE;
     while (!quit) {
+        wp_image_source img_src;
+        u32 wake;
+
+        /* Autosave (autosave.h) looks after every event, and asks for a
+           timer only while a copy is owed -- an idle RetroWP with
+           nothing unsaved wakes for nothing. */
+        img_src.read = atari_read_image_row;
+        img_src.user = NULL;
+        wake = wp_autosave_poll(&g_ctx, &img_src);
         /* MU_BUTTON with clicks 1, mask 1, state 1: the left button
            going down, once -- a click in the work area to place the
            caret (atari_click). */
-        events = WP_EVNT_MULTI(MU_MESAG | MU_KEYBD | MU_BUTTON, 1, 1, 1,
+        events = WP_EVNT_MULTI(MU_MESAG | MU_KEYBD | MU_BUTTON | (wake > 0 ? MU_TIMER : 0), 1, 1, 1,
                              0, 0, 0, 0, 0,
                              0, 0, 0, 0, 0,
-                             msg, 0L,
+                             msg, (unsigned long)wake,
                              &mx, &my, &mbtn, &mkstate, &mkey, &mcount);
+        if (events == MU_TIMER) continue;   /* only the timer: look again */
         if (events & MU_MESAG) {
             quit = wp_dispatch_message(window_handle, vdi_handle, msg);
         }

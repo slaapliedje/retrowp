@@ -43,6 +43,9 @@ typedef struct {
        drawn this much bigger (rulerbar.h, wp_rulerbar_ui_scale); 0 auto,
        from the screen's width. */
     u8  ui_scale;
+    /* "autosave=N|off" (5): minutes between copies of unsaved work to
+       the recovery file (autosave.h), 1..240; off is 0. */
+    u16 autosave_minutes;
 } wp_config;
 
 /* Line-based `key=value` text, `#`/`;` comment lines, blank lines

@@ -12,6 +12,7 @@
 #include <devices/inputevent.h>
 #include <devices/printer.h>
 #include <devices/parallel.h>
+#include <devices/timer.h>
 #include <clib/alib_protos.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -38,6 +39,8 @@
 #include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "recovery.h"
+#include "autosave.h"
 #include "cisummary.h"
 #include "imgcache.h"
 #include "pageview.h"
@@ -2324,6 +2327,73 @@ wp_status plat_dialog_choice(plat_window *parent,
    this fixture's own WB install doesn't fully have working (icon.library
    etc.). See docs/keymaps.md. */
 #define WP_AMIGA_CONFIG_PATH "PROGDIR:RetroWP.cfg"
+/* The recovery file (recovery.h), beside the config: what autosave
+   writes, and what the next start offers after a crash or a reset. */
+#define WP_AMIGA_RECOVERY_PATH "PROGDIR:RetroWP.rec"
+
+/* Autosave's alarm clock (autosave.h): one timer.device request, sent
+   only while a copy is owed, whose signal joins the main loop's Wait.
+   Without it an idle RetroWP would never look -- MUI wakes the loop for
+   input, not for time. All NULL if timer.device would not open: then
+   autosave still runs, at the next input. */
+static struct MsgPort     *g_as_port = NULL;
+static struct timerequest *g_as_req = NULL;
+static BOOL                g_as_busy = FALSE;
+
+static void amiga_alarm_open(void)
+{
+    g_as_port = CreateMsgPort();
+    if (g_as_port == NULL) return;
+    g_as_req = (struct timerequest *)CreateIORequest(g_as_port, sizeof(struct timerequest));
+    if (g_as_req != NULL &&
+        OpenDevice((CONST_STRPTR)TIMERNAME, UNIT_VBLANK, (struct IORequest *)g_as_req, 0) == 0) {
+        return;
+    }
+    if (g_as_req != NULL) DeleteIORequest((struct IORequest *)g_as_req);
+    g_as_req = NULL;
+    DeleteMsgPort(g_as_port);
+    g_as_port = NULL;
+}
+
+static ULONG amiga_alarm_signal(void)
+{
+    return g_as_req != NULL ? (1UL << g_as_port->mp_SigBit) : 0UL;
+}
+
+/* Rings in `ms`. One already set is left alone: autosave's deadline only
+   ever moves later, so the worst it does is ring early and be set again. */
+static void amiga_alarm_set(u32 ms)
+{
+    if (g_as_req == NULL || g_as_busy || ms == 0) return;
+    g_as_req->tr_node.io_Command = TR_ADDREQUEST;
+    g_as_req->tr_time.tv_secs = ms / 1000u;
+    g_as_req->tr_time.tv_micro = (ms % 1000u) * 1000u;
+    SendIO((struct IORequest *)g_as_req);
+    g_as_busy = TRUE;
+}
+
+static void amiga_alarm_reap(void)
+{
+    if (g_as_busy && CheckIO((struct IORequest *)g_as_req) != NULL) {
+        WaitIO((struct IORequest *)g_as_req);
+        g_as_busy = FALSE;
+    }
+}
+
+static void amiga_alarm_close(void)
+{
+    if (g_as_req == NULL) return;
+    if (g_as_busy) {
+        AbortIO((struct IORequest *)g_as_req);
+        WaitIO((struct IORequest *)g_as_req);
+        g_as_busy = FALSE;
+    }
+    CloseDevice((struct IORequest *)g_as_req);
+    DeleteIORequest((struct IORequest *)g_as_req);
+    DeleteMsgPort(g_as_port);
+    g_as_req = NULL;
+    g_as_port = NULL;
+}
 
 void app_shell_run(void)
 {
@@ -2350,6 +2420,8 @@ void app_shell_run(void)
     g_ctx.canvas.y_tw = amiga_px_to_twips_y;
     g_ctx.page_view_able = WP_TRUE;
     g_ctx.config_path = WP_AMIGA_CONFIG_PATH;
+    g_ctx.recovery_path = WP_AMIGA_RECOVERY_PATH;
+    g_ctx.autosave.minutes = cfg.autosave_minutes;   /* autosave.h */
     wp_config_view_apply(&cfg, &g_ctx);
     /* Measured as it will print (papermetrics.h): the Amiga's faces are
        sized in pixels, not points. */
@@ -2457,6 +2529,28 @@ void app_shell_run(void)
            attest. See amiga_ci_mode's own comment. */
         if (amiga_ci_mode()) amiga_ci_write_alive();
 
+        /* The last run ended with work unsaved -- a crash, a reset
+           (recovery.h): offer it now the window is up. Recovering wins
+           over a file named on the command line, which has already
+           loaded; Use saved reopens the file the changes were to. */
+        {
+            wp_image_sink sink;
+            char saved[WP_APP_PATH_MAX];
+            wp_recovery_answer ans;
+
+            wp_image_cache_sink(&sink, amiga_format_image_cache_path, &g_amiga_image_cache_counter);
+            ans = wp_recovery_offer(&g_ctx, &sink, saved, (u32)sizeof(saved));
+            if (ans == WP_RECOVERY_USE_SAVED && saved[0] != '\0' &&
+                (g_start_file == NULL || g_start_file[0] == '\0')) {
+                (void)wp_action_load_file(&g_ctx, saved, &sink);
+            }
+            if (ans != WP_RECOVERY_NONE) {
+                amiga_relayout_after_edit();
+                MUI_Redraw(g_editor, MADF_DRAWOBJECT);
+            }
+        }
+        amiga_alarm_open();
+
         for (;;) {
             id = (LONG)DoMethod(g_app, MUIM_Application_NewInput, &sigs);
             /* ReturnID_Quit comes from this program's own key path once
@@ -2513,8 +2607,20 @@ void app_shell_run(void)
                title's '*' is checked after every input (T21.1); MUI is
                only told when the title changed. */
             amiga_show_document_name();
+            /* Autosave looks after every input, and sets the alarm for
+               when it next wants to (autosave.h). */
+            {
+                wp_image_source src;
+                BOOL told = g_ctx.autosave.told;
+
+                amiga_alarm_reap();
+                wp_image_cache_source(&src, &g_amiga_doc);
+                amiga_alarm_set(wp_autosave_poll(&g_ctx, &src));
+                if (g_ctx.autosave.told && !told) MUI_Redraw(g_editor, MADF_DRAWOBJECT);
+            }
             if (sigs) {
-                sigs = Wait(sigs | SIGBREAKF_CTRL_C);
+                sigs = Wait(sigs | SIGBREAKF_CTRL_C | amiga_alarm_signal());
+                sigs &= ~amiga_alarm_signal();   /* ours, not MUI's */
                 if (sigs & SIGBREAKF_CTRL_C) {
                     /* Ctrl-C or BREAK from the Shell: a way out like the
                        close gadget, so it asks too. */
@@ -2528,6 +2634,7 @@ void app_shell_run(void)
         set(g_win, MUIA_Window_Open, FALSE);
     }
 
+    amiga_alarm_close();
     MUI_DisposeObject(g_app);
     MUI_DeleteCustomClass(g_editor_class);
     if (g_ctx.doc_loaded) {

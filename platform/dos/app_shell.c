@@ -18,6 +18,8 @@
 #include "offload.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "recovery.h"
+#include "autosave.h"
 #include "cisummary.h"
 #include "imgcache.h"
 #include "pageview.h"
@@ -437,6 +439,9 @@ static const char g_sample_text[] =
     "File > New (Ctrl+N) starts a fresh, empty document.\n";
 
 #define WP_DOS_CONFIG_PATH "C:\\RETROWP.CFG"
+/* The recovery file (recovery.h), beside the config: what autosave
+   writes, and what the next start offers after a crash or a power cut. */
+#define WP_DOS_RECOVERY_PATH "C:\\RETROWP.REC"
 
 /* Relayouts only what actually needs it: a paragraph whose layout was
    never built (layout == NULL), one the engine marked layout_dirty (any
@@ -1792,10 +1797,28 @@ void app_shell_run(void)
         g_ctx.printer_sides = cfg.printer_sides;
         g_ctx.printer_choosable = WP_TRUE;
         g_ctx.config_path = WP_DOS_CONFIG_PATH;
+        g_ctx.recovery_path = WP_DOS_RECOVERY_PATH;
+        g_ctx.autosave.minutes = cfg.autosave_minutes;   /* autosave.h */
         g_ctx.view.line_px = dos_line_rows;
     }
 
     load_sample_document(dos_col_to_twips(DOS_SCREEN_COLS));
+    /* The last run ended with work unsaved -- a crash, a reset, the
+       power (recovery.h): offer it before anything else is opened.
+       Recovering wins over a file named on the command line. */
+    {
+        char saved[WP_APP_PATH_MAX];
+        wp_recovery_answer ans;
+
+        redraw_screen();
+        ans = wp_recovery_offer(&g_ctx, NULL, saved, (u32)sizeof(saved));
+        if (ans == WP_RECOVERY_RECOVERED) {
+            g_start_file = NULL;
+        } else if (ans == WP_RECOVERY_USE_SAVED && saved[0] != '\0' &&
+                   (g_start_file == NULL || g_start_file[0] == '\0')) {
+            (void)wp_action_load_file(&g_ctx, saved, NULL);
+        }
+    }
     if (g_start_file != NULL && g_start_file[0] != '\0') {
         (void)wp_action_load_file(&g_ctx, g_start_file, NULL);
     }
@@ -1824,6 +1847,14 @@ void app_shell_run(void)
         } else if (dos_mouse_pressed(&col, &row)) {
             dos_click(col, row);
         } else {
+            /* Autosave (autosave.h) looks while nothing is happening;
+               a failure it reports is a dialog over the screen. */
+            wp_bool told = g_ctx.autosave.told;
+            wp_image_source src;
+
+            wp_image_cache_source(&src, &g_doc);
+            (void)wp_autosave_poll(&g_ctx, &src);
+            if (g_ctx.autosave.told && !told) redraw_screen();
             dos_idle();
             continue;
         }
