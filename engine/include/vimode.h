@@ -118,7 +118,9 @@ typedef enum {
     WP_VIACTION_OPEN,       /* ':e' [name] -- caller loads; bare ':e' means "ask me how"
                                 (the backend raises its own native picker), exactly as
                                 bare ':w' already means "save however you normally would" */
-    WP_VIACTION_BEEP        /* invalid ex-command, or an unrecognized Normal-mode key -- cosmetic */
+    WP_VIACTION_BEEP,       /* invalid ex-command, or an unrecognized Normal-mode key -- cosmetic */
+    WP_VIACTION_SETTINGS    /* ':set' -- the caller's settings (vim's own options command);
+                                appended so the values above keep their numbers */
 } wp_vimode_action_kind;
 
 typedef struct {

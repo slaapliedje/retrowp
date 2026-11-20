@@ -43,9 +43,11 @@ typedef struct {
        drawn this much bigger (rulerbar.h, wp_rulerbar_ui_scale); 0 auto,
        from the screen's width. */
     u8  ui_scale;
-    /* "autosave=N|off" (5): minutes between copies of unsaved work to
-       the recovery file (autosave.h), 1..240; off is 0. */
-    u16 autosave_minutes;
+    /* Settings (settings.h): "docdir=", "datadir=", "recovery=",
+       "offload=" (each "" by default, at most PLAT_FORM_TEXT_MAX
+       characters -- a longer one is ignored), "autosave=N|off" (5;
+       1..240), "backup=on|off" (off). */
+    wp_settings settings;
 } wp_config;
 
 /* Line-based `key=value` text, `#`/`;` comment lines, blank lines
@@ -88,6 +90,9 @@ wp_status wp_config_save_printer(const char *native_path, u8 driver, u8 sides);
 /* The View menu's settings: written (view=, zoom=, grid=, gridsize=, the
    same way as the printer's), read from the running app, and put into
    it at startup -- page view only where the shell can show it. */
+/* The Settings dialog's keys (settings.h), written the same way. */
+wp_status wp_config_save_settings(const char *native_path, const wp_settings *s);
+
 wp_status wp_config_save_view(const char *native_path, const wp_config *cfg);
 void      wp_config_view_get(wp_config *cfg, const struct wp_app_ctx *ctx);
 void      wp_config_view_apply(const wp_config *cfg, struct wp_app_ctx *ctx);

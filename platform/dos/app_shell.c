@@ -20,6 +20,7 @@
 #include "actions.h"
 #include "recovery.h"
 #include "autosave.h"
+#include "settings.h"
 #include "cisummary.h"
 #include "imgcache.h"
 #include "pageview.h"
@@ -1140,8 +1141,22 @@ static wp_bool prompt_for_filename(const char *prompt, char *out, u32 out_cap)
 /* The status-row prompt, in the shape the shared file flow wants. */
 static wp_bool dos_pick_path(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
 {
-    WP_UNUSED(ctx);
-    return prompt_for_filename(save ? "Save: " : "Open: ", out, cap);
+    char typed[WP_APP_PATH_MAX];
+    u32 i, dl;
+
+    if (!prompt_for_filename(save ? "Save: " : "Open: ", typed, (u32)sizeof(typed))) return WP_FALSE;
+    /* A bare name goes in Settings' documents folder, when one is set. */
+    dl = (u32)strlen(ctx->settings.docdir);
+    for (i = 0; typed[i] != '\0' && typed[i] != '\\' && typed[i] != ':'; i++) { }
+    if (typed[i] == '\0' && dl > 0 && dl + 1 + i + 1 <= cap) {
+        strcpy(out, ctx->settings.docdir);
+        if (out[dl - 1] != '\\' && out[dl - 1] != ':') strcat(out, "\\");
+        strcat(out, typed);
+        return WP_TRUE;
+    }
+    if (strlen(typed) + 1 > cap) return WP_FALSE;
+    strcpy(out, typed);
+    return WP_TRUE;
 }
 
 static const char *g_start_file = NULL;
@@ -1182,9 +1197,11 @@ static wp_bool g_dos_offload_init_attempted = WP_FALSE;
 
 static wp_bool ensure_offload(void)
 {
-    if (!g_dos_offload_init_attempted) {
+    /* offload_retry: Settings changed the link, so connect again. */
+    if (!g_dos_offload_init_attempted || g_ctx.offload_retry) {
         g_dos_offload_init_attempted = WP_TRUE;
-        offload_init(WP_DOS_OFFLOAD_ENDPOINT); /* result read back via offload_available() */
+        g_ctx.offload_retry = WP_FALSE;
+        offload_init(wp_settings_offload(&g_ctx)); /* result read back via offload_available() */
     }
     return offload_available();
 }
@@ -1427,7 +1444,12 @@ static void invoke_backend_action(wp_action_id id)
     case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
     /* The four checks are the portable ones (tools.h); this shell adds
        the link, the dictionary's path and the message prompt. */
-    case WP_ACT_TOOLS_SPELLCHECK:   (void)wp_tools_spell_check(&g_ctx, WP_DOS_SPELL_DICT_PATH, dos_tools_show); break;
+    case WP_ACT_TOOLS_SPELLCHECK: {
+        char dict[WP_APP_PATH_MAX];   /* Settings' dictionary folder, or C:\ */
+        if (!wp_settings_data_file(&g_ctx, "WPSPELL.DIC", dict, (u32)sizeof(dict))) strcpy(dict, WP_DOS_SPELL_DICT_PATH);
+        (void)wp_tools_spell_check(&g_ctx, dict, dos_tools_show);
+        break;
+    }
     case WP_ACT_TOOLS_THESAURUS:    (void)ensure_offload(); (void)wp_tools_thesaurus(&g_ctx, dos_tools_show); break;
     case WP_ACT_TOOLS_GRAMMARCHECK: (void)ensure_offload(); (void)wp_tools_grammar_check(&g_ctx, dos_tools_show); break;
     case WP_ACT_TOOLS_CHAT:         (void)ensure_offload(); (void)wp_tools_chat(&g_ctx, dos_tools_show); break;
@@ -1608,11 +1630,13 @@ static wp_bool dos_dispatch_key(void)
        w, <, >, {, }, %), should Alt ever be wired to meta. */
     if (!g_help_active && ascii == 0 && (shift & 0x08) &&
         (scan == 0x13 || scan == 0x14 || scan == 0x25 || scan == 0x32 || scan == 0x17 ||
-         scan == 0x1F || scan == 0x15 || scan == 0x31 || scan == 0x26 || scan == 0x12)) {
+         scan == 0x1F || scan == 0x15 || scan == 0x31 || scan == 0x26 || scan == 0x12 ||
+         scan == 0x18)) {
         /* Alt+T, Table..., likewise; Alt+K, Insert Clipart; Alt+M, Mail
            Merge; Alt+I, Insert Field; Alt+S, Style; Alt+Y, Define Style;
-           Alt+N, Insert Footnote; Alt+L, Columns; Alt+E, Envelope -- DOS has no menu bar, and none of these is an Emacs meta key
-           either. */
+           Alt+N, Insert Footnote; Alt+L, Columns; Alt+E, Envelope;
+           Alt+O, Settings (Options) -- DOS has no menu bar, and none of
+           these is an Emacs meta key either. */
         const wp_action *act = wp_action_find(scan == 0x13 ? WP_ACT_FORMAT_BORDERS :
                                               scan == 0x14 ? WP_ACT_FORMAT_TABLE :
                                               scan == 0x32 ? WP_ACT_FILE_MERGE :
@@ -1621,7 +1645,8 @@ static wp_bool dos_dispatch_key(void)
                                               scan == 0x15 ? WP_ACT_FORMAT_DEFINESTYLE :
                                               scan == 0x31 ? WP_ACT_TOOLS_INSERTFOOTNOTE :
                                               scan == 0x26 ? WP_ACT_FORMAT_COLUMNS :
-                                              scan == 0x12 ? WP_ACT_TOOLS_ENVELOPE : WP_ACT_TOOLS_INSERTCLIPART);
+                                              scan == 0x12 ? WP_ACT_TOOLS_ENVELOPE :
+                                              scan == 0x18 ? WP_ACT_FILE_SETTINGS : WP_ACT_TOOLS_INSERTCLIPART);
         if (g_ctx.doc_loaded && act != NULL && act->handler != NULL) {
             (void)act->handler(&g_ctx);
             redraw_screen();
@@ -1797,8 +1822,13 @@ void app_shell_run(void)
         g_ctx.printer_sides = cfg.printer_sides;
         g_ctx.printer_choosable = WP_TRUE;
         g_ctx.config_path = WP_DOS_CONFIG_PATH;
-        g_ctx.recovery_path = WP_DOS_RECOVERY_PATH;
-        g_ctx.autosave.minutes = cfg.autosave_minutes;   /* autosave.h */
+        /* Settings (settings.h): the writer's, over this machine's own. */
+        g_ctx.recovery_default = WP_DOS_RECOVERY_PATH;
+        g_ctx.offload_default = WP_DOS_OFFLOAD_ENDPOINT;
+        g_ctx.clipart_default = "CLIPART\\";
+        g_ctx.path_sep = '\\';
+        g_ctx.settings = cfg.settings;
+        wp_settings_apply(&g_ctx);
         g_ctx.view.line_px = dos_line_rows;
     }
 

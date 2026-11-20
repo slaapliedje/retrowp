@@ -260,13 +260,13 @@ void test_autosave_config_setting(void)
     static const char d[] = "autosave=soon\n";
 
     ASSERT_TRUE(wp_config_parse((const u8 *)"", 0, &cfg) == WP_OK);
-    ASSERT_EQ_U32(WP_AUTOSAVE_DEFAULT_MINUTES, cfg.autosave_minutes);
+    ASSERT_EQ_U32(WP_AUTOSAVE_DEFAULT_MINUTES, cfg.settings.autosave_minutes);
     ASSERT_TRUE(wp_config_parse((const u8 *)a, (u32)strlen(a), &cfg) == WP_OK);
-    ASSERT_EQ_U32(0, cfg.autosave_minutes);
+    ASSERT_EQ_U32(0, cfg.settings.autosave_minutes);
     ASSERT_TRUE(wp_config_parse((const u8 *)b, (u32)strlen(b), &cfg) == WP_OK);
-    ASSERT_EQ_U32(10, cfg.autosave_minutes);
+    ASSERT_EQ_U32(10, cfg.settings.autosave_minutes);
     ASSERT_TRUE(wp_config_parse((const u8 *)c, (u32)strlen(c), &cfg) == WP_OK);
-    ASSERT_EQ_U32(WP_AUTOSAVE_MAX_MINUTES, cfg.autosave_minutes);
+    ASSERT_EQ_U32(WP_AUTOSAVE_MAX_MINUTES, cfg.settings.autosave_minutes);
     ASSERT_TRUE(wp_config_parse((const u8 *)d, (u32)strlen(d), &cfg) == WP_OK);
-    ASSERT_EQ_U32(WP_AUTOSAVE_DEFAULT_MINUTES, cfg.autosave_minutes);
+    ASSERT_EQ_U32(WP_AUTOSAVE_DEFAULT_MINUTES, cfg.settings.autosave_minutes);
 }

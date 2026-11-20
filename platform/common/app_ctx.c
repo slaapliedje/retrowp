@@ -36,6 +36,13 @@ void wp_app_ctx_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
     ctx->recovery_path = NULL;
     ctx->recovery_owned = WP_FALSE;
     ctx->autosave.minutes = WP_AUTOSAVE_DEFAULT_MINUTES;
+    wp_settings_defaults(&ctx->settings);
+    ctx->recovery_default = NULL;
+    ctx->offload_default = NULL;
+    ctx->clipart_default = NULL;
+    ctx->settings_changed = NULL;
+    ctx->path_sep = '\\';
+    ctx->offload_retry = WP_FALSE;
     ctx->autosave.armed = WP_FALSE;
     ctx->autosave.told = WP_FALSE;
     ctx->autosave.written = 0;

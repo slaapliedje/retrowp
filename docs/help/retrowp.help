@@ -18,6 +18,7 @@ Pick a topic:
 {Format Menu and Shortcuts|Format}
 {Printing|Print}
 {Saving and Recovery|Saving}
+{Settings|Settings}
 {About RetroWP|About}
 @endnode
 
@@ -412,6 +413,27 @@ the configuration file to change how often, or autosave=off.
 The recovery file is RETROWP.REC beside the program on the ST,
 C:\RETROWP.REC on DOS, RetroWP.rec beside the program on the
 Amiga and the Mac.
+@endnode
+
+@node Settings "Settings"
+File > Settings (Alt+O on DOS) changes, in one dialog:
+
+  Documents folder   where Open and Save start for a new document
+                     (not yet on the Mac)
+  Dictionary folder  where WPSPELL.DIC and the CLIPART folder are
+  Recovery file      where unsaved work is kept (see Saving)
+  Autosave           how often that copy is made, or Off
+  Backups            Keep NAME.BAK: each save keeps the copy it
+                     replaces, as NOTE.BAK beside NOTE.TXT
+  Offload link       the gateway: serial:PORT:BAUD or tcp:HOST:PORT
+
+An empty folder or file means the usual place beside the program;
+an empty offload link means this machine's usual port. Fonts are
+the system's own (GDOS, the Amiga's FONTS:, the Mac's System), so
+there is no folder for them here.
+
+OK keeps the settings in the configuration file, so they are
+there the next time; Cancel changes nothing.
 @endnode
 
 @node About "About RetroWP"

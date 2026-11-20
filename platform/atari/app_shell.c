@@ -52,6 +52,7 @@
 #include "statusline.h"
 #include "recovery.h"
 #include "autosave.h"
+#include "settings.h"
 #include "help_doc.h"
 #include "help_view.h"
 #include "help_retrowp.h"
@@ -166,10 +167,10 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_DESK_DUMMY5,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 20, 1 },
     { WP_MENU_OBJ_DESK_DUMMY6,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 20, 1 },
     { WP_MENU_OBJ_DESK_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  7, 20, 1 },
-    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_NEW,    WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 6, 0, 16, 7 },
+    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_NEW,    WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 6, 0, 16, 8 },
     { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 1, 16, 1 },
     { WP_MENU_OBJ_FILE_SAVE_AS,  -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 2, 16, 1 },
-    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 6, 16, 1 },
+    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 7, 16, 1 },
     { WP_MENU_OBJ_VIEW_BOX,      WP_MENU_OBJ_EDIT_UNDO,   WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 12, 0, 8,  4 },
     { WP_MENU_OBJ_EDIT_COPY,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 8,  1 },
     { WP_MENU_OBJ_EDIT_PASTE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 8,  1 },
@@ -222,7 +223,7 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     /* File > Mail Merge... (M18), appended: after Print in the File
        chain, so its ob_next is Quit (y 5; Quit to y 6, the box to seven
        rows and sixteen columns for the label). */
-    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 16, 1 },
+    { WP_MENU_OBJ_FILE_SETTINGS, -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 16, 1 },
     /* Tools > Insert Field... (M18), appended: last in the Tools chain,
        so its ob_next is the box (the box to five rows, eighteen
        columns). OF_LASTOB lives here now, on the final array entry. */
@@ -246,7 +247,11 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_FORMAT_BOX,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 10, 18, 1 },
     /* Tools > Envelope... (M19), appended: after Insert Footnote (y 6;
        the box to seven rows). OF_LASTOB here. */
-    { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 18, 1 }
+    { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 18, 1 },
+    /* File > Settings... (M21 T21.4), appended: after Mail Merge in the
+       File chain, so its ob_next is Quit (y 6; Quit to y 7, the box to
+       eight rows). OF_LASTOB here. */
+    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 16, 1 }
 };
 
 /* T169: how many text fragments the paint loop has actually drawn since
@@ -272,6 +277,7 @@ static WP_AES_NEAR char g_text_save_as[] = "  Save As...";
 static WP_AES_NEAR char g_text_print[] = "  Print...";
 static WP_AES_NEAR char g_text_quit[]  = "  Quit";
 static WP_AES_NEAR char g_text_merge[] = "  Mail Merge...";
+static WP_AES_NEAR char g_text_settings[] = "  Settings...";
 static WP_AES_NEAR char g_text_insert_field[] = "  Insert Field...";
 static WP_AES_NEAR char g_text_insert_footnote[] = "  Insert Footnote";
 static WP_AES_NEAR char g_text_style[] = "  Style...";
@@ -446,6 +452,7 @@ void wp_menu_tree_init(short wcell, short hcell,
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_PRINT], g_text_print);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_QUIT],  g_text_quit);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_MERGE], g_text_merge);
+    OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS], g_text_settings);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFIELD], g_text_insert_field);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE], g_text_insert_footnote);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_STYLE], g_text_style);
@@ -625,7 +632,7 @@ static wp_bool child_chain_ok(short parent)
    the table nor the local-item list, i.e. drawn, highlightable, and
    silently inert. Bumping it remains the prompt to go wire the item up. */
 #define WP_ATARI_MENU_TITLES              7   /* Desk File Edit View Tools Format Help */
-#define WP_ATARI_MENU_DISPATCHED_LEAVES  36   /* About + 7 File + 4 Edit + 3 View + 7 Tools + 11 Format + 3 Help */
+#define WP_ATARI_MENU_DISPATCHED_LEAVES  37   /* About + 8 File + 4 Edit + 3 View + 7 Tools + 11 Format + 3 Help */
 #define WP_ATARI_MENU_INERT_LEAVES        7   /* separator + 6 AES-reserved Desk slots */
 
 /* Defined next to the dispatch table it validates, far below -- this
@@ -872,7 +879,9 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_next != WP_MENU_OBJ_FILE_PRINT) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS], g_text_save_as)) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_PRINT].ob_next != WP_MENU_OBJ_FILE_MERGE) TREE_FAIL();
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_next != WP_MENU_OBJ_FILE_QUIT) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_next != WP_MENU_OBJ_FILE_SETTINGS) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_next != WP_MENU_OBJ_FILE_QUIT) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS], g_text_settings)) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_MERGE], g_text_merge)) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_PRINT], g_text_print)) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_next != WP_MENU_OBJ_FILE_BOX) TREE_FAIL();
@@ -1011,8 +1020,13 @@ wp_bool wp_menu_tree_selfcheck(void)
     if ((wp_menu_tree[WP_MENU_OBJ_VIEW_PAGE].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
     if ((wp_menu_tree[WP_MENU_OBJ_VIEW_GRID].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Columns was appended */
     if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_COLUMNS].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Envelope was appended */
-    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_ENVELOPE].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
-    if (WP_MENU_OBJ_TOOLS_ENVELOPE != WP_MENU_OBJ_COUNT - 1) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_ENVELOPE].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Settings was appended */
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
+    if (WP_MENU_OBJ_FILE_SETTINGS != WP_MENU_OBJ_COUNT - 1) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_type != G_STRING) TREE_FAIL();
+    /* Its row, between Mail Merge's and Quit's (cells or pixels alike). */
+    if (!(wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_y &&
+          wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_y)) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_type != G_STRING) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_head != -1) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFIELD].ob_type != G_STRING) TREE_FAIL();
@@ -1947,6 +1961,9 @@ static wp_bool str_ends_with_ci(const char *s, const char *suffix)
 #ifndef WP_ATARI_OFFLOAD_ENDPOINT
 #define WP_ATARI_OFFLOAD_ENDPOINT "serial:aux:9600"
 #endif
+/* The link is the writer's to set now (Settings), so the alert names
+   where, not one endpoint. */
+#define WP_ATARI_NO_OFFLOAD "[No offload device available.|Check the offload link|in Settings.][ OK ]"
 
 static wp_bool g_offload_init_attempted = WP_FALSE;
 
@@ -2070,9 +2087,11 @@ static wp_status atari_print_pages(wp_app_ctx *ctx, u32 *pages_out)
 
 static wp_bool ensure_offload(void)
 {
-    if (!g_offload_init_attempted) {
+    /* offload_retry: Settings changed the link, so connect again. */
+    if (!g_offload_init_attempted || g_ctx.offload_retry) {
         g_offload_init_attempted = WP_TRUE;
-        offload_init(WP_ATARI_OFFLOAD_ENDPOINT); /* result read back via offload_available() */
+        g_ctx.offload_retry = WP_FALSE;
+        offload_init(wp_settings_offload(&g_ctx)); /* result read back via offload_available() */
     }
     return offload_available();
 }
@@ -2163,7 +2182,12 @@ static void atari_picker_start(const wp_app_ctx *ctx, char *path, char *fname, c
         strcpy(fname, doc + cut);
         return;
     }
-    if (strlen(g_home) + 4 < 128) {
+    n = (u32)strlen(ctx->settings.docdir);
+    if (n > 0 && n + 5 < 128) {                /* Settings' documents folder */
+        strcpy(path, ctx->settings.docdir);
+        if (path[n - 1] != '\\' && path[n - 1] != ':') strcat(path, "\\");
+        strcat(path, "*.*");
+    } else if (strlen(g_home) + 4 < 128) {
         strcpy(path, g_home);
         strcat(path, "*.*");
     } else {
@@ -2315,12 +2339,29 @@ static wp_bool g_spell_dict_open_attempted = WP_FALSE;
 static spell_dict *get_spell_dict(void)
 {
     if (!g_spell_dict_open_attempted) {
+        char in_data[160];
+        const char *path = g_spell_dict_path;
+
+        /* Settings' dictionary folder, when one is set. */
+        if (wp_settings_data_file(&g_ctx, WP_ATARI_SPELL_DICT_NAME, in_data, (u32)sizeof(in_data))) path = in_data;
         g_spell_dict_open_attempted = WP_TRUE;
-        if (spell_dict_open(g_spell_dict_path, &g_spell_dict) != WP_OK) {
+        if (spell_dict_open(path, &g_spell_dict) != WP_OK) {
             g_spell_dict = NULL;
         }
     }
     return g_spell_dict;
+}
+
+/* ctx->settings_changed: the dictionary folder may have moved, so the
+   one open is let go and the next spell check opens it again. */
+static void atari_settings_changed(wp_app_ctx *ctx)
+{
+    (void)ctx;
+    if (g_spell_dict != NULL) {
+        spell_dict_close(g_spell_dict);
+        g_spell_dict = NULL;
+    }
+    g_spell_dict_open_attempted = WP_FALSE;
 }
 
 static wp_bool ascii_is_alpha(u8 c)
@@ -2396,7 +2437,7 @@ static void do_spell_check(void)
 
     dict = get_spell_dict();
     if (dict == NULL) {
-        form_alert(1, FA_ERROR "[Spell-check dictionary not found.|Put " WP_ATARI_SPELL_DICT_NAME " in the|folder RETROWP.PRG is in.][ OK ]");
+        form_alert(1, FA_ERROR "[Spell-check dictionary not found.|Put " WP_ATARI_SPELL_DICT_NAME " beside|RETROWP.PRG, or name its|folder in Settings.][ OK ]");
         return;
     }
 
@@ -2510,7 +2551,7 @@ static void do_thesaurus(void)
     word_buf[word_len] = '\0';
 
     if (!ensure_offload()) {
-        form_alert(1, FA_ERROR "[No offload device available.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");
+        form_alert(1, FA_ERROR WP_ATARI_NO_OFFLOAD);
         return;
     }
 
@@ -3010,7 +3051,7 @@ static void do_chat(void)
 
     if (!ensure_offload()) {
         mem_free(paragraph);
-        form_alert(1, FA_ERROR "[No offload device available.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");
+        form_alert(1, FA_ERROR WP_ATARI_NO_OFFLOAD);
         return;
     }
 
@@ -3198,7 +3239,7 @@ static void do_insert_image(void)
         }
     }
     if (!ensure_offload()) {
-        form_alert(1, FA_ERROR "[No offload device available.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");
+        form_alert(1, FA_ERROR WP_ATARI_NO_OFFLOAD);
         return;
     }
     if (offload_query(&caps) != WP_OK || !offload_caps_supports(&caps, OFFLOAD_IMAGE)) {
@@ -4913,7 +4954,7 @@ static void invoke_backend_action(short window_handle, VdiHdl vdi, wp_action_id 
            portable -- see wp_action_dictate's own comment in
            platform/common/actions.h. */
         if (!ensure_offload()) {
-            form_alert(1, FA_ERROR "[No offload device available.|(tried " WP_ATARI_OFFLOAD_ENDPOINT ")][ OK ]");
+            form_alert(1, FA_ERROR WP_ATARI_NO_OFFLOAD);
         } else {
             (void)wp_action_dictate(&g_ctx);
         }
@@ -5133,6 +5174,7 @@ static const wp_menu_action_pair g_menu_actions[] = {
     { WP_MENU_OBJ_FORMAT_DEFINESTYLE, WP_ACT_FORMAT_DEFINESTYLE },
     { WP_MENU_OBJ_FORMAT_COLUMNS,     WP_ACT_FORMAT_COLUMNS },
     { WP_MENU_OBJ_TOOLS_ENVELOPE,     WP_ACT_TOOLS_ENVELOPE },
+    { WP_MENU_OBJ_FILE_SETTINGS,      WP_ACT_FILE_SETTINGS },
     { WP_MENU_OBJ_FORMAT_BOLD,        WP_ACT_FORMAT_BOLD },
     { WP_MENU_OBJ_FORMAT_ITALIC,      WP_ACT_FORMAT_ITALIC },
     { WP_MENU_OBJ_FORMAT_UNDERLINE,   WP_ACT_FORMAT_UNDERLINE },
@@ -5926,6 +5968,7 @@ void app_shell_run(void)
         wp_app_ctx_init(&g_ctx, (wp_keymap_id)cfg.keymap_id, &g_doc, &g_journal);
         g_ctx.ensure_offload = ensure_offload; /* ODT/PDF in the shared file flow */
         g_ctx.clipart_dir = "CLIPART\\";   /* the bundled clipart, beside the program */
+        g_ctx.clipart_default = "CLIPART\\"; /* ... or in Settings' dictionary folder */
         g_ctx.pick_path = atari_pick_path;   /* Mail Merge asks for its data file so */
         /* Page view (pagecanvas.h): this screen's conversions at 100%. */
         g_ctx.canvas.x_px = atari_twips_to_px_x;
@@ -5941,8 +5984,13 @@ void app_shell_run(void)
         wp_pageview_metrics(g_metrics_pref);   /* pageview.h */
         g_ui_scale_setting = cfg.ui_scale;
         /* Both GEMs: gem4xe's shutdown asks with AP_TERM too. */
-        g_ctx.recovery_path = g_recovery_path[0] != '\0' ? g_recovery_path : NULL;
-        g_ctx.autosave.minutes = cfg.autosave_minutes;   /* autosave.h */
+        g_ctx.recovery_default = g_recovery_path[0] != '\0' ? g_recovery_path : NULL;
+        /* Settings (settings.h): the writer's, over this machine's own. */
+        g_ctx.offload_default = WP_ATARI_OFFLOAD_ENDPOINT;
+        g_ctx.path_sep = '\\';
+        g_ctx.settings = cfg.settings;
+        g_ctx.settings_changed = atari_settings_changed;
+        wp_settings_apply(&g_ctx);
 #ifndef GEM4XE_APP_GEM_H
         /* GEMDOS's printer, the Centronics port: an Epson-style printer
            takes the PC character set, which the ST's own largely is.

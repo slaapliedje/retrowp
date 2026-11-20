@@ -1210,3 +1210,27 @@ void test_vimode_ex_filename_edge_cases(void)
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);
 }
+
+/* M21 T21.4: ':set' opens Settings, as vim's options command; a
+   ':set name=value' has no counterpart and beeps rather than half-doing
+   it. Through the keymap it is the File > Settings action. */
+void test_vimode_ex_set_opens_settings(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_vimode_state vs;
+    wp_vimode_action action;
+
+    build_doc_two_paras(&doc, "", "");
+    wp_undo_journal_init(&journal);
+    wp_vimode_init(&vs, &doc, &journal);
+
+    action = run_ex(&vs, ":set");
+    ASSERT_TRUE(action.kind == WP_VIACTION_SETTINGS);
+    action = run_ex(&vs, ":set autosave=5");
+    ASSERT_TRUE(action.kind == WP_VIACTION_BEEP);
+
+    wp_vimode_free(&vs);
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}

@@ -242,7 +242,10 @@
 #define WP_MENU_OBJ_FORMAT_COLUMNS       59
 /* Tools > Envelope... (M19), appended last in the Tools chain. */
 #define WP_MENU_OBJ_TOOLS_ENVELOPE       60
-#define WP_MENU_OBJ_COUNT        61
+/* File > Settings... (M21 T21.4), appended: after Mail Merge in the
+   File chain, before Quit. */
+#define WP_MENU_OBJ_FILE_SETTINGS        61
+#define WP_MENU_OBJ_COUNT        62
 
 extern WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 
@@ -469,6 +472,12 @@ wp_bool wp_atari_format_selfcheck(void);
    the same boundary every other selfcheck here respects. See
    docs/atari-platform.md's Format Size/Alignment dialogs section. */
 wp_bool wp_atari_dialog_selfcheck(void);
+
+/* M21 T21.4: the same for plat_dialog_form's tree (dialog_atari.c) --
+   one OF_LASTOB, the chain, exactly the text fields editable as
+   G_FTEXTs on their own TEDINFOs, form_do's start object editable,
+   choices as TOUCHEXIT buttons, a smaller form after a bigger one. */
+wp_bool wp_atari_form_selfcheck(void);
 
 /* M8.5 Phase 9: proves atari_translate_key (app_shell.c)'s IKBD scan-
    code table against real (scan, ascii) values from the Atari

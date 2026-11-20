@@ -202,6 +202,9 @@ int main(void)
     check(wp_atari_dialog_selfcheck(),
           "plat_dialog_choice OBJECT-tree construction: index arithmetic and ob_next/head/tail linkage");
 
+    check(wp_atari_form_selfcheck(),
+          "plat_dialog_form OBJECT tree: edit fields, cycle buttons, one OF_LASTOB");
+
     check(wp_atari_key_translate_selfcheck(),
           "IKBD scan-code table: real key values decode to the right wp_key_event");
 

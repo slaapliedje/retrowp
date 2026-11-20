@@ -748,6 +748,7 @@ static wp_vimode_action execute_ex_command(wp_vimode_state *vs)
     else if (ex_word_is(buf, word_len, "x"))  action.kind = (u8)WP_VIACTION_SAVE_QUIT;
     else if (ex_word_is(buf, word_len, "wq")) action.kind = (u8)WP_VIACTION_SAVE_QUIT;
     else if (ex_word_is(buf, word_len, "e"))  action.kind = (u8)WP_VIACTION_OPEN;
+    else if (ex_word_is(buf, word_len, "set")) action.kind = (u8)WP_VIACTION_SETTINGS;
     else return action;
 
     if (arg_len == 0) return action;
@@ -756,7 +757,9 @@ static wp_vimode_action execute_ex_command(wp_vimode_state *vs)
        characters) rather than quietly ignoring it, and so does this.
        Silently dropping it would be worse here than anywhere: the user
        who typed ":q somefile" plainly meant something else. */
-    if (action.kind == (u8)WP_VIACTION_QUIT) {
+    if (action.kind == (u8)WP_VIACTION_QUIT || action.kind == (u8)WP_VIACTION_SETTINGS) {
+        /* ':set' opens the dialog; vim's ':set name=value' has no
+           counterpart here, so it is refused rather than half-done. */
         action.kind = (u8)WP_VIACTION_BEEP;
         return action;
     }

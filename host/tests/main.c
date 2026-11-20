@@ -120,6 +120,7 @@ void test_vimode_ex_command_save_quit(void);
 void test_vimode_ex_save_with_filename(void);
 void test_vimode_ex_open_command(void);
 void test_vimode_ex_filename_edge_cases(void);
+void test_vimode_ex_set_opens_settings(void);
 void test_vimode_search_forward(void);
 void test_vimode_search_backward(void);
 void test_vimode_n_and_capital_n_respect_search_direction(void);
@@ -524,6 +525,15 @@ void test_autosave_off_and_after_a_save(void);
 void test_autosave_failure_keeps_the_last_copy(void);
 void test_autosave_recovered_document_is_caught_up(void);
 void test_autosave_config_setting(void);
+/* test_settings.c */
+void test_settings_ok_applies_and_writes_the_config(void);
+void test_settings_cancel_changes_nothing(void);
+void test_settings_bad_offload_link_asks_again(void);
+void test_settings_unlisted_autosave_survives_ok(void);
+void test_settings_recovery_file_moves_with_its_copy(void);
+void test_settings_data_file_joins_the_folder(void);
+void test_settings_backup_keeps_the_previous_copy(void);
+void test_settings_config_keys(void);
 void test_recovery_discard_keeps_the_copy_until_the_document_goes(void);
 void test_recovery_quit_discarding_drops_the_copy(void);
 void test_pagecanvas_fit_and_stack(void);
@@ -955,6 +965,7 @@ static const test_case g_cases[] = {
     { "vimode_ex_save_with_filename", test_vimode_ex_save_with_filename },
     { "vimode_ex_open_command", test_vimode_ex_open_command },
     { "vimode_ex_filename_edge_cases", test_vimode_ex_filename_edge_cases },
+    { "vimode_ex_set_opens_settings", test_vimode_ex_set_opens_settings },
     { "vimode_search_forward", test_vimode_search_forward },
     { "vimode_search_backward", test_vimode_search_backward },
     { "vimode_n_and_capital_n_respect_search_direction", test_vimode_n_and_capital_n_respect_search_direction },
@@ -1329,6 +1340,14 @@ static const test_case g_cases[] = {
     { "autosave_failure_keeps_the_last_copy", test_autosave_failure_keeps_the_last_copy },
     { "autosave_recovered_document_is_caught_up", test_autosave_recovered_document_is_caught_up },
     { "autosave_config_setting", test_autosave_config_setting },
+    { "settings_ok_applies_and_writes_the_config", test_settings_ok_applies_and_writes_the_config },
+    { "settings_cancel_changes_nothing", test_settings_cancel_changes_nothing },
+    { "settings_bad_offload_link_asks_again", test_settings_bad_offload_link_asks_again },
+    { "settings_unlisted_autosave_survives_ok", test_settings_unlisted_autosave_survives_ok },
+    { "settings_recovery_file_moves_with_its_copy", test_settings_recovery_file_moves_with_its_copy },
+    { "settings_data_file_joins_the_folder", test_settings_data_file_joins_the_folder },
+    { "settings_backup_keeps_the_previous_copy", test_settings_backup_keeps_the_previous_copy },
+    { "settings_config_keys", test_settings_config_keys },
     { "recovery_discard_keeps_the_copy_until_the_document_goes", test_recovery_discard_keeps_the_copy_until_the_document_goes },
     { "recovery_quit_discarding_drops_the_copy", test_recovery_quit_discarding_drops_the_copy },
     { "pagecanvas_fit_and_stack", test_pagecanvas_fit_and_stack },

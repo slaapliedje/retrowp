@@ -28,6 +28,7 @@
 #include "actions.h"
 #include "recovery.h"
 #include "autosave.h"
+#include "settings.h"
 #include "cisummary.h"
 #include "imgcache.h"
 #include "pageview.h"
@@ -63,12 +64,15 @@
    other Tools action stays the documented no-op above), so neither
    helper existed here before now. */
 static wp_bool g_mac_offload_init_attempted = WP_FALSE;
+static wp_app_ctx g_ctx;   /* defined with the others below; ensure_offload reads its settings */
 
 static wp_bool ensure_offload(void)
 {
-    if (!g_mac_offload_init_attempted) {
+    /* offload_retry: Settings changed the link, so connect again. */
+    if (!g_mac_offload_init_attempted || g_ctx.offload_retry) {
         g_mac_offload_init_attempted = WP_TRUE;
-        offload_init(WP_MAC_OFFLOAD_ENDPOINT); /* result read back via offload_available() */
+        g_ctx.offload_retry = WP_FALSE;
+        offload_init(wp_settings_offload(&g_ctx)); /* result read back via offload_available() */
     }
     return offload_available();
 }
@@ -781,7 +785,12 @@ static void invoke_backend_action(wp_action_id id)
     case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
     /* The four checks are the portable ones (tools.h); this shell adds
        the link, the dictionary's name on this volume and the alert. */
-    case WP_ACT_TOOLS_SPELLCHECK:   (void)wp_tools_spell_check(&g_ctx, WP_MAC_SPELL_DICT_PATH, mac_tools_show); break;
+    case WP_ACT_TOOLS_SPELLCHECK: {
+        char dict[WP_APP_PATH_MAX];   /* Settings' dictionary folder, or beside the program */
+        if (!wp_settings_data_file(&g_ctx, WP_MAC_SPELL_DICT_PATH, dict, (u32)sizeof(dict))) strcpy(dict, WP_MAC_SPELL_DICT_PATH);
+        (void)wp_tools_spell_check(&g_ctx, dict, mac_tools_show);
+        break;
+    }
     case WP_ACT_TOOLS_THESAURUS:    (void)ensure_offload(); (void)wp_tools_thesaurus(&g_ctx, mac_tools_show); break;
     case WP_ACT_TOOLS_GRAMMARCHECK: (void)ensure_offload(); (void)wp_tools_grammar_check(&g_ctx, mac_tools_show); break;
     case WP_ACT_TOOLS_CHAT:         (void)ensure_offload(); (void)wp_tools_chat(&g_ctx, mac_tools_show); break;
@@ -2264,8 +2273,13 @@ void app_shell_run(void)
     g_ctx.canvas.y_tw = mac_px_to_twips;
     g_ctx.page_view_able = WP_TRUE;
     g_ctx.config_path = WP_MAC_CONFIG_PATH;
-    g_ctx.recovery_path = WP_MAC_RECOVERY_PATH;
-    g_ctx.autosave.minutes = cfg.autosave_minutes;   /* autosave.h */
+    /* Settings (settings.h): the writer's, over this machine's own. */
+    g_ctx.recovery_default = WP_MAC_RECOVERY_PATH;
+    g_ctx.offload_default = WP_MAC_OFFLOAD_ENDPOINT;
+    g_ctx.clipart_default = ":CLIPART:";
+    g_ctx.path_sep = ':';
+    g_ctx.settings = cfg.settings;
+    wp_settings_apply(&g_ctx);
     wp_config_view_apply(&cfg, &g_ctx);
     wp_pageview_metrics(cfg.paper_metrics != 0 ? WP_METRICS_PAPER : WP_METRICS_SCREEN);   /* pageview.h */
     g_ui_scale = wp_rulerbar_ui_scale((i32)(qd.screenBits.bounds.right - qd.screenBits.bounds.left), cfg.ui_scale);

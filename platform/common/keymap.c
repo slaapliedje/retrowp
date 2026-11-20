@@ -113,6 +113,10 @@ static wp_keymap_outcome feed_key_vi(wp_app_ctx *ctx, wp_key_event ev, u8 raw_sh
     case WP_VIACTION_SAVE_QUIT:
         outcome.kind = (u8)WP_KEYMAP_RESULT_SAVE_QUIT;
         return outcome;
+    case WP_VIACTION_SETTINGS:
+        outcome.kind = (u8)WP_KEYMAP_RESULT_ACTION;
+        outcome.action_id = (u8)WP_ACT_FILE_SETTINGS;
+        return outcome;
     case WP_VIACTION_OPEN:
         /* Same shape as SAVE below, including the deliberate `break`
            rather than a return. Bare ":e" arrives here with path_len 0,

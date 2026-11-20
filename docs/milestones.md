@@ -3062,13 +3062,36 @@ through it in cloud or network storage.
       start offered "Unsaved changes to an untitled document", Recover
       brought the typing back as *Untitled. Amiga, DOS and Mac gates
       green; autosave not yet driven on those three.
-- [ ] T21.4 Settings.
+- [x] T21.4 Settings.
       AC: one Settings dialog on every port, from a shared model in
       platform/common: where documents are saved by default, where fonts
       and the dictionary are loaded from, the recovery file, autosave,
       backups, the offload link. Written to the configuration file.
       Each port draws it its own way (GEM dialog, MUI, Mac dialog, DOS
       text form).
+      Done (2026-11-19): platform/common/settings.c is the model and the
+      dialog's answer: docdir=, datadir=, recovery=, autosave=,
+      backup=on|off, offload= in the configuration file. The dialog is a
+      new retroplat seam, plat_dialog_form (labelled text and choice
+      fields, OK/Cancel; text at most 40 characters, what a TOS 1.x
+      G_FTEXT shows whole): G_FTEXT edit fields and TOUCHEXIT cycle
+      buttons on the ST and gem4xe (sharing bank $00 with the choice
+      dialog's buffers -- the link had no room otherwise, 198 bytes
+      spare now), a MUI window of String and Cycle gadgets, a Mac
+      dialog of editText items and cycle buttons, a DOS text form in a
+      box. File > Settings... everywhere (DOS: Alt+O, until T21.5's menu
+      bar), and vi's ":set". "Where fonts are loaded from" became the
+      dictionary folder (WPSPELL.DIC and CLIPART): no port loads fonts
+      from a folder of its own. Backups keep the replaced copy as
+      NAME.BAK. A changed offload link reconnects; a moved recovery
+      file is written at the new place before the old goes. Shown on
+      TOS 1.04 (Hatari), DOSBox, System 7.5.3 (BasiliskII) and Kickstart
+      3.1 + MUI (amiberry): opened, edited, OK wrote the configuration
+      file, Cancel left it. Not yet: the Mac's Standard File does not
+      start in the documents folder. Found on the way, not fixed (also
+      in the T21.3 build): on TOS 1.04 under Hatari, stepping the
+      keyboard mouse from the File title into its dropdown switches to
+      a one-row Desk menu and the AES stops taking input.
 - [ ] T21.5 DOS menu bar.
       AC: a text-mode menu bar in the DOS convention (MS-DOS Edit, Works
       for DOS): Alt or F10 highlights it, Alt+letter opens a menu, the

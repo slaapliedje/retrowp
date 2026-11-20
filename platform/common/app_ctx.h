@@ -10,6 +10,7 @@
 #include "prompt.h"
 #include "pagecanvas.h"
 #include "platform.h"
+#include "settings.h"
 
 /* Room for a native path in wp_app_ctx. Longer than any target needs
    (8.3 names on the ST and DOS; AmigaDOS and the Mac stay well under)
@@ -137,6 +138,21 @@ typedef struct wp_app_ctx {
        -- and goes when the document is saved or its changes discarded. */
     const char *recovery_path;
     wp_bool     recovery_owned;
+    /* Settings (settings.h): the writer's, from the configuration file
+       and the Settings dialog. The shell's own defaults beside them --
+       the recovery file, the offload link, the separator its paths use
+       ('\\' ST and DOS, '/' Amiga, ':' Mac) -- are what an empty
+       setting means. offload_retry: the link changed, so the shell's
+       next ensure_offload connects again instead of keeping its answer. */
+    wp_settings settings;
+    const char *recovery_default;
+    const char *offload_default;
+    const char *clipart_default;  /* clipart_dir when no data folder is set */
+    char        path_sep;
+    wp_bool     offload_retry;
+    /* Called after the Settings dialog has changed them, for what the
+       shell holds on to (an open dictionary). NULL: nothing to do. */
+    void      (*settings_changed)(struct wp_app_ctx *ctx);
     /* Autosave (autosave.h): `minutes` is the shell's to set from the
        config file (0 = off); the rest is wp_autosave_poll's own. */
     struct {

@@ -130,6 +130,9 @@ typedef enum {
     /* M19: Tools > Envelope -- an envelope addressed from the selection
        (or as typed) added before the document, as its first section. */
     WP_ACT_TOOLS_ENVELOPE,
+    /* M21 T21.4: File > Settings -- the writer's settings (settings.h)
+       in one dialog, kept in the configuration file. */
+    WP_ACT_FILE_SETTINGS,
     WP_ACT_COUNT
 } wp_action_id;
 

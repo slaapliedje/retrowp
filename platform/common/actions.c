@@ -8,6 +8,7 @@
 #include "paper.h"
 #include "labels.h"
 #include "actions.h"
+#include "settings.h"
 #include "recovery.h"
 #include "app_ctx.h"
 #include "format_txt.h"
@@ -1550,6 +1551,45 @@ static wp_status safe_names(const char *path, char *tmp, char *old, u32 cap)
     return WP_OK;
 }
 
+/* Settings' backups (settings.h): `path` with its extension made .BAK
+   (NOTE.TXT -> NOTE.BAK; one without an extension gains it), as
+   WordStar and 1st Word kept theirs. WP_FALSE when it will not fit or
+   the document is a .BAK itself. */
+static wp_bool bak_name(char *out, u32 cap, const char *path)
+{
+    u32 i, dot = 0, n = (u32)strlen(path);
+
+    if (wp_path_ends_with_ci(path, ".BAK")) return WP_FALSE;
+    for (i = 0; i < n; i++) {
+        if (path[i] == '\\' || path[i] == '/' || path[i] == ':') dot = 0;
+        else if (path[i] == '.') dot = i;
+    }
+    if (dot == 0) dot = n;
+    if (dot + 5 > cap) return WP_FALSE;
+    memcpy(out, path, dot);
+    memcpy(out + dot, ".BAK", 5);
+    return WP_TRUE;
+}
+
+/* Set by wp_action_write_file and the export path for the one save they
+   make: whether the copy being replaced is kept as NAME.BAK. Never set
+   for the recovery file, which has no backups. */
+static wp_bool g_keep_backup = WP_FALSE;
+
+/* The old copy, set aside as `old`, is done with: deleted, or with
+   backups on kept as the document's .BAK (a stale one replaced). A .BAK
+   that will not take its name costs only the backup, never the save. */
+static void retire_old(const char *old, const char *path)
+{
+    static char bak[WP_APP_PATH_MAX];
+
+    if (g_keep_backup && bak_name(bak, (u32)sizeof(bak), path)) {
+        (void)plat_file_delete(bak);
+        if (plat_file_rename(old, bak) == WP_OK) return;
+    }
+    (void)plat_file_delete(old);
+}
+
 /* The finished temporary file takes the document's name. WP_OK; WP_ERR
    with the old copy back under its name; or WP_UNSUPPORTED when this
    filesystem will not rename, with nothing moved and `tmp` still there
@@ -1570,7 +1610,7 @@ static wp_status safe_commit(const char *tmp, const char *old, const char *path)
         if (plat_file_rename(old, path) == WP_OK) (void)plat_file_delete(tmp);
         return WP_ERR;
     }
-    (void)plat_file_delete(old);
+    retire_old(old, path);
     return WP_OK;
 }
 
@@ -1632,7 +1672,9 @@ wp_status wp_action_write_file(wp_app_ctx *ctx, const char *native_path,
 {
     wp_status st;
 
+    g_keep_backup = (wp_bool)(ctx->settings.backup != 0);
     st = wp_action_safe_write(native_path, buf, len);
+    g_keep_backup = WP_FALSE;
     if (st == WP_UNSUPPORTED) {
         st = wp_action_write_whole(native_path, buf, len);
         if (st != WP_OK) {
@@ -2698,6 +2740,13 @@ static wp_status act_file_merge(wp_app_ctx *ctx)
     return choose_label_sheet(ctx);
 }
 
+/* File > Settings (settings.h). */
+static wp_status act_file_settings(wp_app_ctx *ctx)
+{
+    (void)wp_action_settings(ctx);
+    return WP_OK;
+}
+
 const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_FILE_NEW,        WP_MENU_FILE,   "New",            "Ctrl+N", 0x0E, act_file_new, NULL },
     { WP_ACT_FILE_OPEN,         WP_MENU_FILE,   "Open",           "Ctrl+O", 0x0F, NULL, NULL },
@@ -2780,7 +2829,8 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_VIEW_ZOOM,          WP_MENU_VIEW,   "Zoom...",         0,      0,    act_view_zoom, NULL },
     { WP_ACT_VIEW_GRID,          WP_MENU_VIEW,   "Grid...",         0,      0,    act_view_grid, NULL },
     { WP_ACT_FORMAT_COLUMNS,     WP_MENU_FORMAT, "Columns...",      0,      0,    act_format_columns, NULL },
-    { WP_ACT_TOOLS_ENVELOPE,     WP_MENU_TOOLS,  "Envelope...",     0,      0,    act_tools_envelope, NULL }
+    { WP_ACT_TOOLS_ENVELOPE,     WP_MENU_TOOLS,  "Envelope...",     0,      0,    act_tools_envelope, NULL },
+    { WP_ACT_FILE_SETTINGS,      WP_MENU_FILE,   "Settings...",     0,      0,    act_file_settings, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)
@@ -3026,7 +3076,9 @@ static wp_status convert_export(wp_app_ctx *ctx, const char *native_path, u8 for
         return WP_ERR;
     }
     if (old[0] != '\0') {
+        g_keep_backup = (wp_bool)(ctx->settings.backup != 0);
         st = safe_commit(tmp, old, native_path);
+        g_keep_backup = WP_FALSE;
         if (st == WP_UNSUPPORTED) st = copy_over(tmp, native_path);
         if (st != WP_OK) {
             wp_action_tell(ctx, "Couldn't save that file");

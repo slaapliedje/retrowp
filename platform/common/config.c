@@ -41,6 +41,15 @@ static void trim(const u8 *bytes, u32 len, u32 *out_start, u32 *out_len)
 
 static u32 parse_num(const u8 *v, u32 len);
 
+/* A setting's text, if it fits whole: a path cut short would name some
+   other folder, so a longer one is ignored and the default stands. */
+static void set_text(char *dst, const u8 *v, u32 len)
+{
+    if (len >= (u32)WP_SETTINGS_TEXT) return;
+    memcpy(dst, v, len);
+    dst[len] = '\0';
+}
+
 static void view_defaults(wp_config *out)
 {
     out->page_view = 0;
@@ -51,7 +60,7 @@ static void view_defaults(wp_config *out)
     out->paper_metrics = 1;
     out->return_addr[0] = '\0';
     out->ui_scale = 0;
-    out->autosave_minutes = WP_AUTOSAVE_DEFAULT_MINUTES;
+    wp_settings_defaults(&out->settings);
 }
 
 static void parse_line(const u8 *bytes, u32 len, wp_config *out)
@@ -116,13 +125,25 @@ static void parse_line(const u8 *bytes, u32 len, wp_config *out)
         const u8 *v = bytes + val_start;
         u32 n;
         if (ascii_ieq(v, val_len, "off") || ascii_ieq(v, val_len, "0")) {
-            out->autosave_minutes = 0;
-        } else if (val_len > 0 && v[0] >= '1' && v[0] <= '9') {
+            out->settings.autosave_minutes = 0;
+        } else if (val_len > 0 && val_len <= 5 && v[0] >= '1' && v[0] <= '9') {
             n = parse_num(v, val_len);
-            out->autosave_minutes = (u16)(n > WP_AUTOSAVE_MAX_MINUTES ? WP_AUTOSAVE_MAX_MINUTES : n);
+            out->settings.autosave_minutes = (u16)(n > WP_AUTOSAVE_MAX_MINUTES ? WP_AUTOSAVE_MAX_MINUTES : n);
+        } else if (val_len > 5 && v[0] >= '1' && v[0] <= '9') {
+            out->settings.autosave_minutes = WP_AUTOSAVE_MAX_MINUTES;
         }
         return;
     }
+    if (ascii_ieq(bytes + key_start, key_len, "backup")) {
+        const u8 *v = bytes + val_start;
+        if (ascii_ieq(v, val_len, "on")) out->settings.backup = 1;
+        else if (ascii_ieq(v, val_len, "off")) out->settings.backup = 0;
+        return;
+    }
+    if (ascii_ieq(bytes + key_start, key_len, "docdir"))   { set_text(out->settings.docdir, bytes + val_start, val_len); return; }
+    if (ascii_ieq(bytes + key_start, key_len, "datadir"))  { set_text(out->settings.datadir, bytes + val_start, val_len); return; }
+    if (ascii_ieq(bytes + key_start, key_len, "recovery")) { set_text(out->settings.recovery, bytes + val_start, val_len); return; }
+    if (ascii_ieq(bytes + key_start, key_len, "offload"))  { set_text(out->settings.offload, bytes + val_start, val_len); return; }
     if (ascii_ieq(bytes + key_start, key_len, "return")) {
         u32 n = val_len < sizeof(out->return_addr) - 1 ? val_len : (u32)sizeof(out->return_addr) - 1;
         memcpy(out->return_addr, bytes + val_start, n);
@@ -370,4 +391,20 @@ wp_status wp_config_save_return(const char *native_path, const char *text)
     const char *values[1];
     values[0] = text;
     return save_keys(native_path, keys, values, 1);
+}
+
+wp_status wp_config_save_settings(const char *native_path, const wp_settings *s)
+{
+    static const char *const keys[] = { "docdir", "datadir", "recovery", "autosave", "backup", "offload" };
+    const char *values[6];
+    char minutes[12];
+
+    values[0] = s->docdir;
+    values[1] = s->datadir;
+    values[2] = s->recovery;
+    if (s->autosave_minutes == 0) values[3] = "off";
+    else { put_num(minutes, s->autosave_minutes); values[3] = minutes; }
+    values[4] = s->backup ? "on" : "off";
+    values[5] = s->offload;
+    return save_keys(native_path, keys, values, 6);
 }

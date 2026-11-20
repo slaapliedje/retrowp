@@ -41,6 +41,7 @@
 #include "actions.h"
 #include "recovery.h"
 #include "autosave.h"
+#include "settings.h"
 #include "cisummary.h"
 #include "imgcache.h"
 #include "pageview.h"
@@ -346,7 +347,8 @@ static wp_bool run_asl_file_requester(wp_bool save_mode, char *out_path, u32 out
     }
 
     fr = (struct FileRequester *)AllocAslRequestTags(ASL_FileRequest,
-        ASLFR_InitialDrawer, (IPTR)"SYS:",
+        /* Settings' documents folder, when one is set. */
+        ASLFR_InitialDrawer, (IPTR)(g_ctx.settings.docdir[0] != '\0' ? g_ctx.settings.docdir : "SYS:"),
         ASLFR_DoSaveMode, (IPTR)(save_mode ? (LONG)1 : (LONG)0),
         ASLFR_TitleText, save_mode ? (IPTR)"Save Document" : (IPTR)"Open Document",
         TAG_DONE);
@@ -542,9 +544,11 @@ static wp_bool amiga_printer_ready(void)
 
 static wp_bool ensure_offload(void)
 {
-    if (!g_offload_init_attempted) {
+    /* offload_retry: Settings changed the link, so connect again. */
+    if (!g_offload_init_attempted || g_ctx.offload_retry) {
         g_offload_init_attempted = WP_TRUE;
-        offload_init(WP_AMIGA_OFFLOAD_ENDPOINT); /* result read back via offload_available() */
+        g_ctx.offload_retry = WP_FALSE;
+        offload_init(wp_settings_offload(&g_ctx)); /* result read back via offload_available() */
     }
     return offload_available();
 }
@@ -681,7 +685,7 @@ static void do_insert_image(void)
         }
     }
     if (!ensure_offload()) {
-        show_message("Insert Image", "No offload device available (tried " WP_AMIGA_OFFLOAD_ENDPOINT ").");
+        show_message("Insert Image", "No offload device available. Check the offload link in Settings.");
         return;
     }
     if (offload_query(&caps) != WP_OK || !offload_caps_supports(&caps, OFFLOAD_IMAGE)) {
@@ -840,14 +844,19 @@ static void invoke_backend_action(wp_action_id id)
     case WP_ACT_FILE_OPEN:      do_file_open(); break;
     case WP_ACT_FILE_SAVE:      do_file_save(WP_FALSE); break;
     case WP_ACT_FILE_SAVE_AS:   do_file_save(WP_TRUE); break;
-    case WP_ACT_TOOLS_SPELLCHECK:   (void)wp_tools_spell_check(&g_ctx, WP_AMIGA_SPELL_DICT_PATH, amiga_tools_show); break;
+    case WP_ACT_TOOLS_SPELLCHECK: {
+        char dict[WP_APP_PATH_MAX];   /* Settings' dictionary folder, or beside the program */
+        if (!wp_settings_data_file(&g_ctx, "WPSPELL.DIC", dict, (u32)sizeof(dict))) strcpy(dict, WP_AMIGA_SPELL_DICT_PATH);
+        (void)wp_tools_spell_check(&g_ctx, dict, amiga_tools_show);
+        break;
+    }
     case WP_ACT_TOOLS_THESAURUS:    do_thesaurus(); break;
     case WP_ACT_TOOLS_GRAMMARCHECK: do_grammar_check(); break;
     case WP_ACT_TOOLS_CHAT:         do_chat(); break;
     case WP_ACT_TOOLS_INSERTIMAGE:  do_insert_image(); break;
     case WP_ACT_TOOLS_DICTATE:
         if (!ensure_offload()) {
-            show_message("Dictate", "No offload device available (tried " WP_AMIGA_OFFLOAD_ENDPOINT ").");
+            show_message("Dictate", "No offload device available. Check the offload link in Settings.");
         } else {
             (void)wp_action_dictate(&g_ctx);
         }
@@ -2319,6 +2328,127 @@ wp_status plat_dialog_choice(plat_window *parent,
     return WP_OK;
 }
 
+/* -- plat_dialog_form (platform.h): a MUI window ----------------------
+   The fields in a two-column group -- a label, then a String gadget for
+   text or a Cycle gadget for a choice, MUI's own -- with OK and Cancel
+   under them, run modally: the main window asleep while it is up, the
+   loop asking only for this window's two answers (its close gadget is
+   Cancel). Built fresh each time and disposed after, as MUI_Request is. */
+#define WP_RETURNID_FORM_OK     902
+#define WP_RETURNID_FORM_CANCEL 903
+#define WP_FORM_MAX_OPTIONS     16
+
+wp_status plat_dialog_form(plat_window *parent,
+                            const u8 *title_utf8, u32 title_len,
+                            plat_form_field *fields, u32 count,
+                            wp_bool *out_cancelled)
+{
+    static char title[64];
+    static STRPTR entries[PLAT_FORM_MAX_FIELDS][WP_FORM_MAX_OPTIONS + 1];
+    Object *gadget[PLAT_FORM_MAX_FIELDS];
+    Object *win, *col, *ok, *cancel;
+    ULONG sigs = 0;
+    LONG id = 0;
+    u32 i, k, n;
+
+    WP_UNUSED(parent);
+    if (count == 0 || count > PLAT_FORM_MAX_FIELDS || fields == NULL) return WP_RANGE;
+    n = title_len < sizeof(title) - 1 ? title_len : (u32)sizeof(title) - 1;
+    memcpy(title, title_utf8, n);
+    title[n] = '\0';
+
+    col = ColGroup(2), End;
+    if (col == NULL) return WP_NOMEM;
+    for (i = 0; i < count; i++) {
+        const char *l = fields[i].label != NULL ? fields[i].label : "";
+        DoMethod(col, OM_ADDMEMBER, Label2(l));
+        if (fields[i].kind == PLAT_FORM_CHOICE) {
+            u32 m = fields[i].option_count < WP_FORM_MAX_OPTIONS ? fields[i].option_count : WP_FORM_MAX_OPTIONS;
+            for (k = 0; k < m; k++) entries[i][k] = (STRPTR)fields[i].options[k];
+            entries[i][m] = NULL;
+            gadget[i] = CycleObject,
+                MUIA_Cycle_Entries, (IPTR)entries[i],
+                MUIA_Cycle_Active,  (IPTR)(fields[i].index < m ? fields[i].index : 0),
+            End;
+        } else {
+            gadget[i] = StringObject,
+                StringFrame,
+                MUIA_String_MaxLen,   (IPTR)(PLAT_FORM_TEXT_MAX + 1),
+                MUIA_String_Contents, (IPTR)(fields[i].text != NULL ? fields[i].text : ""),
+            End;
+        }
+        if (gadget[i] == NULL) {
+            MUI_DisposeObject(col);
+            return WP_NOMEM;
+        }
+        DoMethod(col, OM_ADDMEMBER, gadget[i]);
+    }
+    win = WindowObject,
+        MUIA_Window_Title, (IPTR)title,
+        MUIA_Window_ID,    MAKE_ID('R','W','P','S'),
+        WindowContents, VGroup,
+            Child, col,
+            Child, HGroup,
+                Child, ok = SimpleButton("_OK"),
+                Child, HSpace(0),
+                Child, cancel = SimpleButton("_Cancel"),
+            End,
+        End,
+    End;
+    if (win == NULL) return WP_NOMEM;           /* MUI disposed the children */
+
+    DoMethod(g_app, OM_ADDMEMBER, win);
+    DoMethod(ok, MUIM_Notify, MUIA_Pressed, FALSE, g_app, 2, MUIM_Application_ReturnID, (LONG)WP_RETURNID_FORM_OK);
+    DoMethod(cancel, MUIM_Notify, MUIA_Pressed, FALSE, g_app, 2, MUIM_Application_ReturnID, (LONG)WP_RETURNID_FORM_CANCEL);
+    DoMethod(win, MUIM_Notify, MUIA_Window_CloseRequest, TRUE, g_app, 2, MUIM_Application_ReturnID, (LONG)WP_RETURNID_FORM_CANCEL);
+    for (i = 0; i < count; i++) {                /* Return in a text field is OK */
+        if (fields[i].kind == PLAT_FORM_TEXT) {
+            DoMethod(gadget[i], MUIM_Notify, MUIA_String_Acknowledge, MUIV_EveryTime,
+                     g_app, 2, MUIM_Application_ReturnID, (LONG)WP_RETURNID_FORM_OK);
+        }
+    }
+    set(g_win, MUIA_Window_Sleep, TRUE);
+    set(win, MUIA_Window_Open, TRUE);
+    for (i = 0; i < count; i++) {
+        if (fields[i].kind == PLAT_FORM_TEXT) {
+            set(win, MUIA_Window_ActiveObject, (IPTR)gadget[i]);
+            break;
+        }
+    }
+
+    for (;;) {
+        id = (LONG)DoMethod(g_app, MUIM_Application_NewInput, &sigs);
+        if (id == WP_RETURNID_FORM_OK || id == WP_RETURNID_FORM_CANCEL) break;
+        if (sigs) sigs = Wait(sigs);
+    }
+
+    if (id == WP_RETURNID_FORM_OK) {
+        for (i = 0; i < count; i++) {
+            IPTR v = 0;
+            if (fields[i].kind == PLAT_FORM_CHOICE) {
+                get(gadget[i], MUIA_Cycle_Active, &v);
+                if ((u32)v < fields[i].option_count) fields[i].index = (u32)v;
+            } else if (fields[i].text != NULL && fields[i].text_cap > 0) {
+                const char *t;
+                get(gadget[i], MUIA_String_Contents, &v);
+                t = (const char *)v;
+                if (t == NULL) t = "";
+                n = (u32)strlen(t);
+                if (n > PLAT_FORM_TEXT_MAX) n = PLAT_FORM_TEXT_MAX;
+                if (n > fields[i].text_cap - 1) n = fields[i].text_cap - 1;
+                memcpy(fields[i].text, t, n);
+                fields[i].text[n] = '\0';
+            }
+        }
+    }
+    set(win, MUIA_Window_Open, FALSE);
+    DoMethod(g_app, OM_REMMEMBER, win);
+    MUI_DisposeObject(win);
+    set(g_win, MUIA_Window_Sleep, FALSE);
+    *out_cancelled = (wp_bool)(id != WP_RETURNID_FORM_OK);
+    return WP_OK;
+}
+
 /* -- Application/Window construction + event loop -------------------- */
 
 /* M10: PROGDIR: is a standard, always-available AmigaDOS assign (the
@@ -2420,8 +2550,13 @@ void app_shell_run(void)
     g_ctx.canvas.y_tw = amiga_px_to_twips_y;
     g_ctx.page_view_able = WP_TRUE;
     g_ctx.config_path = WP_AMIGA_CONFIG_PATH;
-    g_ctx.recovery_path = WP_AMIGA_RECOVERY_PATH;
-    g_ctx.autosave.minutes = cfg.autosave_minutes;   /* autosave.h */
+    /* Settings (settings.h): the writer's, over this machine's own. */
+    g_ctx.recovery_default = WP_AMIGA_RECOVERY_PATH;
+    g_ctx.offload_default = WP_AMIGA_OFFLOAD_ENDPOINT;
+    g_ctx.clipart_default = "PROGDIR:CLIPART/";
+    g_ctx.path_sep = '/';
+    g_ctx.settings = cfg.settings;
+    wp_settings_apply(&g_ctx);
     wp_config_view_apply(&cfg, &g_ctx);
     /* Measured as it will print (papermetrics.h): the Amiga's faces are
        sized in pixels, not points. */
