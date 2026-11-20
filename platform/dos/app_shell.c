@@ -29,6 +29,7 @@
 #include "selspan.h"
 #include "tools.h"
 #include "menucheck.h"
+#include "menubar.h"
 #include "config.h"
 #include "statusline.h"
 #include "help_doc.h"
@@ -997,6 +998,134 @@ static const char *quit_key_hint(void)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* The menu bar (menubar.h, M21 T21.5)                                  */
+/* ------------------------------------------------------------------ */
+
+/* The top row is a menu bar in the DOS convention -- MS-DOS Edit, Works
+   for DOS: Alt (pressed and let go) or F10 lights it, Alt+letter opens a
+   menu, the arrows walk it, Enter or an item's letter chooses, Esc
+   leaves; a click on a title opens it. Every action the other ports have
+   in a menu is in one here. */
+static wp_menubar g_menubar;
+static const u8 k_dos_menu_groups[] = {
+    WP_MENU_FILE, WP_MENU_EDIT, WP_MENU_VIEW, WP_MENU_FORMAT, WP_MENU_TOOLS, WP_MENU_HELP
+};
+static const char *const k_dos_menu_titles[] = { "File", "Edit", "View", "Format", "Tools", "Help" };
+#define DOS_MENU_TITLE_COUNT ((u32)(sizeof(k_dos_menu_groups) / sizeof(k_dos_menu_groups[0])))
+
+#define DOS_ATTR_LETTER     0x7F  /* a menu's letter: bright white on grey */
+#define DOS_ATTR_LIT        0x07  /* the lit title or item: grey on black, as Edit */
+#define DOS_ATTR_LIT_LETTER 0x0F
+
+/* Quit is Exit on DOS, as it is in every DOS program's File menu. */
+static const char *dos_menu_label(wp_action_id id)
+{
+    return id == WP_ACT_FILE_QUIT ? "Exit" : NULL;
+}
+
+/* The key beside an item: what really does it here, under the scheme in
+   use. The registry's Ctrl+letters are vi's (its shortcut fallback,
+   keymap.c) and, for the ones Word itself binds, Word's; the other
+   schemes have keys of their own, and the menu does not guess them. */
+static const char *dos_menu_hint(wp_action_id id)
+{
+    const wp_action *a;
+
+    switch (id) {
+    case WP_ACT_FILE_QUIT:            return quit_key_hint();
+    case WP_ACT_FILE_PRINT:           return "Shift+F7";
+    case WP_ACT_HELP_CONTENTS:
+        return wp_keymap_claims_f1((wp_keymap_id)g_ctx.keymap_id) ? "" : "F1";
+    case WP_ACT_FORMAT_BORDERS:       return "Alt+R";
+    case WP_ACT_TOOLS_INSERTCLIPART:  return "Alt+K";
+    case WP_ACT_FILE_MERGE:           return "Alt+M";
+    case WP_ACT_TOOLS_INSERTFIELD:    return "Alt+I";
+    case WP_ACT_FORMAT_STYLE:         return "Alt+S";
+    case WP_ACT_FORMAT_DEFINESTYLE:   return "Alt+Y";
+    case WP_ACT_TOOLS_INSERTFOOTNOTE: return "Alt+N";
+    case WP_ACT_FORMAT_COLUMNS:       return "Alt+L";
+    default: break;
+    }
+    a = wp_action_find(id);
+    if (a == NULL || a->key_hint_utf8 == NULL) return "";
+    if ((wp_keymap_id)g_ctx.keymap_id == WP_KEYMAP_VI) return a->key_hint_utf8;
+    if ((wp_keymap_id)g_ctx.keymap_id == WP_KEYMAP_MSWORD) {
+        switch (id) {
+        case WP_ACT_FILE_OPEN: case WP_ACT_FILE_SAVE:
+        case WP_ACT_EDIT_CUT: case WP_ACT_EDIT_COPY: case WP_ACT_EDIT_PASTE:
+        case WP_ACT_FORMAT_BOLD: case WP_ACT_FORMAT_ITALIC: case WP_ACT_FORMAT_UNDERLINE:
+            return a->key_hint_utf8;
+        case WP_ACT_EDIT_UNDO:
+            return "Ctrl+Z";
+        default: break;
+        }
+    }
+    return "";
+}
+
+static void dos_menubar_init(void)
+{
+    wp_menubar_build(&g_menubar, k_dos_menu_groups, k_dos_menu_titles, DOS_MENU_TITLE_COUNT,
+                     dos_menu_label);
+}
+
+/* A label with its letter picked out, from col; `width` cells in all,
+   padded with spaces. */
+static void dos_draw_label(int row, int col, int width, const char *label, u8 letter,
+                           unsigned char attr, unsigned char letter_attr)
+{
+    int i;
+    wp_bool past = WP_FALSE;
+
+    for (i = 0; i < width && col + i < DOS_SCREEN_COLS; i++) {
+        char ch = ' ';
+
+        if (!past && label[i] != '\0') ch = label[i];
+        else past = WP_TRUE;
+        put_char(row, col + i, ch, (!past && (u8)i == letter) ? letter_attr : attr);
+    }
+}
+
+/* The top row: the titles, the lit one inverted; then, at the right, the
+   document's file -- with a '*' while there are unsaved changes (T21.1)
+   -- and the Help key. */
+static void dos_draw_menubar(void)
+{
+    char right[DOS_SCREEN_COLS + 1];
+    char name[DOS_SCREEN_COLS + 1];
+    u32 t;
+    int end = 0, n, rc;
+
+    for (n = 0; n < DOS_SCREEN_COLS; n++) put_char(DOS_TITLE_ROW, n, ' ', DOS_ATTR_TITLE);
+    for (t = 0; t < g_menubar.title_count; t++) {
+        const wp_menubar_title *ti = &g_menubar.titles[t];
+        wp_bool lit = (wp_bool)(g_menubar.mode != (u8)WP_MENUBAR_CLOSED && g_menubar.title == t);
+        int len = (int)strlen(ti->label);
+
+        if (lit) put_char(DOS_TITLE_ROW, ti->col - 1, ' ', DOS_ATTR_LIT);
+        dos_draw_label(DOS_TITLE_ROW, ti->col, len + (lit ? 1 : 0), ti->label, ti->letter,
+                       lit ? DOS_ATTR_LIT : DOS_ATTR_TITLE, lit ? DOS_ATTR_LIT_LETTER : DOS_ATTR_LETTER);
+        end = ti->col + len + 1;
+    }
+    wp_action_title_name(&g_ctx, name, sizeof(name));
+    right[0] = '\0';
+    strcat(right, name);
+    if (!wp_keymap_claims_f1((wp_keymap_id)g_ctx.keymap_id)) {
+        if (right[0] != '\0') strcat(right, "   ");
+        strcat(right, "F1=Help");
+    }
+    n = (int)strlen(right);
+    rc = DOS_SCREEN_COLS - 1 - n;            /* one cell short of the edge */
+    if (rc < end + 2) {                      /* a long name: its end shows */
+        int cut = end + 2 - rc;
+        if (cut >= n) return;
+        memmove(right, right + cut, (size_t)(n - cut + 1));
+        rc = end + 2;
+    }
+    draw_string(DOS_TITLE_ROW, rc, right, DOS_ATTR_TITLE);
+}
+
 static void redraw_screen(void)
 {
     plat_window *win;
@@ -1006,38 +1135,10 @@ static void redraw_screen(void)
 
     dos_mouse_show(WP_FALSE);
     clear_rows(DOS_TITLE_ROW, DOS_SCREEN_ROWS - 1, DOS_ATTR_NORMAL);
-    {
-        /* This line used to hardcode "Ctrl+Q: Quit" for every keymap. It
-           was only ever true for vi (which reaches WP_ACT_FILE_QUIT
-           through its shortcut fallback) and, since WP_MSACTION_QUIT, for
-           msword. Under wordstar Ctrl+Q is a PREFIX key, emacs quits with
-           Ctrl+X Ctrl+C, and wordperfect with F7 -- so the single hint
-           this backend shows was actively wrong for three of the five
-           schemes, on the one backend that has no menu bar to fall back
-           on when the advertised key does nothing. */
-        static char title[DOS_SCREEN_COLS + 1];
-        int n = 0;
-        const char *p;
-
-        for (p = WP_APP_NAME " -- DOS (F1: Help, "; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
-        for (p = quit_key_hint(); *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
-        for (p = ": Quit)"; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
-        /* The document's file, so the writer knows where Save goes, with
-           a '*' while there are unsaved changes (T21.1). */
-        {
-            char name[DOS_SCREEN_COLS + 1];
-
-            wp_action_title_name(&g_ctx, name, sizeof(name));
-            if (name[0] != '\0') {
-                for (p = "  "; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
-                for (p = name; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
-            }
-        }
-        while (n < DOS_SCREEN_COLS) title[n++] = ' ';
-        title[n] = '\0';
-
-        draw_string(DOS_TITLE_ROW, 0, title, DOS_ATTR_TITLE);
-    }
+    /* The menu bar. Its title row used to name the program and the one
+       quit key, because the menus it now holds did not exist; Exit's key
+       for the scheme in use is in the File menu (quit_key_hint). */
+    dos_draw_menubar();
 
     if (plat_window_create((const u8 *)"", 0, 0, 0, &win) != WP_OK) return;
     plat_window_get_gc(win, &gc);
@@ -1481,6 +1582,214 @@ static void invoke_action(wp_action_id id)
     }
 }
 
+/* -- The menus, while they are up ----------------------------------- */
+
+/* The screen under the menus, kept while they are up and put back as
+   each one moves or closes: every cell, character and attribute. */
+static unsigned char __far g_menu_under[DOS_SCREEN_COLS * DOS_SCREEN_ROWS * 2];
+
+static void dos_screen_keep(void)
+{
+    dos_video_ptr v = video_mem();
+    unsigned i;
+
+    for (i = 0; i < (unsigned)sizeof(g_menu_under); i++) g_menu_under[i] = v[i];
+}
+
+static void dos_screen_back(void)
+{
+    dos_video_ptr v = video_mem();
+    unsigned i;
+
+    for (i = 0; i < (unsigned)sizeof(g_menu_under); i++) v[i] = g_menu_under[i];
+}
+
+/* The open menu: a single-line box (code page 437's box drawing, which
+   every PC's character ROM has), its items, the lit one inverted, each
+   item's key at the right, and a rule over Exit. */
+static void dos_draw_dropdown(void)
+{
+    const wp_menubar_title *ti = &g_menubar.titles[g_menubar.title];
+    wp_menubar_box box;
+    int r, c, right, bottom;
+    u32 i;
+
+    wp_menubar_box_of(&g_menubar, g_menubar.title, dos_menu_hint, DOS_SCREEN_COLS, &box);
+    right = box.col + box.width - 1;
+    bottom = box.row + box.height - 1;
+    for (r = box.row; r <= bottom; r++) {
+        for (c = box.col; c <= right; c++) {
+            unsigned char ch = ' ';
+
+            if (r == box.row || r == bottom) {
+                ch = c == box.col ? (r == box.row ? 0xDA : 0xC0) :
+                     c == right   ? (r == box.row ? 0xBF : 0xD9) : 0xC4;
+            } else if (c == box.col || c == right) {
+                ch = 0xB3;
+            }
+            put_char(r, c, (char)ch, DOS_ATTR_TITLE);
+        }
+    }
+    for (i = 0; i < ti->count; i++) {
+        const wp_menubar_item *it = &g_menubar.items[ti->first + i];
+        int row = (int)wp_menubar_item_row(&g_menubar, g_menubar.title, i, &box);
+        wp_bool lit = (wp_bool)(g_menubar.mode == (u8)WP_MENUBAR_OPEN && g_menubar.item == i);
+        unsigned char a = lit ? DOS_ATTR_LIT : DOS_ATTR_TITLE;
+        const char *hint = dos_menu_hint((wp_action_id)it->action);
+
+        if (it->rule_before) {
+            put_char(row - 1, box.col, (char)0xC3, DOS_ATTR_TITLE);
+            for (c = box.col + 1; c < right; c++) put_char(row - 1, c, (char)0xC4, DOS_ATTR_TITLE);
+            put_char(row - 1, right, (char)0xB4, DOS_ATTR_TITLE);
+        }
+        put_char(row, box.col + 1, ' ', a);
+        dos_draw_label(row, box.col + 2, box.width - 3, it->label, it->letter, a,
+                       lit ? DOS_ATTR_LIT_LETTER : DOS_ATTR_LETTER);
+        if (hint != NULL && hint[0] != '\0') draw_string(row, box.hint_col, hint, a);
+    }
+}
+
+/* Alt pressed and let go with nothing in between lights the bar, as in
+   Edit. The BIOS gives no key for Alt alone, so the idle loop watches
+   the shift state; any key or click while it is held cancels it. */
+static wp_bool g_alt_down = WP_FALSE;
+static wp_bool g_alt_alone = WP_FALSE;
+
+static wp_bool dos_alt_tapped(void)
+{
+    if (get_shift_status() & 0x08) {
+        if (!g_alt_down) {
+            g_alt_down = WP_TRUE;
+            g_alt_alone = WP_TRUE;
+        }
+        return WP_FALSE;
+    }
+    if (g_alt_down) {
+        wp_bool tapped = g_alt_alone;
+
+        g_alt_down = WP_FALSE;
+        g_alt_alone = WP_FALSE;
+        return tapped;
+    }
+    return WP_FALSE;
+}
+
+/* The letter of an Alt+letter key, which the BIOS reports by its scan
+   code alone (no character): the three letter rows of a PC keyboard. */
+static u8 dos_alt_letter(u8 scan)
+{
+    static const char row_q[] = "QWERTYUIOP";
+    static const char row_a[] = "ASDFGHJKL";
+    static const char row_z[] = "ZXCVBNM";
+
+    if (scan >= 0x10 && scan <= 0x19) return (u8)row_q[scan - 0x10];
+    if (scan >= 0x1E && scan <= 0x26) return (u8)row_a[scan - 0x1E];
+    if (scan >= 0x2C && scan <= 0x32) return (u8)row_z[scan - 0x2C];
+    return 0;
+}
+
+/* Without a document, only what makes or finds one, Help, Settings and
+   Exit mean anything -- the same few the keyboard path lets through. */
+static wp_bool dos_menu_action_ok(wp_action_id id)
+{
+    if (g_ctx.doc_loaded) return WP_TRUE;
+    return (wp_bool)(id == WP_ACT_FILE_QUIT || id == WP_ACT_FILE_OPEN ||
+                     id == WP_ACT_FILE_SETTINGS || wp_action_help_node(id, NULL) != NULL);
+}
+
+/* The menus, from the bar lit (Alt, F10) or a menu open (Alt+letter, a
+   click on a title), until something is chosen or they are left; then
+   the screen as it was, and the choice run. WP_TRUE to quit. */
+static wp_bool dos_menu_run(void)
+{
+    u8 chosen = 0xFF;
+
+    /* The driver counts hides and shows: every hide here is matched, or
+       the pointer stays gone after the menus close. Hidden while the
+       screen is kept, so its block is not kept with it. */
+    dos_mouse_show(WP_FALSE);
+    dos_screen_keep();
+    dos_mouse_show(WP_TRUE);
+    /* Entered by Alt+letter, Alt is still down: letting it go is not a tap. */
+    g_alt_down = (wp_bool)((get_shift_status() & 0x08) != 0);
+    g_alt_alone = WP_FALSE;
+    while (g_menubar.mode != (u8)WP_MENUBAR_CLOSED) {
+        int col, row;
+
+        dos_mouse_show(WP_FALSE);
+        dos_screen_back();
+        dos_draw_menubar();
+        if (g_menubar.mode == (u8)WP_MENUBAR_OPEN) dos_draw_dropdown();
+        move_cursor(DOS_SCREEN_ROWS, 0);          /* off the screen while the menus are up */
+        dos_mouse_show(WP_TRUE);
+        for (;;) {
+            if (key_waiting()) {
+                unsigned char ascii, scan;
+                u8 shift;
+                wp_key_event ev;
+
+                read_key(&ascii, &scan);
+                g_alt_alone = WP_FALSE;
+                shift = get_shift_status();
+                if (ascii == 0 && scan == 0x44) {  /* F10 again: leave */
+                    wp_menubar_close(&g_menubar);
+                    break;
+                }
+                ev = dos_translate_key(ascii, scan, shift);
+                if (ascii == 0 && (shift & 0x08)) {
+                    u8 l = dos_alt_letter(scan);
+                    if (l != 0) ev.codepoint = l;
+                }
+                {
+                    wp_menubar_outcome o = wp_menubar_feed(&g_menubar, ev);
+                    if (o.result == (u8)WP_MENUBAR_CHOSEN) chosen = o.action;
+                }
+                break;
+            }
+            if (dos_mouse_pressed(&col, &row)) {
+                g_alt_alone = WP_FALSE;
+                if (row == DOS_TITLE_ROW) {
+                    i32 t = wp_menubar_title_at(&g_menubar, (u32)col);
+                    if (t < 0 || (g_menubar.mode == (u8)WP_MENUBAR_OPEN && g_menubar.title == (u8)t)) {
+                        wp_menubar_close(&g_menubar);
+                    } else {
+                        wp_menubar_open(&g_menubar, (u32)t);
+                    }
+                } else if (g_menubar.mode == (u8)WP_MENUBAR_OPEN) {
+                    wp_menubar_box box;
+                    i32 i;
+
+                    wp_menubar_box_of(&g_menubar, g_menubar.title, dos_menu_hint, DOS_SCREEN_COLS, &box);
+                    i = wp_menubar_item_at(&g_menubar, g_menubar.title, &box, (u32)col, (u32)row);
+                    if (i >= 0) {
+                        chosen = g_menubar.items[g_menubar.titles[g_menubar.title].first + (u32)i].action;
+                        wp_menubar_close(&g_menubar);
+                    } else if (col < box.col || col >= box.col + box.width ||
+                               row < box.row || row >= box.row + box.height) {
+                        wp_menubar_close(&g_menubar);   /* outside: leave */
+                    }
+                } else {
+                    wp_menubar_close(&g_menubar);
+                }
+                break;
+            }
+            if (dos_alt_tapped()) {                /* Alt again: leave */
+                wp_menubar_close(&g_menubar);
+                break;
+            }
+            dos_idle();
+        }
+    }
+    dos_mouse_show(WP_FALSE);
+    dos_screen_back();
+    dos_mouse_show(WP_TRUE);
+    if (chosen != 0xFF && dos_menu_action_ok((wp_action_id)chosen)) {
+        invoke_action((wp_action_id)chosen);
+        return g_ctx.quit_requested;
+    }
+    return WP_FALSE;
+}
+
 /* Opens the help viewer at the named node (falling back to node 0) --
    mirrors platform/atari/app_shell.c's own open_help_node exactly. */
 /* The manual is parsed when Help opens and freed when it closes. Held
@@ -1616,6 +1925,21 @@ static wp_bool dos_dispatch_key(void)
     read_key(&ascii, &scan);
     shift = get_shift_status();
     ev = dos_translate_key(ascii, scan, shift);
+    g_alt_alone = WP_FALSE;               /* Alt held for a key: not a tap */
+
+    /* The menu bar: Alt+a title's letter opens that menu, F10 lights the
+       bar -- unless the scheme has F10 for itself (WordPerfect's Save),
+       when Alt alone does. Before the Alt+letter shortcuts below, which
+       give way to it. */
+    if (!g_help_active && ascii == 0) {
+        if (shift & 0x08) {
+            u8 l = dos_alt_letter(scan);
+            if (l != 0 && wp_menubar_open_letter(&g_menubar, l)) return dos_menu_run();
+        } else if (scan == 0x44 && !wp_keymap_claims_f10((wp_keymap_id)g_ctx.keymap_id)) {
+            wp_menubar_toggle(&g_menubar);
+            return dos_menu_run();
+        }
+    }
 
     /* Shift+F7 is Print, as in WordPerfect for DOS -- the print key a DOS
        writer reaches for, and one DOS itself never claims, where Ctrl+P
@@ -1630,24 +1954,22 @@ static wp_bool dos_dispatch_key(void)
        no keymap here reads; R is not one of Emacs's meta keys (b, f, d,
        w, <, >, {, }, %), should Alt ever be wired to meta. */
     if (!g_help_active && ascii == 0 && (shift & 0x08) &&
-        (scan == 0x13 || scan == 0x14 || scan == 0x25 || scan == 0x32 || scan == 0x17 ||
-         scan == 0x1F || scan == 0x15 || scan == 0x31 || scan == 0x26 || scan == 0x12 ||
-         scan == 0x18)) {
-        /* Alt+T, Table..., likewise; Alt+K, Insert Clipart; Alt+M, Mail
-           Merge; Alt+I, Insert Field; Alt+S, Style; Alt+Y, Define Style;
-           Alt+N, Insert Footnote; Alt+L, Columns; Alt+E, Envelope;
-           Alt+O, Settings (Options) -- DOS has no menu bar, and none of
-           these is an Emacs meta key either. */
+        (scan == 0x13 || scan == 0x25 || scan == 0x32 || scan == 0x17 ||
+         scan == 0x1F || scan == 0x15 || scan == 0x31 || scan == 0x26)) {
+        /* Alt+K, Insert Clipart; Alt+M, Mail Merge; Alt+I, Insert Field;
+           Alt+S, Style; Alt+Y, Define Style; Alt+N, Insert Footnote;
+           Alt+L, Columns -- keys from before the menu bar, kept because
+           they are quicker than a menu and no title's letter is one of
+           them (none is an Emacs meta key either). Table (Alt+T),
+           Envelope (Alt+E) and Settings (Alt+O) gave theirs up to the
+           Tools, Edit and Format menus' letters, and are on those menus. */
         const wp_action *act = wp_action_find(scan == 0x13 ? WP_ACT_FORMAT_BORDERS :
-                                              scan == 0x14 ? WP_ACT_FORMAT_TABLE :
                                               scan == 0x32 ? WP_ACT_FILE_MERGE :
                                               scan == 0x17 ? WP_ACT_TOOLS_INSERTFIELD :
                                               scan == 0x1F ? WP_ACT_FORMAT_STYLE :
                                               scan == 0x15 ? WP_ACT_FORMAT_DEFINESTYLE :
                                               scan == 0x31 ? WP_ACT_TOOLS_INSERTFOOTNOTE :
-                                              scan == 0x26 ? WP_ACT_FORMAT_COLUMNS :
-                                              scan == 0x12 ? WP_ACT_TOOLS_ENVELOPE :
-                                              scan == 0x18 ? WP_ACT_FILE_SETTINGS : WP_ACT_TOOLS_INSERTCLIPART);
+                                              scan == 0x26 ? WP_ACT_FORMAT_COLUMNS : WP_ACT_TOOLS_INSERTCLIPART);
         if (g_ctx.doc_loaded && act != NULL && act->handler != NULL) {
             (void)act->handler(&g_ctx);
             redraw_screen();
@@ -1832,6 +2154,7 @@ void app_shell_run(void)
         wp_settings_apply(&g_ctx);
         g_ctx.view.line_px = dos_line_rows;
     }
+    dos_menubar_init();
 
     load_sample_document(dos_col_to_twips(DOS_SCREEN_COLS));
     /* The last run ended with work unsaved -- a crash, a reset, the
@@ -1876,7 +2199,20 @@ void app_shell_run(void)
         if (key_waiting()) {
             quit = dos_dispatch_key();
         } else if (dos_mouse_pressed(&col, &row)) {
-            dos_click(col, row);
+            g_alt_alone = WP_FALSE;
+            if (row == DOS_TITLE_ROW && !g_help_active) {
+                /* A click on a title opens its menu. */
+                i32 t = wp_menubar_title_at(&g_menubar, (u32)col);
+                if (t >= 0) {
+                    wp_menubar_open(&g_menubar, (u32)t);
+                    quit = dos_menu_run();
+                }
+            } else {
+                dos_click(col, row);
+            }
+        } else if (dos_alt_tapped() && !g_help_active) {
+            wp_menubar_toggle(&g_menubar);
+            quit = dos_menu_run();
         } else {
             /* Autosave (autosave.h) looks while nothing is happening;
                a failure it reports is a dialog over the screen. */
@@ -2235,11 +2571,10 @@ wp_bool wp_dos_config_selfcheck(void)
    scheme. */
 wp_bool wp_dos_menu_selfcheck(void)
 {
-    /* Every action DOS wires by shortcut. Menu-only actions on the other
-       three backends (Spell/Thesaurus/Grammar/Chat, Help Contents) are
-       deliberately absent -- DOS reaches Help via F1 and the rest not at
-       all, a documented gap, not an oversight. Insert Image is here
-       precisely because it was given a real Ctrl+G for this reason. */
+    /* Every action DOS also wires by shortcut. Everything in a menu on
+       the other ports -- Spell, Thesaurus, Grammar, Chat, Settings, Help
+       included -- is in the menu bar (T21.5); wp_menubar_selfcheck below
+       proves it, with this screen's hints and size. */
     static const wp_action_id reachable[] = {
         WP_ACT_FILE_OPEN, WP_ACT_FILE_SAVE, WP_ACT_FILE_QUIT,
         WP_ACT_EDIT_CUT, WP_ACT_EDIT_COPY, WP_ACT_EDIT_PASTE,
@@ -2252,6 +2587,21 @@ wp_bool wp_dos_menu_selfcheck(void)
     u32 i;
 
     if (!wp_menu_model_selfcheck()) return WP_FALSE;
+    dos_menubar_init();
+    for (i = 0; i < (u32)WP_KEYMAP_COUNT; i++) {
+        wp_bool ok;
+
+        saved_keymap = g_ctx.keymap_id;
+        g_ctx.keymap_id = (u8)i;          /* the hints differ by scheme */
+        ok = wp_menubar_selfcheck(&g_menubar, dos_menu_hint, DOS_SCREEN_COLS, DOS_SCREEN_ROWS);
+        g_ctx.keymap_id = saved_keymap;
+        if (!ok) return WP_FALSE;
+    }
+    /* The titles' letters, which the Alt shortcuts must not take. */
+    if (!wp_menubar_open_letter(&g_menubar, 'F') || g_menubar.title != 0) return WP_FALSE;
+    if (!wp_menubar_open_letter(&g_menubar, 'O') ||
+        g_menubar.titles[g_menubar.title].group != (u8)WP_MENU_FORMAT) return WP_FALSE;
+    wp_menubar_close(&g_menubar);
 
     for (i = 0; i < reachable_count; i++) {
         const wp_action *act = wp_action_find(reachable[i]);

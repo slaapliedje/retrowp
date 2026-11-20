@@ -2405,8 +2405,8 @@ merge picked because Atari Works documents already carry merge fields).
       workstation), which takes the same loop.
 
 M18 done: letters, labels and long lists, from any CSV. (Found in M19:
-DOS has no menu bar, so Mail Merge and Insert Field were unreachable
-there until Alt+M and Alt+I.)
+DOS had no menu bar, so Mail Merge and Insert Field were unreachable
+there until Alt+M and Alt+I; T21.5 gave it one.)
 
 ---
 
@@ -3088,17 +3088,65 @@ through it in cloud or network storage.
       TOS 1.04 (Hatari), DOSBox, System 7.5.3 (BasiliskII) and Kickstart
       3.1 + MUI (amiberry): opened, edited, OK wrote the configuration
       file, Cancel left it. Not yet: the Mac's Standard File does not
-      start in the documents folder. Found on the way, not fixed (also
-      in the T21.3 build): on TOS 1.04 under Hatari, stepping the
-      keyboard mouse from the File title into its dropdown switches to
-      a one-row Desk menu and the AES stops taking input.
-- [ ] T21.5 DOS menu bar.
+      start in the documents folder. Found on the way (also in the T21.3
+      build): on TOS 1.04 under Hatari, stepping the keyboard mouse from
+      the File title into its dropdown switched to a one-row Desk menu.
+      Not Hatari: a menu tree bug, fixed in T21.5 (below).
+- [x] T21.5 DOS menu bar.
       AC: a text-mode menu bar in the DOS convention (MS-DOS Edit, Works
       for DOS): Alt or F10 highlights it, Alt+letter opens a menu, the
       mouse opens it by clicking the top row; every action the other
       ports have in their menus is reachable (Spell, Thesaurus, Grammar,
       Chat, Settings included). The direct Alt+letter shortcuts that
       clash move.
+      Done (2026-11-20): platform/common/menubar.c is the model -- the
+      menus folded from g_wp_actions[] by group as the Amiga and Mac do
+      (so wp_menubar_selfcheck can prove every menu action is in it),
+      Quit last under a rule (DOS calls it Exit), each menu's letters
+      picked so none repeats (File F, Edit E, View V, Format o, Tools T,
+      Help H), the keys and clicks, and the boxes' cells; the DOS shell
+      draws it on the top row (the program's name and its one quit key
+      gave way; the document's name and F1=Help stay at the right) with
+      code page 437 boxes, keeping the screen under them. Alt pressed
+      and let go (the BIOS has no key for it, so the idle loop watches
+      the shift state) or F10 lights the bar -- not F10 under
+      WordPerfect, whose Save it is (wp_keymap_claims_f10); Alt+letter
+      opens a menu; arrows, Home/End, Enter, an item's letter, Esc; a
+      click on a title opens it, on an item chooses it, elsewhere
+      leaves. Beside each item, the key that really does it under the
+      scheme in use: vi's (the registry's), Word's own few, DOS's Alt
+      and Shift+F7 keys, the scheme's quit chord; none guessed for the
+      others. Alt+T (Table), Alt+E (Envelope) and Alt+O (Settings) gave
+      way to the titles' letters and are on the menus; Alt+R, K, M, I,
+      S, Y, N, L stay. Tests: 5 host tests (contents, letters, keys,
+      clicks, boxes kept on screen) and the DOS menu selfcheck under all
+      five schemes. Shown in DOSBox: Alt, F10, Alt+O/Alt+F, arrows,
+      File > Settings by its letter, a click on Help and on its item,
+      Exit by x. Found on the way, not fixed (also in the build before
+      this): the first time Help opens after start-up on DOS, only its
+      selected link is drawn; every later opening draws the whole page.
+      Fixed alongside, on the ST: tos-47 found every menu title opening
+      the Desk menu under a black bar (TOS 3.06 and 5, any GDOS; the
+      one-row Desk menu of T21.4's note). The AES finds the title under
+      the pointer with ob_find(tree, THEACTIVE, 1, ...), which answers
+      THEACTIVE itself for a point in it but in no title, and menu
+      tracking then takes object 2 for a title: the whole bar inverted,
+      the box 2 - THEACTIVE - 1 along -- Desk's. The titles were hcell
+      tall in an active area hcell + 3 tall and the screen wide. Now, as
+      RCSMENU.C's fix_menu_bar() lays out every RSC menu, each title is
+      hcell + 3 tall and the active area is as wide as the titles; the
+      tree selfcheck checks the titles cover it. Shown under TOS 1.04:
+      the pointer 9 px below File turned the bar black with Desk's menu
+      on the old build, and keeps File open on the new.
+      And from the same TOS 5 run: the character sheet's bottom row
+      seemed to run into "NORMAL  Page 1 of 1". It did not -- the status
+      line repaints its strip after the text -- but the view's last row,
+      cut where the strip begins, sat against it with nothing between:
+      the strip's grey is white on a monochrome screen. The ST status
+      line now draws a rule along its top. On the way, the redraw's
+      clip, which was the AES's rectangle alone, also keeps the text and
+      pictures (blits, which vs_clip does not stop) to the document area,
+      for repaints the status line does not follow.
 - [ ] T21.6 Storing on the Pi.
       AC: protocol operations to store, list and fetch a document; the
       gateway keeps each machine's documents with the last N versions,

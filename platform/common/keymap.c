@@ -840,3 +840,9 @@ wp_bool wp_keymap_claims_f1(wp_keymap_id id)
        bind no function keys at all. */
     return (id == WP_KEYMAP_WORDPERFECT) ? WP_TRUE : WP_FALSE;
 }
+
+wp_bool wp_keymap_claims_f10(wp_keymap_id id)
+{
+    /* WordPerfect's F10 is Save (wordperfect.c); no other scheme binds it. */
+    return (id == WP_KEYMAP_WORDPERFECT) ? WP_TRUE : WP_FALSE;
+}

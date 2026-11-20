@@ -8,6 +8,12 @@ commands, not typed text, until you press "i" to start typing.
 With a mouse, a click puts the caret where you clicked and a
 Shift+click selects from the caret to there.
 
+On DOS the top row is the menu bar: press and let go of Alt, or
+press F10, to light it (F10 is Save under the WordPerfect keys,
+so there use Alt), or hold Alt and press a menu's bright letter
+-- Alt+F for File. Arrows move, Enter or an item's bright letter
+chooses, Esc leaves. A click on a menu's name opens it.
+
 Pick a topic:
 
 {Normal Mode|Normal}
@@ -189,7 +195,7 @@ the mouse. Its buttons, left to right:
               or a column put in after yours or yours taken out.
               Tab moves to the next cell, adding a row after the
               last; Shift+Tab to the one before. Enter makes a new
-              paragraph in the same cell. On DOS: Alt+T)
+              paragraph in the same cell)
 
 Font lists the typefaces this machine has: the GDOS fonts on
 the ST, the fonts in FONTS: on the Amiga, the installed fonts on
@@ -211,7 +217,7 @@ a centimetre round it, and page view draws the disc's edge and its
 hole so you can see the printable ring. Paper and margins belong
 to the section the caret is in.
 
-Envelope (Tools menu; Alt+E on DOS) asks the envelope's size,
+Envelope (Tools menu) asks the envelope's size,
 then the address -- the paragraphs you have selected are offered,
 their lines split by | -- and the return address (RetroWP
 remembers the last one). The envelope goes in before the document
@@ -416,7 +422,7 @@ Amiga and the Mac.
 @endnode
 
 @node Settings "Settings"
-File > Settings (Alt+O on DOS) changes, in one dialog:
+File > Settings changes, in one dialog:
 
   Documents folder   where Open and Save start for a new document
                      (not yet on the Mac)

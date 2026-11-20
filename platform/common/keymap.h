@@ -51,6 +51,11 @@ typedef enum {
    (WP_KEY_HELP) that no scheme competes for. */
 wp_bool wp_keymap_claims_f1(wp_keymap_id id);
 
+/* Does this scheme bind plain F10 itself? WordPerfect does (Save). On
+   DOS, F10 otherwise lights the menu bar (T21.5), as it does in MS-DOS
+   Edit and Works; under WordPerfect the bar is Alt's alone. */
+wp_bool wp_keymap_claims_f10(wp_keymap_id id);
+
 typedef union {
     wp_vimode_state vi;
     wp_wordstar_state ws;

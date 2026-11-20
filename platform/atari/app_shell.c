@@ -398,7 +398,7 @@ static char *const g_menu_title_text[] = {
    each title loses its trailing space (" Desk"), which needs 38: the
    leading space still separates one title from the next, so the bar
    reads the same, only tighter. */
-static void wp_menu_titles_fit(short wcell, short screen_w_px)
+static void wp_menu_titles_fit(short wcell, short hcell, short screen_w_px)
 {
     short i, n, cols = 0;
 
@@ -413,14 +413,31 @@ static void wp_menu_titles_fit(short wcell, short screen_w_px)
         }
     }
 
+    /* The titles TILE the active area: each as tall as it (hcell + 3,
+       RCSMENU.C's fix_menu_bar(), "be sure!"), and the active area
+       exactly as wide as the titles together. The AES finds the title
+       under the pointer with ob_find(tree, THEACTIVE, 1, ...), which
+       answers THEACTIVE ITSELF -- not NIL -- for a point inside it but
+       in no title. menu tracking (GEMMNLIB.C) then takes object 2 for a
+       title: it inverts the whole bar and walks 2 - THEACTIVE - 1 boxes
+       to a dropdown, which is Desk's. With titles hcell tall in an
+       active area hcell + 3 tall and the full screen wide, the strip
+       under the titles and the bar right of Help did exactly that: the
+       pointer moving from a title down into its menu crossed the strip,
+       and the bar went black with the Desk menu under it (tos-47 found
+       it on TOS 3.06 and 5, 2026-11-20; under Hatari it had looked
+       like a wedge). */
     cols = 0;
     for (i = 0; i < WP_MENU_TITLE_COUNT; i++) {
         OBJECT *t = &wp_menu_tree[WP_MENU_OBJ_DESK_TITLE + i];
         n = (short)strlen(g_menu_title_text[i]);
-        t->ob_x     = (short)(cols * wcell);
-        t->ob_width = (short)(n * wcell);
+        t->ob_x      = (short)(cols * wcell);
+        t->ob_y      = 0;
+        t->ob_width  = (short)(n * wcell);
+        t->ob_height = (short)(hcell + 3);
         cols = (short)(cols + n);
     }
+    wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_width = (short)(cols * wcell);
 }
 
 /* What wp_menu_tree_init was last given. The placement selfcheck below
@@ -539,7 +556,7 @@ void wp_menu_tree_init(short wcell, short hcell,
     wp_menu_tree[WP_MENU_OBJ_ROOT].ob_height = screen_h_px;
 
     wp_menu_tree[WP_MENU_OBJ_BAR].ob_width = screen_w_px;
-    wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_width = screen_w_px;
+    /* ACTIVE's width is the titles' together: wp_menu_titles_fit. */
 
     /* The dropdowns hang from the bottom of the active area, hcell + 3
        pixels down -- where every RCS-built menu puts them (an RSC file
@@ -564,7 +581,7 @@ void wp_menu_tree_init(short wcell, short hcell,
     wp_menu_tree[WP_MENU_OBJ_BAR].ob_height    = (short)(hcell + 2);
     wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_height = (short)(hcell + 3);
 
-    wp_menu_titles_fit(wcell, screen_w_px);
+    wp_menu_titles_fit(wcell, hcell, screen_w_px);
 
     /* Now clamp every dropdown onto the screen. Titles and boxes are
        paired in menu-bar order; see wp_menu_dropdown_x above for why
@@ -820,6 +837,23 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_x <
         wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_x +
         wp_menu_tree[WP_MENU_OBJ_FORMAT_TITLE].ob_width) TREE_FAIL();
+
+    /* The titles tile the active area, edge to edge and top to bottom,
+       so every point of it is in a title (wp_menu_titles_fit says what
+       happens otherwise). Only once init has laid them out. */
+    if (g_menu_wcell > 0) {
+        short t;
+
+        if (wp_menu_tree[WP_MENU_OBJ_DESK_TITLE].ob_x != 0) TREE_FAIL();
+        for (t = WP_MENU_OBJ_DESK_TITLE; t <= WP_MENU_OBJ_HELP_TITLE; t++) {
+            if (wp_menu_tree[t].ob_y != 0) TREE_FAIL();
+            if (wp_menu_tree[t].ob_height != wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_height) TREE_FAIL();
+            if (t > WP_MENU_OBJ_DESK_TITLE &&
+                wp_menu_tree[t].ob_x != wp_menu_tree[t - 1].ob_x + wp_menu_tree[t - 1].ob_width) TREE_FAIL();
+        }
+        if (wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_x + wp_menu_tree[WP_MENU_OBJ_HELP_TITLE].ob_width !=
+            wp_menu_tree[WP_MENU_OBJ_ACTIVE].ob_width) TREE_FAIL();
+    }
 
     /* And the last title must end on screen: off the right edge, the VDI
        wraps it back over Desk (ST low resolution, before
@@ -1431,7 +1465,7 @@ static void atari_invert_rect(VdiHdl vdi, i32 x, i32 y, i32 w, i32 h)
 static wp_screenline g_atari_sl;
 static wp_screen_fonts g_atari_sfonts;
 
-static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
+static void paint_document(short window_handle, VdiHdl vdi, GRECT area, const short *clip)
 {
     atari_gc gc;
     u16 sl_k = 0;   /* the next screenline word to look for */
@@ -1459,7 +1493,11 @@ static void paint_document(short window_handle, VdiHdl vdi, GRECT area)
     memset(&gc, 0, sizeof(gc));   /* every field, now and later */
     gc.vdi = vdi;
     gc.window_handle = window_handle;
-    gc.clip_on = 0;   /* set where a blit must keep to a redraw rectangle */
+    /* A picture is a blit, which vs_clip does not stop: it keeps to the
+       caller's clip -- the redraw rectangle and the document area --
+       itself, or one at the foot of the page lands on the status line. */
+    gc.clip_on = 1;
+    gc.clip[0] = clip[0]; gc.clip[1] = clip[1]; gc.clip[2] = clip[2]; gc.clip[3] = clip[3];
     have_sel = wp_keymap_selection(&g_ctx, &sel);
     /* A frame sits beside the text; a later line's strip, cleared
        behind it as each line is drawn, would wipe the frame away. With
@@ -4206,6 +4244,12 @@ static void paint_status_line_body(short window_handle, VdiHdl vdi, GRECT full_w
                              (i32)(pxy[2] - pxy[0] + 1), bar_h_px, &view);
         plat_font_close(font);
     }
+    /* A rule along its top. The bar's grey is white on a monochrome
+       screen, and without a line the document's last row -- cut where
+       the bar begins, as the view's last row always is -- read as text
+       run into the status line (tos-47, TOS 5 and 3.06 on a TT's
+       640x400). */
+    plat_fill_rect((plat_gc *)&gc, (i32)pxy[0], (i32)pxy[1], (i32)(pxy[2] - pxy[0] + 1), 1, 0, 0, 0);
 
     vs_clip(vdi, 0, pxy);
 }
@@ -4516,8 +4560,27 @@ static void redraw_window(short window_handle, VdiHdl vdi)
            above the text, so the writer sees the answer before the
            document finishes repainting under it. */
         if (r.g_y < doc_area.g_y) paint_rulerbar(window_handle, vdi, work, pxy);
-        if (g_ctx.page_view && g_ctx.doc_loaded) paint_page_view(window_handle, vdi, doc_area, r);
-        else paint_document(window_handle, vdi, doc_area);
+        if (g_ctx.page_view && g_ctx.doc_loaded) {
+            paint_page_view(window_handle, vdi, doc_area, r);
+        } else {
+            /* The text keeps to the document area as well as to the
+               rectangle: its last line is a whole line, usually taller
+               than what is left above the status line, and without this
+               it ran on into the status line's strip, which is drawn
+               after without clearing what is under its text (tos-47,
+               TOS 5, the character sheet's last table row). */
+            short dxy[4];
+
+            dxy[0] = pxy[0] > doc_area.g_x ? pxy[0] : doc_area.g_x;
+            dxy[1] = pxy[1] > doc_area.g_y ? pxy[1] : doc_area.g_y;
+            dxy[2] = pxy[2] < doc_area.g_x + doc_area.g_w - 1 ? pxy[2] : (short)(doc_area.g_x + doc_area.g_w - 1);
+            dxy[3] = pxy[3] < doc_area.g_y + doc_area.g_h - 1 ? pxy[3] : (short)(doc_area.g_y + doc_area.g_h - 1);
+            if (dxy[2] >= dxy[0] && dxy[3] >= dxy[1]) {
+                vs_clip(vdi, 1, dxy);
+                paint_document(window_handle, vdi, doc_area, dxy);
+                vs_clip(vdi, 1, pxy);
+            }
+        }
         wind_get_grect(window_handle, WF_NEXTXYWH, &r);
     }
     vs_clip(vdi, 0, pxy);

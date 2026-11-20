@@ -525,6 +525,12 @@ void test_autosave_off_and_after_a_save(void);
 void test_autosave_failure_keeps_the_last_copy(void);
 void test_autosave_recovered_document_is_caught_up(void);
 void test_autosave_config_setting(void);
+/* test_menubar.c */
+void test_menubar_has_every_menu_action_once(void);
+void test_menubar_keys_walk_and_choose(void);
+void test_menubar_letters_open_and_choose(void);
+void test_menubar_clicks_land_on_items(void);
+void test_menubar_boxes_stay_on_screen(void);
 /* test_settings.c */
 void test_settings_ok_applies_and_writes_the_config(void);
 void test_settings_cancel_changes_nothing(void);
@@ -1348,6 +1354,11 @@ static const test_case g_cases[] = {
     { "settings_data_file_joins_the_folder", test_settings_data_file_joins_the_folder },
     { "settings_backup_keeps_the_previous_copy", test_settings_backup_keeps_the_previous_copy },
     { "settings_config_keys", test_settings_config_keys },
+    { "menubar_has_every_menu_action_once", test_menubar_has_every_menu_action_once },
+    { "menubar_keys_walk_and_choose", test_menubar_keys_walk_and_choose },
+    { "menubar_letters_open_and_choose", test_menubar_letters_open_and_choose },
+    { "menubar_clicks_land_on_items", test_menubar_clicks_land_on_items },
+    { "menubar_boxes_stay_on_screen", test_menubar_boxes_stay_on_screen },
     { "recovery_discard_keeps_the_copy_until_the_document_goes", test_recovery_discard_keeps_the_copy_until_the_document_goes },
     { "recovery_quit_discarding_drops_the_copy", test_recovery_quit_discarding_drops_the_copy },
     { "pagecanvas_fit_and_stack", test_pagecanvas_fit_and_stack },
