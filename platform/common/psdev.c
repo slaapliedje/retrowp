@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <string.h>
 #include "psdev.h"
+#include "appname.h"
 #include "devout.h"
 #include "pageprint.h"
 #include "strpool.h"
@@ -62,7 +63,7 @@ static void put_rgb(ps_out *o, u8 r, u8 g, u8 b)
 /* The prolog: the twelve standard faces re-encoded to Latin-1, and the
    few procedures the pages use. */
 static const char *const g_prolog[] = {
-    "%!PS-Adobe-3.0\n%%Creator: RetroWP\n%%Pages: (atend)\n%%EndComments\n",
+    "%!PS-Adobe-3.0\n%%Creator: " WP_APP_NAME "\n%%Pages: (atend)\n%%EndComments\n",
     "%%BeginProlog\n",
     /* Latin-1 where the printer lacks it (an early level 1 one):
        StandardEncoding with its upper half */

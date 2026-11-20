@@ -630,7 +630,7 @@ static wp_status act_insert_clipart(wp_app_ctx *ctx)
     memcpy(path, ctx->clipart_dir, dl);
     memcpy(path + dl, "CLIPART.TXT", 12);
     if (plat_file_open(path, PLAT_FILE_READ, &f) != WP_OK) {
-        wp_action_tell(ctx, "The CLIPART folder isn't beside RetroWP");
+        wp_action_tell(ctx, "Couldn't find the CLIPART folder");
         return WP_OK;
     }
     text = (char *)mem_alloc(WP_CLIPART_TEXT + 1u);

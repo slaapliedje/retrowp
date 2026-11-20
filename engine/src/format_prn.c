@@ -6,6 +6,7 @@
 #include "platform.h"
 #include "utf8.h"
 #include "drawing.h"
+#include "appname.h"
 
 /* The widest line this lays out: 25.5 inches at 10 cpi, past any paper
    a character printer feeds. A wider page is printed this wide. */
@@ -197,7 +198,7 @@ static void drv_begin_doc(prn_state *s)
         break;
     case WP_PRN_POSTSCRIPT: {
         long size = 1200L / (long)s->cpi;                        /* tenths of a point */
-        put_str(s, "%!PS-Adobe-3.0\n%%Creator: RetroWP\n%%EndComments\n"
+        put_str(s, "%!PS-Adobe-3.0\n%%Creator: " WP_APP_NAME "\n%%EndComments\n"
                    "/RE { findfont dup length dict begin "
                    "{ 1 index /FID ne { def } { pop pop } ifelse } forall "
                    "/Encoding ISOLatin1Encoding def currentdict end definefont pop } bind def\n"

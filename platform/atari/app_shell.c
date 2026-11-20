@@ -39,6 +39,7 @@
 #include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "appname.h"
 #include "cisummary.h"
 #include "pageview.h"
 #include "pageprint.h"
@@ -320,7 +321,7 @@ static WP_AES_NEAR char g_text_help_format[] = "  Format Keys";
    write through the pointer already there). Kept as writable static
    buffers anyway rather than string literals -- that repoint-not-write
    behavior was only confirmed for EmuTOS, not real TOS's own AES. */
-static WP_AES_NEAR char g_text_desk_about[] = "  About RetroWP...";
+static WP_AES_NEAR char g_text_desk_about[] = "  About " WP_APP_NAME "...";
 static WP_AES_NEAR char g_text_desk_sep[]   = "  ----------------";
 static char g_text_desk_dummy1[32];
 static char g_text_desk_dummy2[32];
@@ -1247,7 +1248,7 @@ static const i32 g_font_sizes_twips[] = { 160, 200, 240, 280, 360, 480, 720 };
 #define WP_FONT_SIZE_COUNT (sizeof(g_font_sizes_twips) / sizeof(g_font_sizes_twips[0]))
 
 static const char g_sample_text[] =
-    "This is RetroWP, the portable word processor engine, running on "
+    "This is " WP_APP_NAME ", the portable word processor engine, running on "
     "a real Atari ST under Hatari. Word wrap and on-screen rendering "
     "are driven entirely through the platform.h VDI metrics seam -- "
     "the engine itself has never heard of GEM.\n"
@@ -2214,13 +2215,13 @@ static wp_bool atari_pick_path(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap
    pointer, so `title` is static and only rewritten when it changes. */
 static void atari_show_document_name(void)
 {
-    static char title[48];
+    static char title[WP_APP_NAME_LEN + 3 + 40];   /* name, " - ", the document's */
     char name[40];
-    char want[48];
+    char want[WP_APP_NAME_LEN + 3 + 40];
 
     if (g_window_handle < 0) return;
     wp_action_title_name(&g_ctx, name, sizeof(name));
-    strcpy(want, "RetroWP");
+    strcpy(want, WP_APP_NAME);
     if (name[0] != '\0') {
         strcat(want, " - ");
         strcat(want, name);
@@ -5566,7 +5567,7 @@ wp_bool wp_dispatch_message(short window_handle, VdiHdl vdi, short msg[8])
         img_src.user = NULL;
         if (wp_action_term_request(&g_ctx, &img_src)) return WP_TRUE;
         atari_refuse_ap_term();
-        wp_action_tell(&g_ctx, "Couldn't keep a copy of your changes, so RetroWP did not quit. Save them, then try again.");
+        wp_action_tell(&g_ctx, "Couldn't keep a copy of your changes, so " WP_APP_NAME " did not quit. Save them, then try again.");
         redraw_window(window_handle, vdi);
         return WP_FALSE;
     }
@@ -5915,7 +5916,7 @@ static wp_bool atari_offer_medium(void)
         return WP_FALSE;
     }
     if (atari_aes_changes_rez()) {
-        if (form_alert(1, FA_QUESTION "[Screen is under 80 columns.|Switch to Medium resolution?|RetroWP closes: start it|again afterwards.][Medium|Stay]") != 1)
+        if (form_alert(1, FA_QUESTION "[Screen is under 80 columns.|Switch to Medium resolution?|" WP_APP_NAME " closes: start it|again afterwards.][Medium|Stay]") != 1)
             return WP_FALSE;
         return (wp_bool)(shel_write(SWM_REZCHANGE, WP_ATARI_WSID_ST_MEDIUM, 0, "", "") != 0);
     }
@@ -6087,7 +6088,7 @@ void app_shell_run(void)
     window_handle = wind_create_grect(NAME | MOVER | CLOSER | SIZER | VSLIDE | UPARROW | DNARROW |
                                       HSLIDE | LFARROW | RTARROW, &desk);   /* across: page view */
     g_window_handle = window_handle;
-    wind_set_str(window_handle, WF_NAME, "RetroWP");
+    wind_set_str(window_handle, WF_NAME, WP_APP_NAME);
     wind_open_grect(window_handle, &desk);
 
     graf_mouse(ARROW, (const MFORM *)0);

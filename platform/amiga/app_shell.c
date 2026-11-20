@@ -39,6 +39,7 @@
 #include "config.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "appname.h"
 #include "recovery.h"
 #include "autosave.h"
 #include "settings.h"
@@ -244,7 +245,7 @@ static wp_bool           g_help_active = WP_FALSE;
 static i32 g_content_width_twips = 0;
 
 static const char g_sample_text[] =
-    "RetroWP on Amiga (M9 T9.1b)\n"
+    WP_APP_NAME " on Amiga (M9 T9.1b)\n"
     "\n"
     "This is a real MUI Application/Window with a working menu,\n"
     "built by folding platform/common/actions.c's g_wp_actions[]\n"
@@ -338,7 +339,7 @@ static wp_bool run_asl_file_requester(wp_bool save_mode, char *out_path, u32 out
        one with a NULL base is a wild jump, not a failed call -- this
        guard is the whole reason the library can safely be optional. */
     if (AslBase == NULL) {
-        MUI_Request(g_app, g_win, 0, (CONST_STRPTR)"RetroWP",
+        MUI_Request(g_app, g_win, 0, (CONST_STRPTR)WP_APP_NAME,
                      (CONST_STRPTR)"OK",
                      (CONST_STRPTR)"asl.library is not available on this system,\n"
                                     "so the file requester cannot be opened.\n"
@@ -390,7 +391,7 @@ static void amiga_show_document_name(void)
     static char name[WP_APP_PATH_MAX];
 
     wp_action_title_name(&g_ctx, name, sizeof(name));
-    strcpy(want, "RetroWP");
+    strcpy(want, WP_APP_NAME);
     if (name[0] != '\0') {
         strcat(want, " - ");
         strcat(want, name);
@@ -2314,7 +2315,7 @@ wp_status plat_dialog_choice(plat_window *parent,
     }
     body[pos] = '\0';
 
-    result = MUI_Request(g_app, g_win, 0, (CONST_STRPTR)"RetroWP",
+    result = MUI_Request(g_app, g_win, 0, (CONST_STRPTR)WP_APP_NAME,
                           (CONST_STRPTR)gadgets, (CONST_STRPTR)body);
     if (result <= 0) {
         if (out_cancelled) *out_cancelled = WP_TRUE;
@@ -2596,16 +2597,16 @@ void app_shell_run(void)
     menustrip = build_menustrip();
 
     g_app = ApplicationObject,
-        MUIA_Application_Title,       (IPTR)"RetroWP",
-        MUIA_Application_Version,     (IPTR)"$VER: RetroWP 0.9 (M9)",
-        MUIA_Application_Copyright,   (IPTR)"RetroWP contributors",
-        MUIA_Application_Author,      (IPTR)"RetroWP contributors",
+        MUIA_Application_Title,       (IPTR)WP_APP_NAME,
+        MUIA_Application_Version,     (IPTR)"$VER: " WP_APP_NAME " 0.9 (M9)",
+        MUIA_Application_Copyright,   (IPTR)WP_APP_NAME " contributors",
+        MUIA_Application_Author,      (IPTR)WP_APP_NAME " contributors",
         MUIA_Application_Description, (IPTR)"Portable word processor -- Amiga/MUI backend",
         MUIA_Application_Base,        (IPTR)"RETROWP",
         MUIA_Application_Menustrip,   (IPTR)menustrip,
 
         SubWindow, g_win = WindowObject,
-            MUIA_Window_Title, (IPTR)"RetroWP",
+            MUIA_Window_Title, (IPTR)WP_APP_NAME,
             MUIA_Window_ID,    MAKE_ID('R','W','P','1'),
             /* Real, empirically-found bug (M9 Phase 6, see
                editor_handleevent's own comment for how this was

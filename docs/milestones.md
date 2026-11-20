@@ -3136,6 +3136,32 @@ rendering.
       port, and its PDF made by T22.1; anything that got in the way of
       writing it is filed as a bug. Later, the help pager's text from
       the same source.
+
+## M23 — RetrWrks: the Suite
+Goal: RetrWrks is the suite, in the line of Atari Works and AppleWorks
+(eight letters, so it fits 8.3 everywhere). Its programs keep names of
+their own -- RetroWP (the word processor, M0-M22), RetroSS (spreadsheet),
+RetroDB (database) -- and RetrWrks itself is the launcher that asks what
+you want to make. engine/include/appname.h holds the shown names and the
+"RetroWP" strings that are file-format tags, never to be renamed.
+
+- [ ] T23.1 RetroSS, the spreadsheet. To be planned: what it shares with
+      RetroWP (retroplat, platform/common, the offload link, printing
+      through pageprint) and what is its own (the cell model, recalc,
+      a file format beside Atari Works' spreadsheet).
+- [ ] T23.2 RetroDB, the database. To be planned the same way.
+- [ ] T23.3 The launcher.
+      AC: RETRWRKS.PRG (.EXE, and the Amiga's and Mac's own) opens a
+      small native dialog: New Document, New Spreadsheet, New Database,
+      Open..., Quit. Each starts that program the machine's own way and
+      gets out of its memory first where only one program runs at a
+      time -- on plain TOS, shel_write and exit so the AES runs it next;
+      DOS, exec and exit; the Amiga, a new process from the launcher's
+      own folder; the Mac, Launch. Open... picks the program by the
+      file's kind (RetroWP for .TXT/.RTF/.STW/..., the others for
+      theirs). A program that is not installed beside the launcher is
+      shown as missing and says so, not started blind. Shown on TOS 1.04
+      at 1MB with nothing left resident, and on each other machine.
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)

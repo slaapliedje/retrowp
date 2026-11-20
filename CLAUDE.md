@@ -1,6 +1,13 @@
-# CLAUDE.md — RetroWP
+# CLAUDE.md — RetrWrks / RetroWP
 
 ## What This Project Is
+RetrWrks is the suite (Atari Works / AppleWorks lineage; eight letters, fits
+8.3). Its programs have their own names: RetroWP (the word processor, all of
+this repo today), RetroSS (spreadsheet) and RetroDB (database) to come, and
+RetrWrks itself is to be the launcher that asks which kind of new file you
+want. `engine/include/appname.h` holds the shown names and lists the
+"RetroWP" strings that are file-format tags, not names.
+
 RetroWP: an open-source, portable word processor for vintage platforms, built
 around a platform-independent core engine written in strict, portable C.
 The name fits 8.3 filename limits on every vintage target (`RETROWP.PRG`,

@@ -26,6 +26,7 @@
 #include "keymap.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "appname.h"
 #include "recovery.h"
 #include "autosave.h"
 #include "settings.h"
@@ -262,7 +263,7 @@ static i32 g_ui_scale = 1;
 static i32 g_content_width_twips = 0;
 
 static const char g_sample_text[] =
-    "RetroWP on Mac Classic (M12 Phase 2)\n"
+    WP_APP_NAME " on Mac Classic (M12 Phase 2)\n"
     "\n"
     "This is a real Toolbox window with a working menu bar, built by\n"
     "folding platform/common/actions.c's g_wp_actions[] over Menu\n"
@@ -491,13 +492,13 @@ static wp_bool mac_pick_path(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
    set only when it changed. */
 static void mac_show_document_name(void)
 {
-    static char shown[64];
+    static char shown[WP_APP_NAME_LEN + 3 + 54];
     char name[54];
-    char title[64];
+    char title[WP_APP_NAME_LEN + 3 + 54];   /* name, " - ", the document's */
     unsigned char ptitle[256];
 
     wp_action_title_name(&g_ctx, name, sizeof(name));
-    strcpy(title, "RetroWP");
+    strcpy(title, WP_APP_NAME);
     if (name[0] != '\0') {
         strcat(title, " - ");
         strcat(title, name);

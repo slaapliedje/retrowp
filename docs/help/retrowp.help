@@ -438,7 +438,8 @@ there the next time; Cancel changes nothing.
 
 @node About "About RetroWP"
 RetroWP is an open-source, portable word processor for vintage
-platforms. Its core editing engine is written in strict,
+platforms, and the first part of RetrWrks, an office suite in the
+line of Atari Works and AppleWorks. Its core editing engine is written in strict,
 portable C, with zero platform-specific calls anywhere in the
 engine itself -- the same engine runs unchanged on an Atari ST,
 inside this help viewer, and in this project's own automated

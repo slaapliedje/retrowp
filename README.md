@@ -1,4 +1,17 @@
-# RetroWP
+# RetrWrks
+
+An office suite for vintage computers, in the line of Atari Works and
+AppleWorks. The name is eight letters, so it fits 8.3 on every machine it
+runs on. Each program in it has its own name:
+
+| program | what | state |
+|---|---|---|
+| **RetroWP** | word processor | runs on all four machines (this README) |
+| RetroSS | spreadsheet | planned |
+| RetroDB | database | planned |
+| RetrWrks | the launcher: a new document, spreadsheet or database? | planned |
+
+## RetroWP
 
 An open-source, portable word processor for vintage platforms, built around
 a single, platform-independent document model written in strict, portable

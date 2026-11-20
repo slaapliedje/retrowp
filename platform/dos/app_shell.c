@@ -18,6 +18,7 @@
 #include "offload.h"
 #include "app_ctx.h"
 #include "actions.h"
+#include "appname.h"
 #include "recovery.h"
 #include "autosave.h"
 #include "settings.h"
@@ -429,7 +430,7 @@ static wp_help_view_state g_help_view;
 static wp_bool             g_help_active = WP_FALSE;
 
 static const char g_sample_text[] =
-    "This is RetroWP, the portable word processor engine, running on "
+    "This is " WP_APP_NAME ", the portable word processor engine, running on "
     "real 16-bit DOS under Open Watcom. Word wrap and on-screen "
     "rendering are driven entirely through the platform.h metrics seam "
     "-- the engine itself has never heard of INT 10h or INT 16h.\n"
@@ -1018,7 +1019,7 @@ static void redraw_screen(void)
         int n = 0;
         const char *p;
 
-        for (p = "RetroWP -- DOS (F1: Help, "; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
+        for (p = WP_APP_NAME " -- DOS (F1: Help, "; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
         for (p = quit_key_hint(); *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
         for (p = ": Quit)"; *p && n < DOS_SCREEN_COLS; p++) title[n++] = *p;
         /* The document's file, so the writer knows where Save goes, with
