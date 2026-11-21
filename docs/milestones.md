@@ -3122,9 +3122,15 @@ through it in cloud or network storage.
       clicks, boxes kept on screen) and the DOS menu selfcheck under all
       five schemes. Shown in DOSBox: Alt, F10, Alt+O/Alt+F, arrows,
       File > Settings by its letter, a click on Help and on its item,
-      Exit by x. Found on the way, not fixed (also in the build before
-      this): the first time Help opens after start-up on DOS, only its
-      selected link is drawn; every later opening draws the whole page.
+      Exit by x. Found on the way (also in the build before this), and
+      fixed after: on DOS, Help sometimes showed only its selected link.
+      It was never the first opening: the whole page BLINKED. Help is
+      filled white, retroplat's draw_dos.c took the nearest of all 16
+      colours for a background, and with the BIOS's blink attribute on,
+      bit 7 of 0xF0 is blink, not a bright background. A screenshot in the
+      off phase showed only the link, whose grey fill (7) does not blink.
+      Backgrounds now come from the eight every adapter shows (turning
+      blink off is EGA/VGA only); eight frames at 130 ms hold steady.
       Fixed alongside, on the ST: tos-47 found every menu title opening
       the Desk menu under a black bar (TOS 3.06 and 5, any GDOS; the
       one-row Desk menu of T21.4's note). The AES finds the title under
