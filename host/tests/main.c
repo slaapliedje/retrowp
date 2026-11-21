@@ -611,6 +611,8 @@ void test_paginate_no_leaks(void);
 
 /* undo.c */
 void test_undo_insert_then_undo_then_redo(void);
+void test_undo_typing_lengthens_one_run(void);
+void test_undo_detach_typed_then_undo_redo(void);
 void test_undo_insert_mid_run_out_of_memory_keeps_the_text(void);
 void test_undo_group_out_of_memory_never_walks_off_the_stack(void);
 
@@ -764,6 +766,7 @@ void test_format_rtf_import_no_leaks(void);
 
 /* format_rtf_export.c */
 void test_format_rtf_export_reports_size_on_overflow(void);
+void test_format_rtf_export_same_format_runs_share_a_group(void);
 void test_format_rtf_roundtrip_plain_text(void);
 void test_format_rtf_roundtrip_full_attribute_set(void);
 
@@ -1427,6 +1430,8 @@ static const test_case g_cases[] = {
     { "paginate_no_leaks", test_paginate_no_leaks },
 
     { "undo_insert_then_undo_then_redo", test_undo_insert_then_undo_then_redo },
+    { "undo_typing_lengthens_one_run", test_undo_typing_lengthens_one_run },
+    { "undo_detach_typed_then_undo_redo", test_undo_detach_typed_then_undo_redo },
     { "undo_insert_mid_run_out_of_memory_keeps_the_text", test_undo_insert_mid_run_out_of_memory_keeps_the_text },
     { "undo_group_out_of_memory_never_walks_off_the_stack", test_undo_group_out_of_memory_never_walks_off_the_stack },
     { "style_range_bolds_a_word_in_the_middle", test_style_range_bolds_a_word_in_the_middle },
@@ -1571,6 +1576,7 @@ static const test_case g_cases[] = {
     { "format_rtf_import_no_leaks", test_format_rtf_import_no_leaks },
 
     { "format_rtf_export_reports_size_on_overflow", test_format_rtf_export_reports_size_on_overflow },
+    { "format_rtf_export_same_format_runs_share_a_group", test_format_rtf_export_same_format_runs_share_a_group },
     { "format_rtf_roundtrip_plain_text", test_format_rtf_roundtrip_plain_text },
     { "format_rtf_roundtrip_full_attribute_set", test_format_rtf_roundtrip_full_attribute_set },
 

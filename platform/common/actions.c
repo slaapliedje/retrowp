@@ -282,13 +282,19 @@ void wp_action_after_key(wp_app_ctx *ctx, wp_pos before, wp_bool inserted_char)
         wp_char_style want;
         wp_cstyle handle;
 
-        /* insert_span_at_pos's contract: after.run is the new run. */
+        /* after.run holds what was just typed -- with the text before it,
+           when typing lengthened the run (wp_edit_type_text), so that
+           is split off first: only the new character takes the format. */
         if (cur != NULL) {
             want = *cur;
             want.flags = ctx->style_flags;
             if (ctx->current_size_twips > 0) want.size_twips = ctx->current_size_twips;
             want.font = ctx->current_font;
-            if (wp_document_cstyle_find_or_add(ctx->doc, &want, &handle) == WP_OK) {
+            if (wp_document_cstyle_find_or_add(ctx->doc, &want, &handle) == WP_OK &&
+                handle != run->style &&
+                wp_edit_detach_typed(ctx->doc, ctx->journal, wp_keymap_cursor(ctx)) == WP_OK) {
+                after = *wp_keymap_cursor(ctx);
+                para = wp_section_paragraph_get(sec, after.paragraph);
                 wp_run_cstyle_set(para, (u16)after.run, handle);
                 para->layout_dirty = WP_TRUE;
             }
@@ -3434,6 +3440,7 @@ static wp_bool choose_printer(wp_app_ctx *ctx)
         {
             const u8 *cptrs[5];
             u32 clens[5], i, c = 0, ccount = picked == 1 ? driver_count : 3u, dflt = 0;
+            wp_status st_choice;
 
             for (i = 0; i < ccount; i++) {
                 const char *t = picked == 1 ? printer_name(ctx, driver_of[i]) : sides[i];
@@ -3442,9 +3449,14 @@ static wp_bool choose_printer(wp_app_ctx *ctx)
                 if (picked == 1 ? driver_of[i] == ctx->printer_driver : i == ctx->printer_sides) dflt = i;
             }
             cancelled = WP_TRUE;
-            if (plat_dialog_choice(ctx->window, (const u8 *)(picked == 1 ? "Printer" : "Two-sided"),
-                                   picked == 1 ? 7u : 9u, cptrs, clens, ccount, dflt,
-                                   &cancelled, &c) == WP_OK && !cancelled) {
+            st_choice = plat_dialog_choice(ctx->window, (const u8 *)(picked == 1 ? "Printer" : "Two-sided"),
+                                           picked == 1 ? 7u : 9u, cptrs, clens, ccount, dflt,
+                                           &cancelled, &c);
+            /* Between two dialogs, so nothing is up: the Printer list is
+               taller than the Print box drawn next, and its title and
+               buttons stayed round it until the job (tos-47, TOS 5). */
+            if (ctx->repaint != NULL) ctx->repaint(ctx);
+            if (st_choice == WP_OK && !cancelled) {
                 if (picked == 1) ctx->printer_driver = driver_of[c];
                 else ctx->printer_sides = (u8)c;
                 if (ctx->config_path != NULL) {
@@ -3486,6 +3498,7 @@ static wp_status print_here(wp_app_ctx *ctx)
     wp_status st;
 
     if (ctx->printer_choosable && !choose_printer(ctx)) return WP_OK;
+    if (ctx->repaint != NULL) ctx->repaint(ctx);   /* the dialogs gone before the job starts */
 
     if (ctx->printer_driver == WP_PRINTER_PAGES && ctx->print_pages != NULL) {
         u32 copy, total = 0;

@@ -230,3 +230,32 @@ void test_rtf_borders_round_trip(void)
     wp_document_free(&back);
     wp_document_free(&doc);
 }
+
+/* Neighbouring runs in one format are one group: typing and undo leave
+   them (docs/editing.md), and a group each made the recovery file a
+   group per keystroke. */
+void test_format_rtf_export_same_format_runs_share_a_group(void)
+{
+    wp_document doc;
+    u8 buf[512];
+    u32 needed, sec_idx, para_idx;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_span a, b;
+    u16 ri;
+
+    ASSERT_TRUE(wp_document_init(&doc) == WP_OK);
+    ASSERT_TRUE(wp_document_section_add(&doc, &sec_idx) == WP_OK);
+    sec = wp_document_section_get(&doc, sec_idx);
+    ASSERT_TRUE(wp_section_paragraph_add(sec, &para_idx) == WP_OK);
+    para = wp_section_paragraph_get(sec, para_idx);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"ab", 2, &a) == WP_OK);
+    ASSERT_TRUE(wp_strpool_append(&doc.strings, (const u8 *)"cd", 2, &b) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, a, doc.default_cstyle, &ri) == WP_OK);
+    ASSERT_TRUE(wp_paragraph_run_add(para, b, doc.default_cstyle, &ri) == WP_OK);
+
+    ASSERT_TRUE(format_rtf_export(&doc, buf, sizeof(buf) - 1, &needed) == WP_OK);
+    buf[needed] = '\0';
+    ASSERT_TRUE(strstr((const char *)buf, " abcd}") != NULL);
+    wp_document_free(&doc);
+}

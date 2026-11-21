@@ -381,6 +381,7 @@ void test_msword_ctrl_letter_action_bindings(void)
     ASSERT_TRUE(feed_full(&vs, 'c', (u8)WP_MOD_CTRL) == WP_MSACTION_COPY);
     ASSERT_TRUE(feed_full(&vs, 'x', (u8)WP_MOD_CTRL) == WP_MSACTION_CUT);
     ASSERT_TRUE(feed_full(&vs, 'v', (u8)WP_MOD_CTRL) == WP_MSACTION_PASTE);
+    ASSERT_TRUE(feed_full(&vs, 'p', (u8)WP_MOD_CTRL) == WP_MSACTION_PRINT);   /* typed into the text, on TOS 5 */
 
     wp_undo_journal_free(&journal);
     wp_document_free(&doc);

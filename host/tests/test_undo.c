@@ -671,3 +671,137 @@ void test_undo_group_out_of_memory_never_walks_off_the_stack(void)
         wp_document_free(&doc);
     }
 }
+
+static void type_str(wp_document *doc, wp_undo_journal *journal, wp_pos *cursor, const char *s)
+{
+    for (; *s != '\0'; s++) {
+        wp_pos out;
+        ASSERT_TRUE(wp_edit_type_text(doc, journal, *cursor, (const u8 *)s, 1, &out) == WP_OK);
+        *cursor = out;
+    }
+}
+
+static wp_paragraph *one_para_doc(wp_document *doc, wp_undo_journal *journal, const char *text)
+{
+    u32 sec_idx, para_idx;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_span span;
+    u16 run_idx;
+
+    if (wp_document_init(doc) != WP_OK) return NULL;
+    wp_undo_journal_init(journal);
+    if (wp_document_section_add(doc, &sec_idx) != WP_OK) return NULL;
+    sec = wp_document_section_get(doc, sec_idx);
+    if (wp_section_paragraph_add(sec, &para_idx) != WP_OK) return NULL;
+    para = wp_section_paragraph_get(sec, para_idx);
+    if (wp_strpool_append(&doc->strings, (const u8 *)text, (u32)strlen(text), &span) != WP_OK) return NULL;
+    if (wp_paragraph_run_add(para, span, doc->default_cstyle, &run_idx) != WP_OK) return NULL;
+    return para;
+}
+
+/* Typing makes the run before the caret longer, not a run per key (a
+   recovery file was one RTF group per keystroke, and the ST paid ten
+   bytes of run for each byte typed); each key still undoes and redoes
+   on its own. */
+void test_undo_typing_lengthens_one_run(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_paragraph *para;
+    wp_pos cursor, out;
+    char buf[64];
+    u32 i;
+
+    para = one_para_doc(&doc, &journal, "Hello");
+    ASSERT_TRUE(para != NULL);
+    memset(&cursor, 0, sizeof(cursor));
+    cursor.offset = 5;
+    type_str(&doc, &journal, &cursor, " world");
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "Hello world");
+    ASSERT_EQ_U32(para->run_count, 1);
+    ASSERT_EQ_U32(cursor.run, 0);
+    ASSERT_EQ_U32(cursor.offset, 11);
+
+    /* An insert that is not typing keeps its run of its own: notes.c and
+       the armed input style restyle out_pos->run straight after. */
+    ASSERT_TRUE(wp_edit_insert_text(&doc, &journal, cursor, (const u8 *)"!", 1, &out) == WP_OK);
+    ASSERT_EQ_U32(para->run_count, 2);
+    ASSERT_EQ_U32(out.run, 1);
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_EQ_U32(para->run_count, 1);
+
+    for (i = 0; i < 6; i++) {
+        ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+        ASSERT_EQ_U32(para_text_length(para), 10u - i);
+    }
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "Hello");
+    ASSERT_EQ_U32(para->run_count, 1);
+    for (i = 0; i < 6; i++) ASSERT_TRUE(wp_edit_redo(&doc, &journal) == WP_OK);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "Hello world");
+    ASSERT_EQ_U32(para->run_count, 1);
+
+    /* Mid-run, the first key splits as ever; the keys after it lengthen
+       the run it made. */
+    cursor.run = 0;
+    cursor.offset = 2;
+    type_str(&doc, &journal, &cursor, "XYZ");
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "HeXYZllo world");
+    ASSERT_EQ_U32(para->run_count, 3);
+    for (i = 0; i < 3; i++) ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "Hello world");
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}
+
+/* The armed input style (Bold with nothing selected) restyles only what
+   was typed: detach splits it off the run it lengthened. Redo has to
+   rebuild the runs the edits journaled after it name -- typed 'c',
+   detached, typed 'd' into c's run, all undone and redone. */
+void test_undo_detach_typed_then_undo_redo(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_paragraph *para;
+    wp_pos cursor;
+    char buf[64];
+
+    para = one_para_doc(&doc, &journal, "ab");
+    ASSERT_TRUE(para != NULL);
+    memset(&cursor, 0, sizeof(cursor));
+    cursor.offset = 2;
+    type_str(&doc, &journal, &cursor, "c");
+    ASSERT_EQ_U32(para->run_count, 1);
+    ASSERT_TRUE(wp_edit_detach_typed(&doc, &journal, &cursor) == WP_OK);
+    ASSERT_EQ_U32(para->run_count, 2);
+    ASSERT_EQ_U32(para->runs[0].text.length, 2);
+    ASSERT_EQ_U32(para->runs[1].text.length, 1);
+    ASSERT_EQ_U32(cursor.run, 1);
+    ASSERT_EQ_U32(cursor.offset, 1);
+    /* Already alone: nothing more. */
+    ASSERT_TRUE(wp_edit_detach_typed(&doc, &journal, &cursor) == WP_OK);
+    ASSERT_EQ_U32(para->run_count, 2);
+
+    type_str(&doc, &journal, &cursor, "d");
+    ASSERT_EQ_U32(para->run_count, 2);
+    ASSERT_EQ_U32(para->runs[1].text.length, 2);
+
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    ASSERT_TRUE(wp_edit_undo(&doc, &journal) == WP_OK);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "ab");
+    ASSERT_TRUE(wp_edit_redo(&doc, &journal) == WP_OK);
+    ASSERT_TRUE(wp_edit_redo(&doc, &journal) == WP_OK);
+    dump_para_text(&doc, para, buf);
+    ASSERT_EQ_STR(buf, "abcd");
+    ASSERT_EQ_U32(para->run_count, 2);
+
+    wp_undo_journal_free(&journal);
+    wp_document_free(&doc);
+}

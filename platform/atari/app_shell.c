@@ -2139,6 +2139,7 @@ static wp_bool ensure_offload(void)
 static void atari_image_sink_init(wp_image_sink *sink);
 
 static short g_window_handle = -1; /* the document window, for its title */
+static VdiHdl g_window_vdi;          /* its drawing handle, for atari_repaint */
 
 /* Where RetroWP lives: "X:\FOLDER\", the drive and folder it was started
    in (the desktop makes the program's folder current), read once before
@@ -4598,6 +4599,16 @@ static void redraw_window(short window_handle, VdiHdl vdi)
     atari_update_slider(window_handle);
 }
 
+/* wp_app_ctx.repaint: the window now, as its queued WM_REDRAWs would draw
+   it -- for printing, which starts as its dialogs close and would leave
+   their pieces on the screen until the job and its "Printed" alert were
+   done (tos-47, TOS 5). The queued redraws still come, and paint it again. */
+static void atari_repaint(wp_app_ctx *ctx)
+{
+    (void)ctx;
+    if (g_window_handle >= 0) redraw_window(g_window_handle, g_window_vdi);
+}
+
 /* Translates one AES key into a portable wp_key_event (M8.5) --
    evnt_multi's Key output packs the IKBD scan code in the high byte and
    the ASCII code (0 if the key has none) in the low byte; verified
@@ -6077,6 +6088,7 @@ void app_shell_run(void)
         }
 #endif
         g_ctx.view.line_px = atari_twips_to_px_y; /* the conversion paint_document advances y with */
+        g_ctx.repaint = atari_repaint;
     }
 
     /* The help manual is parsed when Help opens (help_doc_ensure). */
@@ -6151,6 +6163,7 @@ void app_shell_run(void)
     window_handle = wind_create_grect(NAME | MOVER | CLOSER | SIZER | VSLIDE | UPARROW | DNARROW |
                                       HSLIDE | LFARROW | RTARROW, &desk);   /* across: page view */
     g_window_handle = window_handle;
+    g_window_vdi = vdi_handle;
     wind_set_str(window_handle, WF_NAME, WP_APP_NAME);
     wind_open_grect(window_handle, &desk);
 
@@ -6171,6 +6184,11 @@ void app_shell_run(void)
         wp_recovery_answer ans;
 
         atari_image_sink_init(&sink);
+        /* The window's first WM_REDRAW waits for the event loop, so
+           behind the alert it would still be the desktop's colour (green
+           on an ST in Medium, tos-47 on TOS 5): drawn now, it is the
+           window the question is about. */
+        if (wp_recovery_pending(&g_ctx, NULL, 0, NULL)) redraw_window(window_handle, vdi_handle);
         ans = wp_recovery_offer(&g_ctx, &sink, saved, (u32)sizeof(saved));
         if (ans == WP_RECOVERY_RECOVERED) {
             g_start_file = NULL;

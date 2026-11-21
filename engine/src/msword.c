@@ -131,7 +131,7 @@ static void insert_char(wp_msword_state *vs, u32 codepoint)
 
     if (n > 0) {
         wp_pos out;
-        wp_edit_insert_text(vs->doc, vs->journal, vs->cursor, utf8_buf, n, &out);
+        wp_edit_type_text(vs->doc, vs->journal, vs->cursor, utf8_buf, n, &out);
         vs->cursor = out;
     }
 }
@@ -148,6 +148,7 @@ static wp_msword_action_kind handle_ctrl_letter(wp_msword_state *vs, wp_key_even
     case 'c': return WP_MSACTION_COPY;
     case 'x': return WP_MSACTION_CUT;
     case 'v': return WP_MSACTION_PASTE;
+    case 'p': return WP_MSACTION_PRINT;
     case 'f': /* Find -- see msword.h's own file comment */
         vs->prompt_is_replace = WP_FALSE;
         vs->find_len = 0;

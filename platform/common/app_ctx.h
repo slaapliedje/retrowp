@@ -90,6 +90,12 @@ typedef struct wp_app_ctx {
        NULL means the link is whatever offload_available() says. */
     wp_bool (*ensure_offload)(void);
 
+    /* Paint the window now, as the redraws it has queued would: for a
+       long job that starts as its dialogs close (printing), so their
+       pieces are not left on the screen until it ends. Only where no
+       dialog is still up. NULL: the backend's dialogs leave nothing. */
+    void (*repaint)(struct wp_app_ctx *ctx);
+
     /* Where the bundled clipart lives (T16.5): a path prefix the
        backend's file names go after -- "CLIPART\\" on the ST and DOS,
        "PROGDIR:CLIPART/" on the Amiga, ":CLIPART:" on the Mac. NULL: no

@@ -64,13 +64,25 @@ with `run_count` existing runs:
   text inherits run `R`'s style (obviously, since you're typing inside
   it).
 
-**Insert always creates exactly one new run for the inserted text** --
-it never extends or merges into an adjacent run, even when that would be
-possible (e.g. appending at a run's tail when the new bytes happen to
-land contiguously in the pool). This is a deliberate simplification:
-run-coalescing for typing efficiency is real future work (noted, not
-implemented), traded here for an implementation and undo story that's
-easy to get right. A mid-run insert therefore produces **two** new array
+**An insert creates exactly one new run for the inserted text** -- except
+typing. `wp_edit_insert_text` never extends or merges into an adjacent run,
+and callers rely on that: `notes.c` and the armed input style restyle
+`out_pos->run` straight after. `wp_edit_type_text` (M21, what every keymap
+types through) lengthens the run before the caret instead, when the new
+bytes follow that run's in the pool and take its format -- the ordinary
+case of typing on. Before this, a run per keystroke cost the ST ten bytes
+of run for every byte typed, and a recovery file one RTF group per key.
+
+Undo of an insert takes away the run that is exactly its span or, failing
+that, the tail of the run that ends with it; the journal is last-in,
+first-out, so the paragraph is always as the insert left it. The op's
+`style_after` is 1 for a typed insert, so redo lengthens again rather than
+making a run that later journaled edits do not know about.
+`wp_edit_detach_typed` splits the last typed text back off into a run of its
+own (and clears that flag, for the same reason) -- the armed input style's
+way of restyling only the character just typed.
+
+A mid-run insert therefore produces **two** new array
 entries: the inserted-text run, and a new run for the original run's
 tail (the original run's entry is shrunk in place to become the head).
 

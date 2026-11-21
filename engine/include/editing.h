@@ -246,6 +246,19 @@ void wp_undo_group_end(wp_undo_journal *journal);
 wp_status wp_edit_insert_text(wp_document *doc, wp_undo_journal *journal,
                                wp_pos pos, const u8 *utf8, u32 len,
                                wp_pos *out_pos);
+/* A typed character (or a few): the same, except that where the text
+   follows the run before it -- just typed into the pool, in the same
+   format -- that run is made longer instead of a new run made per
+   keystroke, and *out_pos names it. The keymaps type through this; an
+   insert whose caller then restyles out_pos->run uses wp_edit_insert_text. */
+wp_status wp_edit_type_text(wp_document *doc, wp_undo_journal *journal,
+                             wp_pos pos, const u8 *utf8, u32 len,
+                             wp_pos *out_pos);
+/* If the last journaled edit was typed text that lengthened a run, that
+   text is split off into a run of its own (undo and redo unchanged), and
+   *cursor (may be NULL) moved to follow it -- for a caller about to give
+   just the typed text another format. Nothing otherwise. */
+wp_status wp_edit_detach_typed(wp_document *doc, wp_undo_journal *journal, wp_pos *cursor);
 wp_status wp_edit_delete_range(wp_document *doc, wp_undo_journal *journal,
                                 u32 section, u32 paragraph, u16 run_index,
                                 u32 start_offset, u32 end_offset);

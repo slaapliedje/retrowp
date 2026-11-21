@@ -66,7 +66,8 @@ static wp_status unreference(wp_document *doc, wp_cstyle *style)
     return wp_document_cstyle_find_or_add(doc, &plain, style);
 }
 
-wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos *out_pos)
+static wp_status insert_span(wp_document *doc, wp_pos pos, wp_span span, wp_pos *out_pos,
+                             wp_bool typed)
 {
     wp_status st;
     wp_section *sec;
@@ -153,6 +154,23 @@ wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos 
     st = unreference(doc, &style);
     if (st != WP_OK) return st;
     para = &doc->sections[pos.section].paras[pos.paragraph];
+    if (typed && insert_index > 0) {
+        /* Typing: the bytes follow the run before them in the pool and
+           take its format, so they are that run's, made longer -- not a
+           run of their own per keystroke (see docs/editing.md). */
+        wp_run *prev = &para->runs[insert_index - 1];
+        if (prev->style == style && prev->text.offset + prev->text.length == span.offset) {
+            prev->text.length += span.length;
+            para->layout_dirty = WP_TRUE;
+            if (out_pos) {
+                out_pos->section = pos.section;
+                out_pos->paragraph = pos.paragraph;
+                out_pos->run = (u32)insert_index - 1u;
+                out_pos->offset = prev->text.length;
+            }
+            return WP_OK;
+        }
+    }
     st = run_insert_at(para, insert_index, span, style);
     if (st != WP_OK) return st;
 
@@ -163,6 +181,16 @@ wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos 
         out_pos->offset = span.length;
     }
     return WP_OK;
+}
+
+wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos *out_pos)
+{
+    return insert_span(doc, pos, span, out_pos, WP_FALSE);
+}
+
+wp_status insert_span_typed(wp_document *doc, wp_pos pos, wp_span span, wp_pos *out_pos)
+{
+    return insert_span(doc, pos, span, out_pos, WP_TRUE);
 }
 
 wp_status wp_document_insert_text_raw(wp_document *doc, wp_pos pos,
@@ -185,6 +213,19 @@ u16 find_run_by_span(const wp_paragraph *para, wp_span span)
     for (i = 0; i < para->run_count; i++) {
         if (para->runs[i].text.offset == span.offset &&
             para->runs[i].text.length == span.length) {
+            return i;
+        }
+    }
+    return para->run_count;
+}
+
+u16 find_run_ending_in_span(const wp_paragraph *para, wp_span span)
+{
+    u16 i;
+
+    for (i = 0; i < para->run_count; i++) {
+        const wp_span *t = &para->runs[i].text;
+        if (t->offset < span.offset && t->offset + t->length == span.offset + span.length) {
             return i;
         }
     }

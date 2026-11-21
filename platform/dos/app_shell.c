@@ -1034,7 +1034,8 @@ static const char *dos_menu_hint(wp_action_id id)
 
     switch (id) {
     case WP_ACT_FILE_QUIT:            return quit_key_hint();
-    case WP_ACT_FILE_PRINT:           return "Shift+F7";
+    case WP_ACT_FILE_PRINT:
+        return (wp_keymap_id)g_ctx.keymap_id == WP_KEYMAP_MSWORD ? "Ctrl+P" : "Shift+F7";
     case WP_ACT_HELP_CONTENTS:
         return wp_keymap_claims_f1((wp_keymap_id)g_ctx.keymap_id) ? "" : "F1";
     case WP_ACT_FORMAT_BORDERS:       return "Alt+R";

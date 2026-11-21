@@ -27,6 +27,13 @@ void run_remove_at(wp_paragraph *para, u16 index);
    re-appends duplicate bytes into the pool). */
 wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos *out_pos);
 
+/* The same, for typed text: where the span follows the run before it in
+   the pool and takes that run's format, that run is lengthened instead
+   of a new run made, and *out_pos names it. Only wp_edit_type_text (and
+   its redo) asks for this; every other insert keeps the contract that
+   out_pos->run is a run holding exactly the new text. */
+wp_status insert_span_typed(wp_document *doc, wp_pos pos, wp_span span, wp_pos *out_pos);
+
 /* Finds the run in para whose span exactly matches `span` (pool offsets
    are never reused -- append-only -- so this is unambiguous) and
    returns its index, or para->run_count if not found. Used by
@@ -35,6 +42,10 @@ wp_status insert_span_at_pos(wp_document *doc, wp_pos pos, wp_span span, wp_pos 
    (which doesn't apply cleanly to the already-mutated, post-insert
    paragraph -- see docs/editing.md). */
 u16 find_run_by_span(const wp_paragraph *para, wp_span span);
+
+/* The run whose text ENDS with `span` and starts before it -- typed text
+   that lengthened a run (insert_span_typed) -- or para->run_count. */
+u16 find_run_ending_in_span(const wp_paragraph *para, wp_span span);
 
 /* Same shape as run_insert_at/run_remove_at, one tree level up. Unlike a
    run (a POD -- span + style handle, owns no allocation), a removed

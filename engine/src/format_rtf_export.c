@@ -285,13 +285,22 @@ static void rtf_emit_header(rtf_writer *w, const wp_document *doc, const rtf_col
     }
 }
 
-static void rtf_emit_run(rtf_writer *w, const wp_document *doc, const wp_run *run,
-                          const rtf_color_table *ct)
+/* A run's text inside its group. */
+static void rtf_emit_run_text(rtf_writer *w, const wp_document *doc, const wp_run *run);
+
+/* Runs first.. that share first's format, as ONE group: typing and undo
+   leave neighbouring runs in the same format (docs/editing.md), and a
+   group each made a recovery file one group per keystroke. Answers the
+   run after the last one written. */
+static u16 rtf_emit_runs(rtf_writer *w, const wp_document *doc, const wp_paragraph *para,
+                         u16 first, const rtf_color_table *ct)
 {
+    const wp_run *run = &para->runs[first];
     const wp_char_style *cs = wp_document_cstyle_get(doc, run->style);
     u32 color_idx;
+    u16 ri;
 
-    if (cs == NULL) return;
+    if (cs == NULL) return (u16)(first + 1);
 
     rtf_write_str(w, "{");
     if (cs->font != 0) { rtf_write_str(w, "\\f"); rtf_write_i32(w, (i32)cs->font); }
@@ -307,6 +316,15 @@ static void rtf_emit_run(rtf_writer *w, const wp_document *doc, const wp_run *ru
     if (color_idx != 0) { rtf_write_str(w, "\\cf"); rtf_write_i32(w, (i32)color_idx); }
 
     rtf_write_str(w, " ");
+    for (ri = first; ri < para->run_count && para->runs[ri].style == run->style; ri++) {
+        rtf_emit_run_text(w, doc, &para->runs[ri]);
+    }
+    rtf_write_str(w, "}");
+    return ri;
+}
+
+static void rtf_emit_run_text(rtf_writer *w, const wp_document *doc, const wp_run *run)
+{
     {
         /* A merge field «Name» (merge.h) goes as a real MERGEFIELD, its
            shown result the «Name» itself -- as Word writes one, so Word
@@ -329,7 +347,6 @@ static void rtf_emit_run(rtf_writer *w, const wp_document *doc, const wp_run *ru
         }
         if (t != NULL) rtf_write_text(w, t + pos, run->text.length - pos);
     }
-    rtf_write_str(w, "}");
 }
 
 /* -- Image paragraphs ---------------------------------------------- */
@@ -557,7 +574,7 @@ static void rtf_emit_para_props(rtf_writer *w, const wp_para_style *ps)
 }
 
 /* A character format's words, for a stylesheet entry (a run writes its
-   own, in rtf_emit_run). */
+   own, in rtf_emit_runs). */
 static void rtf_emit_char_props(rtf_writer *w, const wp_char_style *cs, const rtf_color_table *ct)
 {
     u32 color_idx;
@@ -622,7 +639,7 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
            emit an empty paragraph and the picture would be gone. */
         rtf_emit_image(w, doc, para, src);
     } else {
-        for (ri = 0; ri < para->run_count; ri++) {
+        for (ri = 0; ri < para->run_count; ) {
             const wp_char_style *rcs = wp_document_cstyle_get(doc, para->runs[ri].style);
             if (rcs != NULL && rcs->note != 0) {
                 /* A footnote reference (notes.h): Word's own form, the
@@ -630,9 +647,10 @@ static void rtf_emit_paragraph(rtf_writer *w, const wp_document *doc, const wp_p
                    in the note itself, just the mark. */
                 rtf_write_str(w, "{\\super\\chftn}");
                 if (para->note == 0) rtf_emit_footnote(w, doc, rcs->note, ct, src);
+                ri++;
                 continue;
             }
-            rtf_emit_run(w, doc, &para->runs[ri], ct);
+            ri = rtf_emit_runs(w, doc, para, (u16)ri, ct);
         }
     }
 

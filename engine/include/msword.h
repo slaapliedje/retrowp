@@ -139,7 +139,8 @@ typedef enum {
     WP_MSACTION_PASTE,      /* Ctrl-V */
     WP_MSACTION_FORMAT_BOLD,      /* Ctrl-B */
     WP_MSACTION_FORMAT_ITALIC,    /* Ctrl-I */
-    WP_MSACTION_FORMAT_UNDERLINE  /* Ctrl-U */
+    WP_MSACTION_FORMAT_UNDERLINE, /* Ctrl-U */
+    WP_MSACTION_PRINT             /* Ctrl-P */
 } wp_msword_action_kind;
 
 /* doc/journal are borrowed, same convention every other scheme uses.

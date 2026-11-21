@@ -1648,6 +1648,11 @@ void test_actions_typed_text_keeps_its_neighbours_style_unless_armed(void)
         const wp_char_style *cs = run_style(&doc, (u16)at.run);
         ASSERT_TRUE(cs != NULL && (cs->flags & WP_STYLE_BOLD) != 0);
         ASSERT_EQ_U32(cs->font, courier);
+        /* Only what was typed: 'b' lengthened the 'a' typed before it
+           (wp_edit_type_text) and was split off before it was restyled. */
+        ASSERT_EQ_U32(at.offset, 2);
+        cs = run_style(&doc, (u16)(at.run - 1u));
+        ASSERT_TRUE(at.run > 0 && cs != NULL && cs->flags == 0 && cs->font == 0);
     }
 
     /* Moving the caret disarms it and reads the style at the new place

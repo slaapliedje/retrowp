@@ -81,8 +81,59 @@ static void commit_edit(wp_document *doc, wp_undo_journal *journal)
     wp_document_mark_modified(doc);
 }
 
+static wp_status insert_text(wp_document *doc, wp_undo_journal *journal, wp_pos pos,
+                             const u8 *utf8, u32 len, wp_pos *out_pos, wp_bool typed);
+
 wp_status wp_edit_insert_text(wp_document *doc, wp_undo_journal *journal, wp_pos pos,
                                const u8 *utf8, u32 len, wp_pos *out_pos)
+{
+    return insert_text(doc, journal, pos, utf8, len, out_pos, WP_FALSE);
+}
+
+wp_status wp_edit_type_text(wp_document *doc, wp_undo_journal *journal, wp_pos pos,
+                             const u8 *utf8, u32 len, wp_pos *out_pos)
+{
+    return insert_text(doc, journal, pos, utf8, len, out_pos, WP_TRUE);
+}
+
+wp_status wp_edit_detach_typed(wp_document *doc, wp_undo_journal *journal, wp_pos *cursor)
+{
+    wp_op *op = journal != NULL ? journal->undo_top : NULL;
+    wp_section *sec;
+    wp_paragraph *para;
+    u16 idx;
+    u32 head;
+    wp_status st;
+
+    if (op == NULL || op->kind != (u8)WP_OP_INSERT_TEXT || op->style_after == 0) return WP_OK;
+    sec = wp_document_section_get(doc, op->at.section);
+    para = sec != NULL ? wp_section_paragraph_get(sec, op->at.paragraph) : NULL;
+    if (para == NULL) return WP_RANGE;
+    idx = find_run_ending_in_span(para, op->text);
+    if (idx < para->run_count) {
+        head = para->runs[idx].text.length - op->text.length;
+        st = run_insert_at(para, (u16)(idx + 1), op->text, para->runs[idx].style);
+        if (st != WP_OK) return st;
+        para->runs[idx].text.length = head;
+        para->layout_dirty = WP_TRUE;
+        if (cursor != NULL && cursor->section == op->at.section &&
+            cursor->paragraph == op->at.paragraph) {
+            if (cursor->run == idx && cursor->offset > head) {
+                cursor->run = (u32)idx + 1u;
+                cursor->offset -= head;
+            } else if (cursor->run > idx) {
+                cursor->run++;
+            }
+        }
+    }
+    /* Its own run from here on, redone as one too: an edit journaled
+       after this one names the runs as they now are. */
+    op->style_after = 0;
+    return WP_OK;
+}
+
+static wp_status insert_text(wp_document *doc, wp_undo_journal *journal, wp_pos pos,
+                             const u8 *utf8, u32 len, wp_pos *out_pos, wp_bool typed)
 {
     wp_status st;
     wp_pos local_out;
@@ -95,7 +146,10 @@ wp_status wp_edit_insert_text(wp_document *doc, wp_undo_journal *journal, wp_pos
     if (op == NULL) return WP_NOMEM;
 
     st = wp_strpool_append(&doc->strings, utf8, len, &new_span);
-    if (st == WP_OK) st = insert_span_at_pos(doc, pos, new_span, &local_out);
+    if (st == WP_OK) {
+        st = typed ? insert_span_typed(doc, pos, new_span, &local_out)
+                   : insert_span_at_pos(doc, pos, new_span, &local_out);
+    }
     if (st != WP_OK) {
         op_free(op);
         return st;
@@ -103,10 +157,12 @@ wp_status wp_edit_insert_text(wp_document *doc, wp_undo_journal *journal, wp_pos
 
     op->kind = (u8)WP_OP_INSERT_TEXT;
     op->at = pos;             /* the pre-insert position */
-    op->text = new_span;      /* the inserted span -- also identifies the
-                                  run undo must remove, via find_run_by_span */
+    op->text = new_span;      /* the inserted span -- also identifies what
+                                  undo takes away: the run that is exactly
+                                  it, or the tail of the run typing made
+                                  longer with it */
     op->style_before = 0;     /* unused for this kind */
-    op->style_after = 0;
+    op->style_after = typed ? 1u : 0u;   /* 1: typed, so redo lengthens as typing did */
 
     commit_edit(doc, journal);
     op->next = journal->undo_top;
@@ -1020,7 +1076,15 @@ static wp_status apply_single_undo_op(wp_document *doc, wp_op *op)
     }
     if (op->kind == (u8)WP_OP_INSERT_TEXT) {
         u16 idx = find_run_by_span(para, op->text);
-        run_remove_at(para, idx);
+        if (idx < para->run_count) {
+            run_remove_at(para, idx);
+        } else {
+            idx = find_run_ending_in_span(para, op->text);
+            if (idx < para->run_count) {
+                para->runs[idx].text.length -= op->text.length;
+                para->layout_dirty = WP_TRUE;
+            }
+        }
     } else if (op->kind == (u8)WP_OP_DELETE_TEXT) {
         u16 run_index = (u16)op->at.run;
 
@@ -1134,7 +1198,8 @@ static wp_status apply_single_redo_op(wp_document *doc, wp_op *op)
 
     if (op->kind == (u8)WP_OP_INSERT_TEXT) {
         wp_pos out_pos;
-        st = insert_span_at_pos(doc, op->at, op->text, &out_pos);
+        st = op->style_after != 0 ? insert_span_typed(doc, op->at, op->text, &out_pos)
+                                  : insert_span_at_pos(doc, op->at, op->text, &out_pos);
     } else if (op->kind == (u8)WP_OP_DELETE_TEXT) {
         /* At this point undo has restored the run to one contiguous
            span at op->at.run; op->text (still in pool coordinates)

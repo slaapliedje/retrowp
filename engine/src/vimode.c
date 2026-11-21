@@ -408,7 +408,7 @@ static wp_vimode_action feed_insert(wp_vimode_state *vs, wp_key_event key)
         u32 n = utf8_encode(key.codepoint, utf8_buf);
         if (n > 0) {
             wp_pos out;
-            wp_edit_insert_text(vs->doc, vs->journal, vs->cursor, utf8_buf, n, &out);
+            wp_edit_type_text(vs->doc, vs->journal, vs->cursor, utf8_buf, n, &out);
             vs->cursor = out;
         }
         return action;

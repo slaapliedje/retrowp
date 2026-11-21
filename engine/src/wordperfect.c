@@ -154,7 +154,7 @@ static void insert_char(wp_wordperfect_state *vs, u32 codepoint)
 
     if (n > 0) {
         wp_pos out;
-        wp_edit_insert_text(vs->doc, vs->journal, vs->cursor, utf8_buf, n, &out);
+        wp_edit_type_text(vs->doc, vs->journal, vs->cursor, utf8_buf, n, &out);
         vs->cursor = out;
     }
 }
