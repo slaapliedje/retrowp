@@ -15,8 +15,10 @@ void wp_settings_defaults(wp_settings *s)
     s->datadir[0] = '\0';
     s->recovery[0] = '\0';
     s->offload[0] = '\0';
+    s->machine[0] = '\0';
     s->autosave_minutes = WP_AUTOSAVE_DEFAULT_MINUTES;
     s->backup = 0;
+    s->pi_copy = 0;
 }
 
 /* The clipart folder in the data folder (one program, one of these). */
@@ -43,6 +45,12 @@ void wp_settings_apply(wp_app_ctx *ctx)
 const char *wp_settings_offload(const wp_app_ctx *ctx)
 {
     return ctx->settings.offload[0] != '\0' ? ctx->settings.offload : ctx->offload_default;
+}
+
+const char *wp_settings_machine(const wp_app_ctx *ctx)
+{
+    if (ctx->settings.machine[0] != '\0') return ctx->settings.machine;
+    return ctx->machine_default != NULL ? ctx->machine_default : "RETROWP";
 }
 
 static wp_bool is_sep(char c)
@@ -73,6 +81,7 @@ static const char *k_autosave_labels[K_MINUTES_N + 1] = {
     "15 minutes", "30 minutes", "60 minutes", NULL
 };
 static const char *const k_backup_labels[] = { "Off", "Keep NAME.BAK" };
+static const char *const k_picopy_labels[] = { "Off", "On every save" };
 
 /* "N minutes" for a value from the configuration file that is not one of
    the list's: shown as itself, last, so OK does not quietly change it. */
@@ -113,7 +122,7 @@ static wp_bool offload_ok(const char *s)
                      (starts(s, "pipe:") && s[5] != '\0'));
 }
 
-enum { F_DOCDIR, F_DATADIR, F_RECOVERY, F_AUTOSAVE, F_BACKUP, F_OFFLOAD, F_COUNT };
+enum { F_DOCDIR, F_DATADIR, F_RECOVERY, F_AUTOSAVE, F_BACKUP, F_OFFLOAD, F_PICOPY, F_MACHINE, F_COUNT };
 
 static void text_field(plat_form_field *f, const char *label, char *buf)
 {
@@ -183,6 +192,8 @@ wp_bool wp_action_settings(wp_app_ctx *ctx)
         choice_field(&fields[F_AUTOSAVE], "Autosave", (const char *const *)k_autosave_labels, choices, mi);
         choice_field(&fields[F_BACKUP], "Backups", k_backup_labels, 2u, edit.backup ? 1u : 0u);
         text_field(&fields[F_OFFLOAD], "Offload link", edit.offload);
+        choice_field(&fields[F_PICOPY], "Copy to the Pi", k_picopy_labels, 2u, edit.pi_copy ? 1u : 0u);
+        text_field(&fields[F_MACHINE], "Name on the Pi", edit.machine);
 
         if (plat_dialog_form(ctx->window, (const u8 *)title, (u32)(sizeof(title) - 1),
                              fields, (u32)F_COUNT, &cancelled) != WP_OK || cancelled) {
@@ -192,6 +203,8 @@ wp_bool wp_action_settings(wp_app_ctx *ctx)
         trim_text(edit.datadir);
         trim_text(edit.recovery);
         trim_text(edit.offload);
+        trim_text(edit.machine);
+        edit.pi_copy = (u8)(fields[F_PICOPY].index == 1u ? 1 : 0);
         mi = fields[F_AUTOSAVE].index;
         if (mi < K_MINUTES_N) edit.autosave_minutes = k_minutes[mi];   /* else: as it was */
         edit.backup = (u8)(fields[F_BACKUP].index == 1u ? 1 : 0);

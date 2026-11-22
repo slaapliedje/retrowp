@@ -41,9 +41,12 @@ void wp_app_ctx_init(wp_app_ctx *ctx, wp_keymap_id keymap_id,
     ctx->recovery_default = NULL;
     ctx->offload_default = NULL;
     ctx->clipart_default = NULL;
+    ctx->machine_default = NULL;
     ctx->settings_changed = NULL;
     ctx->path_sep = '\\';
     ctx->offload_retry = WP_FALSE;
+    ctx->to_pi = WP_FALSE;
+    ctx->from_pi = WP_FALSE;
     ctx->autosave.armed = WP_FALSE;
     ctx->autosave.told = WP_FALSE;
     ctx->autosave.written = 0;

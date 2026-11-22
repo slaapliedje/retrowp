@@ -41,11 +41,19 @@ typedef enum {
                                  that engine/src/drawfile.c reads as a
                                  drawing (T16.4). docs/formats/offload-
                                  protocol.md's OFFLOAD_DRAWING section */
-    OFFLOAD_SET_SPEED        /* the rates this side's line can do, fastest
+    OFFLOAD_SET_SPEED,       /* the rates this side's line can do, fastest
                                  first, u32 BE each -> the one the gateway
                                  picked, and both switch (offload_init does
                                  it; nothing else asks). docs/formats/
                                  offload-protocol.md's OFFLOAD_SET_SPEED */
+    OFFLOAD_STORE,           /* machine, name, a file's bytes -> kept on the
+                                 gateway, answered once the copy is safe
+                                 there (T21.6); one line for the writer */
+    OFFLOAD_LIST,            /* machine [, name] -> the documents kept for
+                                 that machine, or one's versions */
+    OFFLOAD_FETCH            /* machine, name, version -> the file's bytes.
+                                 The three share docs/formats/offload-
+                                 protocol.md's "Document store" section */
 } offload_op;
 
 /* The format_id byte that leads an OFFLOAD_CONVERT_IMPORT/EXPORT payload

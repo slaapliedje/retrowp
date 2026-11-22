@@ -845,6 +845,8 @@ static void invoke_backend_action(wp_action_id id)
     case WP_ACT_FILE_OPEN:      do_file_open(); break;
     case WP_ACT_FILE_SAVE:      do_file_save(WP_FALSE); break;
     case WP_ACT_FILE_SAVE_AS:   do_file_save(WP_TRUE); break;
+    case WP_ACT_FILE_SAVE_TO_PI:   g_ctx.to_pi = WP_TRUE; do_file_save(WP_FALSE); break;
+    case WP_ACT_FILE_OPEN_FROM_PI: g_ctx.from_pi = WP_TRUE; do_file_open(); break;
     case WP_ACT_TOOLS_SPELLCHECK: {
         char dict[WP_APP_PATH_MAX];   /* Settings' dictionary folder, or beside the program */
         if (!wp_settings_data_file(&g_ctx, "WPSPELL.DIC", dict, (u32)sizeof(dict))) strcpy(dict, WP_AMIGA_SPELL_DICT_PATH);
@@ -2554,6 +2556,7 @@ void app_shell_run(void)
     /* Settings (settings.h): the writer's, over this machine's own. */
     g_ctx.recovery_default = WP_AMIGA_RECOVERY_PATH;
     g_ctx.offload_default = WP_AMIGA_OFFLOAD_ENDPOINT;
+    g_ctx.machine_default = "AMIGA";
     g_ctx.clipart_default = "PROGDIR:CLIPART/";
     g_ctx.path_sep = '/';
     g_ctx.settings = cfg.settings;

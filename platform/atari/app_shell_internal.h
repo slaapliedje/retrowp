@@ -245,7 +245,11 @@
 /* File > Settings... (M21 T21.4), appended: after Mail Merge in the
    File chain, before Quit. */
 #define WP_MENU_OBJ_FILE_SETTINGS        61
-#define WP_MENU_OBJ_COUNT        62
+/* File > Save to Pi and Open from Pi... (M21 T21.6), appended: after
+   Settings in the File chain, before Quit. */
+#define WP_MENU_OBJ_FILE_SAVE_TO_PI      62
+#define WP_MENU_OBJ_FILE_OPEN_FROM_PI    63
+#define WP_MENU_OBJ_COUNT        64
 
 extern WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT];
 

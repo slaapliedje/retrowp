@@ -8,7 +8,9 @@ backed THESAURUS/SPELL_CHECK) and ollama_gateway.c (real-LLM-backed
 THESAURUS). This one answers OFFLOAD_CONVERT_IMPORT for format_id=ODT,
 and OFFLOAD_CONVERT_EXPORT for format_id=ODT or format_id=PDF --
 and OFFLOAD_PRINT -- the PDF, printed on this machine's printer -- when
-it has one to print on (--printer / --print-dir, below); everything else
+it has one to print on (--printer / --print-dir, below) -- and keeps
+documents for the machines that send them, with OFFLOAD_STORE, LIST and
+FETCH (doc_store.py), when given a folder for them (--store); everything else
 responds OFFLOAD_UNSUPPORTED. There is deliberately no
 PDF *import*: PDF has no general, reliable text-reconstruction guarantee
 (docs/formats/offload-protocol.md has the reasoning), so it is export-only.
@@ -56,8 +58,10 @@ import xml.etree.ElementTree as ET
 from wire_protocol import (
     STATUS_OK, STATUS_UNSUPPORTED, STATUS_ERR,
     OP_CONVERT_IMPORT, OP_CONVERT_EXPORT, OP_PRINT, OP_PRINT_OPTIONS,
+    OP_STORE, OP_LIST, OP_FETCH,
     parse_gateway_args, run_gateway_with_args,
 )
+from doc_store import DocStore, DEFAULT_VERSIONS
 
 FORMAT_ODT = 1
 FORMAT_PDF = 2
@@ -2162,7 +2166,17 @@ def handle_print(payload):
     return STATUS_OK, _reply('Printed %s%s' % (what, where))
 
 
+STORE = {'store': None}
+
+
 def handle_request(op, payload):
+    if STORE['store'] is not None:
+        if op == OP_STORE:
+            return STORE['store'].store(payload)
+        if op == OP_LIST:
+            return STORE['store'].list(payload)
+        if op == OP_FETCH:
+            return STORE['store'].fetch(payload)
     if op == OP_CONVERT_IMPORT:
         return handle_convert_import(payload)
     if op == OP_CONVERT_EXPORT:
@@ -2191,6 +2205,12 @@ def main():
         (('--print-dir',), {'default': None, 'metavar': 'DIR',
                             'help': 'answer OFFLOAD_PRINT by writing each printout '
                                     'into DIR as print-NNNN.pdf instead'}),
+        (('--store',), {'default': None, 'metavar': 'DIR',
+                        'help': 'keep the documents machines send (OFFLOAD_STORE, '
+                                'LIST, FETCH) in DIR, one folder a machine'}),
+        (('--store-versions',), {'default': DEFAULT_VERSIONS, 'type': int, 'metavar': 'N',
+                                 'help': 'how many versions of each document to keep '
+                                         '(default %d)' % DEFAULT_VERSIONS}),
     ])
     PRINT_TO['dir'] = args.print_dir
     PRINT_TO['command'] = args.print_command
@@ -2206,6 +2226,14 @@ def main():
         PRINT_TO['disc_printer'] = name
         PRINT_TO['disc_host'] = host or None
     ops_supported = (1 << OP_CONVERT_IMPORT) | (1 << OP_CONVERT_EXPORT)
+    if args.store:
+        try:
+            os.makedirs(args.store, exist_ok=True)
+            STORE['store'] = DocStore(args.store, args.store_versions)
+            ops_supported |= (1 << OP_STORE) | (1 << OP_LIST) | (1 << OP_FETCH)
+        except OSError:
+            print('odt-gateway: cannot use %s for the store' % args.store,
+                  file=sys.stderr, flush=True)
     if PRINT_TO['dir'] or PRINT_TO['printer'] is not None:
         ops_supported |= (1 << OP_PRINT) | (1 << OP_PRINT_OPTIONS)
     return run_gateway_with_args(args, handle_request, ops_supported, 'odt-gateway')

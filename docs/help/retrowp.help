@@ -419,19 +419,31 @@ the configuration file to change how often, or autosave=off.
 The recovery file is RETROWP.REC beside the program on the ST,
 C:\RETROWP.REC on DOS, RetroWP.rec beside the program on the
 Amiga and the Mac.
+
+With a gateway that keeps documents, File > Save to Pi saves as
+Save does and then sends the file to the Pi, which keeps the last
+five copies of each document for each machine, and says so once
+the copy is safe there. File > Open from Pi lists this machine's
+documents, newest first, asks which copy when there are several,
+writes it in the documents folder (asking before it replaces a
+file of that name) and opens it. In Settings, Copy to the Pi
+sends every save; it says nothing unless a copy fails.
 @endnode
 
 @node Settings "Settings"
 File > Settings changes, in one dialog:
 
   Documents folder   where Open and Save start for a new document
-                     (not yet on the Mac)
   Dictionary folder  where WPSPELL.DIC and the CLIPART folder are
   Recovery file      where unsaved work is kept (see Saving)
   Autosave           how often that copy is made, or Off
   Backups            Keep NAME.BAK: each save keeps the copy it
                      replaces, as NOTE.BAK beside NOTE.TXT
   Offload link       the gateway: serial:PORT:BAUD or tcp:HOST:PORT
+  Copy to the Pi     On every save: each save also goes to the Pi
+                     (see Saving)
+  Name on the Pi     what the Pi keeps this machine's documents
+                     under: ST, AMIGA, DOS or MAC when empty
 
 An empty folder or file means the usual place beside the program;
 an empty offload link means this machine's usual port. Fonts are

@@ -9,6 +9,7 @@
 #include "labels.h"
 #include "actions.h"
 #include "settings.h"
+#include "pistore.h"
 #include "recovery.h"
 #include "app_ctx.h"
 #include "format_txt.h"
@@ -2836,7 +2837,9 @@ const wp_action g_wp_actions[WP_ACT_COUNT] = {
     { WP_ACT_VIEW_GRID,          WP_MENU_VIEW,   "Grid...",         0,      0,    act_view_grid, NULL },
     { WP_ACT_FORMAT_COLUMNS,     WP_MENU_FORMAT, "Columns...",      0,      0,    act_format_columns, NULL },
     { WP_ACT_TOOLS_ENVELOPE,     WP_MENU_TOOLS,  "Envelope...",     0,      0,    act_tools_envelope, NULL },
-    { WP_ACT_FILE_SETTINGS,      WP_MENU_FILE,   "Settings...",     0,      0,    act_file_settings, NULL }
+    { WP_ACT_FILE_SETTINGS,      WP_MENU_FILE,   "Settings...",     0,      0,    act_file_settings, NULL },
+    { WP_ACT_FILE_SAVE_TO_PI,    WP_MENU_FILE,   "Save to Pi",      0,      0,    NULL, NULL },
+    { WP_ACT_FILE_OPEN_FROM_PI,  WP_MENU_FILE,   "Open from Pi...", 0,      0,    NULL, NULL }
 };
 
 const char *wp_action_help_node(wp_action_id id, u32 *len)
@@ -3686,7 +3689,19 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
     return WP_OK;
 }
 
+static wp_status save_file(wp_app_ctx *ctx, const char *native_path, wp_image_source *img_src,
+                           wp_bool to_pi);
+
 wp_status wp_action_save_file(wp_app_ctx *ctx, const char *native_path, wp_image_source *img_src)
+{
+    wp_bool to_pi = ctx->to_pi;
+
+    ctx->to_pi = WP_FALSE;
+    return save_file(ctx, native_path, img_src, to_pi);
+}
+
+static wp_status save_file(wp_app_ctx *ctx, const char *native_path, wp_image_source *img_src,
+                           wp_bool to_pi)
 {
     /* RTF by name; a name with no extension keeps the document's format. */
     wp_bool as_rtf = (wp_bool)(wp_path_ends_with_ci(native_path, ".RTF") ||
@@ -3699,6 +3714,9 @@ wp_status wp_action_save_file(wp_app_ctx *ctx, const char *native_path, wp_image
     if (!ctx->doc_loaded) return WP_OK;
 
     if (wp_path_ends_with_ci(native_path, ".ODT") || wp_path_ends_with_ci(native_path, ".PDF")) {
+        /* The Pi made these from the document; it keeps what the machine
+           writes (RTF, text, Markdown). */
+        if (to_pi) wp_action_tell(ctx, "Save to Pi keeps RTF, text and Markdown files");
         if (!link_for_convert(ctx)) return WP_ERR;
         return convert_export(ctx, native_path,
                               wp_path_ends_with_ci(native_path, ".ODT") ? (u8)OFFLOAD_FORMAT_ODT
@@ -3730,6 +3748,13 @@ wp_status wp_action_save_file(wp_app_ctx *ctx, const char *native_path, wp_image
     }
     if (st == WP_OK) {
         st = wp_action_write_file(ctx, native_path, buf, needed, WP_TRUE);
+        /* The copy on the Pi (T21.6) only once the file is safe here: a
+           Pi that does not answer never costs the save. File > Save to Pi
+           says what the Pi answered; Settings' copy on every save speaks
+           only when it fails. */
+        if (st == WP_OK && (to_pi || ctx->settings.pi_copy)) {
+            (void)wp_pistore_put(ctx, native_path, buf, needed, (wp_bool)!to_pi);
+        }
     } else {
         wp_action_tell(ctx, "Couldn't build the file to save");
     }
@@ -3745,6 +3770,9 @@ wp_status wp_action_save_file(wp_app_ctx *ctx, const char *native_path, wp_image
 wp_status wp_action_file_open(wp_app_ctx *ctx, wp_pick_path_fn pick, wp_image_sink *sink)
 {
     char path[WP_APP_PATH_MAX];
+    wp_bool from_pi = ctx->from_pi;
+
+    ctx->from_pi = WP_FALSE;
 
     /* Opening replaces the whole document, so it asks before discarding
        unsaved work -- BEFORE the picker, so the writer is not made to
@@ -3754,7 +3782,10 @@ wp_status wp_action_file_open(wp_app_ctx *ctx, wp_pick_path_fn pick, wp_image_si
     /* An ex command may already have named the file (":e foo"); then
        the picker is skipped, which is the whole point: never leave the
        keyboard to name a file. */
-    if (!wp_keymap_take_pending_path(path, (u32)sizeof(path))) {
+    if (from_pi) {
+        /* File > Open from Pi: the store's copy, fetched to a file here. */
+        if (!wp_pistore_pick(ctx, path, (u32)sizeof(path))) return WP_OK;
+    } else if (!wp_keymap_take_pending_path(path, (u32)sizeof(path))) {
         if (pick == NULL || !pick(ctx, WP_FALSE, path, (u32)sizeof(path))) return WP_OK;
     }
     return wp_action_load_file(ctx, path, sink);
@@ -3763,20 +3794,29 @@ wp_status wp_action_file_open(wp_app_ctx *ctx, wp_pick_path_fn pick, wp_image_si
 wp_bool wp_action_save_path(wp_app_ctx *ctx, wp_bool save_as, wp_pick_path_fn pick,
                             char *path_out, u32 cap)
 {
-    if (!ctx->doc_loaded) return WP_FALSE;
+    wp_bool got;
+
+    if (!ctx->doc_loaded) {
+        ctx->to_pi = WP_FALSE;
+        return WP_FALSE;
+    }
     if (wp_keymap_take_pending_path(path_out, cap)) return WP_TRUE;
     if (!save_as && ctx->doc_path[0] != '\0' && strlen(ctx->doc_path) < cap) {
         strcpy(path_out, ctx->doc_path);
         return WP_TRUE;
     }
-    return (wp_bool)(pick != NULL && pick(ctx, WP_TRUE, path_out, cap));
+    got = (wp_bool)(pick != NULL && pick(ctx, WP_TRUE, path_out, cap));
+    if (!got) ctx->to_pi = WP_FALSE;    /* Save to Pi, cancelled at the picker */
+    return got;
 }
 
 wp_status wp_action_file_save(wp_app_ctx *ctx, wp_bool save_as, wp_pick_path_fn pick,
                               wp_image_source *img_src)
 {
     char path[WP_APP_PATH_MAX];
+    wp_bool to_pi = ctx->to_pi;
 
+    ctx->to_pi = WP_FALSE;      /* a cancelled picker must not leave it set */
     if (!wp_action_save_path(ctx, save_as, pick, path, (u32)sizeof(path))) return WP_OK;
-    return wp_action_save_file(ctx, path, img_src);
+    return save_file(ctx, path, img_src, to_pi);
 }

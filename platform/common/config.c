@@ -144,6 +144,13 @@ static void parse_line(const u8 *bytes, u32 len, wp_config *out)
     if (ascii_ieq(bytes + key_start, key_len, "datadir"))  { set_text(out->settings.datadir, bytes + val_start, val_len); return; }
     if (ascii_ieq(bytes + key_start, key_len, "recovery")) { set_text(out->settings.recovery, bytes + val_start, val_len); return; }
     if (ascii_ieq(bytes + key_start, key_len, "offload"))  { set_text(out->settings.offload, bytes + val_start, val_len); return; }
+    if (ascii_ieq(bytes + key_start, key_len, "machine"))  { set_text(out->settings.machine, bytes + val_start, val_len); return; }
+    if (ascii_ieq(bytes + key_start, key_len, "picopy")) {
+        const u8 *v = bytes + val_start;
+        if (ascii_ieq(v, val_len, "on")) out->settings.pi_copy = 1;
+        else if (ascii_ieq(v, val_len, "off")) out->settings.pi_copy = 0;
+        return;
+    }
     if (ascii_ieq(bytes + key_start, key_len, "return")) {
         u32 n = val_len < sizeof(out->return_addr) - 1 ? val_len : (u32)sizeof(out->return_addr) - 1;
         memcpy(out->return_addr, bytes + val_start, n);
@@ -395,8 +402,9 @@ wp_status wp_config_save_return(const char *native_path, const char *text)
 
 wp_status wp_config_save_settings(const char *native_path, const wp_settings *s)
 {
-    static const char *const keys[] = { "docdir", "datadir", "recovery", "autosave", "backup", "offload" };
-    const char *values[6];
+    static const char *const keys[] = { "docdir", "datadir", "recovery", "autosave", "backup", "offload",
+                                        "picopy", "machine" };
+    const char *values[8];
     char minutes[12];
 
     values[0] = s->docdir;
@@ -406,5 +414,7 @@ wp_status wp_config_save_settings(const char *native_path, const wp_settings *s)
     else { put_num(minutes, s->autosave_minutes); values[3] = minutes; }
     values[4] = s->backup ? "on" : "off";
     values[5] = s->offload;
-    return save_keys(native_path, keys, values, 6);
+    values[6] = s->pi_copy ? "on" : "off";
+    values[7] = s->machine;
+    return save_keys(native_path, keys, values, 8);
 }

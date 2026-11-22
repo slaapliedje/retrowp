@@ -24,7 +24,7 @@
 #define ST_BAK  ST_DIR "/NOTE.BAK"
 
 /* The form's fields, in settings.c's order. */
-enum { F_DOCDIR, F_DATADIR, F_RECOVERY, F_AUTOSAVE, F_BACKUP, F_OFFLOAD };
+enum { F_DOCDIR, F_DATADIR, F_RECOVERY, F_AUTOSAVE, F_BACKUP, F_OFFLOAD, F_PICOPY, F_MACHINE };
 
 static wp_bool there(const char *path)
 {
@@ -270,4 +270,36 @@ void test_settings_config_keys(void)
     ASSERT_EQ_U32(1, cfg.settings.backup);
     ASSERT_EQ_STR("D:\\R.REC", cfg.settings.recovery);
     ASSERT_EQ_STR("", cfg.settings.docdir);
+}
+
+/* The Pi's two (T21.6): Copy to the Pi and the machine's name, set in
+   the dialog, written to the configuration file and read back; an empty
+   name is the port's own. */
+void test_settings_pi_copy_and_machine_name(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_config cfg;
+    char text[512];
+    u32 n;
+
+    setup(&doc, &journal, &ctx);
+    ctx.machine_default = "ST";
+    ASSERT_EQ_STR("ST", wp_settings_machine(&ctx));
+    window_host_form_edit(F_PICOPY, NULL, 1);
+    window_host_form_edit(F_MACHINE, " STUDY ", -1);
+    ASSERT_TRUE(wp_action_settings(&ctx));
+    ASSERT_EQ_U32(1, ctx.settings.pi_copy);
+    ASSERT_EQ_STR("STUDY", wp_settings_machine(&ctx));      /* trimmed */
+    n = read_file(ST_CFG, text, (u32)sizeof(text));
+    ASSERT_TRUE(strstr(text, "picopy=on\n") != NULL);
+    ASSERT_TRUE(strstr(text, "machine=STUDY\n") != NULL);
+    ASSERT_TRUE(wp_config_parse((const u8 *)text, n, &cfg) == WP_OK);
+    ASSERT_EQ_U32(1, cfg.settings.pi_copy);
+    ASSERT_EQ_STR("STUDY", cfg.settings.machine);
+    ASSERT_TRUE(wp_config_parse((const u8 *)"picopy=off\nmachine=\n", 20, &cfg) == WP_OK);
+    ASSERT_EQ_U32(0, cfg.settings.pi_copy);
+    ASSERT_EQ_STR("", cfg.settings.machine);
+    teardown(&doc, &journal, &ctx);
 }

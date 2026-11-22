@@ -531,8 +531,18 @@ void test_menubar_keys_walk_and_choose(void);
 void test_menubar_letters_open_and_choose(void);
 void test_menubar_clicks_land_on_items(void);
 void test_menubar_boxes_stay_on_screen(void);
+/* test_pistore.c */
+void test_pistore_save_to_pi_keeps_the_file(void);
+void test_pistore_copy_on_every_save_is_quiet(void);
+void test_pistore_keeps_the_last_versions(void);
+void test_pistore_open_from_pi_restores_a_version(void);
+void test_pistore_open_from_pi_asks_before_replacing(void);
+void test_pistore_machines_are_kept_apart(void);
+void test_pistore_without_a_store(void);
+
 /* test_settings.c */
 void test_settings_ok_applies_and_writes_the_config(void);
+void test_settings_pi_copy_and_machine_name(void);
 void test_settings_cancel_changes_nothing(void);
 void test_settings_bad_offload_link_asks_again(void);
 void test_settings_unlisted_autosave_survives_ok(void);
@@ -1349,7 +1359,15 @@ static const test_case g_cases[] = {
     { "autosave_failure_keeps_the_last_copy", test_autosave_failure_keeps_the_last_copy },
     { "autosave_recovered_document_is_caught_up", test_autosave_recovered_document_is_caught_up },
     { "autosave_config_setting", test_autosave_config_setting },
+    { "pistore_save_to_pi_keeps_the_file", test_pistore_save_to_pi_keeps_the_file },
+    { "pistore_copy_on_every_save_is_quiet", test_pistore_copy_on_every_save_is_quiet },
+    { "pistore_keeps_the_last_versions", test_pistore_keeps_the_last_versions },
+    { "pistore_open_from_pi_restores_a_version", test_pistore_open_from_pi_restores_a_version },
+    { "pistore_open_from_pi_asks_before_replacing", test_pistore_open_from_pi_asks_before_replacing },
+    { "pistore_machines_are_kept_apart", test_pistore_machines_are_kept_apart },
+    { "pistore_without_a_store", test_pistore_without_a_store },
     { "settings_ok_applies_and_writes_the_config", test_settings_ok_applies_and_writes_the_config },
+    { "settings_pi_copy_and_machine_name", test_settings_pi_copy_and_machine_name },
     { "settings_cancel_changes_nothing", test_settings_cancel_changes_nothing },
     { "settings_bad_offload_link_asks_again", test_settings_bad_offload_link_asks_again },
     { "settings_unlisted_autosave_survives_ok", test_settings_unlisted_autosave_survives_ok },

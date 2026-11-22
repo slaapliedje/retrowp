@@ -133,6 +133,11 @@ typedef enum {
     /* M21 T21.4: File > Settings -- the writer's settings (settings.h)
        in one dialog, kept in the configuration file. */
     WP_ACT_FILE_SETTINGS,
+    /* M21 T21.6: File > Save to Pi and File > Open from Pi -- the
+       gateway's document store (pistore.h). Each shell runs its own Save
+       or Open with ctx->to_pi / ctx->from_pi set. */
+    WP_ACT_FILE_SAVE_TO_PI,
+    WP_ACT_FILE_OPEN_FROM_PI,
     WP_ACT_COUNT
 } wp_action_id;
 

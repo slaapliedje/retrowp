@@ -633,6 +633,44 @@ the handshake; nothing else sends it.
   These ceilings are cautious. Each says so in its backend, and should be
   measured on the real machine before it is raised.
 
+### Document store: `OFFLOAD_STORE`, `OFFLOAD_LIST`, `OFFLOAD_FETCH` (ops 12-14, T21.6)
+
+The gateway keeps each machine's documents, the last N versions of
+each, so a writer can put a copy on the Pi and get any of them back
+(File > Save to Pi, File > Open from Pi, and Settings' "Copy to the Pi"
+on every save; platform/common/pistore.c). Served by
+`odt_gateway.py --store DIR [--store-versions N]` (default 5) through
+`doc_store.py`; the three CAPS bits are set only with `--store`.
+
+A **name** -- a machine's or a document's -- goes as a u8 length and that
+many bytes: printable ASCII, 1 to 63 of them, with no `/`, `\` or `:`,
+not starting with `.` or a space. The gateway refuses any other
+(`OFFLOAD_ERR`, "The Pi refused that name") before it touches the disk,
+so a name can never be `..`, absolute or hidden, and every path stays
+in the store. The machine's name is Settings' `machine=`, or the port's
+own (`ST`, `XE` for gem4xe, `AMIGA`, `DOS`, `MAC`). The store is
+
+```
+DIR/<machine>/<document>/000001, 000002, ...
+```
+
+- **`OFFLOAD_STORE`** (12). Request: machine, document name, then the
+  file's bytes (the file as the machine just wrote it; request parts
+  past one frame). The gateway writes a temporary file, `fsync`s it and
+  its folder, renames it into place, then removes the versions past N --
+  so `OFFLOAD_OK` means the copy is safe on the Pi's disk. Response:
+  one line for the writer, either way: `"Kept LETTER.RTF on the Pi (3
+  versions)"`, or why not.
+- **`OFFLOAD_LIST`** (13). Request: machine, and optionally a document
+  name. Without one, a line per document, the most recently stored
+  first: `name<TAB>versions<TAB>bytes<TAB>YYYY-MM-DD HH:MM<LF>`, the size
+  and time being its newest version's. With one, a line per version of
+  it, newest first: `version<TAB>bytes<TAB>YYYY-MM-DD HH:MM<LF>`. A
+  machine with nothing stored gets an empty `OFFLOAD_OK`.
+- **`OFFLOAD_FETCH`** (14). Request: machine, document name, a u32 BE
+  version (0 = the newest). Response: the file's bytes (in parts past
+  one frame); `OFFLOAD_ERR` with nothing for a version not kept.
+
 ### Any other op
 
 The mock gateway responds `RESPONSE` with `status = OFFLOAD_UNSUPPORTED`

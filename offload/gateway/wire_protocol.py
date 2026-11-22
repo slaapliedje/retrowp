@@ -54,7 +54,8 @@ if os.environ.get('RETROWP_GATEWAY_PART_TEST'):
 
 (OP_SPELL_CHECK, OP_GRAMMAR_CHECK, OP_THESAURUS,
  OP_CONVERT_IMPORT, OP_CONVERT_EXPORT, OP_CHAT, OP_IMAGE,
- OP_DICTATE, OP_PRINT, OP_PRINT_OPTIONS, OP_DRAWING, OP_SET_SPEED) = range(12)
+ OP_DICTATE, OP_PRINT, OP_PRINT_OPTIONS, OP_DRAWING, OP_SET_SPEED,
+ OP_STORE, OP_LIST, OP_FETCH) = range(15)
 
 # OP_SET_SPEED: how long the gateway waits, at the new speed, for the
 # client's HELLO before going back to the old one. The client gives up

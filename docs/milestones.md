@@ -3167,12 +3167,49 @@ through it in cloud or network storage.
       for its whole work area, and asserts the cover comes through
       untouched -- the old build drew 15,952 px of "NORMAL  Page 1 of
       1" over it, the new none.
-- [ ] T21.6 Storing on the Pi.
+- [x] T21.6 Storing on the Pi.
       AC: protocol operations to store, list and fetch a document; the
       gateway keeps each machine's documents with the last N versions,
       names checked against path traversal; answered once the copy is
       safe on the Pi. File > Save to Pi, File > Open from Pi (the
       restore); "copy to the Pi on every save" in Settings.
+      Done 2026-11-21. OFFLOAD_STORE, LIST and FETCH (ops 12-14,
+      offload-protocol.md's "Document store"), served by
+      odt_gateway.py --store DIR [--store-versions N] through
+      doc_store.py: DIR/<machine>/<document>/000001..., written to a
+      temporary file, fsync'd with its folder and renamed before the
+      answer; names are printable ASCII without / \ : or a leading dot
+      or space, refused before they reach the disk. The machine's name
+      is Settings' "Name on the Pi" (machine=), or the port's own: ST,
+      XE, AMIGA, DOS, MAC. platform/common/pistore.c is the client: Save
+      to Pi is the port's own Save with ctx->to_pi set, and sends the
+      bytes it just wrote once they are safe here (a Pi that does not
+      answer never costs the save); Open from Pi is the port's own Open
+      with ctx->from_pi, which picks from the store -- the documents
+      newest first, eight to a page, then which copy -- writes the file
+      in the documents folder, asking before it replaces one, and opens
+      it. Settings' "Copy to the Pi" (picopy=) sends every save, saying
+      nothing unless it fails, and that once. The ST's File menu grew to
+      ten rows and eighteen columns. Shown on TOS 1.04 under Hatari at
+      9600 baud against a real gateway: Save to Pi of a new document
+      (the selector, then "Kept NOTE.TXT on the Pi (1 version)", the
+      Pi's copy byte-identical), a second version, Open from Pi choosing
+      either copy and Replace, a request after the gateway's session
+      had timed out, and the quiet copy under a machine named in
+      Settings; the menus and the eight-field Settings form on DOSBox
+      and System 7.5.3 (the Amiga's build only). Host: 7 store tests
+      against a real gateway and a settings one. Found on the way: a
+      choice of one is a message to every backend, so a store with one
+      document showed "Open from Pi" and OK, with neither its name nor a
+      way out -- the picker adds its own Cancel; and the ST's repaint
+      (wp_app_ctx.repaint, tos-47) skipped the ruler bar, which paints
+      only when damaged, so a dialog over the toolbar left its pieces
+      there -- it marks the bar damaged now. Seen once and not since: in
+      the first Hatari run a FETCH went unanswered ("The Pi did not
+      answer" after two minutes) with the gateway idle in poll(), so the
+      request never reached it whole; three later runs, one after a
+      100-second pause and one across the gateway's session timeout,
+      fetched every time.
 - [ ] T21.7 Cloud and network storage.
       AC: the gateway syncs its store through rclone (Dropbox, Google
       Drive, OneDrive, SMB, FTP, SFTP, WebDAV ...), set up by a script

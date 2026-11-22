@@ -76,6 +76,7 @@ set(RETROWP_COMMON_SRC
     ${RETROWP_ROOT}/platform/common/recovery.c
     ${RETROWP_ROOT}/platform/common/autosave.c
     ${RETROWP_ROOT}/platform/common/settings.c
+    ${RETROWP_ROOT}/platform/common/pistore.c
     ${RETROWP_ROOT}/platform/common/tools.c
     ${RETROWP_ROOT}/platform/common/config.c
     ${RETROWP_ROOT}/platform/common/help_doc.c

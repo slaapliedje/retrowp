@@ -23,6 +23,10 @@
  *     offload=    the offload link ("" = the machine's own, such as
  *                 serial:aux:9600; serial:<port>:<baud>[:hard] or
  *                 tcp:<host>:<port>, platform.h's transport seam)
+ *     picopy=     on: every save also keeps a copy on the Pi's document
+ *                 store (T21.6, pistore.h); off (the default)
+ *     machine=    the name this machine's documents are kept under on
+ *                 the Pi ("" = the port's own: ST, AMIGA, DOS, MAC)
  *
  * The dialog is plat_dialog_form, which each backend draws its own way;
  * this file decides what is in it and what an answer does.
@@ -42,8 +46,10 @@ typedef struct {
     char datadir[WP_SETTINGS_TEXT];
     char recovery[WP_SETTINGS_TEXT];
     char offload[WP_SETTINGS_TEXT];
+    char machine[WP_SETTINGS_TEXT]; /* this machine's name on the Pi */
     u16  autosave_minutes;          /* 0 = off */
     u8   backup;                    /* 1 = keep NAME.BAK */
+    u8   pi_copy;                   /* 1 = every save also goes to the Pi */
 } wp_settings;
 
 /* Everything at its default: autosave 5 minutes, the rest empty/off. */
@@ -56,6 +62,10 @@ void wp_settings_apply(struct wp_app_ctx *ctx);
 
 /* The offload link to use: the setting, or the shell's offload_default. */
 const char *wp_settings_offload(const struct wp_app_ctx *ctx);
+
+/* This machine's name on the Pi: the setting, or the shell's
+   machine_default. */
+const char *wp_settings_machine(const struct wp_app_ctx *ctx);
 
 /* A file in the data folder: datadir joined with `name` by the shell's
    path_sep (no separator added after one already there). WP_FALSE --

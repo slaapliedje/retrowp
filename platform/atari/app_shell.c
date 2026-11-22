@@ -168,10 +168,10 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_DESK_DUMMY5,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 20, 1 },
     { WP_MENU_OBJ_DESK_DUMMY6,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 20, 1 },
     { WP_MENU_OBJ_DESK_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  7, 20, 1 },
-    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_NEW,    WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 6, 0, 16, 8 },
-    { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 1, 16, 1 },
-    { WP_MENU_OBJ_FILE_SAVE_AS,  -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 2, 16, 1 },
-    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 7, 16, 1 },
+    { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_NEW,    WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 6, 0, 18, 10 },
+    { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 1, 18, 1 },
+    { WP_MENU_OBJ_FILE_SAVE_AS,  -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 2, 18, 1 },
+    { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 9, 18, 1 },
     { WP_MENU_OBJ_VIEW_BOX,      WP_MENU_OBJ_EDIT_UNDO,   WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 12, 0, 8,  4 },
     { WP_MENU_OBJ_EDIT_COPY,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 8,  1 },
     { WP_MENU_OBJ_EDIT_PASTE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 8,  1 },
@@ -205,7 +205,7 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
        child of the File box, so its ob_next is Open, not the box -- only
        the LAST sibling in a chain wraps back to its parent. OF_LASTOB
        lives here now, on the final array entry, and nowhere else. */
-    { WP_MENU_OBJ_FILE_OPEN,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 0, 16, 1 },
+    { WP_MENU_OBJ_FILE_OPEN,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 0, 18, 1 },
     /* Edit > Undo, appended for the same reason File > New above was:
        array position is nothing to the AES, and renumbering is what has
        broken this tree twice. First child of the Edit box, so its
@@ -215,16 +215,16 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
        AES walks ob_next, not array order. Third in the File chain, so
        its ob_next was Quit (y 3; the box went to twelve columns for the
        longer label) and is Print's now. */
-    { WP_MENU_OBJ_FILE_PRINT,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 3, 16, 1 },
+    { WP_MENU_OBJ_FILE_PRINT,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 3, 18, 1 },
     /* File > Print..., appended the same way: after Save As in the File
        chain, so its ob_next is Quit (y 4; Quit to y 5, the box to six
        rows). OF_LASTOB lives here now, on the final array entry, and
        nowhere else. */
-    { WP_MENU_OBJ_FILE_MERGE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 4, 16, 1 },
+    { WP_MENU_OBJ_FILE_MERGE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 4, 18, 1 },
     /* File > Mail Merge... (M18), appended: after Print in the File
        chain, so its ob_next is Quit (y 5; Quit to y 6, the box to seven
        rows and sixteen columns for the label). */
-    { WP_MENU_OBJ_FILE_SETTINGS, -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 16, 1 },
+    { WP_MENU_OBJ_FILE_SETTINGS, -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 18, 1 },
     /* Tools > Insert Field... (M18), appended: last in the Tools chain,
        so its ob_next is the box (the box to five rows, eighteen
        columns). OF_LASTOB lives here now, on the final array entry. */
@@ -250,9 +250,14 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
        the box to seven rows). OF_LASTOB here. */
     { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 18, 1 },
     /* File > Settings... (M21 T21.4), appended: after Mail Merge in the
-       File chain, so its ob_next is Quit (y 6; Quit to y 7, the box to
-       eight rows). OF_LASTOB here. */
-    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 16, 1 }
+       File chain (y 6). Its ob_next was Quit; it is Save to Pi's now. */
+    { WP_MENU_OBJ_FILE_SAVE_TO_PI, -1,                    -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 18, 1 },
+    /* File > Save to Pi and Open from Pi... (M21 T21.6), appended: after
+       Settings in the File chain (y 7 and 8; Quit to y 9, the box to ten
+       rows and eighteen columns for "Open from Pi..."). OF_LASTOB on the
+       last. */
+    { WP_MENU_OBJ_FILE_OPEN_FROM_PI, -1,                  -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  7, 18, 1 },
+    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  8, 18, 1 }
 };
 
 /* T169: how many text fragments the paint loop has actually drawn since
@@ -279,6 +284,8 @@ static WP_AES_NEAR char g_text_print[] = "  Print...";
 static WP_AES_NEAR char g_text_quit[]  = "  Quit";
 static WP_AES_NEAR char g_text_merge[] = "  Mail Merge...";
 static WP_AES_NEAR char g_text_settings[] = "  Settings...";
+static WP_AES_NEAR char g_text_save_to_pi[] = "  Save to Pi";
+static WP_AES_NEAR char g_text_open_from_pi[] = "  Open from Pi...";
 static WP_AES_NEAR char g_text_insert_field[] = "  Insert Field...";
 static WP_AES_NEAR char g_text_insert_footnote[] = "  Insert Footnote";
 static WP_AES_NEAR char g_text_style[] = "  Style...";
@@ -471,6 +478,8 @@ void wp_menu_tree_init(short wcell, short hcell,
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_QUIT],  g_text_quit);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_MERGE], g_text_merge);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS], g_text_settings);
+    OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI], g_text_save_to_pi);
+    OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI], g_text_open_from_pi);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFIELD], g_text_insert_field);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_TOOLS_INSERTFOOTNOTE], g_text_insert_footnote);
     OB_SPEC_SET_STRING(wp_menu_tree[WP_MENU_OBJ_FORMAT_STYLE], g_text_style);
@@ -650,7 +659,7 @@ static wp_bool child_chain_ok(short parent)
    the table nor the local-item list, i.e. drawn, highlightable, and
    silently inert. Bumping it remains the prompt to go wire the item up. */
 #define WP_ATARI_MENU_TITLES              7   /* Desk File Edit View Tools Format Help */
-#define WP_ATARI_MENU_DISPATCHED_LEAVES  37   /* About + 8 File + 4 Edit + 3 View + 7 Tools + 11 Format + 3 Help */
+#define WP_ATARI_MENU_DISPATCHED_LEAVES  39   /* About + 10 File + 4 Edit + 3 View + 7 Tools + 11 Format + 3 Help */
 #define WP_ATARI_MENU_INERT_LEAVES        7   /* separator + 6 AES-reserved Desk slots */
 
 /* Defined next to the dispatch table it validates, far below -- this
@@ -915,7 +924,11 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS], g_text_save_as)) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_PRINT].ob_next != WP_MENU_OBJ_FILE_MERGE) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_next != WP_MENU_OBJ_FILE_SETTINGS) TREE_FAIL();
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_next != WP_MENU_OBJ_FILE_QUIT) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_next != WP_MENU_OBJ_FILE_SAVE_TO_PI) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI].ob_next != WP_MENU_OBJ_FILE_OPEN_FROM_PI) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI].ob_next != WP_MENU_OBJ_FILE_QUIT) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI], g_text_save_to_pi)) TREE_FAIL();
+    if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI], g_text_open_from_pi)) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS], g_text_settings)) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_MERGE], g_text_merge)) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_PRINT], g_text_print)) TREE_FAIL();
@@ -1056,9 +1069,17 @@ wp_bool wp_menu_tree_selfcheck(void)
     if ((wp_menu_tree[WP_MENU_OBJ_VIEW_GRID].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Columns was appended */
     if ((wp_menu_tree[WP_MENU_OBJ_FORMAT_COLUMNS].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Envelope was appended */
     if ((wp_menu_tree[WP_MENU_OBJ_TOOLS_ENVELOPE].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Settings was appended */
-    if ((wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
-    if (WP_MENU_OBJ_FILE_SETTINGS != WP_MENU_OBJ_COUNT - 1) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_flags & OF_LASTOB) != 0) TREE_FAIL(); /* cleared when Save to Pi was appended */
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI].ob_flags & OF_LASTOB) != 0) TREE_FAIL();
+    if ((wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI].ob_flags & OF_LASTOB) == 0) TREE_FAIL();
+    if (WP_MENU_OBJ_FILE_OPEN_FROM_PI != WP_MENU_OBJ_COUNT - 1) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_type != G_STRING) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI].ob_type != G_STRING) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI].ob_type != G_STRING) TREE_FAIL();
+    /* Their rows, between Settings' and Quit's (cells or pixels alike). */
+    if (!(wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI].ob_y &&
+          wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI].ob_y &&
+          wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_y)) TREE_FAIL();
     /* Its row, between Mail Merge's and Quit's (cells or pixels alike). */
     if (!(wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_y &&
           wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_y)) TREE_FAIL();
@@ -2000,6 +2021,13 @@ static wp_bool str_ends_with_ci(const char *s, const char *suffix)
 #ifndef WP_ATARI_OFFLOAD_ENDPOINT
 #define WP_ATARI_OFFLOAD_ENDPOINT "serial:aux:9600"
 #endif
+/* This machine's name on the Pi's document store (T21.6) when Settings
+   names none: gem4xe's build is a different machine from an ST's. */
+#ifdef GEM4XE_APP_GEM_H
+#define WP_ATARI_MACHINE_NAME "XE"
+#else
+#define WP_ATARI_MACHINE_NAME "ST"
+#endif
 /* The link is the writer's to set now (Settings), so the alert names
    where, not one endpoint. */
 #define WP_ATARI_NO_OFFLOAD "[No offload device available.|Check the offload link|in Settings.][ OK ]"
@@ -2274,6 +2302,15 @@ static void do_file_open(void)
 {
     char fullpath[WP_APP_PATH_MAX];
     wp_image_sink sink;
+
+    /* Open from Pi (T21.6): the shared flow, which picks from the Pi's
+       store instead of the selector, and asks its own unsaved-changes
+       question. */
+    if (g_ctx.from_pi) {
+        atari_image_sink_init(&sink);
+        (void)wp_action_file_open(&g_ctx, atari_pick_path, &sink);
+        return;
+    }
 
     /* Opening replaces the whole document, so it asks before discarding
        unsaved work -- BEFORE the file picker, so the writer is not made
@@ -4637,6 +4674,10 @@ static void redraw_window(short window_handle, VdiHdl vdi)
 static void atari_repaint(wp_app_ctx *ctx)
 {
     (void)ctx;
+    /* The bar too, as a WM_REDRAW would have it: it repaints only when
+       damaged or changed, and a dialog that covered it (the file
+       selector before Save to Pi) is damage the AES has not reported yet. */
+    g_rulerbar_damaged = WP_TRUE;
     if (g_window_handle >= 0) redraw_window(g_window_handle, g_window_vdi);
 }
 
@@ -5050,6 +5091,8 @@ static void invoke_backend_action(short window_handle, VdiHdl vdi, wp_action_id 
     case WP_ACT_FILE_OPEN:         do_file_open(); break;
     case WP_ACT_FILE_SAVE:         do_file_save(WP_FALSE); break;
     case WP_ACT_FILE_SAVE_AS:      do_file_save(WP_TRUE); break;
+    case WP_ACT_FILE_SAVE_TO_PI:   g_ctx.to_pi = WP_TRUE; do_file_save(WP_FALSE); break;
+    case WP_ACT_FILE_OPEN_FROM_PI: g_ctx.from_pi = WP_TRUE; do_file_open(); break;
     case WP_ACT_TOOLS_SPELLCHECK:  do_spell_check(); break;
     case WP_ACT_TOOLS_THESAURUS:   do_thesaurus(); break;
     case WP_ACT_TOOLS_GRAMMARCHECK: do_grammar_check(); break;
@@ -5281,6 +5324,8 @@ static const wp_menu_action_pair g_menu_actions[] = {
     { WP_MENU_OBJ_FORMAT_COLUMNS,     WP_ACT_FORMAT_COLUMNS },
     { WP_MENU_OBJ_TOOLS_ENVELOPE,     WP_ACT_TOOLS_ENVELOPE },
     { WP_MENU_OBJ_FILE_SETTINGS,      WP_ACT_FILE_SETTINGS },
+    { WP_MENU_OBJ_FILE_SAVE_TO_PI,    WP_ACT_FILE_SAVE_TO_PI },
+    { WP_MENU_OBJ_FILE_OPEN_FROM_PI,  WP_ACT_FILE_OPEN_FROM_PI },
     { WP_MENU_OBJ_FORMAT_BOLD,        WP_ACT_FORMAT_BOLD },
     { WP_MENU_OBJ_FORMAT_ITALIC,      WP_ACT_FORMAT_ITALIC },
     { WP_MENU_OBJ_FORMAT_UNDERLINE,   WP_ACT_FORMAT_UNDERLINE },
@@ -6093,6 +6138,7 @@ void app_shell_run(void)
         g_ctx.recovery_default = g_recovery_path[0] != '\0' ? g_recovery_path : NULL;
         /* Settings (settings.h): the writer's, over this machine's own. */
         g_ctx.offload_default = WP_ATARI_OFFLOAD_ENDPOINT;
+        g_ctx.machine_default = WP_ATARI_MACHINE_NAME;
         g_ctx.path_sep = '\\';
         g_ctx.settings = cfg.settings;
         g_ctx.settings_changed = atari_settings_changed;

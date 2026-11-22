@@ -154,8 +154,17 @@ typedef struct wp_app_ctx {
     const char *recovery_default;
     const char *offload_default;
     const char *clipart_default;  /* clipart_dir when no data folder is set */
+    const char *machine_default;  /* this machine's name on the Pi's store when
+                                     the setting is empty ("ST", "AMIGA", ...) */
     char        path_sep;
     wp_bool     offload_retry;
+    /* For the next Save or Open only (T21.6, pistore.h), set by the shell
+       for File > Save to Pi and File > Open from Pi and cleared by the
+       shared file flow as it starts: to_pi sends the saved file to the
+       Pi's store as well, from_pi picks the file from that store instead
+       of the machine's own picker. */
+    wp_bool     to_pi;
+    wp_bool     from_pi;
     /* Called after the Settings dialog has changed them, for what the
        shell holds on to (an open dictionary). NULL: nothing to do. */
     void      (*settings_changed)(struct wp_app_ctx *ctx);

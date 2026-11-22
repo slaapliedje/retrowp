@@ -831,6 +831,8 @@ static void invoke_backend_action(wp_action_id id)
     case WP_ACT_FILE_OPEN:     do_file_open(); break;
     case WP_ACT_FILE_SAVE:     do_file_save(WP_FALSE); break;
     case WP_ACT_FILE_SAVE_AS:  do_file_save(WP_TRUE); break;
+    case WP_ACT_FILE_SAVE_TO_PI:   g_ctx.to_pi = WP_TRUE; do_file_save(WP_FALSE); break;
+    case WP_ACT_FILE_OPEN_FROM_PI: g_ctx.from_pi = WP_TRUE; do_file_open(); break;
     case WP_ACT_TOOLS_INSERTIMAGE: do_insert_image(); break;
     /* The four checks are the portable ones (tools.h); this shell adds
        the link, the dictionary's name on this volume and the alert. */
@@ -2325,6 +2327,7 @@ void app_shell_run(void)
     /* Settings (settings.h): the writer's, over this machine's own. */
     g_ctx.recovery_default = WP_MAC_RECOVERY_PATH;
     g_ctx.offload_default = WP_MAC_OFFLOAD_ENDPOINT;
+    g_ctx.machine_default = "MAC";
     g_ctx.clipart_default = ":CLIPART:";
     g_ctx.path_sep = ':';
     g_ctx.settings = cfg.settings;
