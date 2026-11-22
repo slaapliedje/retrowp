@@ -3087,8 +3087,14 @@ through it in cloud or network storage.
       file is written at the new place before the old goes. Shown on
       TOS 1.04 (Hatari), DOSBox, System 7.5.3 (BasiliskII) and Kickstart
       3.1 + MUI (amiberry): opened, edited, OK wrote the configuration
-      file, Cancel left it. Not yet: the Mac's Standard File does not
-      start in the documents folder. Found on the way (also in the T21.3
+      file, Cancel left it. The Mac's Standard File, which has no
+      parameter for where it opens, starts there since 2026-11-21: the
+      folder is looked up by name and set in the low-memory globals
+      SFSaveDisk and CurDirStore, Standard File's own memory of where
+      it was -- the document's own folder first, as on the ST, then
+      docdir, then wherever it was last left (System 7.5.3: Drafts,
+      Letters for a document opened from there, the volume with
+      neither). Found on the way (also in the T21.3
       build): on TOS 1.04 under Hatari, stepping the keyboard mouse from
       the File title into its dropdown switched to a one-row Desk menu.
       Not Hatari: a menu tree bug, fixed in T21.5 (below).
@@ -3153,6 +3159,14 @@ through it in cloud or network storage.
       clip, which was the AES's rectangle alone, also keeps the text and
       pictures (blits, which vs_clip does not stop) to the document area,
       for repaints the status line does not follow.
+      Then the status line itself (2026-11-21): it and the Help pager
+      painted their whole strip after the document's rectangle loop,
+      over whatever covered the window's foot. Both now walk the AES's
+      rectangle list. The AFROS redraw gate gained a phase for it: the
+      prober covers the foot of the screen, posts RetroWP a WM_REDRAW
+      for its whole work area, and asserts the cover comes through
+      untouched -- the old build drew 15,952 px of "NORMAL  Page 1 of
+      1" over it, the new none.
 - [ ] T21.6 Storing on the Pi.
       AC: protocol operations to store, list and fetch a document; the
       gateway keeps each machine's documents with the last N versions,

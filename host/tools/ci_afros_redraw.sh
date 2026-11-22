@@ -107,7 +107,7 @@ STDERR_LOG="$SCRATCH/stderr.log"
 set +e
 ( cd "$SCRATCH/afros" && \
   env DISPLAY="$DISPLAY_NUM" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
-    timeout 300 aranym -c config -N ) \
+    timeout 420 aranym -c config -N ) \
     >"$SCRATCH/stdout.log" 2>"$STDERR_LOG" &
 ARANYM_PID=$!
 set -e
@@ -173,7 +173,7 @@ else
     set -- $RECT_RAW
     set +e
     python3 host/tools/afros_redraw_check.py "$DISPLAY_NUM" "$STDERR_LOG" "$SHOTS" \
-        "$(($1 + ORIGIN_X))" "$(($2 + ORIGIN_Y))" "$3" "$4" 240
+        "$(($1 + ORIGIN_X))" "$(($2 + ORIGIN_Y))" "$3" "$4" "$ORIGIN_X" "$ORIGIN_Y" 360
     STATUS=$?
     set -e
 fi

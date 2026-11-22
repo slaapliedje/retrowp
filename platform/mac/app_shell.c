@@ -456,6 +456,54 @@ static wp_bool build_full_path(short vRefNum, const unsigned char *fname,
     return WP_TRUE;
 }
 
+/* Where Standard File opens: the document's own folder, so Save As
+   offers where it came from; for a document with no name yet, Settings'
+   documents folder; otherwise wherever Standard File was last left.
+   Classic Standard File has no parameter for this -- it starts in the
+   volume and directory held in the low-memory globals SFSaveDisk
+   (minus the volume's reference number) and CurDirStore (its dirID),
+   so the folder is looked up by name and those two are set. Without HFS
+   there are no folders, and nothing is set. */
+static void mac_sf_start(const wp_app_ctx *ctx)
+{
+    unsigned char pdir[256], pvol[64];
+    const char *src = ctx->doc_path;
+    u32 n = (u32)strlen(src), cut = 0, vol_len = 0, i;
+    CInfoPBRec cpb;
+    HParamBlockRec vpb;
+
+    if (!hfs_present()) return;
+    for (i = 0; i < n; i++) if (src[i] == ':') cut = i + 1;
+    if (cut == 0) {
+        src = ctx->settings.docdir;
+        cut = (u32)strlen(src);
+    }
+    if (cut == 0 || cut > 254) return;
+    memcpy(pdir + 1, src, cut);
+    if (src[cut - 1] != ':') pdir[++cut] = ':';
+    pdir[0] = (unsigned char)cut;
+    while (vol_len < cut && pdir[vol_len + 1] != ':') vol_len++;
+    if (vol_len == 0 || vol_len > 27) return;  /* a relative path, or no volume name */
+    memcpy(pvol + 1, pdir + 1, vol_len + 1);    /* "Vol:" */
+    pvol[0] = (unsigned char)(vol_len + 1);
+
+    memset(&vpb, 0, sizeof(vpb));
+    vpb.volumeParam.ioNamePtr = pvol;
+    vpb.volumeParam.ioVolIndex = -1;            /* by name */
+    if (PBHGetVInfoSync(&vpb) != noErr) return;
+
+    memset(&cpb, 0, sizeof(cpb));
+    cpb.dirInfo.ioNamePtr = pdir;
+    cpb.dirInfo.ioVRefNum = vpb.volumeParam.ioVRefNum;
+    cpb.dirInfo.ioFDirIndex = 0;
+    cpb.dirInfo.ioDrDirID = 0;
+    if (PBGetCatInfoSync(&cpb) != noErr) return;
+    if (!(cpb.dirInfo.ioFlAttrib & 0x10)) return;   /* not a folder */
+
+    LMSetSFSaveDisk((short)-vpb.volumeParam.ioVRefNum);
+    LMSetCurDirStore(cpb.dirInfo.ioDrDirID);
+}
+
 static wp_bool run_sf_get_file(char *out_path, u32 out_cap)
 {
     SFReply reply;
@@ -483,7 +531,7 @@ static wp_bool run_sf_put_file(char *out_path, u32 out_cap)
 /* Standard File, in the shape the shared file flow wants. */
 static wp_bool mac_pick_path(wp_app_ctx *ctx, wp_bool save, char *out, u32 cap)
 {
-    WP_UNUSED(ctx);
+    mac_sf_start(ctx);
     return save ? run_sf_put_file(out, cap) : run_sf_get_file(out, cap);
 }
 

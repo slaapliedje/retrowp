@@ -99,13 +99,18 @@ static void nf_log_short(short v)
    which legitimately changes when the top window changes) -- and a test
    whose compared region grows to include unrelated legitimate changes
    reports failures that are not defects. */
-static void nf_log_rect(const GRECT *r)
+static void nf_log_rect_as(const char *tag, const GRECT *r)
 {
-    nf_log("WMREDRAW: rect ");
+    nf_log(tag);
     nf_log_short(r->g_x); nf_log(" ");
     nf_log_short(r->g_y); nf_log(" ");
     nf_log_short(r->g_w); nf_log(" ");
     nf_log_short(r->g_h); nf_log("\r\n");
+}
+
+static void nf_log_rect(const GRECT *r)
+{
+    nf_log_rect_as("WMREDRAW: rect ", r);
 }
 
 /* How long to wait after appl_init before the first cover. RetroWP is
@@ -136,6 +141,15 @@ static void nf_log_rect(const GRECT *r)
 #define QUIET_MS     5000L
 
 #define CYCLES       3
+
+/* The last phase covers the foot of the screen -- RetroWP's status line
+   and its lower window furniture -- and then asks RetroWP to repaint
+   while it is still covered. Every rectangle it is entitled to paint
+   lies outside the cover, so whatever it draws, the cover must come
+   through untouched. The ST status line used to be painted in full
+   after the document's rectangle loop, and drew itself over exactly
+   this. */
+#define POKE_H        60
 
 /* The rectangle to cover, in screen pixels. Chosen to sit across
    RetroWP's own text band: RetroWP opens full-desktop, and its sample
@@ -334,6 +348,64 @@ int main(void)
         if (cycle > 0) {
             nf_log("WMREDRAW: restored\r\n");
             wait_servicing(-1, vdi, G_RED, QUIET_MS);
+        }
+    }
+
+    /* The poke phase. RetroWP's window is found by its owner, not by a
+       point on the screen: XaAES's TosWin2 console sits over the middle
+       of it, and a wind_find there poked the console instead. */
+    {
+        short rp_handle = -1, rp_owner, h, owner, d1, d2, d3;
+        short screen_h = (short)(work_out[1] + 1);
+        short msg[8];
+        GRECT rp_work;
+
+        rp_owner = appl_find("RETROWP ");
+        for (h = 1; rp_owner >= 0 && h < 256 && rp_handle < 0; h++) {
+            owner = -1;
+            if (wind_get(h, WF_OWNER, &owner, &d1, &d2, &d3) && owner == rp_owner) rp_handle = h;
+        }
+        if (rp_handle <= 0 || rp_owner < 0) {
+            nf_log("WMREDRAW: FAIL no RetroWP window to poke\r\n");
+        } else {
+            wind_get_grect(rp_handle, WF_WORKXYWH, &rp_work);
+            cover.g_x = 0;
+            cover.g_w = screen_w;
+            cover.g_h = POKE_H;
+            cover.g_y = (short)(screen_h - POKE_H);
+            nf_log_rect_as("WMREDRAW: poke rect ", &cover);
+            handle = wind_create_grect(NAME, &cover);
+            if (handle < 0) {
+                nf_log("WMREDRAW: FAIL wind_create\r\n");
+            } else {
+                wind_set_str(handle, WF_NAME, "Cover");
+                wind_open_grect(handle, &cover);
+                probe_paint_all(handle, vdi, G_RED);
+                nf_log("WMREDRAW: poke handle ");
+                nf_log_short(rp_handle);
+                nf_log(" owner ");
+                nf_log_short(rp_owner);
+                nf_log("\r\n");
+                nf_log("WMREDRAW: poke covered\r\n");
+                wait_servicing(handle, vdi, G_RED, QUIET_MS);
+
+                msg[0] = WM_REDRAW;
+                msg[1] = gl_apid;
+                msg[2] = 0;
+                msg[3] = rp_handle;
+                msg[4] = rp_work.g_x;
+                msg[5] = rp_work.g_y;
+                msg[6] = rp_work.g_w;
+                msg[7] = rp_work.g_h;
+                appl_write(rp_owner, 16, msg);
+                wait_servicing(handle, vdi, G_RED, QUIET_MS);
+                nf_log("WMREDRAW: poked\r\n");
+                wait_servicing(handle, vdi, G_RED, QUIET_MS);
+
+                wind_close(handle);
+                wind_delete(handle);
+                wait_servicing(-1, vdi, G_RED, QUIET_MS);
+            }
         }
     }
 

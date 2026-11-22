@@ -15,6 +15,14 @@ and asserts per cover/uncover cycle:
      RetroWP serviced a real partial WM_REDRAW and repainted the exposed
      region from its own document model, with no corruption.
 
+And once, after the cycles, the poke phase: the prober covers the foot
+of the screen (RetroWP's status line), posts RetroWP a WM_REDRAW for its
+whole work area while the cover is still up, and asserts
+
+  3. The cover came through RetroWP's repaint untouched. Every rectangle
+     of RetroWP's list lies outside it, so any pixel changed under the
+     cover is RetroWP drawing where the AES did not let it.
+
 WHY THE MARKERS ARE HINTS, NOT TIMING
 -------------------------------------
 An earlier version ran `tail -F` on the log in shell and screenshotted
@@ -132,7 +140,15 @@ def follow(path, stop_after):
             time.sleep(0.1)
 
 
-def main(display, log, shots, box, total_timeout):
+def parse_rect(line, tag, origin):
+    try:
+        x, y, w, h = (int(v) for v in line.split(tag, 1)[1].split()[:4])
+    except ValueError:
+        return None
+    return (x + origin[0], y + origin[1], x + origin[0] + w, y + origin[1] + h)
+
+
+def main(display, log, shots, box, origin, total_timeout):
     baseline = None
     area = (box[2] - box[0]) * (box[3] - box[1])
     if area <= 0:
@@ -142,6 +158,7 @@ def main(display, log, shots, box, total_timeout):
 
     cycle = 0
     results = []
+    poke = {}
     for line in follow(log, total_timeout):
         if "WMREDRAW: FAIL" in line:
             print("FAIL: probe reported %s" % line)
@@ -172,6 +189,27 @@ def main(display, log, shots, box, total_timeout):
                 ImageChops.difference(baseline.crop(box), im.crop(box)).point(
                     lambda v: min(255, v * 8)).save(
                         os.path.join(shots, "diff_%d.png" % cycle))
+        elif "WMREDRAW: poke rect " in line:
+            poke["box"] = parse_rect(line, "WMREDRAW: poke rect ", origin)
+        elif "WMREDRAW: poke covered" in line and poke.get("box") and baseline is not None:
+            pb = poke["box"]
+            p = os.path.join(shots, "poke_covered.png")
+            parea = (pb[2] - pb[0]) * (pb[3] - pb[1])
+            poke["covered"] = wait_differs(display, p, pb, baseline, parea // 2)
+            poke["area"] = parea
+            # A settled frame of the cover itself is what the repaint is
+            # compared with, not the first frame that merely differed.
+            wait_settled(display, p, pb)
+            poke["covered_im"] = Image.open(p).convert("RGB") if os.path.exists(p) else None
+        elif "WMREDRAW: poked" in line and poke.get("covered_im") is not None:
+            pb = poke["box"]
+            p = os.path.join(shots, "poked.png")
+            poke["settled"] = wait_settled(display, p, pb)
+            im = Image.open(p).convert("RGB") if os.path.exists(p) else None
+            poke["changed"] = ndiff(im, poke["covered_im"], pb)
+            if im is not None and poke["changed"] > 0:
+                ImageChops.difference(poke["covered_im"].crop(pb), im.crop(pb)).point(
+                    lambda v: min(255, v * 8)).save(os.path.join(shots, "diff_poke.png"))
         elif "WMREDRAW: done" in line:
             break
 
@@ -202,15 +240,32 @@ def main(display, log, shots, box, total_timeout):
             failures += 1
 
     print("%d/%d cycles passed" % (len(results) - failures, len(results)))
+
+    if "changed" not in poke:
+        print("FAIL poke: the phase never completed (%s)"
+              % ("no rect" if not poke.get("box") else "no repaint captured"))
+        failures += 1
+    elif poke["covered"] < poke["area"] // 2:
+        print("FAIL poke: prober window never covered the foot of the screen "
+              "(best %d/%d px changed)" % (poke["covered"], poke["area"]))
+        failures += 1
+    elif poke["changed"] == 0:
+        print("PASS poke: RetroWP repainted under a %d px cover and left it "
+              "untouched" % poke["area"])
+    else:
+        print("FAIL poke: RetroWP's repaint drew %d px over the window "
+              "covering it" % poke["changed"])
+        failures += 1
     return 1 if failures else 0
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 9:
+    if len(sys.argv) != 11:
         print(__doc__)
         print("usage: afros_redraw_check.py <display> <stderr-log> <shots-dir>"
-              " <x> <y> <w> <h> <timeout-s>")
+              " <x> <y> <w> <h> <origin-x> <origin-y> <timeout-s>")
         sys.exit(2)
     disp, logp, shotsd = sys.argv[1:4]
-    x, y, w, h = (int(v) for v in sys.argv[4:8])
-    sys.exit(main(disp, logp, shotsd, (x, y, x + w, y + h), float(sys.argv[8])))
+    x, y, w, h, ox, oy = (int(v) for v in sys.argv[4:10])
+    sys.exit(main(disp, logp, shotsd, (x, y, x + w, y + h), (ox, oy),
+                  float(sys.argv[10])))

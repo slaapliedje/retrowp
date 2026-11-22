@@ -4202,56 +4202,83 @@ static void paint_rulerbar(short window_handle, VdiHdl vdi, GRECT work, const sh
     ui_metrics_end(paper);
 }
 
+/* Clips to one rectangle of the AES's list, intersected with `area`:
+   vs_clip for what the VDI draws, and the gc's own clip for the blits
+   vs_clip does not stop. FALSE, and nothing set, when the two do not
+   meet. Furniture painted outside redraw_window's document loop walks
+   the list with this, so a dialog or another window over ours is left
+   alone. */
+static wp_bool clip_to_rect(VdiHdl vdi, atari_gc *gc, GRECT r, GRECT area, short pxy[4])
+{
+    i32 x1 = r.g_x > area.g_x ? r.g_x : area.g_x;
+    i32 y1 = r.g_y > area.g_y ? r.g_y : area.g_y;
+    i32 x2 = (r.g_x + r.g_w < area.g_x + area.g_w ? r.g_x + r.g_w : area.g_x + area.g_w) - 1;
+    i32 y2 = (r.g_y + r.g_h < area.g_y + area.g_h ? r.g_y + r.g_h : area.g_y + area.g_h) - 1;
+
+    if (x2 < x1 || y2 < y1) return WP_FALSE;
+    pxy[0] = (short)x1; pxy[1] = (short)y1; pxy[2] = (short)x2; pxy[3] = (short)y2;
+    vs_clip(vdi, 1, pxy);
+    gc->clip_on = 1;
+    gc->clip[0] = pxy[0]; gc->clip[1] = pxy[1]; gc->clip[2] = pxy[2]; gc->clip[3] = pxy[3];
+    return WP_TRUE;
+}
+
 /* Paints the reserved bottom strip showing vi-mode's current mode (and,
    in Command-line mode, the ':'/'/' buffer being typed) -- see
    platform/common/statusline.h. Always repaints in full (the strip is
    small and its content can change on every keystroke, unlike the
-   document body's damaged-rectangle tracking above) and sets its own
-   clip rather than reusing the caller's, since it's called once after
-   redraw_window's own per-rectangle document loop has already finished
-   and reset clipping. A no-op if no document is loaded (nothing to show
-   a vi-mode state for) or the window is too short to fit the bar. */
+   document body's damaged-rectangle tracking above), once for each
+   rectangle of the AES's list that meets it: it is called after
+   redraw_window's own per-rectangle document loop has finished, and
+   painting the whole strip drew it over whatever covered the window's
+   foot -- another window, an alert. A no-op if no document is loaded
+   (nothing to show a vi-mode state for) or the window is too short to
+   fit the bar. */
 static void paint_status_line_body(short window_handle, VdiHdl vdi, GRECT full_work, i32 bar_h_px)
 {
     atari_gc gc;
     plat_font *font;
     wp_vi_status_view view;
     char mode_buf[96];   /* the mode or prompt, then "Page N of M" after its terminator */
-    short pxy[4];
+    short pxy[4] = { 0, 0, 0, 0 };
+    GRECT strip, r;
 
     if (!g_ctx.doc_loaded || bar_h_px <= 0 || bar_h_px > full_work.g_h) return;
 
     memset(&gc, 0, sizeof(gc));   /* every field, now and later */
     gc.vdi = vdi;
     gc.window_handle = window_handle;
-    gc.clip_on = 0;   /* set where a blit must keep to a redraw rectangle */
 
-    pxy[0] = full_work.g_x;
-    pxy[1] = (short)(full_work.g_y + full_work.g_h - bar_h_px);
-    pxy[2] = (short)(full_work.g_x + full_work.g_w - 1);
-    pxy[3] = (short)(full_work.g_y + full_work.g_h - 1);
-    vs_clip(vdi, 1, pxy);
+    strip = full_work;
+    strip.g_y = (short)(full_work.g_y + full_work.g_h - bar_h_px);
+    strip.g_h = (short)bar_h_px;
 
-    if (plat_font_open((const u8 *)"", 0, WP_ATARI_STATUSLINE_SIZE_TWIPS, 0, &font) == WP_OK) {
-        /* wp_keymap_get_status_view already folds the Command-line
-           buffer into its one composed mode string and leaves
-           pending_count/pending_cmd at 0/NULL -- see its own header
-           comment for why (no per-mode accessor exists yet that
-           wouldn't be more confusing shown alone; a documented, minor
-           gap, not fixed here). */
-        wp_keymap_get_status_view(&g_ctx, mode_buf, (u32)sizeof(mode_buf), &view);
+    if (plat_font_open((const u8 *)"", 0, WP_ATARI_STATUSLINE_SIZE_TWIPS, 0, &font) != WP_OK) font = NULL;
+    /* wp_keymap_get_status_view already folds the Command-line
+       buffer into its one composed mode string and leaves
+       pending_count/pending_cmd at 0/NULL -- see its own header
+       comment for why (no per-mode accessor exists yet that
+       wouldn't be more confusing shown alone; a documented, minor
+       gap, not fixed here). */
+    if (font != NULL) wp_keymap_get_status_view(&g_ctx, mode_buf, (u32)sizeof(mode_buf), &view);
 
-        wp_statusline_paint((plat_gc *)&gc, font, (i32)pxy[0], (i32)pxy[1],
-                             (i32)(pxy[2] - pxy[0] + 1), bar_h_px, &view);
-        plat_font_close(font);
+    wind_get_grect(window_handle, WF_FIRSTXYWH, &r);
+    while (r.g_w > 0 && r.g_h > 0) {
+        if (clip_to_rect(vdi, &gc, r, strip, pxy)) {
+            if (font != NULL) {
+                wp_statusline_paint((plat_gc *)&gc, font, (i32)strip.g_x, (i32)strip.g_y,
+                                     (i32)strip.g_w, bar_h_px, &view);
+            }
+            /* A rule along its top. The bar's grey is white on a monochrome
+               screen, and without a line the document's last row -- cut where
+               the bar begins, as the view's last row always is -- read as text
+               run into the status line (tos-47, TOS 5 and 3.06 on a TT's
+               640x400). */
+            plat_fill_rect((plat_gc *)&gc, (i32)strip.g_x, (i32)strip.g_y, (i32)strip.g_w, 1, 0, 0, 0);
+        }
+        wind_get_grect(window_handle, WF_NEXTXYWH, &r);
     }
-    /* A rule along its top. The bar's grey is white on a monochrome
-       screen, and without a line the document's last row -- cut where
-       the bar begins, as the view's last row always is -- read as text
-       run into the status line (tos-47, TOS 5 and 3.06 on a TT's
-       640x400). */
-    plat_fill_rect((plat_gc *)&gc, (i32)pxy[0], (i32)pxy[1], (i32)(pxy[2] - pxy[0] + 1), 1, 0, 0, 0);
-
+    if (font != NULL) plat_font_close(font);
     vs_clip(vdi, 0, pxy);
 }
 
@@ -4282,71 +4309,75 @@ static void paint_help_body(short window_handle, VdiHdl vdi)
     atari_gc gc;
     GRECT work;
     plat_font *body_font;
-    i32 hint_bar_h_px, body_line_h_px, body_h_px;
-    short pxy[4];
+    plat_font *hint_font = NULL;
+    i32 hint_bar_h_px, body_line_h_px, body_h_px, body_ascent_px = 0;
+    short pxy[4] = { 0, 0, 0, 0 };
+    GRECT r, hint_area;
+    wp_vi_status_view view;
+    static const u8 hint[] = "HELP -- j/k select, Enter follow, Backspace back, Esc/q close";
 
     wind_get_grect(window_handle, WF_WORKXYWH, &work);
     memset(&gc, 0, sizeof(gc));   /* every field, now and later */
     gc.vdi = vdi;
     gc.window_handle = window_handle;
-    gc.clip_on = 0;   /* set where a blit must keep to a redraw rectangle */
-
-    pxy[0] = work.g_x;
-    pxy[1] = work.g_y;
-    pxy[2] = (short)(work.g_x + work.g_w - 1);
-    pxy[3] = (short)(work.g_y + work.g_h - 1);
-    vs_clip(vdi, 1, pxy);
-    vsf_interior(vdi, FIS_SOLID);
-    vsf_color(vdi, G_WHITE);
-    v_bar(vdi, pxy);
-    vs_clip(vdi, 0, pxy);
 
     hint_bar_h_px = statusline_height_px();
     if (hint_bar_h_px > work.g_h) hint_bar_h_px = 0;
     body_line_h_px = font_line_height_px(WP_ATARI_HELP_BODY_SIZE_TWIPS);
     body_h_px = work.g_h - hint_bar_h_px;
     if (body_h_px < 0) body_h_px = 0;
+    hint_area = work;
+    hint_area.g_y = (short)(work.g_y + work.g_h - hint_bar_h_px);
+    hint_area.g_h = (short)hint_bar_h_px;
 
-    if (plat_font_open((const u8 *)"", 0, WP_ATARI_HELP_BODY_SIZE_TWIPS, 0, &body_font) == WP_OK) {
-        /* wp_help_view_paint positions text by BASELINE (plat_draw_text's
-           own convention, matching v_gtext) -- ascent_px tells it where
-           row 0's baseline sits below the viewport's own top edge. A
-           bare y_px with no ascent offset drew row 0's ascending strokes
-           above the viewport entirely -- a real bug found and fixed via
-           Amiga's own Phase 6 interactive verification (see
-           help_view.h's own comment), latent here too since this pager
-           was never interactively exercised end to end. */
-        plat_font_metrics body_fm;
-        i32 body_ascent_px = 0;
-        if (plat_font_metrics_get(body_font, &body_fm) == WP_OK) {
-            body_ascent_px = atari_twips_to_px_y(body_fm.ascent);
+    if (plat_font_open((const u8 *)"", 0, WP_ATARI_HELP_BODY_SIZE_TWIPS, 0, &body_font) != WP_OK) body_font = NULL;
+    if (hint_bar_h_px > 0 &&
+        plat_font_open((const u8 *)"", 0, WP_ATARI_STATUSLINE_SIZE_TWIPS, 0, &hint_font) != WP_OK) hint_font = NULL;
+    view.mode_label_utf8 = hint;
+    view.mode_label_len = (u32)(sizeof(hint) - 1);
+    view.pending_count = 0;
+    view.pending_cmd_utf8 = NULL;
+    view.pending_cmd_len = 0;
+    view.where_utf8 = NULL;
+    view.where_len = 0;
+
+    /* Once for each rectangle of the AES's list, like the document: the
+       pager painted its whole work area and drew itself over a window or
+       an alert that covered part of it. */
+    wind_get_grect(window_handle, WF_FIRSTXYWH, &r);
+    while (r.g_w > 0 && r.g_h > 0) {
+        if (clip_to_rect(vdi, &gc, r, work, pxy)) {
+            vsf_interior(vdi, FIS_SOLID);
+            vsf_color(vdi, G_WHITE);
+            v_bar(vdi, pxy);
+
+            if (body_font != NULL) {
+                /* wp_help_view_paint positions text by BASELINE (plat_draw_text's
+                   own convention, matching v_gtext) -- ascent_px tells it where
+                   row 0's baseline sits below the viewport's own top edge. A
+                   bare y_px with no ascent offset drew row 0's ascending strokes
+                   above the viewport entirely -- a real bug found and fixed via
+                   Amiga's own Phase 6 interactive verification (see
+                   help_view.h's own comment), latent here too since this pager
+                   was never interactively exercised end to end. */
+                plat_font_metrics body_fm;
+                if (body_ascent_px == 0 && plat_font_metrics_get(body_font, &body_fm) == WP_OK) {
+                    body_ascent_px = atari_twips_to_px_y(body_fm.ascent);
+                }
+                wp_help_view_paint((plat_gc *)&gc, body_font, work.g_x, work.g_y, work.g_w, body_h_px,
+                                    atari_px_to_twips_x((i32)work.g_w), body_line_h_px, body_ascent_px, &g_help_view);
+            }
+
+            if (hint_font != NULL && clip_to_rect(vdi, &gc, r, hint_area, pxy)) {
+                wp_statusline_paint((plat_gc *)&gc, hint_font, (i32)hint_area.g_x, (i32)hint_area.g_y,
+                                     (i32)work.g_w, hint_bar_h_px, &view);
+            }
         }
-        wp_help_view_paint((plat_gc *)&gc, body_font, work.g_x, work.g_y, work.g_w, body_h_px,
-                            atari_px_to_twips_x((i32)work.g_w), body_line_h_px, body_ascent_px, &g_help_view);
-        plat_font_close(body_font);
+        wind_get_grect(window_handle, WF_NEXTXYWH, &r);
     }
-
-    if (hint_bar_h_px > 0) {
-        plat_font *hint_font;
-        wp_vi_status_view view;
-        static const u8 hint[] = "HELP -- j/k select, Enter follow, Backspace back, Esc/q close";
-
-        pxy[1] = (short)(work.g_y + work.g_h - hint_bar_h_px);
-        vs_clip(vdi, 1, pxy);
-        if (plat_font_open((const u8 *)"", 0, WP_ATARI_STATUSLINE_SIZE_TWIPS, 0, &hint_font) == WP_OK) {
-            view.mode_label_utf8 = hint;
-            view.mode_label_len = (u32)(sizeof(hint) - 1);
-            view.pending_count = 0;
-            view.pending_cmd_utf8 = NULL;
-            view.pending_cmd_len = 0;
-            view.where_utf8 = NULL;
-            view.where_len = 0;
-            wp_statusline_paint((plat_gc *)&gc, hint_font, (i32)pxy[0], (i32)pxy[1],
-                                 (i32)work.g_w, hint_bar_h_px, &view);
-            plat_font_close(hint_font);
-        }
-        vs_clip(vdi, 0, pxy);
-    }
+    if (body_font != NULL) plat_font_close(body_font);
+    if (hint_font != NULL) plat_font_close(hint_font);
+    vs_clip(vdi, 0, pxy);
 }
 
 /* paint_help_body, measured in the screen's own face (ui_metrics_begin). */
