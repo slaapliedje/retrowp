@@ -623,8 +623,13 @@ the handshake; nothing else sends it.
 - **What each machine offers** (retroplat, each backend's
   `plat_transport_speeds`):
   - Plain ST/STE: 19200 (the MFP's Timer D ceiling).
-  - Falcon (TOS 5's RSVF cookie, or HSMODEM): 38400 and 57600, plus
-    115200 and 230400 with RTS/CTS (`:hard`).
+  - Falcon or Mega STE on MODEM2, or a TT on SERIAL2 (TOS 5's RSVF
+    cookie, or HSMODEM's, listing the port AUX is mapped to): 38400 and
+    57600, plus 115200 and 230400 with RTS/CTS (`:hard`). A TT's MODEM2:
+    38400. A TT's MODEM1 or SERIAL1 (MFP ports): 19200, cookie or not --
+    there Rsconf's codes 10-13 still mean 200 to 110 baud. The cookie
+    lists ports, not speeds, so the backend decides by port name and
+    `_MCH` (transport_atari.c, `fast_codes`).
   - DOS: 115200 with a 16550's FIFO, 19200 without (the UART is polled).
   - Amiga: 38400 on a 68000, 115200 on a 68020 or better.
   - Mac: 57600 (the Serial Driver's table; a 2 KB SerSetBuf input
@@ -671,7 +676,7 @@ DIR/<machine>/<document>/000001, 000002, ...
   version (0 = the newest). Response: the file's bytes (in parts past
   one frame); `OFFLOAD_ERR` with nothing for a version not kept.
 
-**Kept in git** (`--store-git`, T21.7; `doc_store_git.py`). The same
+**Kept in git** (`--store-git`, T21.8; `doc_store_git.py`). The same
 three ops and the same answers, but DIR is a git repository and every
 copy a commit, so nothing is ever removed:
 

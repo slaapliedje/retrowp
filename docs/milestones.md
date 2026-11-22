@@ -3222,7 +3222,24 @@ through it in cloud or network storage.
       Open from Pi... now sits under Open and Save to Pi under Save
       As... on every machine (wp_action_menu_order(); the ST's tree by
       hand).
-- [ ] T21.7 Cloud and network storage.
+- [ ] T21.7 Choosing the serial port and speed.
+      Before more Pi work: a link stuck at 9600 makes every Pi feature
+      slow, and many machines have more than one port.
+      AC: Settings has Link (none, serial, TCP where there is one), Port
+      and Speed choices, filled from what the machine really has; the
+      stored offload= string keeps its shape, so old settings still load.
+      retroplat gains a port-listing call; the PORT field means:
+      Atari -- MODEM1, MODEM2, SERIAL1, SERIAL2 (from the RSVF cookie,
+      else the machine's ports; Bconmap to it, the old mapping restored on
+      exit), so a TT or Falcon can use its SCC port; Amiga --
+      <name>.device:<unit> (serial.device 0 by default, any card's
+      device); DOS -- COM1-COM4 (0-3 still read); Mac -- modem or printer,
+      the printer port refused while LocalTalk holds it. Speed lists only
+      what that port reaches (plat_transport_speeds, now per port); "best"
+      keeps raising it through SET_SPEED. Gates: each port's transport
+      self-check, and a run at the raised speed on the MiSTer TT's
+      SERIAL2 or MODEM2.
+- [ ] T21.8 Cloud and network storage.
       AC: the gateway syncs its store through rclone (Dropbox, Google
       Drive, OneDrive, SMB, FTP, SFTP, WebDAV ...), set up by a script
       on the Pi; credentials never leave the Pi; a status operation
@@ -3238,7 +3255,7 @@ through it in cloud or network storage.
       it against a real gateway (five saves, five commits, the third
       newest fetched back; an unchanged save told). Left: the rclone
       sync, its status op and the Settings line.
-- [ ] T21.8 The shortcuts, in the program.
+- [ ] T21.9 The shortcuts, in the program.
       AC: Help > Keyboard Shortcuts shows the list for the scheme in use
       (vi, WordStar, Emacs, WordPerfect, Word), in the help viewer on
       every port: the application's own shortcuts and the scheme's

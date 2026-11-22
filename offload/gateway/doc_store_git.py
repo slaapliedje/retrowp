@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""The document store kept in git (M21 T21.7): the same OFFLOAD_STORE,
+"""The document store kept in git (M21 T21.8): the same OFFLOAD_STORE,
 OFFLOAD_LIST and OFFLOAD_FETCH answers as doc_store.py, but every copy a
 machine sends is a commit, so nothing is ever thrown away.
 

@@ -92,7 +92,7 @@ static void setup(wp_bool store)
     setup_with(store ? with : NULL);
 }
 
-/* The git store (T21.7), listing three versions. */
+/* The git store (T21.8), listing three versions. */
 static void setup_git(void)
 {
     static const char *const with[] = { "--store", PS_STORE, "--store-git", "--store-versions", "3", NULL };
