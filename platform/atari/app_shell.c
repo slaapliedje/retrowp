@@ -169,8 +169,8 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     { WP_MENU_OBJ_DESK_DUMMY6,   -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 20, 1 },
     { WP_MENU_OBJ_DESK_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  7, 20, 1 },
     { WP_MENU_OBJ_EDIT_BOX,      WP_MENU_OBJ_FILE_NEW,    WP_MENU_OBJ_FILE_QUIT,  G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 6, 0, 18, 10 },
-    { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 1, 18, 1 },
-    { WP_MENU_OBJ_FILE_SAVE_AS,  -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 2, 18, 1 },
+    { WP_MENU_OBJ_FILE_OPEN_FROM_PI, -1,                  -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 1, 18, 1 },
+    { WP_MENU_OBJ_FILE_SAVE_AS,  -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 3, 18, 1 },
     { WP_MENU_OBJ_FILE_BOX,      -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 9, 18, 1 },
     { WP_MENU_OBJ_VIEW_BOX,      WP_MENU_OBJ_EDIT_UNDO,   WP_MENU_OBJ_EDIT_PASTE, G_BOX,    OF_NONE    , OS_NORMAL,   OB_SPEC_ZERO, 12, 0, 8,  4 },
     { WP_MENU_OBJ_EDIT_COPY,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  1, 8,  1 },
@@ -214,17 +214,17 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
     /* File > Save As, appended for the same reason as New above: the
        AES walks ob_next, not array order. Third in the File chain, so
        its ob_next was Quit (y 3; the box went to twelve columns for the
-       longer label) and is Print's now. */
-    { WP_MENU_OBJ_FILE_PRINT,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 3, 18, 1 },
+       longer label) and is Save to Pi's now (y 4). */
+    { WP_MENU_OBJ_FILE_SAVE_TO_PI, -1,                    -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 4, 18, 1 },
     /* File > Print..., appended the same way: after Save As in the File
        chain, so its ob_next is Quit (y 4; Quit to y 5, the box to six
        rows). OF_LASTOB lives here now, on the final array entry, and
        nowhere else. */
-    { WP_MENU_OBJ_FILE_MERGE,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 4, 18, 1 },
+    { WP_MENU_OBJ_FILE_MERGE,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0, 6, 18, 1 },
     /* File > Mail Merge... (M18), appended: after Print in the File
        chain, so its ob_next is Quit (y 5; Quit to y 6, the box to seven
        rows and sixteen columns for the label). */
-    { WP_MENU_OBJ_FILE_SETTINGS, -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 18, 1 },
+    { WP_MENU_OBJ_FILE_SETTINGS, -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  7, 18, 1 },
     /* Tools > Insert Field... (M18), appended: last in the Tools chain,
        so its ob_next is the box (the box to five rows, eighteen
        columns). OF_LASTOB lives here now, on the final array entry. */
@@ -250,14 +250,15 @@ WP_AES_NEAR OBJECT wp_menu_tree[WP_MENU_OBJ_COUNT] = {
        the box to seven rows). OF_LASTOB here. */
     { WP_MENU_OBJ_TOOLS_BOX,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 18, 1 },
     /* File > Settings... (M21 T21.4), appended: after Mail Merge in the
-       File chain (y 6). Its ob_next was Quit; it is Save to Pi's now. */
-    { WP_MENU_OBJ_FILE_SAVE_TO_PI, -1,                    -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  6, 18, 1 },
-    /* File > Save to Pi and Open from Pi... (M21 T21.6), appended: after
-       Settings in the File chain (y 7 and 8; Quit to y 9, the box to ten
-       rows and eighteen columns for "Open from Pi..."). OF_LASTOB on the
-       last. */
-    { WP_MENU_OBJ_FILE_OPEN_FROM_PI, -1,                  -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  7, 18, 1 },
-    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  8, 18, 1 }
+       File chain, last before Quit (y 8). */
+    { WP_MENU_OBJ_FILE_QUIT,     -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  8, 18, 1 },
+    /* File > Save to Pi and Open from Pi... (M21 T21.6), appended to the
+       array but each beside the command it extends in the File chain:
+       Open, Open from Pi..., Save, Save As..., Save to Pi, then Print,
+       Mail Merge, Settings and Quit (y 0-9; the box ten rows and eighteen
+       columns for "Open from Pi..."). OF_LASTOB on the last. */
+    { WP_MENU_OBJ_FILE_PRINT,    -1,                      -1,                     G_STRING, OF_NONE,     OS_NORMAL,   OB_SPEC_ZERO, 0,  5, 18, 1 },
+    { WP_MENU_OBJ_FILE_SAVE,     -1,                      -1,                     G_STRING, OF_LASTOB,   OS_NORMAL,   OB_SPEC_ZERO, 0,  2, 18, 1 }
 };
 
 /* T169: how many text fragments the paint loop has actually drawn since
@@ -916,17 +917,17 @@ wp_bool wp_menu_tree_selfcheck(void)
     if ((wp_menu_tree[WP_MENU_OBJ_FILE_BOX].ob_flags & OF_HIDETREE) != 0) TREE_FAIL();
     if (!menu_box_placed_ok(WP_MENU_OBJ_FILE_TITLE, WP_MENU_OBJ_FILE_BOX)) TREE_FAIL();
 
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_next != WP_MENU_OBJ_FILE_SAVE) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_next != WP_MENU_OBJ_FILE_OPEN_FROM_PI) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI].ob_next != WP_MENU_OBJ_FILE_SAVE) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_OPEN], g_text_open)) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_next != WP_MENU_OBJ_FILE_SAVE_AS) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE], g_text_save)) TREE_FAIL();
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_next != WP_MENU_OBJ_FILE_PRINT) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_next != WP_MENU_OBJ_FILE_SAVE_TO_PI) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI].ob_next != WP_MENU_OBJ_FILE_PRINT) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS], g_text_save_as)) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_PRINT].ob_next != WP_MENU_OBJ_FILE_MERGE) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_next != WP_MENU_OBJ_FILE_SETTINGS) TREE_FAIL();
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_next != WP_MENU_OBJ_FILE_SAVE_TO_PI) TREE_FAIL();
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI].ob_next != WP_MENU_OBJ_FILE_OPEN_FROM_PI) TREE_FAIL();
-    if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI].ob_next != WP_MENU_OBJ_FILE_QUIT) TREE_FAIL();
+    if (wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_next != WP_MENU_OBJ_FILE_QUIT) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI], g_text_save_to_pi)) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI], g_text_open_from_pi)) TREE_FAIL();
     if (!OB_SPEC_IS_STRING(wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS], g_text_settings)) TREE_FAIL();
@@ -1076,10 +1077,13 @@ wp_bool wp_menu_tree_selfcheck(void)
     if (wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_type != G_STRING) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI].ob_type != G_STRING) TREE_FAIL();
     if (wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI].ob_type != G_STRING) TREE_FAIL();
-    /* Their rows, between Settings' and Quit's (cells or pixels alike). */
-    if (!(wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI].ob_y &&
-          wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI].ob_y &&
-          wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_y)) TREE_FAIL();
+    /* Their rows, each just under the command it extends: Open from Pi
+       between Open and Save, Save to Pi between Save As and Print
+       (cells or pixels alike). */
+    if (!(wp_menu_tree[WP_MENU_OBJ_FILE_OPEN].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI].ob_y &&
+          wp_menu_tree[WP_MENU_OBJ_FILE_OPEN_FROM_PI].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_SAVE].ob_y &&
+          wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_AS].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI].ob_y &&
+          wp_menu_tree[WP_MENU_OBJ_FILE_SAVE_TO_PI].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_PRINT].ob_y)) TREE_FAIL();
     /* Its row, between Mail Merge's and Quit's (cells or pixels alike). */
     if (!(wp_menu_tree[WP_MENU_OBJ_FILE_MERGE].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_y &&
           wp_menu_tree[WP_MENU_OBJ_FILE_SETTINGS].ob_y < wp_menu_tree[WP_MENU_OBJ_FILE_QUIT].ob_y)) TREE_FAIL();

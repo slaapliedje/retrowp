@@ -2211,7 +2211,7 @@ static Object *build_menustrip(void)
         if (menu == NULL) continue;
 
         for (ai = 0; ai < (u32)WP_ACT_COUNT; ai++) {
-            const wp_action *act = &g_wp_actions[ai];
+            const wp_action *act = wp_action_menu_order(ai);
             Object *item;
             const char *shortcut;
 

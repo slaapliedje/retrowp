@@ -2867,6 +2867,25 @@ const wp_action *wp_action_find(wp_action_id id)
     return &g_wp_actions[id];
 }
 
+const wp_action *wp_action_menu_order(u32 i)
+{
+    static u8 order[WP_ACT_COUNT];
+    static wp_bool built = WP_FALSE;
+
+    if (i >= (u32)WP_ACT_COUNT) return NULL;
+    if (!built) {
+        u32 a, n = 0;
+        for (a = 0; a < (u32)WP_ACT_COUNT; a++) {
+            if (a == (u32)WP_ACT_FILE_SAVE_TO_PI || a == (u32)WP_ACT_FILE_OPEN_FROM_PI) continue;
+            order[n++] = (u8)a;
+            if (a == (u32)WP_ACT_FILE_OPEN) order[n++] = (u8)WP_ACT_FILE_OPEN_FROM_PI;
+            if (a == (u32)WP_ACT_FILE_SAVE_AS) order[n++] = (u8)WP_ACT_FILE_SAVE_TO_PI;
+        }
+        built = WP_TRUE;
+    }
+    return &g_wp_actions[order[i]];
+}
+
 const wp_action *wp_action_find_by_shortcut(u8 ascii)
 {
     u32 i;

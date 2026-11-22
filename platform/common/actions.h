@@ -194,6 +194,14 @@ extern const wp_action g_wp_actions[WP_ACT_COUNT];
 const wp_action *wp_action_find(wp_action_id id);
 const wp_action *wp_action_find_by_shortcut(u8 ascii);
 
+/* The order menus list actions in: g_wp_actions[]' own order (it is
+   indexed by id, so it cannot move), except that File > Open from Pi...
+   sits under Open and File > Save to Pi under Save As..., beside the
+   commands they extend. `i` runs 0 .. WP_ACT_COUNT-1; every id appears
+   exactly once. A menu built by walking the table walks this instead,
+   and so does anything that maps a menu position back to an action. */
+const wp_action *wp_action_menu_order(u32 i);
+
 /* T174 Dictate: the whole action, portable, in ONE place rather than
    four near-identical per-backend copies.
 

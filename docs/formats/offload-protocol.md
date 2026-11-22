@@ -671,6 +671,28 @@ DIR/<machine>/<document>/000001, 000002, ...
   version (0 = the newest). Response: the file's bytes (in parts past
   one frame); `OFFLOAD_ERR` with nothing for a version not kept.
 
+**Kept in git** (`--store-git`, T21.7; `doc_store_git.py`). The same
+three ops and the same answers, but DIR is a git repository and every
+copy a commit, so nothing is ever removed:
+
+```
+DIR/.git
+DIR/<machine>/<document>          the newest copy, a plain file
+```
+
+A document's versions are the commits that changed its file, numbered
+from 1, so version n is always the same bytes. A copy identical to the
+newest is no new version: `OFFLOAD_OK`, "NOTE.TXT is unchanged on the
+Pi (2 versions)". `--store-versions` then says how many versions LIST
+shows (the newest), not how many are kept; FETCH can name any. The
+file is written, `fsync`ed and renamed as above, then committed with
+`core.fsync` on, before the answer. The gateway commits as "RetroWP
+gateway" with no global git configuration, hooks or signing, and never
+pushes: clone the store elsewhere to read the documents or their
+differences (`git log -p`), or add a remote and push it yourself. DIR
+must be empty or already a git store; the numbered layout is refused
+rather than mixed.
+
 ### Any other op
 
 The mock gateway responds `RESPONSE` with `status = OFFLOAD_UNSUPPORTED`

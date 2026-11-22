@@ -166,3 +166,34 @@ void test_menubar_boxes_stay_on_screen(void)
     ASSERT_TRUE((u32)box.col + box.width <= 46u);
     ASSERT_TRUE(!wp_menubar_selfcheck(&mb, dos_hint, 80u, 10u));   /* Format is taller */
 }
+
+/* The menus' order (wp_action_menu_order): every action once, the
+   table's order kept, and each Pi command right under the one it
+   extends -- here as the File menu the DOS bar builds from it. */
+void test_menubar_pi_commands_sit_by_their_partners(void)
+{
+    static const wp_action_id want[] = {
+        WP_ACT_FILE_NEW, WP_ACT_FILE_OPEN, WP_ACT_FILE_OPEN_FROM_PI,
+        WP_ACT_FILE_SAVE, WP_ACT_FILE_SAVE_AS, WP_ACT_FILE_SAVE_TO_PI
+    };
+    u8 seen[WP_ACT_COUNT];
+    wp_menubar mb;
+    u32 i;
+
+    memset(seen, 0, sizeof(seen));
+    for (i = 0; i < (u32)WP_ACT_COUNT; i++) {
+        const wp_action *a = wp_action_menu_order(i);
+        ASSERT_TRUE(a != NULL);
+        ASSERT_TRUE(seen[a->id] == 0);
+        seen[a->id] = 1;
+    }
+    ASSERT_TRUE(wp_action_menu_order((u32)WP_ACT_COUNT) == NULL);
+
+    build(&mb);
+    ASSERT_TRUE(mb.titles[0].group == WP_MENU_FILE);
+    for (i = 0; i < (u32)(sizeof(want) / sizeof(want[0])); i++) {
+        ASSERT_TRUE(mb.items[mb.titles[0].first + i].action == (u8)want[i]);
+    }
+    /* Quit still last. */
+    ASSERT_TRUE(mb.items[mb.titles[0].first + mb.titles[0].count - 1].action == (u8)WP_ACT_FILE_QUIT);
+}

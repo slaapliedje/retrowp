@@ -68,11 +68,10 @@ static const char *doc_text(void)
     return buf;
 }
 
-/* A fresh store; the gateway started with `store` (or without one). */
-static void setup(wp_bool store)
+/* A fresh store; the gateway started with these arguments (NULL: no
+   store at all). */
+static void setup_with(const char *const *args)
 {
-    static const char *const with[] = { "--store", PS_STORE, "--store-versions", "3", NULL };
-
     (void)mkdir(PS_DIR, 0777);
     (void)system("rm -rf " PS_STORE " " PS_DOC);
     ASSERT_TRUE(format_txt_import((const u8 *)"Hello\n", 6, &g_doc) == WP_OK);
@@ -82,8 +81,37 @@ static void setup(wp_bool store)
     g_ctx.config_path = PS_CFG;
     g_ctx.path_sep = '/';
     g_ctx.machine_default = "ST";
-    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, store ? with : NULL, &g_gw) == WP_OK);
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, args, &g_gw) == WP_OK);
     ASSERT_TRUE(offload_init(g_gw.endpoint) == WP_OK);
+}
+
+/* The numbered store keeping three versions (or no store). */
+static void setup(wp_bool store)
+{
+    static const char *const with[] = { "--store", PS_STORE, "--store-versions", "3", NULL };
+    setup_with(store ? with : NULL);
+}
+
+/* The git store (T21.7), listing three versions. */
+static void setup_git(void)
+{
+    static const char *const with[] = { "--store", PS_STORE, "--store-git", "--store-versions", "3", NULL };
+    setup_with(with);
+}
+
+/* A number git prints about the store, or -1. */
+static long git_count(const char *args)
+{
+    char cmd[256], line[64];
+    FILE *fp;
+    long n = -1;
+
+    sprintf(cmd, "git -C " PS_STORE " %s 2>/dev/null", args);
+    fp = popen(cmd, "r");
+    if (fp == NULL) return -1;
+    if (fgets(line, sizeof(line), fp) != NULL) n = strtol(line, NULL, 10);
+    (void)pclose(fp);
+    return n;
 }
 
 static void teardown(void)
@@ -243,5 +271,46 @@ void test_pistore_without_a_store(void)
     g_ctx.from_pi = WP_TRUE;
     ASSERT_TRUE(wp_action_file_open(&g_ctx, NULL, NULL) == WP_OK);
     ASSERT_EQ_STR("Open from Pi needs a gateway that keeps documents", window_host_last_title());
+    teardown();
+}
+
+/* The git store keeps every copy as a commit -- five saves, five
+   versions, though Open from Pi lists only the newest three -- and the
+   document itself is a plain file in the repository. */
+void test_pistore_git_keeps_every_version(void)
+{
+    static const char *const bodies[] = { "one\n", "two\n", "three\n", "four\n", "five\n" };
+    char here[64];
+    u32 i;
+
+    setup_git();
+    for (i = 0; i < 5; i++) {
+        ASSERT_TRUE(wp_pistore_put(&g_ctx, PS_DOC, (const u8 *)bodies[i],
+                                   (u32)strlen(bodies[i]), WP_TRUE) == WP_OK);
+    }
+    ASSERT_TRUE(git_count("rev-list --count HEAD -- ST/NOTE.TXT") == 5);
+    ASSERT_TRUE(read_all(PS_STORE "/ST/NOTE.TXT", here, sizeof(here)) > 0);
+    ASSERT_EQ_STR("five\n", here);
+
+    /* The third newest is the last one listed: "three". */
+    g_ctx.from_pi = WP_TRUE;
+    window_host_next_choice(0);                /* NOTE.TXT */
+    window_host_next_choice(2);                /* the third newest */
+    ASSERT_TRUE(wp_action_file_open(&g_ctx, NULL, NULL) == WP_OK);
+    ASSERT_EQ_STR("three\n", doc_text());
+    teardown();
+}
+
+/* A save with nothing changed is not a new version, and says so. */
+void test_pistore_git_unchanged_is_not_a_version(void)
+{
+    setup_git();
+    g_ctx.to_pi = WP_TRUE;
+    ASSERT_TRUE(wp_action_save_file(&g_ctx, PS_DOC, NULL) == WP_OK);
+    ASSERT_EQ_STR("Kept NOTE.TXT on the Pi (1 version)", window_host_last_title());
+    g_ctx.to_pi = WP_TRUE;
+    ASSERT_TRUE(wp_action_save_file(&g_ctx, PS_DOC, NULL) == WP_OK);
+    ASSERT_EQ_STR("NOTE.TXT is unchanged on the Pi (1 version)", window_host_last_title());
+    ASSERT_TRUE(git_count("rev-list --count HEAD") == 1);
     teardown();
 }

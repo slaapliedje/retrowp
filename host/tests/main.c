@@ -527,6 +527,7 @@ void test_autosave_recovered_document_is_caught_up(void);
 void test_autosave_config_setting(void);
 /* test_menubar.c */
 void test_menubar_has_every_menu_action_once(void);
+void test_menubar_pi_commands_sit_by_their_partners(void);
 void test_menubar_keys_walk_and_choose(void);
 void test_menubar_letters_open_and_choose(void);
 void test_menubar_clicks_land_on_items(void);
@@ -539,6 +540,8 @@ void test_pistore_open_from_pi_restores_a_version(void);
 void test_pistore_open_from_pi_asks_before_replacing(void);
 void test_pistore_machines_are_kept_apart(void);
 void test_pistore_without_a_store(void);
+void test_pistore_git_keeps_every_version(void);
+void test_pistore_git_unchanged_is_not_a_version(void);
 
 /* test_settings.c */
 void test_settings_ok_applies_and_writes_the_config(void);
@@ -1366,6 +1369,8 @@ static const test_case g_cases[] = {
     { "pistore_open_from_pi_asks_before_replacing", test_pistore_open_from_pi_asks_before_replacing },
     { "pistore_machines_are_kept_apart", test_pistore_machines_are_kept_apart },
     { "pistore_without_a_store", test_pistore_without_a_store },
+    { "pistore_git_keeps_every_version", test_pistore_git_keeps_every_version },
+    { "pistore_git_unchanged_is_not_a_version", test_pistore_git_unchanged_is_not_a_version },
     { "settings_ok_applies_and_writes_the_config", test_settings_ok_applies_and_writes_the_config },
     { "settings_pi_copy_and_machine_name", test_settings_pi_copy_and_machine_name },
     { "settings_cancel_changes_nothing", test_settings_cancel_changes_nothing },
@@ -1376,6 +1381,7 @@ static const test_case g_cases[] = {
     { "settings_backup_keeps_the_previous_copy", test_settings_backup_keeps_the_previous_copy },
     { "settings_config_keys", test_settings_config_keys },
     { "menubar_has_every_menu_action_once", test_menubar_has_every_menu_action_once },
+    { "menubar_pi_commands_sit_by_their_partners", test_menubar_pi_commands_sit_by_their_partners },
     { "menubar_keys_walk_and_choose", test_menubar_keys_walk_and_choose },
     { "menubar_letters_open_and_choose", test_menubar_letters_open_and_choose },
     { "menubar_clicks_land_on_items", test_menubar_clicks_land_on_items },

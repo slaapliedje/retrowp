@@ -932,7 +932,7 @@ static void build_action_menus(void)
         if (menu == NULL) continue;
 
         for (ai = 0; ai < (u32)WP_ACT_COUNT; ai++) {
-            const wp_action *act = &g_wp_actions[ai];
+            const wp_action *act = wp_action_menu_order(ai);
             unsigned char pitem[256];
 
             if (act->group != groups[gi]) continue;
@@ -1000,7 +1000,7 @@ static void do_menu_command(long menu_choice)
     }
 
     for (ai = 0; ai < (u32)WP_ACT_COUNT; ai++) {
-        const wp_action *act = &g_wp_actions[ai];
+        const wp_action *act = wp_action_menu_order(ai);   /* the order the menus were built in */
 
         if ((short)(WP_MENU_APPLE_ID + (int)act->group) != menuID) continue;
         count++;

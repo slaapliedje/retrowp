@@ -3210,12 +3210,34 @@ through it in cloud or network storage.
       request never reached it whole; three later runs, one after a
       100-second pause and one across the gateway's session timeout,
       fetched every time.
+      2026-11-22, on the main MiSTer's TT030 core over the real serial
+      cable to the gateway Pi, through speed_relay at 9600 -- TOS 5
+      (tos5tt.img, by the board's screenshot names; it was loaded part-way
+      and rebooted the TT, after a TOS 3.06 boot), not 3.06: Save
+      to Pi twice (versions 1 and 2 on the Pi, bytes checked), Open from
+      Pi listed both newest first, the older fetched with Replace and
+      written to the floppy (bytes checked). Each operation took ~40 s,
+      mostly a step up to 57600 that never confirmed through the relay
+      (on TOS 5; untried on 3.06 this way).
+      Open from Pi... now sits under Open and Save to Pi under Save
+      As... on every machine (wp_action_menu_order(); the ST's tree by
+      hand).
 - [ ] T21.7 Cloud and network storage.
       AC: the gateway syncs its store through rclone (Dropbox, Google
       Drive, OneDrive, SMB, FTP, SFTP, WebDAV ...), set up by a script
       on the Pi; credentials never leave the Pi; a status operation
       reports the last sync or its failure, shown in RetroWP's status
       line; "and then to cloud storage" in Settings.
+      Done so far: the store can be a git repository
+      (odt_gateway.py --store DIR --store-git, doc_store_git.py): every
+      copy a commit, nothing removed, version n always the same bytes, an
+      unchanged copy no new version ("... is unchanged on the Pi"), and
+      --store-versions only how many LIST shows. Same three ops, so no
+      machine changes. Never pushes by itself; a clone shows each
+      document's history and differences. host/tests/test_pistore.c runs
+      it against a real gateway (five saves, five commits, the third
+      newest fetched back; an unchanged save told). Left: the rclone
+      sync, its status op and the Settings line.
 - [ ] T21.8 The shortcuts, in the program.
       AC: Help > Keyboard Shortcuts shows the list for the scheme in use
       (vi, WordStar, Emacs, WordPerfect, Word), in the help viewer on

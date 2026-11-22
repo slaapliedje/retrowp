@@ -65,7 +65,7 @@ void wp_menubar_build(wp_menubar *mb, const u8 *groups, const char *const *title
 
         t->first = mb->item_count;
         for (a = 0; a < (u32)WP_ACT_COUNT; a++) {
-            const wp_action *act = &g_wp_actions[a];
+            const wp_action *act = wp_action_menu_order(a);
             if (act->group == groups[g] && act->id != WP_ACT_FILE_QUIT) add_item(mb, act, label_of, 0);
         }
         /* Quit last, under a rule, where a DOS program keeps Exit. */

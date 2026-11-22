@@ -10,7 +10,8 @@ and OFFLOAD_CONVERT_EXPORT for format_id=ODT or format_id=PDF --
 and OFFLOAD_PRINT -- the PDF, printed on this machine's printer -- when
 it has one to print on (--printer / --print-dir, below) -- and keeps
 documents for the machines that send them, with OFFLOAD_STORE, LIST and
-FETCH (doc_store.py), when given a folder for them (--store); everything else
+FETCH (doc_store.py, or doc_store_git.py with --store-git), when given a
+folder for them (--store); everything else
 responds OFFLOAD_UNSUPPORTED. There is deliberately no
 PDF *import*: PDF has no general, reliable text-reconstruction guarantee
 (docs/formats/offload-protocol.md has the reasoning), so it is export-only.
@@ -62,6 +63,7 @@ from wire_protocol import (
     parse_gateway_args, run_gateway_with_args,
 )
 from doc_store import DocStore, DEFAULT_VERSIONS
+from doc_store_git import GitDocStore, GitStoreError
 
 FORMAT_ODT = 1
 FORMAT_PDF = 2
@@ -2210,7 +2212,11 @@ def main():
                                 'LIST, FETCH) in DIR, one folder a machine'}),
         (('--store-versions',), {'default': DEFAULT_VERSIONS, 'type': int, 'metavar': 'N',
                                  'help': 'how many versions of each document to keep '
+                                         '(with --store-git: to list; all are kept) '
                                          '(default %d)' % DEFAULT_VERSIONS}),
+        (('--store-git',), {'action': 'store_true',
+                            'help': 'keep the store as a git repository, every copy '
+                                    'a commit (DIR new or already one)'}),
     ])
     PRINT_TO['dir'] = args.print_dir
     PRINT_TO['command'] = args.print_command
@@ -2229,10 +2235,13 @@ def main():
     if args.store:
         try:
             os.makedirs(args.store, exist_ok=True)
-            STORE['store'] = DocStore(args.store, args.store_versions)
+            if args.store_git:
+                STORE['store'] = GitDocStore(args.store, args.store_versions)
+            else:
+                STORE['store'] = DocStore(args.store, args.store_versions)
             ops_supported |= (1 << OP_STORE) | (1 << OP_LIST) | (1 << OP_FETCH)
-        except OSError:
-            print('odt-gateway: cannot use %s for the store' % args.store,
+        except (OSError, GitStoreError) as e:
+            print('odt-gateway: cannot use %s for the store (%s)' % (args.store, e),
                   file=sys.stderr, flush=True)
     if PRINT_TO['dir'] or PRINT_TO['printer'] is not None:
         ops_supported |= (1 << OP_PRINT) | (1 << OP_PRINT_OPTIONS)
