@@ -124,6 +124,12 @@ wp_bool offload_takes_large_requests(void);
    has moved it up, where both ends could); 0 for a link with no speed
    (a socket) or no link. */
 u32 offload_link_speed(void);
+
+/* The fastest the link may be raised to by the next offload_init's
+   OFFLOAD_SET_SPEED; 0 (the default) for as fast as both ends go. For a
+   cable or a machine that loses bytes at its line's top rate (M21 T21.7,
+   Settings' Speed). */
+void offload_set_speed_limit(u32 max_baud);
 void      offload_response_free(offload_response *resp);
 
 /* The response's bytes, as they arrive -- one call per frame. A non-OK

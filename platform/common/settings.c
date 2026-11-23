@@ -16,6 +16,7 @@ void wp_settings_defaults(wp_settings *s)
     s->recovery[0] = '\0';
     s->offload[0] = '\0';
     s->machine[0] = '\0';
+    s->link_max = 0;
     s->autosave_minutes = WP_AUTOSAVE_DEFAULT_MINUTES;
     s->backup = 0;
     s->pi_copy = 0;
@@ -29,6 +30,7 @@ void wp_settings_apply(wp_app_ctx *ctx)
     ctx->recovery_path = ctx->settings.recovery[0] != '\0' ? ctx->settings.recovery
                                                            : ctx->recovery_default;
     ctx->autosave.minutes = ctx->settings.autosave_minutes;
+    offload_set_speed_limit(ctx->settings.link_max);
     if (ctx->clipart_default != NULL) {
         char name[9];
 
@@ -111,18 +113,231 @@ static wp_bool starts(const char *s, const char *p)
     return (wp_bool)(strncmp(s, p, strlen(p)) == 0);
 }
 
-/* An offload link the transport seam can read: empty (the machine's
-   own), serial:..., tcp:..., or pipe:... (the host's). What follows the
-   prefix is the backend's to check when it connects. */
-static wp_bool offload_ok(const char *s)
+/* -- The link: Port, Speed, Network address (M21 T21.7) ---------------
+
+   The offload= string keeps the shape it always had -- serial:<port>:
+   <baud>[:hard], tcp:<host>:<port>, or off -- and the dialog builds it
+   from choices filled from what the machine really has
+   (plat_serial_ports). The <baud> is where the link starts, and stays
+   what it was: the gateway listens there, and OFFLOAD_SET_SPEED raises
+   it. Speed is how far up it may go (linkmax=), and whether RTS/CTS is
+   on, which the fastest rates of some ports need.
+
+   A form's choices cannot change while it is open, so Speed lists every
+   rate any port reaches; a rate the chosen port does not reach is
+   refused on OK, naming the port's own top speed. */
+
+#define LINK_PORTS_MAX  8
+#define LINK_SPEEDS_MAX 10
+
+static plat_serial_port g_ports[LINK_PORTS_MAX];
+static u32 g_port_n;
+static const char *g_port_labels[LINK_PORTS_MAX + 4];
+static u32 g_port_choices;
+static u32 g_port_net;                 /* index of "Network" */
+static u32 g_port_other;               /* index of the as-it-was entry, or ~0 */
+static char g_other_label[WP_SETTINGS_TEXT];
+
+static u32 g_speeds[LINK_SPEEDS_MAX];  /* index -> cap; 0 = fastest */
+static u8  g_speed_hard[LINK_SPEEDS_MAX];
+static const char *g_speed_labels[LINK_SPEEDS_MAX];
+static char g_speed_text[LINK_SPEEDS_MAX][16];
+static u32 g_speed_choices;
+
+static char g_address[WP_SETTINGS_TEXT];
+
+/* The parsed link as the dialog opened: its port index, its device and
+   start speed, whether RTS/CTS was on. */
+static u32  g_open_port;
+static char g_open_dev[PLAT_PORT_NAME_MAX];
+static char g_open_baud[12];
+static wp_bool g_open_hard;
+
+static char lower_c(char c) { return (char)(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c); }
+
+static wp_bool same_nocase(const char *a, const char *b, u32 blen)
 {
-    return (wp_bool)(s[0] == '\0' ||
-                     (starts(s, "serial:") && s[7] != '\0') ||
-                     (starts(s, "tcp:") && s[4] != '\0') ||
-                     (starts(s, "pipe:") && s[5] != '\0'));
+    u32 i;
+    for (i = 0; i < blen; i++) if (a[i] == '\0' || lower_c(a[i]) != lower_c(b[i])) return WP_FALSE;
+    return (wp_bool)(a[blen] == '\0');
 }
 
-enum { F_DOCDIR, F_DATADIR, F_RECOVERY, F_AUTOSAVE, F_BACKUP, F_OFFLOAD, F_PICOPY, F_MACHINE, F_COUNT };
+/* A port's own top rate and the slowest needing RTS/CTS. */
+static u32 port_rates(u32 port, u32 *rates, u32 cap, u32 *hard_from)
+{
+    const char *name = g_port_n > 0 ? g_ports[port].name : "aux";
+    return plat_serial_port_speeds(name, rates, cap, hard_from);
+}
+
+static void add_speed(u32 cap, wp_bool hard, const char *label)
+{
+    u32 i;
+    if (g_speed_choices >= LINK_SPEEDS_MAX) return;
+    for (i = 0; i < g_speed_choices; i++) if (g_speeds[i] == cap && g_speed_hard[i] == (u8)hard) return;
+    g_speeds[g_speed_choices] = cap;
+    g_speed_hard[g_speed_choices] = (u8)hard;
+    if (label != NULL) {
+        g_speed_labels[g_speed_choices] = label;
+    } else {
+        u32 n;
+        memcpy(g_speed_text[g_speed_choices], "Up to ", 6);
+        n = put_u(g_speed_text[g_speed_choices] + 6, cap);
+        WP_UNUSED(n);
+        g_speed_labels[g_speed_choices] = g_speed_text[g_speed_choices];
+    }
+    g_speed_choices++;
+}
+
+/* Fills the Port and Speed lists, and reads `link` (the link in use)
+   into them: *port_ix and *speed_ix answer where it stands. */
+static void link_lists(const char *link, u32 link_max, u32 *port_ix, u32 *speed_ix)
+{
+    u32 rates[LINK_SPEEDS_MAX], all[LINK_SPEEDS_MAX * 2];
+    u32 i, j, k, n, all_n = 0, hard_from, any_hard = 0, ports;
+
+    g_port_n = plat_serial_ports(g_ports, LINK_PORTS_MAX);
+    ports = g_port_n > 0 ? g_port_n : 1u;
+    g_port_labels[0] = "Off";
+    for (i = 0; i < ports; i++) g_port_labels[1 + i] = g_port_n > 0 ? g_ports[i].label : "Serial";
+    g_port_net = 1 + ports;
+    g_port_labels[g_port_net] = "Network";
+    g_port_choices = g_port_net + 1;
+    g_port_other = ~(u32)0;
+
+    /* Every rate any port reaches, fastest first, without repeats. */
+    for (i = 0; i < ports; i++) {
+        n = port_rates(i, rates, LINK_SPEEDS_MAX, &hard_from);
+        if (hard_from != 0) any_hard = 1;
+        for (j = 0; j < n; j++) {
+            for (k = 0; k < all_n && all[k] != rates[j]; k++) { }
+            if (k == all_n && all_n < LINK_SPEEDS_MAX * 2) all[all_n++] = rates[j];
+        }
+    }
+    for (i = 1; i < all_n; i++) {                   /* a few entries: insertion sort */
+        u32 v = all[i];
+        for (j = i; j > 0 && all[j - 1] < v; j--) all[j] = all[j - 1];
+        all[j] = v;
+    }
+    g_speed_choices = 0;
+    add_speed(0, WP_FALSE, "Fastest");
+    if (any_hard) add_speed(0, WP_TRUE, "Fastest, RTS/CTS");
+    for (i = 1; i < all_n; i++) add_speed(all[i], WP_FALSE, NULL);   /* the top is "Fastest" */
+
+    /* Where the link in use stands. */
+    *port_ix = 0;
+    g_open_dev[0] = '\0';
+    strcpy(g_open_baud, "9600");
+    g_open_hard = WP_FALSE;
+    g_address[0] = '\0';
+    if (link[0] == '\0' || strcmp(link, "off") == 0) {
+        *port_ix = 0;
+    } else if (starts(link, "tcp:") && link[4] != '\0') {
+        *port_ix = g_port_net;
+        if (strlen(link + 4) < sizeof(g_address)) strcpy(g_address, link + 4);
+    } else if (starts(link, "serial:")) {
+        const char *rest = link + 7, *end = rest + strlen(rest), *c;
+        u32 dl;
+
+        if (end - rest > 5 && strcmp(end - 5, ":hard") == 0) { g_open_hard = WP_TRUE; end -= 5; }
+        else if (end - rest > 5 && strcmp(end - 5, ":none") == 0) end -= 5;
+        for (c = end; c > rest && c[-1] != ':'; c--) { }
+        dl = c > rest ? (u32)(c - 1 - rest) : 0u;
+        if (dl > 0 && dl < sizeof(g_open_dev) && (u32)(end - c) < sizeof(g_open_baud) && end > c) {
+            memcpy(g_open_dev, rest, dl);
+            g_open_dev[dl] = '\0';
+            memcpy(g_open_baud, c, (u32)(end - c));
+            g_open_baud[end - c] = '\0';
+            if (g_port_n == 0) {
+                *port_ix = 1;
+            } else {
+                for (i = 0; i < g_port_n; i++) {
+                    u32 nl = (u32)strlen(g_ports[i].name);
+                    if (same_nocase(g_ports[i].name, g_open_dev, dl) ||
+                        (same_nocase("aux", g_open_dev, dl) && (g_ports[i].flags & PLAT_PORT_CURRENT)) ||
+                        /* DOS's older spelling: 0-3 for COM1-COM4. */
+                        (dl == 1 && g_open_dev[0] >= '0' && g_open_dev[0] <= '8' && nl > 0 &&
+                         g_ports[i].name[nl - 1] == g_open_dev[0] + 1))
+                        *port_ix = 1 + i;
+                }
+                if (*port_ix == 0 && same_nocase("aux", g_open_dev, dl)) *port_ix = 1;
+            }
+        }
+    }
+    if (*port_ix == 0 && link[0] != '\0' && strcmp(link, "off") != 0) {
+        /* Something the lists cannot show (a MiNT device path, the host's
+           pipe:): offered as itself, so OK keeps it. */
+        g_port_other = g_port_choices;
+        strncpy(g_other_label, link, sizeof(g_other_label) - 1);
+        g_other_label[sizeof(g_other_label) - 1] = '\0';
+        g_port_labels[g_port_other] = g_other_label;
+        g_port_choices++;
+        *port_ix = g_port_other;
+    }
+
+    if (link_max != 0) add_speed(link_max, WP_FALSE, NULL);
+    *speed_ix = 0;
+    for (i = 0; i < g_speed_choices; i++) {
+        if (g_speeds[i] == link_max && (link_max != 0 || g_speed_hard[i] == (u8)g_open_hard)) {
+            *speed_ix = i;
+            break;
+        }
+    }
+}
+
+/* The link the answer names, into `out`; NULL if it is fine, else what
+   to tell the writer. `cap_out` gets linkmax=. */
+static const char *link_answer(u32 port_ix, u32 speed_ix, const char *address,
+                               char *out, u32 out_cap, u32 *cap_out)
+{
+    static char why[64];
+    u32 rates[LINK_SPEEDS_MAX], n, hard_from, cap, k;
+    wp_bool hard;
+    const char *dev;
+
+    cap = speed_ix < g_speed_choices ? g_speeds[speed_ix] : 0;
+    *cap_out = cap;
+    if (port_ix == 0) { strcpy(out, "off"); return NULL; }
+    if (port_ix == g_port_other) { return NULL; }           /* kept as it was */
+    if (port_ix == g_port_net) {
+        if (address[0] == '\0' || strchr(address, ':') == NULL)
+            return "Network address: HOST:PORT";
+        if (4u + (u32)strlen(address) + 1u > out_cap) return "Network address: too long";
+        strcpy(out, "tcp:");
+        strcat(out, address);
+        return NULL;
+    }
+    k = port_ix - 1;
+    if (g_port_n > 0 && (g_ports[k].flags & PLAT_PORT_BUSY)) {
+        strcpy(why, g_ports[k].label);
+        strcat(why, " is in use by the system");
+        return why;
+    }
+    n = port_rates(k, rates, LINK_SPEEDS_MAX, &hard_from);
+    if (n > 0 && cap > rates[0]) {
+        u32 l;
+        strcpy(why, g_port_labels[port_ix]);
+        strcat(why, " goes up to ");
+        l = (u32)strlen(why);
+        (void)put_u(why + l, rates[0]);
+        return why;
+    }
+    hard = (wp_bool)(hard_from != 0 &&
+                     ((cap == 0 && speed_ix < g_speed_choices && g_speed_hard[speed_ix]) ||
+                      (cap != 0 && cap >= hard_from)));
+    /* The device as it was written when the port is unchanged ("aux"
+       stays "aux"), else the port's own name. */
+    dev = (port_ix == g_open_port && g_open_dev[0] != '\0') ? g_open_dev
+          : (g_port_n > 0 ? g_ports[k].name : "aux");
+    if (7u + (u32)strlen(dev) + 1u + (u32)strlen(g_open_baud) + 6u > out_cap) return "Port name too long";
+    strcpy(out, "serial:");
+    strcat(out, dev);
+    strcat(out, ":");
+    strcat(out, g_open_baud);
+    if (hard) strcat(out, ":hard");
+    return NULL;
+}
+
+enum { F_DOCDIR, F_DATADIR, F_RECOVERY, F_AUTOSAVE, F_BACKUP, F_PORT, F_SPEED, F_ADDRESS, F_PICOPY, F_MACHINE, F_COUNT };
 
 static void text_field(plat_form_field *f, const char *label, char *buf)
 {
@@ -162,18 +377,23 @@ static wp_bool move_recovery(wp_app_ctx *ctx, const char *old_path)
 
 wp_bool wp_action_settings(wp_app_ctx *ctx)
 {
-    /* Static: six fields and a working copy are a lot for a 4 KB Amiga
+    /* Static: ten fields and a working copy are a lot for a 4 KB Amiga
        stack (and the dialog backends need some of it too). */
     static wp_settings edit;
     static plat_form_field fields[F_COUNT];
     static char old_recovery[WP_APP_PATH_MAX];
     static char old_setting[WP_SETTINGS_TEXT];
+    static char link[WP_SETTINGS_TEXT];
     static const char title[] = "Settings";
-    u32 i, mi, choices;
+    u32 i, mi, choices, port_ix, speed_ix, cap;
     wp_bool cancelled = WP_FALSE, offload_changed;
-    const char *old_path;
+    const char *old_path, *why, *cur;
 
     edit = ctx->settings;
+    cur = wp_settings_offload(ctx);
+    if (cur == NULL || strlen(cur) >= sizeof(link)) cur = "";
+    link_lists(cur, edit.link_max, &port_ix, &speed_ix);
+    g_open_port = port_ix;
     for (;;) {
         /* The autosave list: the eight standard choices, and the
            configuration's own value after them when it is none of those. */
@@ -191,7 +411,9 @@ wp_bool wp_action_settings(wp_app_ctx *ctx)
         text_field(&fields[F_RECOVERY], "Recovery file", edit.recovery);
         choice_field(&fields[F_AUTOSAVE], "Autosave", (const char *const *)k_autosave_labels, choices, mi);
         choice_field(&fields[F_BACKUP], "Backups", k_backup_labels, 2u, edit.backup ? 1u : 0u);
-        text_field(&fields[F_OFFLOAD], "Offload link", edit.offload);
+        choice_field(&fields[F_PORT], "Pi link", (const char *const *)g_port_labels, g_port_choices, port_ix);
+        choice_field(&fields[F_SPEED], "Link speed", (const char *const *)g_speed_labels, g_speed_choices, speed_ix);
+        text_field(&fields[F_ADDRESS], "Network address", g_address);
         choice_field(&fields[F_PICOPY], "Copy to the Pi", k_picopy_labels, 2u, edit.pi_copy ? 1u : 0u);
         text_field(&fields[F_MACHINE], "Name on the Pi", edit.machine);
 
@@ -202,17 +424,29 @@ wp_bool wp_action_settings(wp_app_ctx *ctx)
         trim_text(edit.docdir);
         trim_text(edit.datadir);
         trim_text(edit.recovery);
-        trim_text(edit.offload);
+        trim_text(g_address);
         trim_text(edit.machine);
         edit.pi_copy = (u8)(fields[F_PICOPY].index == 1u ? 1 : 0);
         mi = fields[F_AUTOSAVE].index;
         if (mi < K_MINUTES_N) edit.autosave_minutes = k_minutes[mi];   /* else: as it was */
         edit.backup = (u8)(fields[F_BACKUP].index == 1u ? 1 : 0);
-        if (offload_ok(edit.offload)) break;
-        wp_action_tell(ctx, "Offload link: serial:PORT:BAUD or tcp:HOST:PORT");
+        port_ix = fields[F_PORT].index;
+        speed_ix = fields[F_SPEED].index;
+        strcpy(link, cur);
+        why = link_answer(port_ix, speed_ix, g_address, link, (u32)sizeof(link), &cap);
+        if (why == NULL) {
+            /* The machine's own link, chosen again, stays "" -- so a later
+               build's own default still applies to it. */
+            if (ctx->offload_default != NULL && strcmp(link, ctx->offload_default) == 0) link[0] = '\0';
+            strcpy(edit.offload, link);
+            edit.link_max = cap;
+            break;
+        }
+        wp_action_tell(ctx, why);
     }
 
-    offload_changed = (wp_bool)(strcmp(edit.offload, ctx->settings.offload) != 0);
+    offload_changed = (wp_bool)(strcmp(edit.offload, ctx->settings.offload) != 0 ||
+                                edit.link_max != ctx->settings.link_max);
     old_recovery[0] = '\0';
     if (ctx->recovery_path != NULL && strlen(ctx->recovery_path) < sizeof(old_recovery)) {
         strcpy(old_recovery, ctx->recovery_path);

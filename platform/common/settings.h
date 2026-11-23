@@ -22,7 +22,11 @@
  *                 the way WordStar and 1st Word did; off (the default)
  *     offload=    the offload link ("" = the machine's own, such as
  *                 serial:aux:9600; serial:<port>:<baud>[:hard] or
- *                 tcp:<host>:<port>, platform.h's transport seam)
+ *                 tcp:<host>:<port>, platform.h's transport seam; off
+ *                 for none). The dialog builds it from a Port choice
+ *                 (plat_serial_ports) and a network address (T21.7).
+ *     linkmax=    the fastest the link is raised to, in baud; 0 or
+ *                 absent for no limit (offload_set_speed_limit)
  *     picopy=     on: every save also keeps a copy on the Pi's document
  *                 store (T21.6, pistore.h); off (the default)
  *     machine=    the name this machine's documents are kept under on
@@ -47,6 +51,7 @@ typedef struct {
     char recovery[WP_SETTINGS_TEXT];
     char offload[WP_SETTINGS_TEXT];
     char machine[WP_SETTINGS_TEXT]; /* this machine's name on the Pi */
+    u32  link_max;                  /* the fastest the link is raised to; 0 = no limit */
     u16  autosave_minutes;          /* 0 = off */
     u8   backup;                    /* 1 = keep NAME.BAK */
     u8   pi_copy;                   /* 1 = every save also goes to the Pi */

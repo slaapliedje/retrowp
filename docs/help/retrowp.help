@@ -439,14 +439,22 @@ File > Settings changes, in one dialog:
   Autosave           how often that copy is made, or Off
   Backups            Keep NAME.BAK: each save keeps the copy it
                      replaces, as NOTE.BAK beside NOTE.TXT
-  Offload link       the gateway: serial:PORT:BAUD or tcp:HOST:PORT
+  Pi link            Off, one of this machine's serial ports
+                     (Modem 2, Serial 2 on a TT; COM1-COM4; the
+                     Mac's modem or printer port) or Network
+  Link speed         Fastest, or a top speed for a cable that loses
+                     bytes; "RTS/CTS" for a cable that carries it,
+                     which the fastest rates of some ports need
+  Network address    HOST:PORT, when the Pi link is Network
   Copy to the Pi     On every save: each save also goes to the Pi
                      (see Saving)
   Name on the Pi     what the Pi keeps this machine's documents
                      under: ST, AMIGA, DOS or MAC when empty
 
-An empty folder or file means the usual place beside the program;
-an empty offload link means this machine's usual port. Fonts are
+An empty folder or file means the usual place beside the program.
+The link starts at the Pi's speed (9600) and is raised from there
+as far as both ends go; a speed the chosen port cannot reach is
+refused, naming the port's own top speed. Fonts are
 the system's own (GDOS, the Amiga's FONTS:, the Mac's System), so
 there is no folder for them here.
 

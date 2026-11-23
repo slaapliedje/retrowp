@@ -553,6 +553,11 @@ void test_settings_recovery_file_moves_with_its_copy(void);
 void test_settings_data_file_joins_the_folder(void);
 void test_settings_backup_keeps_the_previous_copy(void);
 void test_settings_config_keys(void);
+void test_settings_link_unchanged_stays_the_default(void);
+void test_settings_link_port_and_rts_cts(void);
+void test_settings_link_speed_limit(void);
+void test_settings_link_busy_port_and_off(void);
+void test_settings_link_unlisted_survives_ok(void);
 void test_recovery_discard_keeps_the_copy_until_the_document_goes(void);
 void test_recovery_quit_discarding_drops_the_copy(void);
 void test_pagecanvas_fit_and_stack(void);
@@ -829,6 +834,7 @@ void test_ticks_deadline_holds_across_the_wrap(void);
 void test_link_speed_moves_up(void);
 void test_link_speed_falls_back(void);
 void test_link_speed_gateway_caps_it(void);
+void test_link_speed_own_limit(void);
 void test_link_speed_restart_finds_the_gateway(void);
 void test_oom_walk_every_edit_undo_and_redo(void);
 void test_ticks_offload_deadline_across_the_wrap(void);
@@ -1380,6 +1386,11 @@ static const test_case g_cases[] = {
     { "settings_data_file_joins_the_folder", test_settings_data_file_joins_the_folder },
     { "settings_backup_keeps_the_previous_copy", test_settings_backup_keeps_the_previous_copy },
     { "settings_config_keys", test_settings_config_keys },
+    { "settings_link_unchanged_stays_the_default", test_settings_link_unchanged_stays_the_default },
+    { "settings_link_port_and_rts_cts", test_settings_link_port_and_rts_cts },
+    { "settings_link_speed_limit", test_settings_link_speed_limit },
+    { "settings_link_busy_port_and_off", test_settings_link_busy_port_and_off },
+    { "settings_link_unlisted_survives_ok", test_settings_link_unlisted_survives_ok },
     { "menubar_has_every_menu_action_once", test_menubar_has_every_menu_action_once },
     { "menubar_pi_commands_sit_by_their_partners", test_menubar_pi_commands_sit_by_their_partners },
     { "menubar_keys_walk_and_choose", test_menubar_keys_walk_and_choose },
@@ -1647,6 +1658,7 @@ static const test_case g_cases[] = {
     { "link_speed_moves_up", test_link_speed_moves_up },
     { "link_speed_falls_back", test_link_speed_falls_back },
     { "link_speed_gateway_caps_it", test_link_speed_gateway_caps_it },
+    { "link_speed_own_limit", test_link_speed_own_limit },
     { "link_speed_restart_finds_the_gateway", test_link_speed_restart_finds_the_gateway },
     { "oom_walk_every_edit_undo_and_redo", test_oom_walk_every_edit_undo_and_redo },
     { "ticks_offload_deadline_across_the_wrap", test_ticks_offload_deadline_across_the_wrap },

@@ -156,6 +156,13 @@ static wp_status handshake(u32 timeout_ms)
 #define OFFLOAD_SPEED_SETTLE_MS   100u     /* the gateway drains, then switches */
 #define OFFLOAD_SPEED_GATEWAY_MS  3000u    /* wire_protocol.py's SPEED_CONFIRM_S */
 
+static u32 g_speed_limit;          /* 0 = none */
+
+void offload_set_speed_limit(u32 max_baud)
+{
+    g_speed_limit = max_baud;
+}
+
 static void negotiate_speed(void)
 {
     u32 rates[OFFLOAD_SPEED_MAX_RATES], now = 0, count, i, n = 0;
@@ -168,6 +175,7 @@ static void negotiate_speed(void)
     count = plat_transport_speeds(g_transport, rates, OFFLOAD_SPEED_MAX_RATES, &now);
     for (i = 0; i < count; i++) {
         if (rates[i] <= now) continue;
+        if (g_speed_limit != 0 && rates[i] > g_speed_limit) continue;
         payload[n * 4u]      = (u8)(rates[i] >> 24);
         payload[n * 4u + 1u] = (u8)(rates[i] >> 16);
         payload[n * 4u + 2u] = (u8)(rates[i] >> 8);

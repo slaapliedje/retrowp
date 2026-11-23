@@ -3239,6 +3239,25 @@ through it in cloud or network storage.
       keeps raising it through SET_SPEED. Gates: each port's transport
       self-check, and a run at the raised speed on the MiSTer TT's
       SERIAL2 or MODEM2.
+      Done so far: plat_serial_ports / plat_serial_port_speeds in every
+      backend (Atari by RSVF, else _MCH and the Compendium's Bconmap
+      device table; DOS from the BIOS data area, COMn or 0-3; Mac modem
+      and printer, busy under AppleTalk by SPConfig; Amiga
+      serial.device, or NAME.device:UNIT typed in). Settings: Pi link
+      (Off, the ports, Network, or a link it cannot show, kept as
+      itself), Link speed (Fastest, Fastest RTS/CTS, Up to N -- refused
+      past the port's own top, naming it), Network address; linkmax=
+      caps OFFLOAD_SET_SPEED (offload_set_speed_limit); offload= keeps
+      its shape and stays "" when the machine's own is chosen again.
+      host tests: five Settings cases (RP_HOST_SERIAL_PORTS fakes the
+      ports) and test_link_speed_own_limit (a 115200 gateway held at
+      57600). The Atari serial smoke lists the ports, opens the last by
+      name and checks AUX's mapping is put back: ST (EmuTOS) and TT (TOS
+      3.06, which lists SERIAL2) both pass; Hatari's Mega STE (TOS 2.06)
+      never starts the smoke, the committed tree neither. Settings seen
+      whole at 200 lines (ST medium) and "Modem 1" on a TT. Left: the
+      MiSTer TT run on MODEM2/SERIAL2 at a raised speed; Network is
+      offered even where there is no TCP (DOS, Mac).
 - [ ] T21.8 Cloud and network storage.
       AC: the gateway syncs its store through rclone (Dropbox, Google
       Drive, OneDrive, SMB, FTP, SFTP, WebDAV ...), set up by a script

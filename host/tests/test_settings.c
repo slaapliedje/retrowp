@@ -15,6 +15,8 @@
 #include "docmodel.h"
 #include "format_txt.h"
 #include "window_host.h"
+#include "offload.h"
+#include <stdlib.h>
 
 #define ST_DIR  "build/settings"
 #define ST_CFG  ST_DIR "/RETROWP.CFG"
@@ -24,7 +26,11 @@
 #define ST_BAK  ST_DIR "/NOTE.BAK"
 
 /* The form's fields, in settings.c's order. */
-enum { F_DOCDIR, F_DATADIR, F_RECOVERY, F_AUTOSAVE, F_BACKUP, F_OFFLOAD, F_PICOPY, F_MACHINE };
+enum { F_DOCDIR, F_DATADIR, F_RECOVERY, F_AUTOSAVE, F_BACKUP, F_PORT, F_SPEED, F_ADDRESS, F_PICOPY, F_MACHINE };
+
+/* The Port list with no serial ports listed (the host's default):
+   Off, Serial (the one AUX), Network. */
+enum { P_OFF, P_SERIAL, P_NET };
 
 static wp_bool there(const char *path)
 {
@@ -54,6 +60,7 @@ static void setup(wp_document *doc, wp_undo_journal *journal, wp_app_ctx *ctx)
 
 static void teardown(wp_document *doc, wp_undo_journal *journal, wp_app_ctx *ctx)
 {
+    offload_set_speed_limit(0);         /* wp_settings_apply set it for everyone */
     wp_keymap_free(ctx);
     wp_undo_journal_free(journal);
     wp_document_free(doc);
@@ -88,7 +95,8 @@ void test_settings_ok_applies_and_writes_the_config(void)
     window_host_form_edit(F_DATADIR, "  C:\\DATA  ", -1);
     window_host_form_edit(F_AUTOSAVE, NULL, 4);          /* 10 minutes */
     window_host_form_edit(F_BACKUP, NULL, 1);
-    window_host_form_edit(F_OFFLOAD, "tcp:pi:6809", -1);
+    window_host_form_edit(F_PORT, NULL, P_NET);
+    window_host_form_edit(F_ADDRESS, " pi:6809 ", -1);
     ASSERT_TRUE(wp_action_settings(&ctx));
     ASSERT_EQ_STR("Settings", window_host_last_title());
     ASSERT_EQ_STR("C:\\LETTERS", ctx.settings.docdir);
@@ -131,8 +139,8 @@ void test_settings_cancel_changes_nothing(void)
     teardown(&doc, &journal, &ctx);
 }
 
-/* A link the transport cannot read: said so, and the dialog opens again
-   with what was typed, to be put right there. */
+/* Network with no address: said so, and the dialog opens again with
+   what was chosen, to be put right there. */
 void test_settings_bad_offload_link_asks_again(void)
 {
     wp_document doc;
@@ -142,14 +150,136 @@ void test_settings_bad_offload_link_asks_again(void)
 
     setup(&doc, &journal, &ctx);
     forms = window_host_form_count();
-    window_host_form_edit(F_OFFLOAD, "modem", -1);
+    window_host_form_edit(F_PORT, NULL, P_NET);
     window_host_form_edit(F_DOCDIR, "A:\\", -1);
     window_host_form_next();
-    window_host_form_edit(F_OFFLOAD, "serial:aux:19200:hard", -1);
+    window_host_form_edit(F_ADDRESS, "pi.local:6809", -1);
     ASSERT_TRUE(wp_action_settings(&ctx));
     ASSERT_EQ_U32(forms + 2, window_host_form_count());
     ASSERT_EQ_STR("A:\\", ctx.settings.docdir);          /* kept from the first */
-    ASSERT_EQ_STR("serial:aux:19200:hard", ctx.settings.offload);
+    ASSERT_EQ_STR("tcp:pi.local:6809", ctx.settings.offload);
+    teardown(&doc, &journal, &ctx);
+}
+
+/* T21.7: a machine with several ports. /dev/ttyA is the one "aux" means
+   now, /dev/ttyB has rates that need RTS/CTS, /dev/ttyC is held by the
+   system. Port list: Off, ttyA, ttyB, ttyC, Network; Speed: Fastest,
+   Fastest RTS/CTS, then Up to 57600 ... 9600. */
+enum { PP_A = 1, PP_B, PP_C, PP_NET };
+enum { S_FASTEST, S_FASTEST_HARD, S_57600, S_38400, S_19200, S_9600 };
+#define THREE_PORTS "/dev/ttyA=c,/dev/ttyB=h,/dev/ttyC=b"
+
+/* OK without touching the link keeps it "" -- the machine's own -- and
+   writes no limit. */
+void test_settings_link_unchanged_stays_the_default(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    char text[512];
+
+    setenv("RP_HOST_SERIAL_PORTS", THREE_PORTS, 1);
+    setup(&doc, &journal, &ctx);
+    window_host_form_edit(F_DOCDIR, "C:\\", -1);
+    ASSERT_TRUE(wp_action_settings(&ctx));
+    ASSERT_EQ_STR("", ctx.settings.offload);
+    ASSERT_EQ_U32(0, ctx.settings.link_max);
+    ASSERT_TRUE(!ctx.offload_retry);
+    (void)read_file(ST_CFG, text, (u32)sizeof(text));
+    ASSERT_TRUE(strstr(text, "offload=\n") != NULL);
+    ASSERT_TRUE(strstr(text, "linkmax=\n") != NULL);
+    unsetenv("RP_HOST_SERIAL_PORTS");
+    teardown(&doc, &journal, &ctx);
+}
+
+/* Another port, its fastest with RTS/CTS: the port's own name, the start
+   speed kept, ":hard". */
+void test_settings_link_port_and_rts_cts(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+
+    setenv("RP_HOST_SERIAL_PORTS", THREE_PORTS, 1);
+    setup(&doc, &journal, &ctx);
+    window_host_form_edit(F_PORT, NULL, PP_B);
+    window_host_form_edit(F_SPEED, NULL, S_FASTEST_HARD);
+    ASSERT_TRUE(wp_action_settings(&ctx));
+    ASSERT_EQ_STR("serial:/dev/ttyB:9600:hard", ctx.settings.offload);
+    ASSERT_EQ_U32(0, ctx.settings.link_max);
+    ASSERT_TRUE(ctx.offload_retry);
+    unsetenv("RP_HOST_SERIAL_PORTS");
+    teardown(&doc, &journal, &ctx);
+}
+
+/* A limit below the rates that need RTS/CTS: no ":hard", linkmax= in
+   the configuration file, read back. Reopened, the dialog shows it. */
+void test_settings_link_speed_limit(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    wp_config cfg;
+    char text[512];
+    u32 n;
+
+    setenv("RP_HOST_SERIAL_PORTS", THREE_PORTS, 1);
+    setup(&doc, &journal, &ctx);
+    window_host_form_edit(F_PORT, NULL, PP_B);
+    window_host_form_edit(F_SPEED, NULL, S_57600);
+    ASSERT_TRUE(wp_action_settings(&ctx));
+    ASSERT_EQ_STR("serial:/dev/ttyB:9600", ctx.settings.offload);
+    ASSERT_EQ_U32(57600, ctx.settings.link_max);
+    n = read_file(ST_CFG, text, (u32)sizeof(text));
+    ASSERT_TRUE(strstr(text, "linkmax=57600\n") != NULL);
+    ASSERT_TRUE(wp_config_parse((const u8 *)text, n, &cfg) == WP_OK);
+    ASSERT_EQ_U32(57600, cfg.settings.link_max);
+    /* Opened again and OK'd untouched: the same link and limit. */
+    ctx.offload_retry = WP_FALSE;
+    ASSERT_TRUE(wp_action_settings(&ctx));
+    ASSERT_EQ_STR("serial:/dev/ttyB:9600", ctx.settings.offload);
+    ASSERT_EQ_U32(57600, ctx.settings.link_max);
+    ASSERT_TRUE(!ctx.offload_retry);
+    unsetenv("RP_HOST_SERIAL_PORTS");
+    teardown(&doc, &journal, &ctx);
+}
+
+/* A port the system holds is refused, named, and the dialog opens again;
+   Off is "off". */
+void test_settings_link_busy_port_and_off(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    u32 forms;
+
+    setenv("RP_HOST_SERIAL_PORTS", THREE_PORTS, 1);
+    setup(&doc, &journal, &ctx);
+    forms = window_host_form_count();
+    window_host_form_edit(F_PORT, NULL, PP_C);
+    window_host_form_next();
+    window_host_form_edit(F_PORT, NULL, 0);
+    ASSERT_TRUE(wp_action_settings(&ctx));
+    ASSERT_EQ_U32(forms + 2, window_host_form_count());
+    ASSERT_EQ_STR("off", ctx.settings.offload);
+    unsetenv("RP_HOST_SERIAL_PORTS");
+    teardown(&doc, &journal, &ctx);
+}
+
+/* A link the lists cannot show (the host's pipe:) is offered as itself
+   and kept through OK. */
+void test_settings_link_unlisted_survives_ok(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+
+    setup(&doc, &journal, &ctx);
+    strcpy(ctx.settings.offload, "pipe:build/settings/x");
+    window_host_form_edit(F_DOCDIR, "C:\\", -1);
+    ASSERT_TRUE(wp_action_settings(&ctx));
+    ASSERT_EQ_STR("pipe:build/settings/x", ctx.settings.offload);
+    ASSERT_TRUE(!ctx.offload_retry);
     teardown(&doc, &journal, &ctx);
 }
 

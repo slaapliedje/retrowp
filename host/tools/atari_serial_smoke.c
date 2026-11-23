@@ -18,6 +18,8 @@
 #include "offload.h"
 #include "wire.h"
 #include "platform.h"
+#include <string.h>
+#include <mint/osbind.h>
 
 __attribute__((noipa))
 static long nf_get_id(const char *name)
@@ -136,6 +138,54 @@ int main(void)
               "empty device is rejected");
         check(plat_transport_open("tcp:1.2.3.4:9000", 1000, &tp) == WP_UNSUPPORTED,
               "tcp: endpoint is WP_UNSUPPORTED, not silently accepted");
+    }
+
+    /* The machine's ports (M21 T21.7): at least one, each with rates
+       up to 19200 at least, at most one of them what AUX means now; a
+       named port opens and, closed, leaves AUX mapped as it was; a port
+       word this machine does not have is refused. */
+    {
+        plat_serial_port ports[8];
+        plat_transport *tp = NULL;
+        u32 n, i, current = 0, rates[8], hard_from = 0;
+        long before, after;
+        char ep[48];
+        wp_bool have_serial2 = WP_FALSE;
+
+        n = plat_serial_ports(ports, 8u);
+        check(n >= 1, "plat_serial_ports lists at least one port");
+        for (i = 0; i < n; i++) {
+            nf_log("  port: ");
+            nf_log(ports[i].name);
+            nf_log(" (");
+            nf_log(ports[i].label);
+            nf_log(")\r\n");
+            if (ports[i].flags & PLAT_PORT_CURRENT) current++;
+            if (strcmp(ports[i].name, "SERIAL2") == 0) have_serial2 = WP_TRUE;
+        }
+        check(current <= 1, "at most one port is the one AUX means");
+        if (n >= 1) {
+            u32 k = plat_serial_port_speeds(ports[0].name, rates, 8u, &hard_from);
+            check(k >= 2 && rates[0] >= 19200uL && rates[k - 1] == 9600uL,
+                  "the first port's rates run from 19200 or more down to 9600");
+            /* Bconmap only where a port has a name: "aux" alone is a
+               TOS without XBIOS 44. */
+            before = strcmp(ports[0].name, "aux") != 0 ? Bconmap(-1) : 0;
+            strcpy(ep, "serial:");
+            strcat(ep, ports[n - 1].name);
+            strcat(ep, ":9600");
+            check(plat_transport_open(ep, 1000, &tp) == WP_OK, "the last listed port opens by name");
+            if (tp) { plat_transport_close(tp); tp = NULL; }
+            after = strcmp(ports[0].name, "aux") != 0 ? Bconmap(-1) : 0;
+            check(before == after, "closing a named port leaves AUX mapped as it was");
+        }
+        if (!have_serial2) {
+            check(plat_transport_open("serial:SERIAL2:9600", 1000, &tp) == WP_ERR,
+                  "a port this machine does not have is refused");
+            if (tp) { plat_transport_close(tp); tp = NULL; }
+        }
+        check(plat_serial_port_speeds("NOSUCH", rates, 8u, &hard_from) == 0,
+              "speeds for a port that is not there: none");
     }
 
     check(offload_init("serial:aux:9600") == WP_OK,

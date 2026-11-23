@@ -131,6 +131,15 @@ void test_link_speed_gateway_caps_it(void)
     run_case("--serial-max-baud=38400", WP_FALSE, 38400uL);
 }
 
+/* This side's own limit (Settings' Speed, offload_set_speed_limit): a
+   gateway that would go to 115200 is offered nothing past 57600. */
+void test_link_speed_own_limit(void)
+{
+    offload_set_speed_limit(57600uL);
+    run_case("--serial-max-baud=115200", WP_FALSE, 57600uL);
+    offload_set_speed_limit(0);
+}
+
 /* The program run again after a session that moved up: the gateway is
    still at 115200, the new client starts at 9600. On a real wire its
    HELLO arrives as noise; a pty carries bytes whatever the speed, so the

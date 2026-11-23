@@ -145,6 +145,12 @@ static void parse_line(const u8 *bytes, u32 len, wp_config *out)
     if (ascii_ieq(bytes + key_start, key_len, "recovery")) { set_text(out->settings.recovery, bytes + val_start, val_len); return; }
     if (ascii_ieq(bytes + key_start, key_len, "offload"))  { set_text(out->settings.offload, bytes + val_start, val_len); return; }
     if (ascii_ieq(bytes + key_start, key_len, "machine"))  { set_text(out->settings.machine, bytes + val_start, val_len); return; }
+    if (ascii_ieq(bytes + key_start, key_len, "linkmax")) {
+        const u8 *v = bytes + val_start;
+        out->settings.link_max = (val_len > 0 && val_len <= 7 && v[0] >= '0' && v[0] <= '9')
+                                     ? parse_num(v, val_len) : 0;
+        return;
+    }
     if (ascii_ieq(bytes + key_start, key_len, "picopy")) {
         const u8 *v = bytes + val_start;
         if (ascii_ieq(v, val_len, "on")) out->settings.pi_copy = 1;
@@ -403,9 +409,9 @@ wp_status wp_config_save_return(const char *native_path, const char *text)
 wp_status wp_config_save_settings(const char *native_path, const wp_settings *s)
 {
     static const char *const keys[] = { "docdir", "datadir", "recovery", "autosave", "backup", "offload",
-                                        "picopy", "machine" };
-    const char *values[8];
-    char minutes[12];
+                                        "picopy", "machine", "linkmax" };
+    const char *values[9];
+    char minutes[12], linkmax[12];
 
     values[0] = s->docdir;
     values[1] = s->datadir;
@@ -416,5 +422,7 @@ wp_status wp_config_save_settings(const char *native_path, const wp_settings *s)
     values[5] = s->offload;
     values[6] = s->pi_copy ? "on" : "off";
     values[7] = s->machine;
-    return save_keys(native_path, keys, values, 8);
+    if (s->link_max == 0) values[8] = "";
+    else { put_num(linkmax, s->link_max); values[8] = linkmax; }
+    return save_keys(native_path, keys, values, 9);
 }
