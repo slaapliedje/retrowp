@@ -3255,9 +3255,20 @@ through it in cloud or network storage.
       name and checks AUX's mapping is put back: ST (EmuTOS) and TT (TOS
       3.06, which lists SERIAL2) both pass; Hatari's Mega STE (TOS 2.06)
       never starts the smoke, the committed tree neither. Settings seen
-      whole at 200 lines (ST medium) and "Modem 1" on a TT. Left: the
-      MiSTer TT run on MODEM2/SERIAL2 at a raised speed; Network is
-      offered even where there is no TCP (DOS, Mac).
+      whole at 200 lines (ST medium) and "Modem 1" on a TT. MiSTer TT
+      (2026-11-23, TOS 5 from floppy, core UART on Modem 2): CONVHW.PRG,
+      now taking its endpoint from CONVHW.CFG, listed MODEM1 (current),
+      MODEM2, SERIAL1, SERIAL2, opened MODEM2 by name and climbed 9600 ->
+      38400, all checks passed, with and without :hard (T21.6 on Modem 1
+      reached 19200). 38400 is the gateway's ceiling while the Pi runs
+      --serial-flow=none. Seen once, not chased: the same CONVHW last in
+      AUTO on the xVDI/SpeedoGDOS install left no log and sent nothing;
+      that boot came up in TT High with no VME (CFG 00 d0 40, which by
+      Falcon.sv's layout keeps the ATW on), the ROM's default desktop
+      showed, and the image came back byte-identical -- no AUTO on C ran
+      at all; likeliest HDDRIVER never loaded (the image copied in ~1 s
+      before load_core, so not ready at the DMA boot). Not chased.
+      Left: Network is offered even where there is no TCP (DOS, Mac).
 - [ ] T21.8 Cloud and network storage.
       AC: the gateway syncs its store through rclone (Dropbox, Google
       Drive, OneDrive, SMB, FTP, SFTP, WebDAV ...), set up by a script

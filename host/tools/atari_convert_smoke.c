@@ -32,6 +32,7 @@
 #include "format_rtf.h"
 #include "offload.h"
 #include "wire.h"
+#include "platform.h"
 
 __attribute__((noipa))
 static long nf_get_id(const char *name)
@@ -159,8 +160,37 @@ int main(void)
     nf_log("ATARI CONVERT SMOKE: starting\r\n");
 
     check(!offload_available(), "offload_available() false before offload_init");
-    check(offload_init("serial:aux:9600") == WP_OK,
-          "offload_init(serial:aux:9600) handshake succeeded");
+    {
+        /* CONVHW.PRG: CONVHW.CFG beside it may name the endpoint
+           (one line, e.g. serial:MODEM2:9600:hard), so one build tests
+           any port; the emulator gate always uses aux. */
+        static char ep[64] = "serial:aux:9600";
+        char line[128];
+        plat_serial_port ports[8];
+        u32 n, i;
+#ifdef WP_CONVERT_HW
+        FILE *cf = fopen("CONVHW.CFG", "r");
+        if (cf != NULL) {
+            if (fgets(ep, sizeof(ep), cf) != NULL) {
+                size_t k = strlen(ep);
+                while (k > 0 && (ep[k - 1] == '\r' || ep[k - 1] == '\n' || ep[k - 1] == ' '))
+                    ep[--k] = '\0';
+                if (k == 0) strcpy(ep, "serial:aux:9600");
+            }
+            fclose(cf);
+        }
+#endif
+        n = plat_serial_ports(ports, 8);
+        for (i = 0; i < n && i < 8; i++) {
+            sprintf(line, "port %.23s \"%.23s\"%s%s\r\n", ports[i].name, ports[i].label,
+                    (ports[i].flags & PLAT_PORT_CURRENT) ? " current" : "",
+                    (ports[i].flags & PLAT_PORT_BUSY) ? " busy" : "");
+            nf_log(line);
+        }
+        sprintf(line, "endpoint: %s\r\n", ep);
+        nf_log(line);
+        check(offload_init(ep) == WP_OK, "offload_init() handshake succeeded");
+    }
     {
         /* Where OFFLOAD_SET_SPEED left the link: 9600 over the gate's
            FIFOs (no tty, so the gateway offers nothing), faster over a
