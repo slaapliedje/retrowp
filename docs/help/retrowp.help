@@ -441,11 +441,13 @@ File > Settings changes, in one dialog:
                      replaces, as NOTE.BAK beside NOTE.TXT
   Pi link            Off, one of this machine's serial ports
                      (Modem 2, Serial 2 on a TT; COM1-COM4; the
-                     Mac's modem or printer port) or Network
+                     Mac's modem or printer port) or Network,
+                     where this machine has TCP
   Link speed         Fastest, or a top speed for a cable that loses
                      bytes; "RTS/CTS" for a cable that carries it,
                      which the fastest rates of some ports need
   Network address    HOST:PORT, when the Pi link is Network
+                     (not shown without TCP)
   Copy to the Pi     On every save: each save also goes to the Pi
                      (see Saving)
   Name on the Pi     what the Pi keeps this machine's documents

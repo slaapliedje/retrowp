@@ -136,6 +136,7 @@ static const char *g_port_labels[LINK_PORTS_MAX + 4];
 static u32 g_port_choices;
 static u32 g_port_net;                 /* index of "Network" */
 static u32 g_port_other;               /* index of the as-it-was entry, or ~0 */
+static wp_bool g_net;                  /* plat_network_available(): Network offered */
 static char g_other_label[WP_SETTINGS_TEXT];
 
 static u32 g_speeds[LINK_SPEEDS_MAX];  /* index -> cap; 0 = fastest */
@@ -199,9 +200,15 @@ static void link_lists(const char *link, u32 link_max, u32 *port_ix, u32 *speed_
     ports = g_port_n > 0 ? g_port_n : 1u;
     g_port_labels[0] = "Off";
     for (i = 0; i < ports; i++) g_port_labels[1 + i] = g_port_n > 0 ? g_ports[i].label : "Serial";
-    g_port_net = 1 + ports;
-    g_port_labels[g_port_net] = "Network";
-    g_port_choices = g_port_net + 1;
+    g_net = plat_network_available();
+    if (g_net) {
+        g_port_net = 1 + ports;
+        g_port_labels[g_port_net] = "Network";
+        g_port_choices = g_port_net + 1;
+    } else {                               /* no TCP here: no Network, no address */
+        g_port_net = ~(u32)0;
+        g_port_choices = 1 + ports;
+    }
     g_port_other = ~(u32)0;
 
     /* Every rate any port reaches, fastest first, without repeats. */
@@ -231,7 +238,7 @@ static void link_lists(const char *link, u32 link_max, u32 *port_ix, u32 *speed_
     g_address[0] = '\0';
     if (link[0] == '\0' || strcmp(link, "off") == 0) {
         *port_ix = 0;
-    } else if (starts(link, "tcp:") && link[4] != '\0') {
+    } else if (g_net && starts(link, "tcp:") && link[4] != '\0') {
         *port_ix = g_port_net;
         if (strlen(link + 4) < sizeof(g_address)) strcpy(g_address, link + 4);
     } else if (starts(link, "serial:")) {
@@ -385,7 +392,7 @@ wp_bool wp_action_settings(wp_app_ctx *ctx)
     static char old_setting[WP_SETTINGS_TEXT];
     static char link[WP_SETTINGS_TEXT];
     static const char title[] = "Settings";
-    u32 i, mi, choices, port_ix, speed_ix, cap;
+    u32 i, mi, choices, port_ix, speed_ix, cap, nf;
     wp_bool cancelled = WP_FALSE, offload_changed;
     const char *old_path, *why, *cur;
 
@@ -417,10 +424,19 @@ wp_bool wp_action_settings(wp_app_ctx *ctx)
         choice_field(&fields[F_PICOPY], "Copy to the Pi", k_picopy_labels, 2u, edit.pi_copy ? 1u : 0u);
         text_field(&fields[F_MACHINE], "Name on the Pi", edit.machine);
 
+        /* Without TCP the address field is left out: the fields after
+           it move up one for the form, and back for reading. */
+        nf = (u32)F_COUNT;
+        if (!g_net) {
+            for (i = F_ADDRESS; i + 1 < (u32)F_COUNT; i++) fields[i] = fields[i + 1];
+            nf--;
+        }
         if (plat_dialog_form(ctx->window, (const u8 *)title, (u32)(sizeof(title) - 1),
-                             fields, (u32)F_COUNT, &cancelled) != WP_OK || cancelled) {
+                             fields, nf, &cancelled) != WP_OK || cancelled) {
             return WP_FALSE;
         }
+        if (!g_net)
+            for (i = (u32)F_COUNT - 1; i > F_ADDRESS; i--) fields[i] = fields[i - 1];
         trim_text(edit.docdir);
         trim_text(edit.datadir);
         trim_text(edit.recovery);

@@ -283,6 +283,41 @@ void test_settings_link_unlisted_survives_ok(void)
     teardown(&doc, &journal, &ctx);
 }
 
+/* A machine with no TCP: no Network in the Port list and no address
+   field (nine fields); a tcp: link from the file is offered as itself
+   and kept, and a port can still be picked. */
+void test_settings_link_without_network(void)
+{
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    const plat_form_field *f;
+    u32 n = 0, i;
+
+    setenv("RP_HOST_SERIAL_PORTS", THREE_PORTS, 1);
+    setenv("RP_HOST_NO_NETWORK", "1", 1);
+    setup(&doc, &journal, &ctx);
+    strcpy(ctx.settings.offload, "tcp:pi:6809");
+    ASSERT_TRUE(wp_action_settings(&ctx));
+    f = window_host_form_last(&n);
+    ASSERT_TRUE(f != NULL);
+    ASSERT_EQ_U32(9, n);
+    for (i = 0; i < n; i++) ASSERT_TRUE(strcmp(f[i].label, "Network address") != 0);
+    ASSERT_EQ_STR("Name on the Pi", f[8].label);
+    ASSERT_EQ_U32(5, f[F_PORT].option_count);        /* Off, A, B, C, the tcp: link */
+    for (i = 0; i < f[F_PORT].option_count; i++) ASSERT_TRUE(strcmp(f[F_PORT].options[i], "Network") != 0);
+    ASSERT_EQ_STR("tcp:pi:6809", f[F_PORT].options[4]);
+    ASSERT_EQ_U32(4, f[F_PORT].index);
+    ASSERT_EQ_STR("tcp:pi:6809", ctx.settings.offload);
+
+    window_host_form_edit(F_PORT, NULL, PP_B);
+    ASSERT_TRUE(wp_action_settings(&ctx));
+    ASSERT_EQ_STR("serial:/dev/ttyB:9600", ctx.settings.offload);
+    unsetenv("RP_HOST_NO_NETWORK");
+    unsetenv("RP_HOST_SERIAL_PORTS");
+    teardown(&doc, &journal, &ctx);
+}
+
 /* A value from the configuration file the list does not have stays
    itself through OK. */
 void test_settings_unlisted_autosave_survives_ok(void)

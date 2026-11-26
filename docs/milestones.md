@@ -3222,7 +3222,7 @@ through it in cloud or network storage.
       Open from Pi... now sits under Open and Save to Pi under Save
       As... on every machine (wp_action_menu_order(); the ST's tree by
       hand).
-- [ ] T21.7 Choosing the serial port and speed.
+- [x] T21.7 Choosing the serial port and speed.
       Before more Pi work: a link stuck at 9600 makes every Pi feature
       slow, and many machines have more than one port.
       AC: Settings has Link (none, serial, TCP where there is one), Port
@@ -3260,15 +3260,17 @@ through it in cloud or network storage.
       now taking its endpoint from CONVHW.CFG, listed MODEM1 (current),
       MODEM2, SERIAL1, SERIAL2, opened MODEM2 by name and climbed 9600 ->
       38400, all checks passed, with and without :hard (T21.6 on Modem 1
-      reached 19200). 38400 is the gateway's ceiling while the Pi runs
-      --serial-flow=none. Seen once, not chased: the same CONVHW last in
-      AUTO on the xVDI/SpeedoGDOS install left no log and sent nothing;
-      that boot came up in TT High with no VME (CFG 00 d0 40, which by
-      Falcon.sv's layout keeps the ATW on), the ROM's default desktop
-      showed, and the image came back byte-identical -- no AUTO on C ran
-      at all; likeliest HDDRIVER never loaded (the image copied in ~1 s
-      before load_core, so not ready at the DMA boot). Not chased.
-      Left: Network is offered even where there is no TCP (DOS, Mac).
+      reached 19200). 38400 is the ceiling by design: a TT's MODEM2 SCC
+      runs from an 8 MHz PCLK (code 13 is its top); the TT's 115200 port,
+      SERIAL2, is not one this core's UART can be routed to. Rerun the
+      same day on top of the TOS 5 std install (xVDI on the ATW,
+      SpeedoGDOS): CONVHW last in AUTO, same result, all checks pass. An
+      earlier try there ran nothing -- the image was copied in ~1 s before
+      load_core and HDDRIVER never loaded; sync and a wait fixed it.
+      Network is offered only where plat_network_available() says TCP
+      can work (host; Amiga with bsdsocket.library; Atari built with
+      RP_ATARI_TCP under MiNT), and the address field goes with it; a
+      tcp: link in the file on a machine without TCP shows as itself.
 - [ ] T21.8 Cloud and network storage.
       AC: the gateway syncs its store through rclone (Dropbox, Google
       Drive, OneDrive, SMB, FTP, SFTP, WebDAV ...), set up by a script

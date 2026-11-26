@@ -558,6 +558,7 @@ void test_settings_link_port_and_rts_cts(void);
 void test_settings_link_speed_limit(void);
 void test_settings_link_busy_port_and_off(void);
 void test_settings_link_unlisted_survives_ok(void);
+void test_settings_link_without_network(void);
 void test_recovery_discard_keeps_the_copy_until_the_document_goes(void);
 void test_recovery_quit_discarding_drops_the_copy(void);
 void test_pagecanvas_fit_and_stack(void);
@@ -1391,6 +1392,7 @@ static const test_case g_cases[] = {
     { "settings_link_speed_limit", test_settings_link_speed_limit },
     { "settings_link_busy_port_and_off", test_settings_link_busy_port_and_off },
     { "settings_link_unlisted_survives_ok", test_settings_link_unlisted_survives_ok },
+    { "settings_link_without_network", test_settings_link_without_network },
     { "menubar_has_every_menu_action_once", test_menubar_has_every_menu_action_once },
     { "menubar_pi_commands_sit_by_their_partners", test_menubar_pi_commands_sit_by_their_partners },
     { "menubar_keys_walk_and_choose", test_menubar_keys_walk_and_choose },
