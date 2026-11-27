@@ -3359,16 +3359,27 @@ it with, and a PDF that keeps it.
       export drops), and their RTF reads under ASan/UBSan. Needs the
       gateway deployed to the Pi (docx_reader.py is a new file beside
       odt_gateway.py).
-- [ ] T24.2 A Greek font on the Atari.
+- [x] T24.2 A Greek font on the Atari.
       The ST's system font has 12 Greek characters (αβΓπΣστΦΘΩδϕ, its
       0xE0 block); modern Greek needs 69 with the tonos and dialytika
       forms. RetroWP brings its own glyphs for the rest, at the system
       font's 8x8 and 8x16 cells, drawn where the font lacks one.
       AC: the T24.1 fixture shows every Greek letter, not "?", on TOS 1.04
-      at 1MB, in ST High and Medium, and prints on the gateway.
-- [ ] T24.3 Greek in the PDF. The gateway's PDF writer encodes WinAnsi,
-      so Greek becomes "?": embed a face with Greek (Liberation has it)
-      and encode beyond 0xFF.
+      at 1MB, in ST High and Medium. (Printing it is T24.3's.)
+      Note (2026-11-27): retroplat tools/greek_glyphs.txt -> backends/
+      atari/greek_glyphs.h: 34 letters and the accents, drawn in the
+      system font's style -- all of them ours, because the font's own
+      Greek block sits two rows above the Latin baseline at 8x16. Latin-
+      shaped capitals and ο are the font's own letters. Drawn and measured
+      by one walk (atari_text_run), scaled to the font's cell; bold,
+      italic and underline follow. Seen in ST High and Medium at 10, 20
+      and 36 pt (docs/atari-platform.md). Also fixed: retroplat's
+      check-atari had failed since 47b1485, which put gem4xe's
+      plat_network_available outside its file's #if.
+- [ ] T24.3 Greek in the PDF and on paper. The gateway's PDF writer
+      encodes WinAnsi, so Greek becomes "?": embed a face with Greek
+      (Liberation has it) and encode beyond 0xFF. And the machines' own
+      printing: the ST's GDOS and PostScript paths, the others'.
 - [ ] T24.4 Greek on DOS (codepage 737 loaded into a VGA font), the Amiga
       (an ISO-8859-7 font) and the Mac (a Greek face of its own).
 - [ ] T24.5 Typing Greek: a Greek keyboard layout, switched the machine's
