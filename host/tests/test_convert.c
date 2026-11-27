@@ -660,6 +660,77 @@ void test_convert_sections_reach_the_pdf_and_odt(void)
     wp_document_free(&doc);
 }
 
+/* Greek reaches the PDF (M24 T24.3). Where the gateway host has
+   Liberation Sans, the text font is embedded as a Type0 font with
+   Identity-H -- two-byte glyph numbers, which reach Greek where the
+   one-byte WinAnsi of the built-in faces cannot -- and the glyphs it
+   holds are the letters drawn: three different Greek letters are three
+   glyphs in its /W, where letters the font could not set would all be
+   one '?'. Without Liberation the built-in Helvetica still makes a PDF. */
+static u32 pdf_type0_glyphs(const u8 *pdf, u32 n)
+{
+    /* The width entries of the first /W: "g [w w ...] g [w] ...". */
+    u32 i, count = 0;
+    int depth = 0;
+    for (i = 0; i + 4 <= n; i++) {
+        if (memcmp(pdf + i, "/W [", 4) == 0) break;
+    }
+    if (i + 4 > n) return 0;
+    for (i += 4; i < n; i++) {
+        if (pdf[i] == '[') depth++;
+        else if (pdf[i] == ']') { if (depth == 0) break; depth--; }
+        else if (depth == 1 && pdf[i] >= '0' && pdf[i] <= '9' &&
+                 (pdf[i - 1] == ' ' || pdf[i - 1] == '[')) count++;
+    }
+    return count;
+}
+
+void test_convert_pdf_sets_greek(void)
+{
+    static const char rtf[] =
+        "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fswiss Helvetica;}}{\\*\\generator RetroWP;}"
+        "\\pard{\\fs24 \\u945?\\u946?\\u947?}\\par}";      /* alpha beta gamma */
+    u8 *pdf;
+    u32 pdf_len;
+
+    export_pdf(rtf, (u32)sizeof(rtf) - 1, &pdf, &pdf_len);
+    if (has_bytes(pdf, pdf_len, "/BaseFont /LiberationSans")) {
+        ASSERT_TRUE(has_bytes(pdf, pdf_len, "/Subtype /Type0"));
+        ASSERT_TRUE(has_bytes(pdf, pdf_len, "/Encoding /Identity-H"));
+        ASSERT_TRUE(has_bytes(pdf, pdf_len, "/Subtype /CIDFontType2"));
+        ASSERT_TRUE(has_bytes(pdf, pdf_len, "/ToUnicode"));
+        ASSERT_EQ_U32(pdf_type0_glyphs(pdf, pdf_len), 3);
+    } else {
+        ASSERT_TRUE(has_bytes(pdf, pdf_len, "/BaseFont /Helvetica"));
+    }
+    mem_free(pdf);
+}
+
+/* A header's Greek crosses to ODT and back whole: the \\uN's fallback
+   '?' after each letter is dropped in a header as in the body. */
+void test_convert_greek_header_keeps_no_fallbacks(void)
+{
+    static const char rtf[] =
+        "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fswiss Helvetica;}}{\\*\\generator RetroWP;}"
+        "{\\header\\pard\\plain \\u931?\\u949?\\u955?\\u943?\\u948?\\u945? \\chpgn }"
+        "\\pard{\\fs24 Body}\\par}";
+    /* "Σελίδα #" in UTF-8 */
+    static const char want[] = "\xce\xa3\xce\xb5\xce\xbb\xce\xaf\xce\xb4\xce\xb1 #";
+    u8 *odt, *back;
+    u32 odt_len, back_len;
+    wp_document doc;
+
+    gateway_convert(OFFLOAD_CONVERT_EXPORT, FORMAT_ODT, (const u8 *)rtf, (u32)sizeof(rtf) - 1,
+                    &odt, &odt_len);
+    gateway_convert(OFFLOAD_CONVERT_IMPORT, FORMAT_ODT, odt, odt_len, &back, &back_len);
+    mem_free(odt);
+    ASSERT_TRUE(format_rtf_import(back, back_len, &doc) == WP_OK);
+    mem_free(back);
+    ASSERT_EQ_U32(doc.sections[0].header.length, (u32)sizeof(want) - 1);
+    ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, doc.sections[0].header), want, sizeof(want) - 1);
+    wp_document_free(&doc);
+}
+
 /* A request bigger than one frame goes in parts to a gateway that takes
    them: a document whose RTF is well past 64 KB goes out as ODT and
    comes back with every paragraph. */

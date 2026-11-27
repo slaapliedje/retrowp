@@ -32,9 +32,7 @@ fits comfortably under OFFLOAD_MAX_RESPONSE_PAYLOAD (32768 bytes,
 engine/src/offload_client.c) with zero changes needed to the wire
 protocol layer itself -- see the M15 plan's own arithmetic.
 
-Uses Pillow (PIL), gated exactly like odt_gateway.py's own optional
-`fonttools` dependency (PDF Tier-1 font embedding): imported inside a
-try/except, with OFFLOAD_IMAGE's CAPS bit set only when the import
+Uses Pillow (PIL), an optional dependency: imported inside a try/except, with OFFLOAD_IMAGE's CAPS bit set only when the import
 succeeded. Fully deterministic (decode/resize/quantize -- no LLM in
 the loop), the same testing category as odt_gateway.py, unlike
 ollama_gateway.c.

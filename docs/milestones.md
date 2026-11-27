@@ -3380,6 +3380,14 @@ it with, and a PDF that keeps it.
       encodes WinAnsi, so Greek becomes "?": embed a face with Greek
       (Liberation has it) and encode beyond 0xFF. And the machines' own
       printing: the ST's GDOS and PostScript paths, the others'.
+      Note (2026-11-27), the Pi's part: a Liberation face goes into the PDF
+      as a Type0/Identity-H font (two-byte glyph numbers, any character
+      the face has), read and subset by offload/gateway/ttf_embed.py with
+      the standard library -- the Pi has Liberation but not fontTools, so
+      every Pi PDF had been Tier 0. Also fixed: a header's or footer's
+      \uN kept its '?' fallback. PDFs are under half the size they were.
+      The Pi makes the fixture's PDF byte for byte as the host does; gate
+      convert-serial passed; host 800/800 (docs/formats/pdf.md).
 - [ ] T24.4 Greek on DOS (codepage 737 loaded into a VGA font), the Amiga
       (an ISO-8859-7 font) and the Mac (a Greek face of its own).
 - [ ] T24.5 Typing Greek: a Greek keyboard layout, switched the machine's

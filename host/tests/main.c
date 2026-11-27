@@ -748,6 +748,8 @@ void test_actions_font_restyles_the_selection_as_one_step(void);
 void test_actions_typed_text_keeps_its_neighbours_style_unless_armed(void);
 void test_rulerbar_has_font_and_size(void);
 void test_convert_pdf_export_picks_faces_by_family(void);
+void test_convert_pdf_sets_greek(void);
+void test_convert_greek_header_keeps_no_fallbacks(void);
 void test_rulerbar_panel_look_follows_the_colour_count(void);
 void test_rulerbar_dragging_indents(void);
 void test_rulerbar_dragging_tabs(void);
@@ -1580,6 +1582,8 @@ static const test_case g_cases[] = {
     { "actions_typed_text_keeps_its_neighbours_style_unless_armed", test_actions_typed_text_keeps_its_neighbours_style_unless_armed },
     { "rulerbar_has_font_and_size", test_rulerbar_has_font_and_size },
     { "convert_pdf_export_picks_faces_by_family", test_convert_pdf_export_picks_faces_by_family },
+    { "convert_pdf_sets_greek", test_convert_pdf_sets_greek },
+    { "convert_greek_header_keeps_no_fallbacks", test_convert_greek_header_keeps_no_fallbacks },
     { "rulerbar_panel_look_follows_the_colour_count", test_rulerbar_panel_look_follows_the_colour_count },
     { "rulerbar_dragging_indents", test_rulerbar_dragging_indents },
     { "rulerbar_dragging_tabs", test_rulerbar_dragging_tabs },

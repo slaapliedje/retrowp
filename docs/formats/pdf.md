@@ -53,26 +53,38 @@ same thing).
   - **Tier 0** (always available, zero dependencies): the 4 standard
     Type1 Helvetica variants -- no embedding, every PDF viewer has these
     built in ("the standard 14 fonts").
-  - **Tier 1** (`_pdf_tier1_slot_info`/`_pdf_subset_embed`): real
-    embedded TrueType via the `fonttools` library, subsetting Liberation
-    Sans Regular/Bold/Italic/BoldItalic (checked at a handful of real
-    Arch/Debian/Fedora install paths) down to the glyphs a given
-    document actually draws. Liberation Sans is metrically compatible
-    with Helvetica by design (Red Hat's own stated goal for the family)
-    -- verified directly during development against this module's own
-    AFM widths (`'A'` advance: 667 in both). Gated **per style slot
-    independently**: `fonttools` missing, or one particular face's file
-    missing on this host, or that slot simply never being used in the
-    document (embedding an unused font would be pure byte waste) falls
-    that ONE slot back to Tier 0 rather than refusing embedding
-    altogether. A shared `/ToUnicode` CMap (an identity map over
-    0x20-0xFF, correct because this module's own character codes ARE
-    the Unicode codepoint in that range -- see `_pdf_escape_str`) is
-    attached to every Tier-1 font, fixing a real text-extraction bug
-    found during development: without it, a real viewer's
-    (`poppler`'s) text-extraction fallback heuristic broke down partway
-    through a subsetted font's renumbered glyph IDs even though visual
-    rendering was already correct.
+  - **Tier 1** (`_pdf_tier1_slot_info`, `_pdf_show`, `ttf_embed.py`):
+    Liberation Sans Regular/Bold/Italic/BoldItalic (and Serif and Mono,
+    below) embedded, from a handful of real Arch/Debian/Fedora install
+    paths, cut down to the glyphs the document draws. Liberation Sans is
+    metrically compatible with Helvetica by design (Red Hat's own stated
+    goal for the family) -- `'A'` advance 667 in both -- so a document
+    lays out the same on either tier. Gated **per style slot
+    independently**: the face's file missing on this host, or the slot
+    never used (embedding an unused font is pure byte waste), falls that
+    ONE slot back to Tier 0.
+
+    Since M24 T24.3 (2026-11-27) a Tier-1 face goes in as a **Type0 font
+    with `/Encoding /Identity-H` over a CIDFontType2**: page text names
+    glyphs by their two-byte number in the whole face, so it reaches
+    every character the face has -- Greek, and the quotes and dashes Word
+    types -- rather than the 224 a one-byte encoding can. The subset
+    numbers the kept glyphs afresh and the font's `/CIDToGIDMap` stream
+    says where each went; `/W` gives each drawn glyph's width; a
+    `/ToUnicode` CMap per font maps each glyph back to its character, for
+    copying and searching. A character the face lacks prints as `?` (and
+    is measured as one). `Tw` acts on the one-byte code 32 alone, so a
+    justified line's extra space is a `TJ` adjustment after each space.
+
+    `ttf_embed.py` reads and subsets the face with the standard library
+    (head, hhea, maxp, hmtx, cmap formats 4 and 12, loca, glyf, OS/2,
+    post; the hinting programs are kept): the gateway's Pi has the
+    Liberation fonts but not `fonttools`, which Tier 1 needed until then,
+    so every Pi PDF was Tier 0. Checked against `fonttools` on every
+    Liberation face: the same cmap, advances, metrics, and outlines in
+    the subset. The PDFs shrank too, the Greek Word fixture from 59 KB to
+    26 KB, a page of English from 51 KB to 19 KB (fonttools' subset kept
+    all of ASCII and its own extra tables).
   - **Three families** (since 2026-11-04), each with those four style
     slots: Sans, Serif and Mono -- Helvetica, Times and Courier in Tier 0,
     Liberation Sans, Serif and Mono (their metric twins) in Tier 1. A run's
@@ -201,7 +213,17 @@ properties the automated test's size constraint can't exercise):
   CMap -- not just visual rendering. Also verified the graceful Tier-0
   fallback path (with `fonttools` simulated missing) produces byte-for-
   byte the same small, zero-embedding PDF this module always produced
-  before T13.3.
+  before T13.3. (Tier 1 no longer uses fonttools; see Tier 1 above.)
+- **Greek (M24 T24.3)**: the T24.1 Word fixture and a mixed page
+  (justified Greek, bold, italic, Serif, Mono, underline, curly quotes,
+  dashes, the euro) rendered by poppler (`pdftoppm`) and Ghostscript,
+  extracted by `pdftotext` with every character right, `qpdf --check`
+  clean, `pdffonts` showing each used face `CID TrueType Identity-H emb
+  yes uni yes`. The Pi (Python 3.13, no fonttools) makes the same PDF
+  byte for byte as the development host. Host tests
+  `convert_pdf_sets_greek` (three Greek letters are three glyphs in the
+  font's `/W`, not one `?`) and `convert_greek_header_keeps_no_fallbacks`
+  both fail on the gateway before this change.
 
 ## Known gaps
 
@@ -213,11 +235,12 @@ properties the automated test's size constraint can't exercise):
   The same PDF is what File > Print prints on the gateway's printer
   (`OFFLOAD_PRINT`, docs/formats/offload-protocol.md), so it shares the
   gap.
-- **Extended-charset (non-ASCII) glyph widths are approximated** for any
-  style slot still on Tier 0 (no `fonttools`, or that particular
-  Liberation face missing on this host) -- see the width-table note
-  above. A slot actually running on Tier 1 uses real widths across the
-  full WinAnsi range instead.
+- **Tier 0 stops at Windows-1252.** A slot whose Liberation face is
+  missing on the host sets Latin-1 and 1252's quotes and dashes in the
+  built-in face (their widths approximated past ASCII -- see the
+  width-table note above), and anything else, Greek included, as `?`.
+  Tier 1 sets whatever the face has, at its real widths. Neither falls
+  back to another face for a character its own lacks (CJK is `?`).
 - **No font embedding tiering beyond Tier 0/Tier 1** -- e.g. no option to
   force Tier 0 even when Tier 1 is available, no support for embedding
   any font family beyond Liberation Sans (there is no document-level

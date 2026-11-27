@@ -66,6 +66,7 @@ from wire_protocol import (
 from doc_store import DocStore, DEFAULT_VERSIONS
 from doc_store_git import GitDocStore, GitStoreError
 from docx_reader import docx_bytes_to_paragraphs
+import ttf_embed
 
 FORMAT_ODT = 1
 FORMAT_PDF = 2
@@ -1026,9 +1027,10 @@ def rtf_bytes_to_paragraphs(rtf_bytes):
 # slot (regular/bold/italic/bolditalic): Tier 0 is the 4 standard
 # Type1 Helvetica variants below (zero dependencies, always available,
 # every PDF viewer has them built in); Tier 1 (below _pdf_tier1_slot_
-# info) is real embedded TrueType via fonttools + Liberation Sans, used
-# whenever both are actually available on this host, falling a given
-# slot back to Tier 0 alone if not.
+# info) is Liberation Sans, Serif or Mono embedded (ttf_embed.py), used
+# wherever the face's file is on this host, falling a given slot back to
+# Tier 0 alone if not. Tier 1 sets any character the face has -- Greek
+# among them -- and Tier 0 Latin-1 and Windows-1252's quotes and dashes.
 # ---------------------------------------------------------------------
 
 # Real Adobe Core 14 AFM widths (ASCII 32-126, 1000-unit em), extracted
@@ -1059,12 +1061,15 @@ def _rtf_group_at(rtf_bytes, start):
 
 def _rtf_margin_text(group):
     """One header/footer group as the engine keeps it (docmodel.h): a tab
-    is a part break '|', \\chpgn or a PAGE field the page number '#'."""
+    is a part break '|', \\chpgn or a PAGE field the page number '#'. A
+    \\uN's fallback characters (\\ucN of them, 1 by default) are dropped,
+    as the body's reader drops them."""
     out = []
     depth = 0
     skip_depth = None
     page_field = False
     pending_skip_next = False
+    uc, skip = 1, 0
     for m in _RTF_TOKEN_RE.finditer(group):
         hexval, word, num, brace, text, sym = m.groups()
         if brace == '{' or brace == b'{':
@@ -1102,14 +1107,25 @@ def _rtf_margin_text(group):
             elif w == 'u' and num:
                 n = int(num)
                 out.append(chr(n + 65536 if n < 0 else n))
+                skip = uc
+                continue
+            elif w == 'uc':
+                uc = int(num) if num else 1
+            skip = 0
             continue
         if skip_depth is not None:
             continue
         if hexval is not None:
+            if skip > 0:
+                skip -= 1
+                continue
             b = int(hexval, 16)
             out.append(chr(b) if b < 0x80 or b >= 0xA0 else chr(_CP1252_TO_UNICODE.get(b, ord('?'))))
         elif text is not None:
-            out.append(text.decode('cp1252'))
+            t = text.decode('cp1252')
+            if skip > 0:
+                t, skip = t[skip:], max(0, skip - len(t))
+            out.append(t)
     return ''.join(out).strip()
 
 
@@ -1194,25 +1210,19 @@ _PDF_MARGIN = 72.0        # 1 inch
 
 
 # ---------------------------------------------------------------------
-# Tier 1: real embedded TrueType, gated on fonttools + Liberation Sans
-# actually being present on this host. Liberation Sans is metrically
-# compatible with Helvetica by design (Red Hat's own stated goal for
-# the family) -- verified during development directly against this
-# module's own _HELV_WIDTHS ('A' advance: 667 in both). No document-
-# level font-family selection exists anywhere in this pipeline yet
-# (RTF's \fonttbl is a skipped destination on import, same as the C
-# engine's importer; every RTF export always declares a single
-# Helvetica font) -- so Tier 1 embeds the same 4 logical style slots
-# Tier 0 already has (regular/bold/italic/bolditalic) in ONE real
-# family, not a font-family feature.
+# Tier 1: Liberation Sans, Serif and Mono embedded, wherever the face's
+# file is on this host. Liberation is metrically compatible with
+# Helvetica, Times and Courier by design (Red Hat's own stated goal for
+# the family) -- 'A' is 667 in Liberation Sans and in _HELV_WIDTHS -- so
+# a document lays out the same on either tier. The face is embedded as a
+# CIDFontType2 under a Type0 font with Identity-H: page text names
+# glyphs by their two-byte number in the whole face, which reaches any
+# character the face has (Greek, the quotes and dashes Word types)
+# rather than the 224 a one-byte encoding can, and the subset's
+# CIDToGIDMap says where each landed. Read and subset by ttf_embed.py,
+# with the standard library: the gateway's Pi has the fonts and not
+# fontTools.
 # ---------------------------------------------------------------------
-
-try:
-    from fontTools.ttLib import TTFont as _TTFont
-    from fontTools import subset as _fonttools_subset
-    _FONTTOOLS_AVAILABLE = True
-except ImportError:
-    _FONTTOOLS_AVAILABLE = False
 
 # Real install paths across the distros this project's real hosts (dev
 # machine, Raspberry Pi gateway) realistically run: Arch, Debian/
@@ -1247,25 +1257,6 @@ _PDF_SLOT_TIER0_WIDTHS = {0: _HELV_WIDTHS, 1: _HELV_BOLD_WIDTHS, 2: _HELV_WIDTHS
                           8: _COURIER_WIDTHS, 9: _COURIER_WIDTHS, 10: _COURIER_WIDTHS, 11: _COURIER_WIDTHS}
 _PDF_SLOT_RESOURCE = {slot: '/F%d' % (slot + 1) for slot in range(_PDF_SLOT_COUNT)}
 
-# Identity ToUnicode CMap for codes 0x20-0xFF: correct (not an
-# approximation) precisely because this module's own character codes
-# ARE the Unicode codepoint in that range by construction -- see
-# _pdf_escape_str's own "WinAnsiEncoding matches Latin-1 in this range"
-# comment. Fixes real-viewer text extraction/copy-paste for embedded
-# TrueType fonts (found during development: without this, poppler's
-# text-extraction fallback heuristic breaks down partway through a
-# subsetted font's remapped glyph IDs even though rendering is
-# correct); shared by every Tier-1 slot, since the mapping doesn't
-# depend on which face is embedded.
-_PDF_TOUNICODE_CMAP = (
-    "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
-    "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
-    "/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n"
-    "1 begincodespacerange\n<20> <FF>\nendcodespacerange\n"
-    "1 beginbfrange\n<20> <FF> <0020>\nendbfrange\nendcmap\n"
-    "CMapName currentdict /CMap defineresource pop\nend\nend"
-).encode('ascii')
-
 
 def _liberation_font_path(slot):
     for path in _liberation_candidates(_PDF_FAMILIES[slot // 4], _PDF_STYLE_NAMES[slot % 4]):
@@ -1275,16 +1266,11 @@ def _liberation_font_path(slot):
 
 
 def _pdf_tier1_slot_info(slot):
-    """Lazily loads and caches, per style slot, the real metrics needed
-    for BOTH layout (widths, covering the full 32-255 WinAnsi range --
-    not just ASCII, unlike Tier 0's AFM table) and final embedding
-    (ascent/descent/bbox/etc) -- none of this depends on which glyphs
-    end up subsetted, so it's computed once from the full font
-    regardless of what text a given document actually uses. Returns
-    None if fonttools isn't importable or this slot's font file isn't
-    found on this host -- the caller falls that slot back to Tier 0."""
-    if not _FONTTOOLS_AVAILABLE:
-        return None
+    """Lazily loads and caches, per style slot, the face and what layout
+    needs of it: widths for every character it has (1000-unit em) and
+    the glyph each is drawn with. None where this slot's face isn't on
+    this host or can't be read -- the caller falls that slot back to
+    Tier 0."""
     if slot in _pdf_tier1_slot_info._cache:
         return _pdf_tier1_slot_info._cache[slot]
 
@@ -1292,31 +1278,25 @@ def _pdf_tier1_slot_info(slot):
     path = _liberation_font_path(slot)
     if path is not None:
         try:
-            font = _TTFont(path)
-            upm = font['head'].unitsPerEm
-            cmap = font.getBestCmap()
-            hmtx = font['hmtx']
-            widths = {}
-            for cp in range(32, 256):
-                gname = cmap.get(cp)
-                if gname is not None:
-                    widths[cp] = round(hmtx[gname][0] * 1000 / upm)
+            face = ttf_embed.Face(path)
             info = {
-                'path': path,
-                'widths': widths,
-                'ascent': round(font['hhea'].ascent * 1000 / upm),
-                'descent': round(font['hhea'].descent * 1000 / upm),
-                'cap_height': round(getattr(font['OS/2'], 'sCapHeight', font['hhea'].ascent) * 1000 / upm),
-                'bbox': [round(v * 1000 / upm) for v in
-                         (font['head'].xMin, font['head'].yMin, font['head'].xMax, font['head'].yMax)],
-                'italic_angle': font['post'].italicAngle,
+                'face': face,
+                'gid': face.cmap,
+                'widths': {cp: face.width1000(g) for cp, g in face.cmap.items()},
+                'ascent': face.scale1000(face.ascent),
+                'descent': face.scale1000(face.descent),
+                'cap_height': face.scale1000(face.cap_height),
+                'bbox': [face.scale1000(v) for v in face.bbox],
+                'italic_angle': face.italic_angle,
                 # bit 6 (nonsymbolic) always; bit 7 (italic) for the italic
                 # slots; bit 1 (fixed pitch) for Mono, bit 2 (serif) for Serif
                 'flags': (96 if slot % 4 in (2, 3) else 32) | (1 if slot // 4 == 2 else 0) |
                          (2 if slot // 4 == 1 else 0),
-                'font_name': 'Liberation%s' % _PDF_FAMILIES[slot // 4],
+                # The face's own PostScript name: LiberationSans, -Bold, ...
+                'font_name': 'Liberation%s%s' % (_PDF_FAMILIES[slot // 4],
+                                                 '' if slot % 4 == 0 else '-' + _PDF_STYLE_NAMES[slot % 4]),
             }
-        except Exception:
+        except (OSError, ValueError, struct.error):
             info = None
     _pdf_tier1_slot_info._cache[slot] = info
     return info
@@ -1325,29 +1305,30 @@ def _pdf_tier1_slot_info(slot):
 _pdf_tier1_slot_info._cache = {}
 
 
-def _pdf_subset_embed(slot, used_chars):
-    """Subsets this slot's real font down to used_chars plus printable
-    ASCII (always included, so a slot with no drawn text -- or an
-    unexpectedly empty used_chars -- still embeds a usable font) and
-    returns the raw TrueType bytes to embed as /FontFile2."""
-    info = _pdf_tier1_slot_info(slot)
-    # recalcTimestamp off: saving the subset otherwise stamps the font's
-    # head table with the time, and the same document made a different PDF
-    # from one second to the next.
-    font = _TTFont(info['path'], recalcTimestamp=False)
-    options = _fonttools_subset.Options()
-    options.set(layout_features=[])
-    options.drop_tables += ['GSUB', 'GPOS', 'GDEF']
-    subsetter = _fonttools_subset.Subsetter(options=options)
-    # Sorted: a set's order changes from one process to the next (string
-    # hashing is seeded per process), and with it the subset's bytes -- the
-    # same document must make the same PDF.
-    text = ''.join(sorted(used_chars)) + ''.join(chr(c) for c in range(32, 127))
-    subsetter.populate(text=text)
-    subsetter.subset(font)
-    buf = io.BytesIO()
-    font.save(buf)
-    return buf.getvalue()
+def _pdf_tounicode(gid_to_text):
+    """A ToUnicode CMap from glyph numbers (the page text's two-byte
+    codes) to the characters they draw, for text a viewer copies or
+    searches."""
+    lines = ['/CIDInit /ProcSet findresource begin', '12 dict begin', 'begincmap',
+             '/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def',
+             '/CMapName /Adobe-Identity-UCS def', '/CMapType 2 def',
+             '1 begincodespacerange', '<0000> <FFFF>', 'endcodespacerange']
+    pairs = sorted(gid_to_text.items())
+    for k in range(0, len(pairs), 100):
+        chunk = pairs[k:k + 100]
+        lines.append('%d beginbfchar' % len(chunk))
+        for gid, ch in chunk:
+            lines.append('<%04X> <%s>' % (gid, ch.encode('utf-16-be').hex().upper()))
+        lines.append('endbfchar')
+    lines += ['endcmap', 'CMapName currentdict /CMap defineresource pop', 'end', 'end']
+    return '\n'.join(lines).encode('ascii')
+
+
+def _pdf_tier1_text(slot, text):
+    """text as this slot's face draws it: each character it has, a '?'
+    for one it lacks."""
+    gid = _pdf_tier1_slot_info(slot)['gid']
+    return ''.join(ch if ord(ch) in gid else '?' for ch in text)
 
 
 _PDF_COLUMN_WIDTH = _PDF_PAGE_WIDTH - 2 * _PDF_MARGIN
@@ -1382,7 +1363,9 @@ def _pdf_font_for_run(run):
 
 
 def _pdf_text_width_pt(text, widths, size_pt):
-    return sum(widths.get(ord(ch), _PDF_FALLBACK_WIDTH) for ch in text) * size_pt / 1000.0
+    # A character the face lacks prints as '?', and is that wide.
+    missing = widths.get(63, _PDF_FALLBACK_WIDTH)
+    return sum(widths.get(ord(ch), missing) for ch in text) * size_pt / 1000.0
 
 
 def _pdf_effective_size_pt(run):
@@ -1563,6 +1546,8 @@ def _pdf_wrap_paragraph(para, column_width_pt):
 
 
 def _pdf_escape_str(text):
+    """A Tier 0 (WinAnsiEncoding) string's body: Latin-1 as itself,
+    Windows-1252's quotes, dashes and the rest in 0x80-0x9F, else '?'."""
     out = []
     for ch in text:
         cp = ord(ch)
@@ -1570,9 +1555,39 @@ def _pdf_escape_str(text):
             out.append('\\' + ch)
         elif cp < 0x80 or 0xA0 <= cp <= 0xFF:
             out.append(ch)  # WinAnsiEncoding matches Latin-1 in this range
+        elif cp in _UNICODE_TO_CP1252:
+            out.append(chr(_UNICODE_TO_CP1252[cp]))   # the content stream goes out as Latin-1
         else:
             out.append('?')
     return ''.join(out)
+
+
+def _pdf_show(slot, text, size_pt, word_space, gids_used):
+    """The operator that draws text in this slot's font: a Tj for Tier 0,
+    whose Tw spaces the words; for Tier 1 a TJ of two-byte glyph numbers,
+    which Tw does not reach (it acts on the one-byte code 32 alone), so a
+    justified line's extra space follows each space in the array.
+    gids_used[slot] gains each glyph drawn (Tier 1) or character code
+    (Tier 0) and the character it is."""
+    info = _pdf_tier1_slot_info(slot)
+    used = gids_used[slot]
+    if info is None:
+        for ch in text:
+            used.setdefault(ord(ch), ch)
+        return '(%s) Tj' % _pdf_escape_str(text)
+    gid = info['gid']
+    adjust = -word_space * 1000.0 / size_pt if word_space and size_pt else 0.0
+    parts, cur = [], []
+    for ch in _pdf_tier1_text(slot, text):
+        g = gid[ord(ch)]
+        used.setdefault(g, ch)
+        cur.append('%04X' % g)
+        if ch == ' ' and adjust:
+            parts.append('<%s> %.1f' % (''.join(cur), adjust))
+            cur = []
+    if cur or not parts:
+        parts.append('<%s>' % ''.join(cur))
+    return '[%s] TJ' % ' '.join(parts)
 
 
 def _pdf_margin_ops(text, page_no, y, m_left, column_w, used_chars):
@@ -1596,9 +1611,10 @@ def _pdf_margin_ops(text, page_no, y, m_left, column_w, used_chars):
             continue
         w = _pdf_text_width_pt(part, widths, 10.0)
         x = m_left + (0.0 if idx == 0 else (column_w - w) / 2.0 if idx == 1 else column_w - w)
-        ops += ['BT', '%s 10.00 Tf' % font_name, '0 0 0 rg', '%.2f %.2f Td' % (x, y),
-                '(%s) Tj' % _pdf_escape_str(part), 'ET']
-        used_chars[_pdf_run_slot(run)].update(part)
+        # 0 Tw: word spacing is text state, which outlives a text object,
+        # and a justified line's last setting must not space this one.
+        ops += ['BT', '%s 10.00 Tf' % font_name, '0 Tw', '0 0 0 rg', '%.2f %.2f Td' % (x, y),
+                _pdf_show(_pdf_run_slot(run), part, 10.0, 0.0, used_chars), 'ET']
     return ops
 
 
@@ -1627,7 +1643,7 @@ def paragraphs_to_pdf_bytes(paragraphs, page=None, header='', footer='', section
     cur_tw = None
     cur_font = cur_size = None
     cur_color = (0, 0, 0)
-    used_chars = {slot: set() for slot in range(_PDF_SLOT_COUNT)}  # per style slot, for Tier-1 subsetting
+    used_chars = {slot: {} for slot in range(_PDF_SLOT_COUNT)}  # per style slot: _pdf_show's glyphs drawn
 
     def new_page():
         nonlocal cur_ops, cur_y, cur_tw, cur_font, cur_size, cur_color
@@ -1739,8 +1755,8 @@ def paragraphs_to_pdf_bytes(paragraphs, page=None, header='', footer='', section
                     if color != cur_color:
                         cur_ops.append('%.3f %.3f %.3f rg' % (color[0] / 255.0, color[1] / 255.0, color[2] / 255.0))
                         cur_color = color
-                    cur_ops.append('(%s) Tj' % _pdf_escape_str(text))
-                    used_chars[_pdf_run_slot(run)].update(text)
+                    cur_ops.append(_pdf_show(_pdf_run_slot(run), text, size_pt,
+                                             extra_per_space if is_space else 0.0, used_chars))
 
                     w = _pdf_text_width_pt(text, widths, size_pt)
                     if is_space and extra_per_space:
@@ -1783,14 +1799,13 @@ def _pdf_assemble(pages, used_chars, media=(_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT)):
     BoldOblique, no embedding, no /Widths array needed: every viewer
     already knows the standard 14 fonts' real metrics, which is exactly
     why this module used the SAME real AFM widths for its own layout)
-    for whichever slots Tier 1 isn't available for, real embedded
-    TrueType (with a full /Widths array and a shared /ToUnicode CMap)
-    for whichever slots it is."""
+    for whichever slots Tier 1 isn't available for, and for those it is,
+    the face's subset as a Type0 font (Identity-H over a CIDFontType2,
+    with its /W, /CIDToGIDMap and /ToUnicode -- see _pdf_show)."""
     objects = []
 
     next_obj = 14
     font_res_parts = []
-    tounicode_num = None
 
     for slot in range(_PDF_SLOT_COUNT):
         resource_name = _PDF_SLOT_RESOURCE[slot][1:]  # strip the leading '/'
@@ -1815,18 +1830,26 @@ def _pdf_assemble(pages, used_chars, media=(_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT)):
             font_res_parts.append('/%s %d 0 R' % (resource_name, num))
             continue
 
-        if tounicode_num is None:
-            tounicode_num = next_obj
-            next_obj += 1
-            objects.append((tounicode_num, b'<< /Length %d >>\nstream\n' % len(_PDF_TOUNICODE_CMAP) +
-                             _PDF_TOUNICODE_CMAP + b'\nendstream'))
+        used = used_chars[slot]
+        fontdata, new_gid = tier1['face'].subset(sorted(used))
+        # The subset's glyph for each of the whole face's (the page text's
+        # codes), two bytes each, 0 for those not kept.
+        top = max(used) if used else 0
+        cid_to_gid = b''.join(struct.pack('>H', new_gid.get(g, 0)) for g in range(top + 1))
+        # /W: each glyph drawn and its width, glyphs that run on sharing a list.
+        w_parts, run_start, run_ws = [], None, []
+        for g in sorted(used) + [None]:
+            if g is not None and run_start is not None and g == run_start + len(run_ws):
+                run_ws.append(tier1['face'].width1000(g))
+                continue
+            if run_start is not None:
+                w_parts.append('%d [%s]' % (run_start, ' '.join(str(w) for w in run_ws)))
+            if g is not None:
+                run_start, run_ws = g, [tier1['face'].width1000(g)]
+        cmap = _pdf_tounicode(used)
 
-        fontfile_num, next_obj = next_obj, next_obj + 1
-        descr_num, next_obj = next_obj, next_obj + 1
-        font_num, next_obj = next_obj, next_obj + 1
-
-        fontdata = _pdf_subset_embed(slot, used_chars.get(slot, set()))
-        widths_arr = ' '.join(str(tier1['widths'].get(cp, 0)) for cp in range(32, 256))
+        fontfile_num, descr_num, cidfont_num, map_num, tounicode_num, font_num = range(next_obj, next_obj + 6)
+        next_obj += 6
         descr = ('<< /Type /FontDescriptor /FontName /%s /Flags %d '
                  '/FontBBox [%d %d %d %d] /ItalicAngle %g /Ascent %d /Descent %d '
                  '/CapHeight %d /StemV 80 /FontFile2 %d 0 R >>' %
@@ -1836,11 +1859,19 @@ def _pdf_assemble(pages, used_chars, media=(_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT)):
         objects.append((fontfile_num, b'<< /Length %d /Length1 %d /Filter /FlateDecode >>\nstream\n' %
                          (len(packed), len(fontdata)) + packed + b'\nendstream'))
         objects.append((descr_num, descr.encode('ascii')))
-        objects.append((font_num, ('<< /Type /Font /Subtype /TrueType /BaseFont /%s '
-                                    '/FirstChar 32 /LastChar 255 /Widths [%s] '
-                                    '/FontDescriptor %d 0 R /Encoding /WinAnsiEncoding '
-                                    '/ToUnicode %d 0 R >>' %
-                                    (tier1['font_name'], widths_arr, descr_num, tounicode_num)).encode('ascii')))
+        objects.append((cidfont_num, ('<< /Type /Font /Subtype /CIDFontType2 /BaseFont /%s '
+                                      '/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> '
+                                      '/FontDescriptor %d 0 R /DW 0 /W [%s] /CIDToGIDMap %d 0 R >>' %
+                                      (tier1['font_name'], descr_num, ' '.join(w_parts), map_num)).encode('ascii')))
+        packed = zlib.compress(cid_to_gid, 9)
+        objects.append((map_num, b'<< /Length %d /Filter /FlateDecode >>\nstream\n' % len(packed) +
+                         packed + b'\nendstream'))
+        packed = zlib.compress(cmap, 9)
+        objects.append((tounicode_num, b'<< /Length %d /Filter /FlateDecode >>\nstream\n' % len(packed) +
+                         packed + b'\nendstream'))
+        objects.append((font_num, ('<< /Type /Font /Subtype /Type0 /BaseFont /%s /Encoding /Identity-H '
+                                   '/DescendantFonts [%d 0 R] /ToUnicode %d 0 R >>' %
+                                   (tier1['font_name'], cidfont_num, tounicode_num)).encode('ascii')))
         font_res_parts.append('/%s %d 0 R' % (resource_name, font_num))
 
     font_res = ' '.join(font_res_parts)

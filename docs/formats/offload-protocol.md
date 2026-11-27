@@ -409,9 +409,7 @@ monochrome target -- `offload/gateway/image_gateway.py`).
   request (payload shorter than the 6-byte header, or a zero-sized
   target box after clamping); `OFFLOAD_UNSUPPORTED` for a gateway with
   no Pillow installed (`image_gateway.py` never sets its CAPS bit in
-  that case -- an honest, structural degrade, the same posture
-  `odt_gateway.py`'s own optional `fonttools` PDF-embedding dependency
-  already has).
+  that case -- an honest, structural degrade).
 - **Deliberately out of scope for this op** (M15's own plan, not a
   silent gap): no RTF `\pict`/ODT `draw:frame` import of pre-existing
   embedded images; no round-trip image export back into RTF/ODT (an
@@ -947,8 +945,7 @@ green with zero test-file changes.
 A fourth gateway, answering the real `OFFLOAD_IMAGE` op (see that op's
 own section above for the full wire shape and design rationale). Built
 on `wire_protocol.py`, with its own single real dependency, Pillow,
-gated exactly like `odt_gateway.py`'s own optional `fonttools`
-dependency: imported inside a `try/except ImportError`, with the
+optional: imported inside a `try/except ImportError`, with the
 `OFFLOAD_IMAGE` CAPS bit set only when the import succeeded -- an
 honest, structural "unsupported" for an environment with no Pillow
 installed, not a crash. Fully deterministic (decode/resize/quantize or
