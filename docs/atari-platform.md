@@ -424,6 +424,27 @@ rest. Seen on TOS 1.04 in ST High and Medium (host/tests/fixtures/
 sample_greek.docx through the gateway), at 10, 20 and 36 point, bold,
 italic and underlined.
 
+**Greek on GDOS's printer** (M24 T24.3, 2026-11-27). File > Print on
+GDOS draws through the same `atari_text_run`, so the same glyphs go to
+paper, with two differences. They are sized to the printer's face, not
+by whole pixels: the 8x16's twelve rows of capital the height of the
+face's capitals, as wide as the printer's pixel shape makes the ST's
+square 8x16 (FX80 is 120 x 144 dpi). The capitals' height is the ascent
+line `vqt_fontinfo` gives, GEM's top of the capitals -- except where a
+face reports its half, ascent and top lines at one height, as SpeedoGDOS
+5 does (23 of a 30-pixel cell at 12 point on FX80, near the em): three
+quarters of that. Drawn to the cell instead, Greek came out a third
+taller than Swiss's own letters. And the glyph is a raster copy only
+where the GDOS prints one: `atari_gc.mono_by_runs`, set when there is no
+NVDI cookie (as for pictures, which now go the same way), draws it as
+runs of filled bars, which SpeedoGDOS's FX80 prints -- the build before
+printed the Latin-shaped letters and left every other Greek letter out.
+Seen on TOS 1.04 + SpeedoGDOS 5 + FX80 under Hatari: plain, bold, italic,
+underlined, 20 and 36 point, the printout decoded from the Epson stream.
+Not seen: NVDI's printing (its fonts' `vqt_fontinfo` lines are taken at
+their word). The screen is unchanged, pixel for pixel, in ST High and
+Medium.
+
 **The sample document.** `app_shell.c` hardcodes and imports one paragraph
 at startup (no Open dialog yet -- that's T4.3), lays it out against the
 window's current work-area width, and repaints it on every `WM_REDRAW`,

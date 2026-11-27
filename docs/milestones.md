@@ -3388,6 +3388,12 @@ it with, and a PDF that keeps it.
       \uN kept its '?' fallback. PDFs are under half the size they were.
       The Pi makes the fixture's PDF byte for byte as the host does; gate
       convert-serial passed; host 800/800 (docs/formats/pdf.md).
+      Note (2026-11-27), the ST's GDOS: Greek prints, sized to the
+      printer face's capitals and drawn as runs of bars where the GDOS
+      prints no raster copy (SpeedoGDOS) -- before, only the Latin-shaped
+      letters printed (docs/atari-platform.md). Still open: PostScript
+      (psdev.c, format_prn's driver), the character printers' Greek code
+      pages, and the other machines' printing.
 - [ ] T24.4 Greek on DOS (codepage 737 loaded into a VGA font), the Amiga
       (an ISO-8859-7 font) and the Mac (a Greek face of its own).
 - [ ] T24.5 Typing Greek: a Greek keyboard layout, switched the machine's

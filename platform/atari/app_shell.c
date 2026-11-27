@@ -2132,7 +2132,9 @@ static wp_status atari_print_pages(wp_app_ctx *ctx, u32 *pages_out)
     dev.y_px = atari_twips_to_px_y;
     dev.device_w_px = (i32)work_out[0] + 1;
     dev.device_h_px = (i32)work_out[1] + 1;
-    dev.draw_mono = atari_gdos_takes_raster_copy() ? NULL : plat_mono_by_runs;
+    /* A picture, and the Greek the backend draws itself, are raster
+       copies where the GDOS prints them, else runs of bars. */
+    gc.mono_by_runs = (short)!atari_gdos_takes_raster_copy();
     /* SpeedoGDOS's FX80 driver writes to address 0 on v_fillarea (under
        Hatari, 2026-11-10 -- the November wide-line crash was likely the
        same fill): polygons go to it a row at a time, as v_bar. */
