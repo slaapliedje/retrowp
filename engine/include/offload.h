@@ -57,9 +57,11 @@ typedef enum {
 } offload_op;
 
 /* The format_id byte that leads an OFFLOAD_CONVERT_IMPORT/EXPORT payload
-   (docs/formats/offload-protocol.md). PDF is export-only. */
-#define OFFLOAD_FORMAT_ODT 1u
-#define OFFLOAD_FORMAT_PDF 2u
+   (docs/formats/offload-protocol.md). PDF is export-only, Word's .docx
+   import-only. */
+#define OFFLOAD_FORMAT_ODT  1u
+#define OFFLOAD_FORMAT_PDF  2u
+#define OFFLOAD_FORMAT_DOCX 3u
 
 typedef enum {
     OFFLOAD_OK          = 0,

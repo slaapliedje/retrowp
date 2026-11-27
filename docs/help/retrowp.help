@@ -111,8 +111,9 @@ Ex commands:
           (.rtf writes RTF, .md Markdown, .odt and .pdf go through
           the gateway; anything else is plain text)
   :e name open that file (.rtf is read as RTF, .md as Markdown,
-          .odt through the gateway, WordStar and Atari Works by
-          content; an Atari Works .stw saves as .rtf beside it)
+          .odt and Word's .docx through the gateway, WordStar and
+          Atari Works by content; Word and Atari Works files save as
+          .rtf beside them)
   :q      quit
   :wq     save and quit
   :x      save and quit (same as :wq)

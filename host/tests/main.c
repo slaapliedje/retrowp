@@ -326,6 +326,7 @@ void test_label_sheets_fit(void);
 void test_actions_mail_merge_printed(void);
 void test_actions_format_style_and_define(void);
 void test_actions_odt_and_pdf_go_through_the_gateway(void);
+void test_actions_word_files_open_through_the_gateway(void);
 void test_actions_file_print_routes(void);
 void test_actions_file_print_options(void);
 void test_actions_file_print_choose_printer(void);
@@ -497,6 +498,8 @@ void test_papermetrics_widths(void);
 void test_papermetrics_layout_and_config(void);
 void test_actions_envelope(void);
 void test_convert_print_disc_to_its_tray(void);
+void test_convert_docx_greek_import_via_gateway(void);
+void test_convert_docx_id_takes_an_odt_and_refuses_other_zips(void);
 void test_pagecanvas_disc_guides(void);
 void test_pagecanvas_disc_guides_tall_pixels(void);
 void test_config_view_keys(void);
@@ -1193,6 +1196,7 @@ static const test_case g_cases[] = {
     { "actions_mail_merge_printed", test_actions_mail_merge_printed },
     { "actions_format_style_and_define", test_actions_format_style_and_define },
     { "actions_odt_and_pdf_go_through_the_gateway", test_actions_odt_and_pdf_go_through_the_gateway },
+    { "actions_word_files_open_through_the_gateway", test_actions_word_files_open_through_the_gateway },
     { "actions_file_print_routes", test_actions_file_print_routes },
     { "actions_file_print_options", test_actions_file_print_options },
     { "actions_file_print_choose_printer", test_actions_file_print_choose_printer },
@@ -1343,6 +1347,8 @@ static const test_case g_cases[] = {
     { "papermetrics_layout_and_config", test_papermetrics_layout_and_config },
     { "actions_envelope", test_actions_envelope },
     { "convert_print_disc_to_its_tray", test_convert_print_disc_to_its_tray },
+    { "convert_docx_greek_import_via_gateway", test_convert_docx_greek_import_via_gateway },
+    { "convert_docx_id_takes_an_odt_and_refuses_other_zips", test_convert_docx_id_takes_an_odt_and_refuses_other_zips },
     { "pagecanvas_disc_guides", test_pagecanvas_disc_guides },
     { "pagecanvas_disc_guides_tall_pixels", test_pagecanvas_disc_guides_tall_pixels },
     { "config_view_keys", test_config_view_keys },

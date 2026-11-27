@@ -201,9 +201,14 @@ other format in this project has, not a new one invented for M7.
 - **`CONVERT_IMPORT` request payload:**
   ```
   offset  size  field
-  0       1     format_id (1 = ODT)
+  0       1     format_id (1 = ODT, 3 = Word .docx)
   1       ...   the foreign file's raw bytes (e.g. a whole .odt file)
   ```
+  Word (`format_id=3`, `docs/formats/docx.md`) is **import-only**: the
+  gateway answers `CONVERT_EXPORT` for it with `OFFLOAD_UNSUPPORTED`. A
+  ZIP sent as Word that is an ODT inside (its first entry the ODF
+  `mimetype`) is read as the ODT it is -- a machine that found a ZIP by
+  its content, a `.DOC` on an 8.3 disk, cannot tell the two apart.
   **Response payload (status `OFFLOAD_OK`):** RTF bytes, exactly the
   shape `format_rtf_import` accepts. The engine's own Open-ODT flow (a
   future task) is therefore just: ship the file's bytes with

@@ -1185,6 +1185,17 @@ void test_actions_load_file_opens_atari_works_and_saves_rtf_beside_it(void)
     ASSERT_TRUE(strncmp(text, "{\\rtf1", 6) == 0);
     read_whole_file(stw, text, sizeof(text));
     ASSERT_TRUE(text[0] == '1' && text[1] == '1');   /* the original, untouched */
+
+    /* Atari Works under an .RTF name: Save asks, rather than write the
+       RTF over the original. */
+    f = fopen(rtf, "wb");
+    ASSERT_TRUE(f != NULL);
+    if (f != NULL) {
+        fwrite(sample, 1, len, f);
+        fclose(f);
+        ASSERT_TRUE(wp_action_load_file(&ctx, rtf, NULL) == WP_OK);
+        ASSERT_EQ_STR(ctx.doc_path, "");
+    }
     ctx_teardown(&doc, &journal, &ctx);
     (void)remove(stw);
     (void)remove(rtf);
@@ -1304,6 +1315,101 @@ void test_actions_odt_and_pdf_go_through_the_gateway(void)
     ASSERT_EQ_STR(text, "Alpha\nBeta\n");
 
     ctx_teardown(&doc, &journal, &ctx);
+}
+
+static void copy_file(const char *from, const char *to)
+{
+    static char buf[32768];
+    size_t n;
+    FILE *in = fopen(from, "rb");
+    FILE *out = fopen(to, "wb");
+
+    ASSERT_TRUE(in != NULL && out != NULL);
+    if (in == NULL || out == NULL) {
+        if (in) fclose(in);
+        if (out) fclose(out);
+        return;
+    }
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) fwrite(buf, 1, n, out);
+    fclose(in);
+    fclose(out);
+}
+
+/* Word through the gateway by the shared file flow: a .docx by its name,
+   and a .DOC by its content -- what an 8.3 disk calls a .docx -- while a
+   Word 97-2003 .doc is told it can't be read. Save never writes over the
+   Word file: it goes to an .RTF beside it, and a save to a .docx name is
+   refused. */
+void test_actions_word_files_open_through_the_gateway(void)
+{
+    static const char docx[] = "build/test_actions_word.docx";
+    static const char doc8[] = "build/TESTWORD.DOC";
+    static const char old[] = "build/test_actions_old.doc";
+    static const u8 ole2[16] = { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 };
+    gateway_handle gw;
+    wp_document doc;
+    wp_undo_journal journal;
+    wp_app_ctx ctx;
+    static char text[2048];
+    FILE *f;
+
+    copy_file("host/tests/fixtures/sample_greek.docx", docx);
+    copy_file("host/tests/fixtures/sample_greek.docx", doc8);
+    f = fopen(old, "wb");
+    ASSERT_TRUE(f != NULL);
+    if (f == NULL) return;
+    fwrite(ole2, 1, sizeof(ole2), f);
+    fclose(f);
+    (void)remove("build/test_actions_word.rtf");
+    (void)remove("build/TESTWORD.RTF");
+
+    ctx_setup_imported(&doc, &journal, &ctx, "Alpha\n");
+
+    /* No link: told, the document untouched, for both names. */
+    ctx.ensure_offload = no_link;
+    ASSERT_TRUE(wp_action_load_file(&ctx, docx, NULL) != WP_OK);
+    ASSERT_TRUE(wp_action_load_file(&ctx, doc8, NULL) != WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Alpha\n");
+
+    /* Word 97-2003: refused before any link is asked for. */
+    ASSERT_TRUE(wp_action_load_file(&ctx, old, NULL) != WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Alpha\n");
+
+    ASSERT_TRUE(gateway_start_bin("offload/gateway/odt_gateway.py", NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    ctx.ensure_offload = NULL;
+
+    ASSERT_TRUE(wp_action_load_file(&ctx, docx, NULL) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "\xce\x9a\xce\xb1\xce\xbb", 6) == 0);   /* "Καλ" */
+    ASSERT_EQ_STR(ctx.doc_path, "build/test_actions_word.rtf");
+    ASSERT_TRUE(ctx.doc_rtf);
+    ASSERT_TRUE(wp_action_save_file(&ctx, ctx.doc_path, NULL) == WP_OK);
+    read_whole_file("build/test_actions_word.rtf", text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "{\\rtf1", 6) == 0);
+    read_whole_file(docx, text, sizeof(text));
+    ASSERT_TRUE(text[0] == 'P' && text[1] == 'K');   /* the Word file, untouched */
+
+    /* Saving under a Word name is refused, and the file stays Word's. */
+    ASSERT_TRUE(wp_action_save_file(&ctx, docx, NULL) != WP_OK);
+    read_whole_file(docx, text, sizeof(text));
+    ASSERT_TRUE(text[0] == 'P' && text[1] == 'K');
+
+    ASSERT_TRUE(wp_action_load_file(&ctx, doc8, NULL) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "\xce\x9a\xce\xb1\xce\xbb", 6) == 0);
+    ASSERT_EQ_STR(ctx.doc_path, "build/TESTWORD.RTF");
+
+    offload_shutdown();
+    gateway_stop(&gw);
+    ctx_teardown(&doc, &journal, &ctx);
+    (void)remove(docx);
+    (void)remove(doc8);
+    (void)remove(old);
+    (void)remove("build/test_actions_word.rtf");
+    (void)remove("build/TESTWORD.RTF");
 }
 
 void test_actions_file_open_asks_picks_and_a_new_document_forgets_the_name(void)

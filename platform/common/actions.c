@@ -2998,7 +2998,7 @@ static wp_bool link_for_convert(wp_app_ctx *ctx)
 {
     wp_bool up = (ctx->ensure_offload != NULL) ? ctx->ensure_offload() : offload_available();
 
-    if (!up) wp_action_tell(ctx, "ODT/PDF needs a connected gateway");
+    if (!up) wp_action_tell(ctx, "Word, ODT and PDF files need a connected gateway");
     return up;
 }
 
@@ -3609,13 +3609,63 @@ wp_status wp_action_file_print(wp_app_ctx *ctx)
     return WP_ERR;
 }
 
+/* A ZIP's opening: ODT and Word's .docx are both one. */
+static wp_bool looks_like_zip(const u8 *data, u32 len)
+{
+    return (wp_bool)(len >= 4 && data[0] == 'P' && data[1] == 'K' && data[2] == 3 && data[3] == 4);
+}
+
+/* Word 97-2003's .doc: an OLE2 compound file, which nothing here reads. */
+static wp_bool looks_like_ole2(const u8 *data, u32 len)
+{
+    return (wp_bool)(len >= 8 && data[0] == 0xD0 && data[1] == 0xCF && data[2] == 0x11 &&
+                     data[3] == 0xE0 && data[4] == 0xA1 && data[5] == 0xB1 &&
+                     data[6] == 0x1A && data[7] == 0xE1);
+}
+
+/* The name a file RetroWP reads but does not write saves under: its own
+   with .RTF for the extension (LETTER.STW, LETTER.DOCX, LETTER.DOC all
+   become LETTER.RTF, in the case the name was written in), or "" when it
+   has no extension -- or has .RTF already, which would be the original
+   written over -- so Save asks. */
+static void save_beside_as_rtf(wp_app_ctx *ctx)
+{
+    char *dot = strrchr(ctx->doc_path, '.');
+    char *sep1 = strrchr(ctx->doc_path, '/');
+    char *sep2 = strrchr(ctx->doc_path, '\\');
+    char *sep3 = strrchr(ctx->doc_path, ':');
+    char *sep = sep1;
+    wp_bool lower;
+
+    if (sep2 > sep) sep = sep2;
+    if (sep3 > sep) sep = sep3;
+    /* doc_path is "" when the path was too long to keep. */
+    if (dot == NULL || (sep != NULL && dot < sep) || (u32)(dot - ctx->doc_path) + 5 > WP_APP_PATH_MAX ||
+        wp_path_ends_with_ci(ctx->doc_path, ".RTF")) {
+        ctx->doc_path[0] = '\0';
+        ctx->doc_rtf = WP_TRUE;
+        return;
+    }
+    lower = (wp_bool)(dot[1] >= 'a' && dot[1] <= 'z');
+    memcpy(dot, lower ? ".rtf" : ".RTF", 5);
+    ctx->doc_rtf = WP_TRUE;
+}
+
 wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image_sink *sink)
 {
     plat_file *f;
     u32 size = 0, read_len = 0;
     u8 *buf, *data;
-    wp_bool via_gateway = wp_path_ends_with_ci(native_path, ".ODT");
-    wp_bool as_rtf = WP_FALSE, from_stw = WP_FALSE;
+    /* By name, ODT and Word's .docx; by content, a .DOC that is a ZIP
+       -- what an 8.3 disk calls a .docx -- and a file with no extension
+       that is one. Anything else named .DOC (WordStar's, or text) is
+       read here as before. */
+    u8 format_id = wp_path_ends_with_ci(native_path, ".ODT") ? (u8)OFFLOAD_FORMAT_ODT
+                 : wp_path_ends_with_ci(native_path, ".DOCX") ? (u8)OFFLOAD_FORMAT_DOCX : (u8)0;
+    wp_bool maybe_word = (wp_bool)(wp_path_ends_with_ci(native_path, ".DOC") ||
+                                   !wp_path_has_extension(native_path));
+    wp_bool via_gateway = (wp_bool)(format_id != 0);
+    wp_bool as_rtf = WP_FALSE, save_as_rtf = WP_FALSE;
     wp_document fresh;
     wp_status st;
 
@@ -3644,9 +3694,32 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
         wp_action_tell(ctx, "Not enough memory to open that file");
         return WP_NOMEM;
     }
-    data = via_gateway ? buf + 1 : buf;
+    /* Always behind a byte's room, so a .DOC found by its content to be
+       Word's can still go to the gateway without a copy. */
+    data = buf + 1;
     st = plat_file_read(f, data, size, &read_len);
     plat_file_close(f);
+
+    if (st == WP_OK && !via_gateway && maybe_word && looks_like_ole2(data, read_len)) {
+        mem_free(buf);
+        wp_action_tell(ctx, "Word 97-2003 files can't be read; save it as .docx in Word");
+        return WP_ERR;
+    }
+    if (st == WP_OK && !via_gateway && maybe_word && looks_like_zip(data, read_len)) {
+        /* The gateway tells an ODT from Word's by what is inside; a
+           ZIP with neither is refused there. */
+        format_id = (u8)OFFLOAD_FORMAT_DOCX;
+        via_gateway = WP_TRUE;
+        if (!link_for_convert(ctx)) {
+            mem_free(buf);
+            return WP_ERR;
+        }
+        if (read_len + 1 > convert_max_file()) {
+            mem_free(buf);
+            wp_action_tell(ctx, "That file is too large to send to the gateway");
+            return WP_RANGE;
+        }
+    }
 
     if (st == WP_OK) {
         /* WordStar is detected by CONTENT, not by name: those files
@@ -3659,13 +3732,15 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
            extension at all -- a Mac's usual -- goes by that opening.
            See docs/formats/. */
         if (via_gateway) {
-            buf[0] = (u8)OFFLOAD_FORMAT_ODT;
+            buf[0] = format_id;
             st = convert_import(ctx, buf, read_len + 1, &fresh, sink);
+            /* Word's is read, not written: Save makes an RTF beside it. */
+            save_as_rtf = (wp_bool)(format_id == (u8)OFFLOAD_FORMAT_DOCX);
         } else if (format_stw_looks_like(data, read_len)) {
             /* Atari Works, by content: its "10"/"11" opening is not
                distinctive alone, so the whole structure must walk. */
             st = format_stw_import(data, read_len, &fresh);
-            from_stw = WP_TRUE;
+            save_as_rtf = WP_TRUE;
         } else if (format_ws_looks_like(data, read_len)) {
             st = format_ws_import(data, read_len, &fresh);
         } else if (wp_path_ends_with_ci(native_path, ".RTF") ||
@@ -3687,20 +3762,13 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
         return st;
     }
     wp_action_replace_document(ctx, &fresh);
-    if (from_stw) {
-        /* RetroWP does not write Atari Works, so Save must not write
-           over one: LETTER.STW saves as LETTER.RTF beside it, keeping
-           its formatting; a name with no extension asks. */
+    if (save_as_rtf) {
+        /* RetroWP does not write Atari Works or Word, so Save must not
+           write over one: LETTER.STW (or .DOCX, or .DOC) saves as
+           LETTER.RTF beside it, keeping its formatting; a name with no
+           extension asks. */
         wp_action_remember_path(ctx, native_path);
-        /* doc_path is "" when the path was too long to keep (and then
-           there is no extension in it to change). */
-        if (wp_path_ends_with_ci(ctx->doc_path, ".STW")) {
-            u32 n = (u32)strlen(ctx->doc_path);
-            memcpy(ctx->doc_path + n - 3, ctx->doc_path[n - 3] == 's' ? "rtf" : "RTF", 3);
-        } else {
-            ctx->doc_path[0] = '\0';
-        }
-        ctx->doc_rtf = WP_TRUE;
+        save_beside_as_rtf(ctx);
         return WP_OK;
     }
     wp_action_remember_path(ctx, native_path);
@@ -3731,6 +3799,13 @@ static wp_status save_file(wp_app_ctx *ctx, const char *native_path, wp_image_so
     wp_status st;
 
     if (!ctx->doc_loaded) return WP_OK;
+
+    if (wp_path_ends_with_ci(native_path, ".DOCX")) {
+        /* Read through the gateway, never written: plain text under a
+           Word name would be a file Word cannot open. */
+        wp_action_tell(ctx, "RetroWP reads Word files but saves as RTF, which Word opens");
+        return WP_ERR;
+    }
 
     if (wp_path_ends_with_ci(native_path, ".ODT") || wp_path_ends_with_ci(native_path, ".PDF")) {
         /* The Pi made these from the document; it keeps what the machine

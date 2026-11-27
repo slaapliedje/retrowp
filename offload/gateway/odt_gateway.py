@@ -5,7 +5,8 @@ T7.2, T7.3).
 
 A third offload/gateway executable, alongside mock_gateway.c (fixture-
 backed THESAURUS/SPELL_CHECK) and ollama_gateway.c (real-LLM-backed
-THESAURUS). This one answers OFFLOAD_CONVERT_IMPORT for format_id=ODT,
+THESAURUS). This one answers OFFLOAD_CONVERT_IMPORT for format_id=ODT
+or format_id=DOCX (Word, read by docx_reader.py),
 and OFFLOAD_CONVERT_EXPORT for format_id=ODT or format_id=PDF --
 and OFFLOAD_PRINT -- the PDF, printed on this machine's printer -- when
 it has one to print on (--printer / --print-dir, below) -- and keeps
@@ -64,9 +65,11 @@ from wire_protocol import (
 )
 from doc_store import DocStore, DEFAULT_VERSIONS
 from doc_store_git import GitDocStore, GitStoreError
+from docx_reader import docx_bytes_to_paragraphs
 
 FORMAT_ODT = 1
 FORMAT_PDF = 2
+FORMAT_DOCX = 3   # import only, docx_reader.py
 
 # ---------------------------------------------------------------------
 # ODF (ODT) unit conversion
@@ -734,6 +737,11 @@ def paragraphs_to_rtf_bytes(paragraphs, page=None, header=None, footer=None, sec
             parts.append('\\sa%d' % p['sa'])
         if p.get('pagebb'):
             parts.append('\\pagebb')
+        if p.get('sl'):
+            parts.append('\\sl%d\\slmult%d' % (p['sl'], 1 if p.get('slmult') else 0))
+        for pos, kind in p.get('tabs', []):
+            parts.append({'right': '\\tqr', 'center': '\\tqc', 'decimal': '\\tqdec'}.get(kind, '') +
+                         '\\tx%d' % pos)
 
         for r in (p['runs'] or [_new_run()]):
             parts.append('{')
@@ -1883,15 +1891,35 @@ def _pdf_assemble(pages, used_chars, media=(_PDF_PAGE_WIDTH, _PDF_PAGE_HEIGHT)):
 # Request dispatch + server loop
 # ---------------------------------------------------------------------
 
+def _is_odt(body):
+    """An OpenDocument package: its first entry, uncompressed, is the
+    mimetype (ODF 1.2, section 3.3)."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(body)) as zf:
+            names = zf.namelist()
+            return bool(names) and names[0] == 'mimetype' and \
+                zf.read('mimetype').startswith(b'application/vnd.oasis.opendocument')
+    except zipfile.BadZipFile:
+        return False
+
+
 def handle_convert_import(payload):
     if len(payload) < 1:
         return STATUS_ERR, b''
     format_id, body = payload[0], payload[1:]
-    if format_id != FORMAT_ODT:
+    if format_id not in (FORMAT_ODT, FORMAT_DOCX):
         return STATUS_UNSUPPORTED, b''
     try:
-        paragraphs = odt_bytes_to_paragraphs(body)
-        sections = odt_sections(body, paragraphs)
+        if format_id == FORMAT_DOCX and _is_odt(body):
+            # A machine that found a ZIP by its content (a .DOC on an 8.3
+            # disk, a Mac file with no extension) cannot tell which.
+            format_id = FORMAT_ODT
+        if format_id == FORMAT_DOCX:
+            paragraphs, sections = docx_bytes_to_paragraphs(body, _new_para, _new_run,
+                                                            font_family_guess, _zip_read)
+        else:
+            paragraphs = odt_bytes_to_paragraphs(body)
+            sections = odt_sections(body, paragraphs)
         return STATUS_OK, paragraphs_to_rtf_bytes(paragraphs, sections=sections)
     except Exception:
         return STATUS_ERR, b''

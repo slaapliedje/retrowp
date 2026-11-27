@@ -1088,3 +1088,172 @@ void test_convert_print_disc_to_its_tray(void)
     got[n] = '\0';
     ASSERT_EQ_STR(got, "-t\nRetroWP\n-n\n2\n-d\nOffice\n");
 }
+
+/* A paragraph's text, its runs end to end, NUL-terminated into out. */
+static void para_text(wp_document *doc, wp_paragraph *para, char *out, u32 cap)
+{
+    u32 r, n = 0;
+
+    for (r = 0; r < para->run_count; r++) {
+        wp_run *run = wp_paragraph_run_get(para, r);
+        u32 len = run->text.length;
+        if (n + len + 1 > cap) len = cap - n - 1;
+        memcpy(out + n, wp_strpool_get(&doc->strings, run->text), len);
+        n += len;
+    }
+    out[n] = '\0';
+}
+
+/* Word (format_id 3, docx_reader.py) in the shape Word 2021 saves it
+   (host/tests/fixtures/make_greek_docx.py): Greek arrives as Greek,
+   UTF-8 in the model; Greek typed in the Symbol font and a w:sym become
+   the letters they show; style inheritance, lists, a table, a page
+   break, two sections and a header with its page number all carry. */
+void test_convert_docx_greek_import_via_gateway(void)
+{
+    static u8 docx[FIXTURE_CAP];
+    u32 docx_len;
+    u8 *rtf;
+    u32 rtf_len;
+    wp_document doc;
+    wp_section *sec;
+    wp_paragraph *para;
+    wp_run *run;
+    const wp_para_style *ps;
+    const wp_char_style *cs;
+    char text[256];
+
+    ASSERT_TRUE(read_fixture("host/tests/fixtures/sample_greek.docx", docx, FIXTURE_CAP, &docx_len) == WP_OK);
+    gateway_convert(OFFLOAD_CONVERT_IMPORT, OFFLOAD_FORMAT_DOCX, docx, docx_len, &rtf, &rtf_len);
+    ASSERT_TRUE(format_rtf_import(rtf, rtf_len, &doc) == WP_OK);
+    mem_free(rtf);
+
+    ASSERT_EQ_U32(doc.section_count, 2);
+    sec = wp_document_section_get(&doc, 0);
+    ASSERT_EQ_U32(sec->para_count, 10);
+    ASSERT_EQ_U32((u32)sec->page_width, 11906);         /* A4 */
+    ASSERT_EQ_U32((u32)sec->page_height, 16838);
+    ASSERT_EQ_U32((u32)sec->margin_left, 1440);
+    ASSERT_EQ_U32(sec->header.length, 15);                /* "|Σελίδα #": right, Word's "1" gone */
+    ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, sec->header), "|\xce\xa3\xce\xb5\xce\xbb\xce\xaf\xce\xb4\xce\xb1 #", 15);
+
+    /* Heading 1: bold, 16 pt, its colour -- all from the style chain. */
+    para = wp_section_paragraph_get(sec, 0);
+    para_text(&doc, para, text, sizeof(text));
+    ASSERT_EQ_STR(text, "\xce\x9a\xce\xb1\xce\xbb\xce\xb7\xce\xbc\xce\xad\xcf\x81\xce\xb1 "
+                        "\xce\xba\xcf\x8c\xcf\x83\xce\xbc\xce\xb5");   /* Καλημέρα κόσμε */
+    run = wp_paragraph_run_get(para, 0);
+    cs = wp_document_cstyle_get(&doc, run->style);
+    ASSERT_TRUE((cs->flags & WP_STYLE_BOLD) != 0);
+    ASSERT_EQ_U32((u32)cs->size_twips, 320);
+    ASSERT_EQ_U32(cs->color_b, 150);
+
+    /* Centred; bold and italic runs; tonos and dialytika kept. */
+    para = wp_section_paragraph_get(sec, 1);
+    ps = wp_document_pstyle_get(&doc, para->style);
+    ASSERT_EQ_U32(ps->align, WP_ALIGN_CENTER);
+    ASSERT_EQ_U32((u32)ps->space_after, 160);
+    ASSERT_EQ_U32((u32)ps->line_spacing, 259);
+    run = wp_paragraph_run_get(para, 1);
+    ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, run->text), "\xcf\x80\xce\xb7\xce\xb4\xce\xac\xce\xb5\xce\xb9", 12);
+    cs = wp_document_cstyle_get(&doc, run->style);
+    ASSERT_TRUE((cs->flags & WP_STYLE_BOLD) != 0);
+    run = wp_paragraph_run_get(para, 3);
+    cs = wp_document_cstyle_get(&doc, run->style);
+    ASSERT_TRUE((cs->flags & WP_STYLE_ITALIC) != 0);
+    run = wp_paragraph_run_get(para, 4);                   /* the Strong character style */
+    cs = wp_document_cstyle_get(&doc, run->style);
+    ASSERT_TRUE((cs->flags & WP_STYLE_BOLD) != 0);
+    ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, run->text), " \xce\xaa\xcf\x8b\xce\x90\xce\xb0 ", 10);
+
+    /* Symbol-font Greek and a w:sym; a hyperlink's and an insertion's
+       text kept, a deletion's dropped. */
+    para = wp_section_paragraph_get(sec, 2);
+    para_text(&doc, para, text, sizeof(text));
+    ASSERT_EQ_STR(text, "Symbol: \xce\xb1\xce\xb2\xce\xb3\xce\xb4\xce\xa9\xcf\x80"
+                        " \xcf\x83\xcf\x8d\xce\xbd\xce\xb4\xce\xb5\xcf\x83\xce\xbc\xce\xbf\xcf\x82"
+                        " \xce\xbd\xce\xad\xce\xbf");
+
+    /* Lists: numbered, then a Symbol bullet as U+2022; hanging indent. */
+    para = wp_section_paragraph_get(sec, 3);
+    para_text(&doc, para, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "1.\t", 3) == 0);
+    ps = wp_document_pstyle_get(&doc, para->style);
+    ASSERT_EQ_U32((u32)ps->indent_left, 720);
+    ASSERT_TRUE(ps->indent_first == -360);
+    para = wp_section_paragraph_get(sec, 4);
+    para_text(&doc, para, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "2.\t", 3) == 0);
+    para = wp_section_paragraph_get(sec, 5);
+    para_text(&doc, para, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "\xe2\x80\xa2\t", 4) == 0);
+
+    /* A table row is one paragraph, the cells apart by a tab. */
+    para = wp_section_paragraph_get(sec, 7);
+    para_text(&doc, para, text, sizeof(text));
+    ASSERT_EQ_STR(text, "\xce\xad\xce\xbd\xce\xb1\t1");
+
+    /* The page break inside a paragraph starts the next on a new page. */
+    para = wp_section_paragraph_get(sec, 9);
+    ps = wp_document_pstyle_get(&doc, para->style);
+    ASSERT_TRUE(ps->page_break_before == WP_BREAK_PAGE);
+
+    /* Section two: A4 on its side, no header; 1.5 lines, a right tab. */
+    sec = wp_document_section_get(&doc, 1);
+    ASSERT_EQ_U32((u32)sec->page_width, 16838);
+    ASSERT_EQ_U32(sec->header.length, 0);
+    para = wp_section_paragraph_get(sec, 0);
+    ps = wp_document_pstyle_get(&doc, para->style);
+    ASSERT_EQ_U32((u32)ps->line_spacing, 360);
+    ASSERT_EQ_U32(ps->tab_count, 1);
+    ASSERT_EQ_U32((u32)ps->tab_pos[0], 9000);
+    ASSERT_EQ_U32(ps->tab_kind[0], WP_TAB_RIGHT);
+    run = wp_paragraph_run_get(para, 0);
+    cs = wp_document_cstyle_get(&doc, run->style);
+    ASSERT_EQ_U32((u32)cs->size_twips, 280);
+    wp_document_free(&doc);
+}
+
+/* A ZIP sent as Word's that is an ODT inside (what a machine sends for a
+   .DOC or a name with no extension) is read as the ODT it is; one that is
+   neither is refused, not misread. */
+void test_convert_docx_id_takes_an_odt_and_refuses_other_zips(void)
+{
+    static u8 odt[FIXTURE_CAP];
+    static u8 payload[64];
+    u32 odt_len;
+    u8 *rtf;
+    u32 rtf_len;
+    wp_document doc;
+    gateway_handle gw;
+    offload_request req;
+    offload_response resp;
+    /* An empty ZIP: just the end-of-central-directory record. */
+    static const u8 empty_zip[22] = { 'P', 'K', 5, 6 };
+
+    ASSERT_TRUE(read_fixture("host/tests/fixtures/sample.odt", odt, FIXTURE_CAP, &odt_len) == WP_OK);
+    gateway_convert(OFFLOAD_CONVERT_IMPORT, OFFLOAD_FORMAT_DOCX, odt, odt_len, &rtf, &rtf_len);
+    ASSERT_TRUE(format_rtf_import(rtf, rtf_len, &doc) == WP_OK);
+    mem_free(rtf);
+    ASSERT_EQ_U32(wp_document_section_get(&doc, 0)->para_count, 2);
+    wp_document_free(&doc);
+
+    ASSERT_TRUE(gateway_start_bin(GATEWAY_BINARY, NULL, &gw) == WP_OK);
+    ASSERT_TRUE(offload_init(gw.endpoint) == WP_OK);
+    payload[0] = OFFLOAD_FORMAT_DOCX;
+    memcpy(payload + 1, empty_zip, sizeof(empty_zip));
+    req.op = OFFLOAD_CONVERT_IMPORT;
+    req.payload = payload;
+    req.payload_len = (u32)sizeof(empty_zip) + 1;
+    req.timeout_ms = 5000;
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_ERR);
+    offload_response_free(&resp);
+
+    req.op = OFFLOAD_CONVERT_EXPORT;   /* Word is read, never written */
+    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
+    ASSERT_TRUE(resp.status == OFFLOAD_UNSUPPORTED);
+    offload_response_free(&resp);
+    offload_shutdown();
+    gateway_stop(&gw);
+}

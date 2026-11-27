@@ -3338,6 +3338,41 @@ you want to make. engine/include/appname.h holds the shown names and the
       theirs). A program that is not installed beside the launcher is
       shown as missing and says so, not started blind. Shown on TOS 1.04
       at 1MB with nothing left resident, and on each other machine.
+
+## M24 — Greek
+Goal: a Greek document from Word opens, reads, prints and saves on every
+machine. The document model is Unicode already, and RTF and ODT carry
+Greek both ways; what was missing was a way in from Word, glyphs to draw
+it with, and a PDF that keeps it.
+
+- [x] T24.1 Word (.docx) import, through the gateway.
+      AC: a Word 2021 .docx with Greek opens with its text, styles,
+      lists, tables, sections and headers; Greek typed in the Symbol font
+      becomes Unicode Greek; a .DOC that is a ZIP (an 8.3 disk's .docx)
+      goes the same way, a Word 97-2003 .doc is told it can't be read;
+      Save never writes over the Word file.
+      Note (2026-11-27): offload/gateway/docx_reader.py, standard library
+      only, format_id 3 (docs/formats/docx.md). The gateway's RTF writer
+      now also carries line spacing and tab stops, which ODT import gains
+      too. Host 798/798. Five real Word files agree word for word with
+      LibreOffice's reading (one keeps 37 table words LibreOffice's text
+      export drops), and their RTF reads under ASan/UBSan. Needs the
+      gateway deployed to the Pi (docx_reader.py is a new file beside
+      odt_gateway.py).
+- [ ] T24.2 A Greek font on the Atari.
+      The ST's system font has 12 Greek characters (αβΓπΣστΦΘΩδϕ, its
+      0xE0 block); modern Greek needs 69 with the tonos and dialytika
+      forms. RetroWP brings its own glyphs for the rest, at the system
+      font's 8x8 and 8x16 cells, drawn where the font lacks one.
+      AC: the T24.1 fixture shows every Greek letter, not "?", on TOS 1.04
+      at 1MB, in ST High and Medium, and prints on the gateway.
+- [ ] T24.3 Greek in the PDF. The gateway's PDF writer encodes WinAnsi,
+      so Greek becomes "?": embed a face with Greek (Liberation has it)
+      and encode beyond 0xFF.
+- [ ] T24.4 Greek on DOS (codepage 737 loaded into a VGA font), the Amiga
+      (an ISO-8859-7 font) and the Mac (a Greek face of its own).
+- [ ] T24.5 Typing Greek: a Greek keyboard layout, switched the machine's
+      way.
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)
