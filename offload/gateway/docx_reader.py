@@ -666,7 +666,8 @@ class _Docx(object):
 
     def _margin(self, sect, kind):
         """The default header/footer of a section as the engine's parts
-        (odt_masters' shape), or None when there is none."""
+        (odt_masters' shape): [] for one that is empty, None when the
+        section names none (and so has the one before it)."""
         for ref in sect:
             if _local(ref.tag) != kind + 'Reference':
                 continue
@@ -675,14 +676,14 @@ class _Docx(object):
             target = self.rels.get(_attr(ref, 'id'))
             root = self._xml(target) if target else None
             if root is None:
-                return None
+                return []
             paras = []
             self.paragraphs_of(root, paras)
             for p in paras:
                 t = ''.join(r['text'] for r in p['runs'])
                 if t.strip():
-                    return _margin_parts_from(t, p.get('align', 'left'))
-            return None
+                    return _margin_parts_from(t, p.get('align', 'left')) or []
+            return []
         return None
 
     def section_info(self, sect):
@@ -767,6 +768,14 @@ def docx_bytes_to_paragraphs(data, new_para, new_run, family_guess, zip_read):
         # The body's own w:sectPr is the last section's -- unless the last
         # paragraph already ended a section and none follows.
         sections.append(d.section_info(final_sect))
+    # A section that names no header (or footer) has the one before it,
+    # as Word shows it (ECMA-376 17.10.5): a section's own empty one is
+    # how it says it has none. _margin answers None for "names none" and
+    # [] for "names an empty one".
+    for k in range(1, len(sections)):
+        page, header, footer = sections[k]
+        sections[k] = (page, sections[k - 1][1] if header is None else header,
+                       sections[k - 1][2] if footer is None else footer)
     for p in paragraphs:
         p.pop('_base_run', None)
         for r in p['runs']:

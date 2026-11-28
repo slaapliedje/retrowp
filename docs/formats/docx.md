@@ -1,12 +1,15 @@
-# Word (.docx) Import
+# Word (.docx) Import and Export
 
 `offload/gateway/docx_reader.py`, called by `odt_gateway.py`, answers
 `OFFLOAD_CONVERT_IMPORT` for `format_id = FORMAT_DOCX (3)`: the file's
 bytes go to the Pi, and the RTF that comes back is read by
 `format_rtf_import` like any other (`docs/formats/offload-protocol.md`).
-Word is read, not written: `CONVERT_EXPORT` answers `OFFLOAD_UNSUPPORTED`,
-the machine refuses a save under a `.docx` name, and a document opened
-from Word saves as an `.RTF` beside it, which Word opens.
+`docx_writer.py` answers `CONVERT_EXPORT` for the same id (M24 T24.6,
+2026-11-27): the engine's RTF goes to the Pi and a `.docx` comes back
+(see "Writing Word" below). A document opened from Word still saves as
+an `.RTF` beside it, because the writer has only what RetroWP's document
+holds -- Word's lists, tables and pictures would be lost written back
+over the original; Save As a `.docx` name (or `.DOC`, below) writes Word.
 
 The reader uses Python's standard library only (`zipfile`,
 `xml.etree`), as the ODT reader does; the Pi has neither python-docx nor
@@ -50,6 +53,54 @@ characters they show (`SYMBOL_TO_UNICODE`, Adobe's Symbol encoding), and
 the run loses the Symbol face so it is drawn as Unicode. A list bullet in
 Symbol or Wingdings (Word's own default bullet is Symbol's `F0B7`)
 becomes U+2022.
+
+## A section with no header of its own
+
+Word gives a section that names no header (or footer) the one before it
+(ECMA-376 17.10.5); a section's own empty header is how it says it has
+none. The reader did not, until T24.6: the fixture's second section,
+which names none, came in headerless where Word and LibreOffice show
+"Σελίδα 3" on it. It now carries the header on, and the T24.1 test that
+asserted the empty one says so.
+
+## Writing Word
+
+`docx_writer.py`, standard library only like the reader, writes what the
+gateway's paragraph model holds:
+
+| RetroWP | Word |
+|---|---|
+| alignment, indents, spacing before/after, line spacing, tab stops, page break before | `w:jc`, `w:ind`, `w:spacing` (a multiple as `lineRule="auto"` in 240ths, Word's own unit; "at least" as `atLeast`), `w:tabs`, `w:pageBreakBefore` |
+| bold, italic, underline, strike, super/subscript, colour, size, face | `w:b`, `w:i`, `w:u`, `w:strike`, `w:vertAlign`, `w:color`, `w:sz`, `w:rFonts` |
+| a run with Greek in it | `w:lang w:val="el-GR"`, so Word checks it as Greek |
+| each section's page, orientation and margins | `w:sectPr` on the section's last paragraph (the last section's on the body) |
+| each section's header and footer | `header*.xml` / `footer*.xml`, `\|` parts on a centre and a right tab stop, `#` a `PAGE` field; every section names its own, an empty one included, since Word would otherwise give it the one before |
+
+The default face is Arial, 12 point, and Helvetica, Times and Courier --
+the PostScript names an ST, an Amiga or a Mac writes -- become Arial,
+Times New Roman and Courier New, which Windows has, Greek included.
+`settings.xml` says `compatibilityMode` 15 so Word 2013 and later,
+Word 2021 among them, open it in their own mode rather than
+Compatibility Mode. Elements follow the schema's order inside `w:pPr`,
+`w:rPr` and `w:sectPr`, which Word enforces. Every ZIP entry carries the
+same date, so the same document makes the same bytes.
+
+On the machine, Save under a `.docx` name, or `.DOC` -- the name an 8.3
+disk (an ST's, a DOS machine's) gives Word's file, and the one the reader
+already takes as Word when it is a ZIP -- goes through the gateway; with
+no gateway it says so and writes nothing. A WordStar `.DOC`, opened and
+saved under its own name, now goes to Word through the gateway too, where
+it used to be written over as plain text.
+
+Checked: the Greek fixture in, out as `.docx` and in again keeps its
+text, paragraph and run formatting, sections, page sizes and headers
+(the one change: a run with no face comes back naming the default, Arial);
+LibreOffice reads the written file to the same text as Word's original,
+less the original's list numbering and table (the model has neither) and
+with real Greek where the original's Symbol-font letters extract as
+Latin. Host tests `convert_docx_export_reads_back` and
+`actions_word_files_open_through_the_gateway` (Save As `.docx` and `.DOC`).
+Opening it in Word itself is the user's to do.
 
 ## Not carried
 

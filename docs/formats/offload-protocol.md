@@ -204,9 +204,9 @@ other format in this project has, not a new one invented for M7.
   0       1     format_id (1 = ODT, 3 = Word .docx)
   1       ...   the foreign file's raw bytes (e.g. a whole .odt file)
   ```
-  Word (`format_id=3`, `docs/formats/docx.md`) is **import-only**: the
-  gateway answers `CONVERT_EXPORT` for it with `OFFLOAD_UNSUPPORTED`. A
-  ZIP sent as Word that is an ODT inside (its first entry the ODF
+  Word (`format_id=3`, `docs/formats/docx.md`) goes both ways since M24
+  T24.6 (2026-11-27; import-only before, `CONVERT_EXPORT` answering
+  `OFFLOAD_UNSUPPORTED`). A ZIP sent as Word that is an ODT inside (its first entry the ODF
   `mimetype`) is read as the ODT it is -- a machine that found a ZIP by
   its content, a `.DOC` on an 8.3 disk, cannot tell the two apart.
   **Response payload (status `OFFLOAD_OK`):** RTF bytes, exactly the
@@ -217,12 +217,12 @@ other format in this project has, not a new one invented for M7.
 - **`CONVERT_EXPORT` request payload:**
   ```
   offset  size  field
-  0       1     format_id (1 = ODT, 2 = PDF)
+  0       1     format_id (1 = ODT, 2 = PDF, 3 = Word .docx)
   1       ...   RTF bytes, produced by the engine's OWN format_rtf_export()
   ```
   **Response payload (status `OFFLOAD_OK`):** the foreign format's raw
-  bytes (a whole `.odt` file, or a whole `.pdf` file) -- write directly
-  to disk, no further engine-side work.
+  bytes (a whole `.odt`, `.pdf` or `.docx` file) -- write directly to
+  disk, no further engine-side work.
   PDF is **export-only**: there is no `format_id` for "import a PDF" --
   PDF has no general, reliable text-reconstruction guarantee (real-world
   PDFs range from clean text to scanned images with no text layer at

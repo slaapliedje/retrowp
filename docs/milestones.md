@@ -3398,6 +3398,17 @@ it with, and a PDF that keeps it.
       (an ISO-8859-7 font) and the Mac (a Greek face of its own).
 - [ ] T24.5 Typing Greek: a Greek keyboard layout, switched the machine's
       way.
+- [ ] T24.6 Word (.docx) export, through the gateway.
+      AC: a Greek document made in RetroWP and saved under a .docx name
+      (.DOC on an 8.3 disk) opens in Word 2021, in its own mode, with
+      its text, formatting, sections and headers.
+      Note (2026-11-27): offload/gateway/docx_writer.py (docs/formats/
+      docx.md); the reader now gives a section with no header the one
+      before it, as Word does. Host 801/801; the written file reads back
+      the same and LibreOffice renders it. The live run on the ST under
+      Hatari was not done: TOS 1.04 there carries no serial data and
+      EmuTOS dropped and repeated injected keys at load 22. Open: the
+      user's look in Word 2021.
 ---
 
 ## Cross-Cutting "Done" Checklist (apply to every task)

@@ -1269,10 +1269,14 @@ void test_convert_docx_greek_import_via_gateway(void)
     ps = wp_document_pstyle_get(&doc, para->style);
     ASSERT_TRUE(ps->page_break_before == WP_BREAK_PAGE);
 
-    /* Section two: A4 on its side, no header; 1.5 lines, a right tab. */
+    /* Section two: A4 on its side; 1.5 lines, a right tab. It names no
+       header, so it has section one's, as Word (and LibreOffice) show
+       it -- "|Σελίδα #", 15 bytes. */
     sec = wp_document_section_get(&doc, 1);
     ASSERT_EQ_U32((u32)sec->page_width, 16838);
-    ASSERT_EQ_U32(sec->header.length, 0);
+    ASSERT_EQ_U32(sec->header.length, 15);
+    ASSERT_MEM_EQ(wp_strpool_get(&doc.strings, sec->header),
+                  wp_strpool_get(&doc.strings, wp_document_section_get(&doc, 0)->header), 15);
     para = wp_section_paragraph_get(sec, 0);
     ps = wp_document_pstyle_get(&doc, para->style);
     ASSERT_EQ_U32((u32)ps->line_spacing, 360);
@@ -1320,11 +1324,66 @@ void test_convert_docx_id_takes_an_odt_and_refuses_other_zips(void)
     ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
     ASSERT_TRUE(resp.status == OFFLOAD_ERR);
     offload_response_free(&resp);
-
-    req.op = OFFLOAD_CONVERT_EXPORT;   /* Word is read, never written */
-    ASSERT_TRUE(offload_submit(&req, &resp) == WP_OK);
-    ASSERT_TRUE(resp.status == OFFLOAD_UNSUPPORTED);
-    offload_response_free(&resp);
     offload_shutdown();
     gateway_stop(&gw);
+}
+
+/* Word written (format_id 3 on CONVERT_EXPORT) reads back as it went:
+   the Greek fixture, in through the gateway and out again as .docx, then
+   in once more, has the same text, the same two sections at their own
+   sizes, and the same headers -- the second section's being the first's,
+   which Word gives a section that names none. */
+static void doc_all_text(wp_document *doc, char *out, u32 cap)
+{
+    u32 n = 0, si, pi, ri;
+    for (si = 0; si < doc->section_count; si++) {
+        wp_section *sec = wp_document_section_get(doc, si);
+        for (pi = 0; pi < sec->para_count; pi++) {
+            wp_paragraph *p = wp_section_paragraph_get(sec, pi);
+            for (ri = 0; ri < p->run_count; ri++) {
+                wp_span sp = p->runs[ri].text;
+                if (n + sp.length + 2 > cap) return;
+                memcpy(out + n, wp_strpool_get(&doc->strings, sp), sp.length);
+                n += sp.length;
+            }
+            out[n++] = '\n';
+            out[n] = '\0';
+        }
+    }
+}
+
+void test_convert_docx_export_reads_back(void)
+{
+    static u8 docx[FIXTURE_CAP];
+    static char before[4096], after[4096];
+    u32 docx_len;
+    u8 *rtf, *out, *rtf2;
+    u32 rtf_len, out_len, rtf2_len;
+    wp_document a, b;
+
+    ASSERT_TRUE(read_fixture("host/tests/fixtures/sample_greek.docx", docx, FIXTURE_CAP, &docx_len) == WP_OK);
+    gateway_convert(OFFLOAD_CONVERT_IMPORT, OFFLOAD_FORMAT_DOCX, docx, docx_len, &rtf, &rtf_len);
+    gateway_convert(OFFLOAD_CONVERT_EXPORT, OFFLOAD_FORMAT_DOCX, rtf, rtf_len, &out, &out_len);
+    ASSERT_TRUE(out_len > 4 && out[0] == 'P' && out[1] == 'K');
+    gateway_convert(OFFLOAD_CONVERT_IMPORT, OFFLOAD_FORMAT_DOCX, out, out_len, &rtf2, &rtf2_len);
+    mem_free(out);
+    ASSERT_TRUE(format_rtf_import(rtf, rtf_len, &a) == WP_OK);
+    ASSERT_TRUE(format_rtf_import(rtf2, rtf2_len, &b) == WP_OK);
+    mem_free(rtf);
+    mem_free(rtf2);
+
+    doc_all_text(&a, before, sizeof(before));
+    doc_all_text(&b, after, sizeof(after));
+    ASSERT_TRUE(strncmp(before, "\xce\x9a\xce\xb1\xce\xbb", 6) == 0);   /* "Καλ" */
+    ASSERT_EQ_STR(after, before);
+    ASSERT_EQ_U32(b.section_count, 2);
+    ASSERT_EQ_U32((u32)b.sections[0].page_width, (u32)a.sections[0].page_width);
+    ASSERT_EQ_U32((u32)b.sections[1].page_width, (u32)a.sections[1].page_width);
+    ASSERT_TRUE(b.sections[1].page_width > b.sections[1].page_height);    /* on its side */
+    ASSERT_EQ_U32(b.sections[1].header.length, a.sections[0].header.length);
+    ASSERT_TRUE(b.sections[1].header.length > 0);
+    ASSERT_MEM_EQ(wp_strpool_get(&b.strings, b.sections[1].header),
+                  wp_strpool_get(&a.strings, a.sections[0].header), a.sections[0].header.length);
+    wp_document_free(&a);
+    wp_document_free(&b);
 }

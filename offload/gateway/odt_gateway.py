@@ -7,7 +7,7 @@ A third offload/gateway executable, alongside mock_gateway.c (fixture-
 backed THESAURUS/SPELL_CHECK) and ollama_gateway.c (real-LLM-backed
 THESAURUS). This one answers OFFLOAD_CONVERT_IMPORT for format_id=ODT
 or format_id=DOCX (Word, read by docx_reader.py),
-and OFFLOAD_CONVERT_EXPORT for format_id=ODT or format_id=PDF --
+and OFFLOAD_CONVERT_EXPORT for format_id=ODT, PDF or DOCX (docx_writer.py) --
 and OFFLOAD_PRINT -- the PDF, printed on this machine's printer -- when
 it has one to print on (--printer / --print-dir, below) -- and keeps
 documents for the machines that send them, with OFFLOAD_STORE, LIST and
@@ -66,11 +66,12 @@ from wire_protocol import (
 from doc_store import DocStore, DEFAULT_VERSIONS
 from doc_store_git import GitDocStore, GitStoreError
 from docx_reader import docx_bytes_to_paragraphs
+from docx_writer import paragraphs_to_docx_bytes
 import ttf_embed
 
 FORMAT_ODT = 1
 FORMAT_PDF = 2
-FORMAT_DOCX = 3   # import only, docx_reader.py
+FORMAT_DOCX = 3   # docx_reader.py in, docx_writer.py out
 
 # ---------------------------------------------------------------------
 # ODF (ODT) unit conversion
@@ -1960,7 +1961,7 @@ def handle_convert_export(payload):
     if len(payload) < 1:
         return STATUS_ERR, b''
     format_id, rtf_bytes = payload[0], payload[1:]
-    if format_id not in (FORMAT_ODT, FORMAT_PDF):
+    if format_id not in (FORMAT_ODT, FORMAT_PDF, FORMAT_DOCX):
         return STATUS_UNSUPPORTED, b''
     try:
         paragraphs = rtf_bytes_to_paragraphs(rtf_bytes)
@@ -1971,6 +1972,8 @@ def handle_convert_export(payload):
         page, header, footer = sections[0]
         if format_id == FORMAT_ODT:
             return STATUS_OK, paragraphs_to_odt_bytes(paragraphs, page, header, footer, sections)
+        if format_id == FORMAT_DOCX:
+            return STATUS_OK, paragraphs_to_docx_bytes(paragraphs, sections, _margin_parts)
         return STATUS_OK, paragraphs_to_pdf_bytes(paragraphs, page, header, footer, sections)
     except Exception:
         return STATUS_ERR, b''

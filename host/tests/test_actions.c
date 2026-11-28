@@ -1338,13 +1338,15 @@ static void copy_file(const char *from, const char *to)
 /* Word through the gateway by the shared file flow: a .docx by its name,
    and a .DOC by its content -- what an 8.3 disk calls a .docx -- while a
    Word 97-2003 .doc is told it can't be read. Save never writes over the
-   Word file: it goes to an .RTF beside it, and a save to a .docx name is
-   refused. */
+   Word file it opened: it goes to an .RTF beside it. Save As a .docx or
+   .DOC name writes Word through the gateway, which reads back. */
 void test_actions_word_files_open_through_the_gateway(void)
 {
     static const char docx[] = "build/test_actions_word.docx";
     static const char doc8[] = "build/TESTWORD.DOC";
     static const char old[] = "build/test_actions_old.doc";
+    static const char out_docx[] = "build/test_actions_out.docx";
+    static const char out_doc8[] = "build/TESTOUT.DOC";
     static const u8 ole2[16] = { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 };
     gateway_handle gw;
     wp_document doc;
@@ -1392,10 +1394,21 @@ void test_actions_word_files_open_through_the_gateway(void)
     read_whole_file(docx, text, sizeof(text));
     ASSERT_TRUE(text[0] == 'P' && text[1] == 'K');   /* the Word file, untouched */
 
-    /* Saving under a Word name is refused, and the file stays Word's. */
-    ASSERT_TRUE(wp_action_save_file(&ctx, docx, NULL) != WP_OK);
-    read_whole_file(docx, text, sizeof(text));
+    /* Saved under a Word name, it is Word -- .docx and an 8.3 .DOC alike
+       -- and reads back with its Greek. */
+    (void)remove(out_docx);
+    (void)remove(out_doc8);
+    ASSERT_TRUE(wp_action_save_file(&ctx, out_docx, NULL) == WP_OK);
+    ASSERT_EQ_STR(ctx.doc_path, out_docx);
+    read_whole_file(out_docx, text, sizeof(text));
     ASSERT_TRUE(text[0] == 'P' && text[1] == 'K');
+    ASSERT_TRUE(wp_action_save_file(&ctx, out_doc8, NULL) == WP_OK);
+    read_whole_file(out_doc8, text, sizeof(text));
+    ASSERT_TRUE(text[0] == 'P' && text[1] == 'K');
+    ASSERT_TRUE(wp_action_load_file(&ctx, out_doc8, NULL) == WP_OK);
+    doc_text(&doc, text, sizeof(text));
+    ASSERT_TRUE(strncmp(text, "\xce\x9a\xce\xb1\xce\xbb", 6) == 0);   /* "Καλ" */
+    ASSERT_EQ_STR(ctx.doc_path, "build/TESTOUT.RTF");
 
     ASSERT_TRUE(wp_action_load_file(&ctx, doc8, NULL) == WP_OK);
     doc_text(&doc, text, sizeof(text));
@@ -1408,6 +1421,9 @@ void test_actions_word_files_open_through_the_gateway(void)
     (void)remove(docx);
     (void)remove(doc8);
     (void)remove(old);
+    (void)remove(out_docx);
+    (void)remove(out_doc8);
+    (void)remove("build/TESTOUT.RTF");
     (void)remove("build/test_actions_word.rtf");
     (void)remove("build/TESTWORD.RTF");
 }

@@ -3113,7 +3113,8 @@ static wp_status convert_export(wp_app_ctx *ctx, const char *native_path, u8 for
             return WP_ERR;
         }
     }
-    if (format_id == (u8)OFFLOAD_FORMAT_ODT) {
+    if (format_id == (u8)OFFLOAD_FORMAT_ODT || format_id == (u8)OFFLOAD_FORMAT_DOCX) {
+        /* Both read back as they were written: the document is saved. */
         wp_document_mark_saved(ctx->doc);
         wp_action_remember_path(ctx, native_path);
     }
@@ -3763,10 +3764,12 @@ wp_status wp_action_load_file(wp_app_ctx *ctx, const char *native_path, wp_image
     }
     wp_action_replace_document(ctx, &fresh);
     if (save_as_rtf) {
-        /* RetroWP does not write Atari Works or Word, so Save must not
-           write over one: LETTER.STW (or .DOCX, or .DOC) saves as
-           LETTER.RTF beside it, keeping its formatting; a name with no
-           extension asks. */
+        /* RetroWP does not write Atari Works, and writes Word only as
+           far as its own document goes (no lists, tables or pictures of
+           Word's), so Save must not write over either: LETTER.STW (or
+           .DOCX, or .DOC) saves as LETTER.RTF beside it, keeping its
+           formatting; a name with no extension asks. Save As a .DOCX or
+           .DOC name writes Word. */
         wp_action_remember_path(ctx, native_path);
         save_beside_as_rtf(ctx);
         return WP_OK;
@@ -3800,21 +3803,19 @@ static wp_status save_file(wp_app_ctx *ctx, const char *native_path, wp_image_so
 
     if (!ctx->doc_loaded) return WP_OK;
 
-    if (wp_path_ends_with_ci(native_path, ".DOCX")) {
-        /* Read through the gateway, never written: plain text under a
-           Word name would be a file Word cannot open. */
-        wp_action_tell(ctx, "RetroWP reads Word files but saves as RTF, which Word opens");
-        return WP_ERR;
-    }
-
-    if (wp_path_ends_with_ci(native_path, ".ODT") || wp_path_ends_with_ci(native_path, ".PDF")) {
-        /* The Pi made these from the document; it keeps what the machine
-           writes (RTF, text, Markdown). */
+    if (wp_path_ends_with_ci(native_path, ".ODT") || wp_path_ends_with_ci(native_path, ".PDF") ||
+        wp_path_ends_with_ci(native_path, ".DOCX") || wp_path_ends_with_ci(native_path, ".DOC")) {
+        /* The Pi makes these from the document; it keeps what the machine
+           writes (RTF, text, Markdown). Word's is .DOCX, or .DOC where a
+           name has three letters after the dot (an ST's, a DOS disk's) --
+           the same .DOC the reader takes as Word when it is a ZIP. Word
+           opens a .docx named .doc by what is in it. */
+        u8 format_id = wp_path_ends_with_ci(native_path, ".ODT") ? (u8)OFFLOAD_FORMAT_ODT
+                     : wp_path_ends_with_ci(native_path, ".PDF") ? (u8)OFFLOAD_FORMAT_PDF
+                                                                 : (u8)OFFLOAD_FORMAT_DOCX;
         if (to_pi) wp_action_tell(ctx, "Save to Pi keeps RTF, text and Markdown files");
         if (!link_for_convert(ctx)) return WP_ERR;
-        return convert_export(ctx, native_path,
-                              wp_path_ends_with_ci(native_path, ".ODT") ? (u8)OFFLOAD_FORMAT_ODT
-                                                                        : (u8)OFFLOAD_FORMAT_PDF);
+        return convert_export(ctx, native_path, format_id);
     }
 
     /* The two-call sizing convention every exporter shares. */

@@ -500,6 +500,7 @@ void test_actions_envelope(void);
 void test_convert_print_disc_to_its_tray(void);
 void test_convert_docx_greek_import_via_gateway(void);
 void test_convert_docx_id_takes_an_odt_and_refuses_other_zips(void);
+void test_convert_docx_export_reads_back(void);
 void test_pagecanvas_disc_guides(void);
 void test_pagecanvas_disc_guides_tall_pixels(void);
 void test_config_view_keys(void);
@@ -1351,6 +1352,7 @@ static const test_case g_cases[] = {
     { "convert_print_disc_to_its_tray", test_convert_print_disc_to_its_tray },
     { "convert_docx_greek_import_via_gateway", test_convert_docx_greek_import_via_gateway },
     { "convert_docx_id_takes_an_odt_and_refuses_other_zips", test_convert_docx_id_takes_an_odt_and_refuses_other_zips },
+    { "convert_docx_export_reads_back", test_convert_docx_export_reads_back },
     { "pagecanvas_disc_guides", test_pagecanvas_disc_guides },
     { "pagecanvas_disc_guides_tall_pixels", test_pagecanvas_disc_guides_tall_pixels },
     { "config_view_keys", test_config_view_keys },
